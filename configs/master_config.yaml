@@ -7,7 +7,7 @@ global_seed: 11  # null=random, int=reproducible
 # Output and plotting
 plotting:
   enabled: true
-  output_dir: /Users/vassilak/research/hwo/outputs
+  output_dir: /Users/vassig/research/hwo/hwo-slaps
 
 # Lensing system generation
 lensing:
