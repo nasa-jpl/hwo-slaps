@@ -38,6 +38,7 @@ class DetectionData:
     snr_array: np.ndarray
     labeled_regions: np.ndarray
     residual_map: np.ndarray
+    image_shape: Tuple[int, int]
     variance_2d: Optional[np.ndarray] = None
     
     # === SUBHALO TRUTH ===
@@ -123,27 +124,17 @@ class DetectionData:
     @property
     def snr_array_2d(self) -> np.ndarray:
         """SNR array reshaped to 2D image format."""
-        # Infer 2D shape from the square root of array size (assuming square images)
-        side_length = int(np.sqrt(self.snr_array.size))
-        return self.snr_array.reshape(side_length, side_length)
+        return self.snr_array.reshape(self.image_shape)
     
     @property
     def snr_mask_2d(self) -> np.ndarray:
         """SNR mask reshaped to 2D image format."""
-        side_length = int(np.sqrt(self.snr_mask.size))
-        return self.snr_mask.reshape(side_length, side_length)
+        return self.snr_mask.reshape(self.image_shape)
     
     @property
     def residual_map_2d(self) -> np.ndarray:
         """Residual map reshaped to 2D image format."""
-        side_length = int(np.sqrt(self.residual_map.size))
-        return self.residual_map.reshape(side_length, side_length)
-    
-    @property
-    def image_shape(self) -> Tuple[int, int]:
-        """Shape of the detection arrays as (height, width)."""
-        side_length = int(np.sqrt(self.snr_array.size))
-        return (side_length, side_length)
+        return self.residual_map.reshape(self.image_shape)
     
     @property
     def field_of_view_arcsec(self) -> Tuple[float, float]:

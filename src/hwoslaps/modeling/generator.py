@@ -85,7 +85,6 @@ def perform_subhalo_detection(
         snr_threshold=detection_config['snr_threshold'],
         significance_levels=detection_config['significance_levels']
     )
-    
     # Get subhalo position from test case (EXACTLY as in prototype lines 344-345)
     if lensing_test.has_subhalo:
         subhalo_x = lensing_test.subhalo_position[1]  # x is second coordinate
@@ -118,6 +117,7 @@ def perform_subhalo_detection(
         labeled_regions=detector.labeled_regions,
         residual_map=results[min(detector.significance_levels)].residual,
         variance_2d=getattr(detector, 'variance_2d', None),
+        image_shape=observation_baseline.data.shape_native,
         
         # Truth information
         true_subhalo_position=subhalo_position if lensing_test.has_subhalo else None,

@@ -101,6 +101,7 @@ def perform_mejiro_detection(
         labeled_regions=detector.labeled_regions,
         residual_map=residual_full,
         variance_2d=None,
+        image_shape=observation_baseline.data.shape_native,
         true_subhalo_position=None if lensing_test is None else lensing_test.subhalo_position,
         true_subhalo_mass=None if lensing_test is None else lensing_test.subhalo_mass,
         true_subhalo_model=None if lensing_test is None else lensing_test.subhalo_model,
