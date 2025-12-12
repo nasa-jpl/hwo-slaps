@@ -171,12 +171,12 @@ def generate_psf_system(config, full_config=None):
     if segment_hexikes is not None:
         if use_segment_api:
             from .aberration_models import apply_segment_zernikes
-            phase_screen, hsm_api = apply_segment_zernikes(
+            phase_screen, hexike_surface = apply_segment_zernikes(
                 segment_hexikes, segments, telescope_data, wavelength, use_api=True
             )
             phase_screens['segment_hexikes_api'] = phase_screen
-            # Apply hexike phase via the API-enabled mirror to avoid double-application hazards.
-            wf_pupil = hsm_api(wf_pupil)
+            # Apply hexike phase via the segmented hexike surface to avoid double-application hazards.
+            wf_pupil = hexike_surface(wf_pupil)
         else:
             from .aberration_models import apply_segment_zernikes
             phase_screen = apply_segment_zernikes(
@@ -515,10 +515,9 @@ def generate_aberrated_psf(
         if use_segment_api:
             from .aberration_models import apply_segment_zernikes
             result = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=True)
-            phase_screen, hsm_api = result  # API version returns tuple.
+            phase_screen, hexike_surface = result  # API version returns tuple.
             phase_screens['segment_hexikes_api'] = phase_screen
-            # Apply the phase screen (the API doesn't do this automatically in our implementation).
-            wf.electric_field *= np.exp(1j * np.array(phase_screen))
+            wf = hexike_surface(wf)
         else:
             from .aberration_models import apply_segment_zernikes
             phase_screen = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=False)

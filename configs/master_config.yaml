@@ -1,13 +1,13 @@
 # HWO-SLAPS Configuration
 
 # Run identification
-run_name: presentation_run
+run_name: hexike_run
 global_seed: 11  # null=random, int=reproducible 
 
 # Output and plotting
 plotting:
   enabled: true
-  output_dir: /Users/vassig/research/hwo/hwo-slaps
+  output_dir: /Users/vassig/research/hwo/outputs
 
 # Lensing system generation
 lensing:
@@ -65,7 +65,7 @@ psf:
     
   # High-resolution PSF parameters (for metrics calculation)
   hres_psf:
-    num_pix: 513
+    num_pix: 512
     wavelength: 5.0e-7  # m
     num_airy: 12
     sampling: 5
@@ -83,7 +83,7 @@ psf:
     # Toggle flags to enable/disable each aberration type
     enable_segment_pistons: false       
     enable_segment_tiptilts: false
-    enable_segment_hexikes: false
+    enable_segment_hexikes: true
     enable_global_zernikes: false
     
     # Segment piston errors in nm 
