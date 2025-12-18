@@ -37,6 +37,13 @@ def _create_output_directory(base_output_dir, run_name, module_name):
     return output_dir
 
 
+def _format_mass_latex(mass):
+    """Format mass into LaTeX scientific notation with M_odot."""
+    m_val, m_exp = f"{mass:.1e}".split('e')
+    m_exp = int(m_exp)
+    return rf"{m_val} \times 10^{{{m_exp}}} M_\odot"
+
+
 @plot_function(module='lensing', requires_subhalo=True, 
                description="2x2 comparison showing subhalo effects with log/linear scaling")
 def plot_lensing_comparison(lensing_data, plot_config):
@@ -90,6 +97,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     subhalo_position = lensing_data.subhalo_position
     subhalo_model = lensing_data.subhalo_model
     subhalo_mass = lensing_data.subhalo_mass
+    mass_latex = _format_mass_latex(subhalo_mass)
     
     # Recreate lens galaxy without subhalo for baseline comparison
     # Create lens mass profile (without subhalo)
@@ -156,8 +164,9 @@ def plot_lensing_comparison(lensing_data, plot_config):
     # Top right: Full lensing system with subhalo
     ax2 = plt.subplot(2, 2, 2)
     im2 = ax2.imshow(image_with_subhalo, extent=extent, origin='lower', cmap='viridis')
-    ax2.set_title(f'Scene with Subhalo ({subhalo_model})', fontsize=16)
-    ax2.scatter(*subhalo_position[::-1], c='red', s=100, marker='x')
+    ax2.set_title(f'Scene with Subhalo ({subhalo_model}, ${mass_latex}$)', fontsize=16)
+    ax2.scatter(*subhalo_position[::-1], c='red', s=100, marker='x', label='Injected Subhalo')
+    ax2.legend(loc='upper right', fontsize=10)
     ax2.set_xlabel('arcsec')
     ax2.set_ylabel('arcsec')
     plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
@@ -170,7 +179,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     ax3 = plt.subplot(2, 2, 3)
     im3 = ax3.imshow(difference_image, extent=extent, origin='lower', cmap='RdBu_r',
                      norm=SymLogNorm(linthresh=linthresh, vmin=-max_diff, vmax=max_diff))
-    ax3.set_title('Subhalo Difference (Log Scale)', fontsize=16)
+    ax3.set_title(f'Difference (Log, ${mass_latex}$)', fontsize=16)
     ax3.scatter(*subhalo_position[::-1], c='black', s=100, marker='x')
     ax3.set_xlabel('arcsec')
     ax3.set_ylabel('arcsec')
@@ -180,7 +189,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     ax4 = plt.subplot(2, 2, 4)
     im4 = ax4.imshow(difference_image, extent=extent, origin='lower', cmap='RdBu_r',
                      vmin=-max_diff, vmax=max_diff)
-    ax4.set_title('Subhalo Difference (Absolute Scale)', fontsize=16)
+    ax4.set_title(f'Difference (Linear, ${mass_latex}$)', fontsize=16)
     ax4.scatter(*subhalo_position[::-1], c='black', s=100, marker='x')
     ax4.set_xlabel('arcsec')
     ax4.set_ylabel('arcsec')
@@ -267,6 +276,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     # Get subhalo information
     subhalo_position = lensing_data.subhalo_position
     subhalo_mass = lensing_data.subhalo_mass
+    mass_latex = _format_mass_latex(subhalo_mass)
     
     # Recreate lens galaxy without subhalo for baseline comparison
     lens_mass = al.mp.Isothermal(
@@ -336,7 +346,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     ax2 = axes[1] 
     im2 = ax2.imshow(image_with_subhalo, extent=extent, origin='lower',
                      cmap='viridis', vmin=vmin, vmax=vmax)
-    ax2.set_title('With Subhalo', fontsize=14, fontweight='bold')
+    ax2.set_title(f'With Subhalo (${mass_latex}$)', fontsize=14, fontweight='bold')
     ax2.set_xlabel('arcsec', fontsize=12)
     ax2.set_ylabel('arcsec', fontsize=12)
     # Mark subhalo position
@@ -347,7 +357,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     max_diff = np.max(np.abs(difference_image))
     im3 = ax3.imshow(difference_image, extent=extent, origin='lower', 
                      cmap='RdBu_r', vmin=-max_diff, vmax=max_diff)
-    ax3.set_title('Residual', fontsize=14, fontweight='bold')
+    ax3.set_title(f'Residual (${mass_latex}$)', fontsize=14, fontweight='bold')
     ax3.set_xlabel('arcsec', fontsize=12)
     ax3.set_ylabel('arcsec', fontsize=12)
     # Mark subhalo position in black for contrast
@@ -605,7 +615,7 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
                        f"• Einstein radius: {einstein_radius:.3f}\"\n"
                        f"• Scatter: ±{scatter_pixels} pixels\n"
                        f"• Band width: ±{scatter_arcsec:.3f}\"\n"
-                       f"• Sample mass: 5.0×10⁷ M☉")
+                       f"• Sample mass: $5.0\\times 10^7 M_\\odot$")
     
     ax_main.text(0.02, 0.98, methodology_text, transform=ax_main.transAxes,
                 fontsize=9, verticalalignment='top',
