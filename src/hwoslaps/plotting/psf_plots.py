@@ -345,10 +345,14 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     psf_intensity = psf_data.psf.intensity
     
     # Calculate extent for high-res PSF.
+    #
+    # HCIPy focal-plane grids produced by `make_focal_grid(..., focal_length=...)`
+    # are in **meters at the focal plane**. Convert to angle on-sky via
+    # theta [rad] = x [m] / f [m].
     psf_grid = psf_data.psf.grid
-    extent_rad = [psf_grid.x.min(), psf_grid.x.max(), 
-                  psf_grid.y.min(), psf_grid.y.max()]
-    extent_arcsec = [x * ARCSEC_PER_RAD for x in extent_rad]
+    extent_m = [psf_grid.x.min(), psf_grid.x.max(),
+                psf_grid.y.min(), psf_grid.y.max()]
+    extent_arcsec = [x / psf_data.focal_length_m * ARCSEC_PER_RAD for x in extent_m]
     
     im = ax.imshow(psf_intensity.shaped, extent=extent_arcsec,
                    origin='lower', cmap='hot',
@@ -572,11 +576,14 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     # Get the PSF intensity (assuming this is the baseline perfect PSF)
     psf_intensity = psf_data.psf.intensity.shaped
     
-    # Calculate PSF extent in arcseconds
+    # Calculate PSF extent in arcseconds.
+    #
+    # The PSF grid coordinates are in meters at the focal plane (HCIPy focal grid).
+    # Convert to sky angle using theta [rad] = x [m] / f [m].
     psf_grid = psf_data.psf.grid
-    extent_rad = [psf_grid.x.min(), psf_grid.x.max(), 
-                  psf_grid.y.min(), psf_grid.y.max()]
-    extent_arcsec = [x * ARCSEC_PER_RAD for x in extent_rad]
+    extent_m = [psf_grid.x.min(), psf_grid.x.max(),
+                psf_grid.y.min(), psf_grid.y.max()]
+    extent_arcsec = [x / psf_data.focal_length_m * ARCSEC_PER_RAD for x in extent_m]
     
     # Log stretch with proper normalization
     psf_log = np.log10(psf_intensity / np.max(psf_intensity) + 1e-6)
@@ -586,7 +593,12 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     
     ax2.set_xlabel('arcsec', fontsize=12)
     ax2.set_ylabel('arcsec', fontsize=12)
-    ax2.set_title('Diffraction-Limited PSF (EAC 1)', fontsize=14, fontweight='bold')
+    title = 'PSF (log stretch)'
+    if psf_data.has_aberrations:
+        title += f"\n(With aberrations; total RMS={psf_data.total_rms_nm:.3g} nm OPD)"
+    else:
+        title += "\n(Diffraction-limited)"
+    ax2.set_title(title, fontsize=14, fontweight='bold')
     
     # Add colorbar for PSF
     cbar2 = plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
@@ -612,3 +624,164 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     print(f"Sampling: {sampling:.2f} pixels/λ/D (auto-adjusted)")
     print(f"Gap size: {gap_size_m*1000:.1f} mm")
     print(f"Segment flat-to-flat: {segment_flat_to_flat_m*1000:.1f} mm")
+
+
+@plot_function(module='psf', description="Optics chain: segmented pupil → pupil OPD (hexikes) → resulting PSF")
+def plot_optics_chain(psf_data, plot_config):
+    """Create a 3-panel optics chain figure for presentations.
+
+    The output file is saved as `optics_chain.png` under `{output_dir}/{run_name}/psf/`.
+
+    Panels:
+    1) Segmented pupil with segment IDs
+    2) Segment OPD (hexike phase screen; API), converted to OPD in pm
+    3) Resulting PSF (log10 intensity), with physically-correct arcsec axes
+    """
+    config = psf_data.config
+    run_name = config['run_name']
+
+    output_dir = _create_output_directory(plot_config['output_dir'], run_name, 'psf')
+
+    telescope_data = psf_data.telescope_data
+    aperture = telescope_data['aper']
+    segments = telescope_data['segments']
+
+    fig, axes = plt.subplots(3, 1, figsize=(6, 16), constrained_layout=True)
+    # Reduce vertical whitespace between stacked panels while keeping colorbars
+    # and titles from overlapping.
+    try:
+        fig.set_constrained_layout_pads(
+            h_pad=0.02,
+            w_pad=0.02,
+            hspace=0.02,
+            wspace=0.02,
+        )
+    except AttributeError:
+        fig.subplots_adjust(hspace=0.08)
+
+    # Panel 1: Segmented pupil (numbered)
+    ax = axes[0]
+    imshow_field(aperture, ax=ax, cmap='gray')
+    ax.set_title('EAC-1 Segmented Pupil', fontsize=18)
+    ax.set_xlabel('Position [m]', fontsize=11)
+    ax.set_ylabel('Position [m]', fontsize=11)
+
+    # Add segment labels at centroids (reuse the same approach as the baseline plot).
+    for i, segment in enumerate(segments):
+        segment_coords = segment.grid.coords
+        segment_values = segment.shaped
+        total_weight = np.sum(segment_values)
+        if total_weight > 0:
+            x_center = np.sum(segment_coords[0] * segment_values.ravel()) / total_weight
+            y_center = np.sum(segment_coords[1] * segment_values.ravel()) / total_weight
+            ax.text(
+                x_center,
+                y_center,
+                str(i),
+                fontsize=16,
+                color='red',
+                alpha=0.7,
+                ha='center',
+                va='center',
+                fontweight='bold',
+            )
+
+    # Panel 2: Pupil OPD / phase screen (Hexike Phase Screen (API), pupil-plane)
+    ax = axes[1]
+    phase_screen = None
+    if psf_data.phase_screens:
+        # Prefer the API hexike screen if present.
+        if 'segment_hexikes_api' in psf_data.phase_screens:
+            phase_screen = psf_data.phase_screens['segment_hexikes_api']
+        else:
+            # Fallback: any screen that looks like a hexike API product.
+            for k, v in psf_data.phase_screens.items():
+                if 'hexike' in k.lower():
+                    phase_screen = v
+                    break
+
+    if phase_screen is None:
+        ax.set_title('Example Segmented Errors', fontsize=18)
+        ax.set_xlabel('Position [m]', fontsize=11)
+        ax.set_ylabel('Position [m]', fontsize=11)
+        ax.text(
+            0.5,
+            0.5,
+            'No hexike phase screen\navailable in psf_data.phase_screens',
+            transform=ax.transAxes,
+            ha='center',
+            va='center',
+        )
+    else:
+        # Convert phase [rad] -> OPD [pm] for rigorous interpretation:
+        # phase = 2π * OPD / λ  =>  OPD = phase * λ / (2π)
+        opd_m = phase_screen * (psf_data.wavelength_m / (2 * np.pi))
+        opd_pm = opd_m * 1e12
+        ax.set_title('Example segment OPD (Hexike Modes)', fontsize=18)
+        ax.set_xlabel('Position [m]', fontsize=11)
+        ax.set_ylabel('Position [m]', fontsize=11)
+        imshow_field(opd_pm, ax=ax, cmap='RdBu_r')
+        cbar = plt.colorbar(ax.images[0], ax=ax, fraction=0.046, pad=0.04)
+        cbar.set_label('Optical Path Difference [pm]', fontsize=16)
+        cbar.ax.tick_params(labelsize=16)
+
+    # Panel 3: Resulting PSF (log stretch)
+    ax = axes[2]
+    psf_intensity = psf_data.psf.intensity.shaped
+    psf_norm = psf_intensity / np.max(psf_intensity)
+    psf_log = np.log10(psf_norm + 1e-6)
+
+    # PSF grid coordinates are in meters at the focal plane -> convert to arcsec via theta = x / f.
+    psf_grid = psf_data.psf.grid
+    extent_m = [psf_grid.x.min(), psf_grid.x.max(), psf_grid.y.min(), psf_grid.y.max()]
+    extent_arcsec = [x / psf_data.focal_length_m * ARCSEC_PER_RAD for x in extent_m]
+
+    im = ax.imshow(
+        psf_log,
+        extent=extent_arcsec,
+        origin='lower',
+        cmap='hot',
+        vmin=-5,
+        vmax=0,
+        aspect='equal',
+    )
+    ax.set_title('Resulting PSF (log$_{10}$ intensity)', fontsize=18)
+    ax.set_xlabel('arcsec', fontsize=11)
+    ax.set_ylabel('arcsec', fontsize=11)
+    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label('Log$_{10}$(Normalized intensity)', fontsize=16)
+    cbar.ax.tick_params(labelsize=16)
+
+    # Keep the requested caption clean; include RMS OPD as an annotation.
+    if psf_data.has_aberrations:
+        ax.text(
+            0.03,
+            0.97,
+            f"RMS OPD = {psf_data.total_rms_nm:.3g} nm",
+            transform=ax.transAxes,
+            ha='left',
+            va='top',
+            color='white',
+            fontsize=14,
+            bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.5),
+        )
+
+    # Presentation styling: remove axis labels and tick marks/labels for all panels.
+    for ax in axes:
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.tick_params(
+            bottom=False,
+            left=False,
+            labelbottom=False,
+            labelleft=False,
+        )
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+    filepath = output_dir / 'optics_chain.png'
+    fig.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Saved optics chain plot: {filepath}")

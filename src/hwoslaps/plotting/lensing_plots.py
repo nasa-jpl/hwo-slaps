@@ -87,6 +87,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     # Extract data from lensing_data using unified structure
     grid = lensing_data.grid
     pixel_scale = lensing_data.pixel_scale
+    re = lensing_data.lens_einstein_radius
     
     # Check if subhalo is present
     if not lensing_data.has_subhalo:
@@ -149,26 +150,23 @@ def plot_lensing_comparison(lensing_data, plot_config):
     # Create the comparison figure - 2x2 layout
     fig = plt.figure(figsize=(12, 10))
     
-    # Calculate field of view for extent
+    # Calculate normalized extent (x/RE, y/RE)
     fov_arcsec = grid.shape_native[0] * pixel_scale
-    extent = (-fov_arcsec/2, fov_arcsec/2, -fov_arcsec/2, fov_arcsec/2)
+    extent_norm = (-fov_arcsec/(2*re), fov_arcsec/(2*re), -fov_arcsec/(2*re), fov_arcsec/(2*re))
+    subhalo_pos_norm = (subhalo_position[0]/re, subhalo_position[1]/re)
     
     # Top left: Original image (no subhalo)
     ax1 = plt.subplot(2, 2, 1)
-    im1 = ax1.imshow(image_no_subhalo.native, extent=extent, origin='lower', cmap='viridis')
+    im1 = ax1.imshow(image_no_subhalo.native, extent=extent_norm, origin='lower', cmap='viridis')
     ax1.set_title('Original Scene (No Subhalo)', fontsize=16)
-    ax1.set_xlabel('arcsec')
-    ax1.set_ylabel('arcsec')
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
     
     # Top right: Full lensing system with subhalo
     ax2 = plt.subplot(2, 2, 2)
-    im2 = ax2.imshow(image_with_subhalo, extent=extent, origin='lower', cmap='viridis')
+    im2 = ax2.imshow(image_with_subhalo, extent=extent_norm, origin='lower', cmap='viridis')
     ax2.set_title(f'Scene with Subhalo ({subhalo_model}, ${mass_latex}$)', fontsize=16)
-    ax2.scatter(*subhalo_position[::-1], c='red', s=100, marker='x', label='Injected Subhalo')
+    ax2.scatter(subhalo_pos_norm[1], subhalo_pos_norm[0], c='red', s=100, marker='x', label='Injected Subhalo')
     ax2.legend(loc='upper right', fontsize=10)
-    ax2.set_xlabel('arcsec')
-    ax2.set_ylabel('arcsec')
     plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
     
     # Calculate difference scaling
@@ -177,23 +175,23 @@ def plot_lensing_comparison(lensing_data, plot_config):
     
     # Bottom left: Difference image with log scale
     ax3 = plt.subplot(2, 2, 3)
-    im3 = ax3.imshow(difference_image, extent=extent, origin='lower', cmap='RdBu_r',
+    im3 = ax3.imshow(difference_image, extent=extent_norm, origin='lower', cmap='RdBu_r',
                      norm=SymLogNorm(linthresh=linthresh, vmin=-max_diff, vmax=max_diff))
     ax3.set_title(f'Difference (Log, ${mass_latex}$)', fontsize=16)
-    ax3.scatter(*subhalo_position[::-1], c='black', s=100, marker='x')
-    ax3.set_xlabel('arcsec')
-    ax3.set_ylabel('arcsec')
+    ax3.scatter(subhalo_pos_norm[1], subhalo_pos_norm[0], c='black', s=100, marker='x')
     plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04, label='Difference (log scale)')
     
     # Bottom right: Difference image with absolute scale
     ax4 = plt.subplot(2, 2, 4)
-    im4 = ax4.imshow(difference_image, extent=extent, origin='lower', cmap='RdBu_r',
+    im4 = ax4.imshow(difference_image, extent=extent_norm, origin='lower', cmap='RdBu_r',
                      vmin=-max_diff, vmax=max_diff)
     ax4.set_title(f'Difference (Linear, ${mass_latex}$)', fontsize=16)
-    ax4.scatter(*subhalo_position[::-1], c='black', s=100, marker='x')
-    ax4.set_xlabel('arcsec')
-    ax4.set_ylabel('arcsec')
+    ax4.scatter(subhalo_pos_norm[1], subhalo_pos_norm[0], c='black', s=100, marker='x')
     plt.colorbar(im4, ax=ax4, fraction=0.046, pad=0.04, label='Difference (absolute scale)')
+    
+    for ax in [ax1, ax2, ax3, ax4]:
+        ax.set_xlabel(r'$x / R_E$')
+        ax.set_ylabel(r'$y / R_E$')
     
     plt.tight_layout()
     
@@ -219,6 +217,179 @@ def plot_lensing_comparison(lensing_data, plot_config):
     print(f"Peak signal: {peak_signal:.6e}")
     print(f"Total |signal|: {total_signal:.6e}")
     print(f"Signal RMS: {signal_rms:.6e}")
+
+
+@plot_function(module='lensing', requires_subhalo=True, 
+               description="3x1 baseline scene layout with fractional residual (Delta I / I)")
+def plot_lensing_fractional_comparison(lensing_data, plot_config):
+    """Plot lensing system comparison showing fractional subhalo effects.
+    
+    This function matches the layout of `plot_lensing_baseline_scene`, but replaces
+    the residual panel with a fractional residual:
+    
+    - No-subhalo baseline (intensity)
+    - With-subhalo image (intensity)
+    - Fractional residual (Delta I / I), where I is the no-subhalo baseline
+    
+    The plot uses axes normalized by the Einstein radius (x/RE, y/RE) and uses a
+    consistent intensity stretch for the first two panels.
+    
+    Parameters
+    ----------
+    lensing_data : `LensingData`
+        Complete lensing system data from the pipeline.
+    plot_config : `dict`
+        Plotting configuration including output directory.
+    """
+    # Get run name from config
+    config = lensing_data.config
+    run_name = config['run_name']
+    
+    # Create structured output directory
+    output_dir = _create_output_directory(
+        plot_config['output_dir'], 
+        run_name, 
+        'lensing'
+    )
+    
+    # Extract data from lensing_data
+    grid = lensing_data.grid
+    pixel_scale = lensing_data.pixel_scale
+    
+    # Check if subhalo is present
+    if not lensing_data.has_subhalo:
+        return
+    
+    # Get subhalo information
+    subhalo_position = lensing_data.subhalo_position
+    subhalo_model = lensing_data.subhalo_model
+    subhalo_mass = lensing_data.subhalo_mass
+    mass_latex = _format_mass_latex(subhalo_mass)
+    
+    # Recreate baseline without subhalo
+    lens_mass = al.mp.Isothermal(
+        centre=lensing_data.lens_centre,
+        einstein_radius=lensing_data.lens_einstein_radius,
+        ell_comps=lensing_data.lens_ellipticity
+    )
+    
+    source_light = al.lp.Exponential(
+        centre=lensing_data.source_centre,
+        ell_comps=lensing_data.source_ellipticity,
+        intensity=lensing_data.source_intensity,
+        effective_radius=lensing_data.source_effective_radius
+    )
+    
+    lens_galaxy_no_subhalo = al.Galaxy(redshift=lensing_data.lens_redshift, mass=lens_mass)
+    source_galaxy = al.Galaxy(redshift=lensing_data.source_redshift, light=source_light)
+    
+    if lensing_data.cosmology_name == 'Planck15':
+        cosmo = al.cosmo.Planck15()
+    else:
+        raise ValueError(f"Unsupported cosmology: {lensing_data.cosmology_name}")
+
+    tracer_no_subhalo = al.Tracer(galaxies=[lens_galaxy_no_subhalo, source_galaxy], cosmology=cosmo)
+    
+    # Generate images
+    image_with_subhalo = lensing_data.image
+    image_no_subhalo = tracer_no_subhalo.image_2d_from(grid=grid).native
+    
+    # Calculate fractional residual: (with - baseline) / baseline
+    epsilon = 1e-10
+    raw_diff = image_with_subhalo - image_no_subhalo
+    fractional_residual = np.where(image_no_subhalo > epsilon, raw_diff / image_no_subhalo, 0.0)
+
+    # Calculate extent in arcseconds
+    fov_arcsec = grid.shape_native[0] * pixel_scale
+    extent = (-fov_arcsec / 2, fov_arcsec / 2, -fov_arcsec / 2, fov_arcsec / 2)
+
+    # Vertical layout (3x1)
+    plt.style.use('default')
+    fig, axes = plt.subplots(3, 1, figsize=(5, 13), constrained_layout=True)
+    # Reduce vertical whitespace between stacked panels while keeping colorbars
+    # and titles from overlapping.
+    try:
+        fig.set_constrained_layout_pads(
+            h_pad=0.02,
+            w_pad=0.02,
+            hspace=0.02,
+            wspace=0.02,
+        )
+    except AttributeError:
+        fig.subplots_adjust(hspace=0.08)
+
+    # Consistent intensity scaling across the first two panels.
+    vmin = np.min(image_with_subhalo)
+    vmax = np.max(image_with_subhalo)
+
+    # Panel 1: No-subhalo baseline
+    ax1 = axes[0]
+    im1 = ax1.imshow(image_no_subhalo, extent=extent, origin='lower',
+                     cmap='viridis', vmin=vmin, vmax=vmax)
+    ax1.set_title('Lensing System with No Subhalo', fontsize=18)
+    ax1.text(
+        0.98,
+        0.98,
+        f'FOV = {fov_arcsec:.1f}" x {fov_arcsec:.1f}"',
+        transform=ax1.transAxes,
+        ha='right',
+        va='top',
+        fontsize=12,
+        bbox=dict(boxstyle='round,pad=0.25', facecolor='white', alpha=0.8),
+    )
+    #ax1.scatter(*subhalo_position[::-1], c='red', s=80, marker='x', alpha=0.7)
+    # Panel 2: With subhalo
+    ax2 = axes[1]
+    im2 = ax2.imshow(image_with_subhalo, extent=extent, origin='lower',
+                     cmap='viridis', vmin=vmin, vmax=vmax)
+    ax2.set_title(f'System w/ Subhalo (${mass_latex}$)', fontsize=18)
+    ax2.scatter(*subhalo_position[::-1], c='red', s=80, marker='x', alpha=0.7, label='Injected Subhalo')
+    ax2.legend(loc='upper right', fontsize=10)
+
+    # Panel 3: Fractional residual (converted to percentages)
+    ax3 = axes[2]
+    fractional_residual_percent = fractional_residual * 100
+    max_frac_percent = np.max(np.abs(fractional_residual_percent))
+    vfrac_percent = max_frac_percent if max_frac_percent > 0 else 1e-4
+    im3 = ax3.imshow(fractional_residual_percent, extent=extent, origin='lower',
+                     cmap='RdBu_r', vmin=-vfrac_percent, vmax=vfrac_percent)
+    ax3.set_title(f'Fractional Residual (%)', fontsize=18)
+    ax3.scatter(*subhalo_position[::-1], c='black', s=80, marker='x', alpha=0.8)
+
+    for ax in [ax1, ax2, ax3]:
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        ax.tick_params(
+            bottom=False,
+            left=False,
+            labelbottom=False,
+            labelleft=False,
+        )
+
+    # Colorbars (mirror baseline scene behavior).
+    #
+    # Note: these images are in the simulator's native intensity / surface
+    # brightness units (i.e., arbitrary units). They are not normalized.
+    cbar1 = plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
+    cbar2 = plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
+    cbar3 = plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
+    cbar1.set_label('Intensity', fontsize=16)
+    cbar2.set_label('Intensity', fontsize=16)
+    cbar3.set_label(r'$\Delta I / I$ (%)', fontsize=16)
+
+    for cbar in (cbar1, cbar2, cbar3):
+        cbar.ax.tick_params(labelsize=16)
+
+    # `constrained_layout` handles spacing; avoid `tight_layout` which can
+    # re-expand inter-panel spacing after adding colorbars.
+    
+    filename = "lensing_fractional_comparison.png"
+    filepath = output_dir / filename
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"Saved fractional comparison plot (normalized axes): {filepath}")
+    print(f"Peak |Delta I / I|: {max_frac_percent:.6e}%")
 
 
 @plot_function(module='lensing', requires_subhalo=True,
@@ -319,9 +490,9 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     image_no_subhalo = tracer_no_subhalo.image_2d_from(grid=grid)
     difference_image = image_with_subhalo - image_no_subhalo.native
     
-    # Calculate field of view for extent
+    # Calculate extent in arcseconds
     fov_arcsec = grid.shape_native[0] * pixel_scale
-    extent = (-fov_arcsec/2, fov_arcsec/2, -fov_arcsec/2, fov_arcsec/2)
+    extent = (-fov_arcsec / 2, fov_arcsec / 2, -fov_arcsec / 2, fov_arcsec / 2)
     
     # Set up consistent intensity scaling across all panels
     # Use the with-subhalo image for reference scaling
@@ -336,9 +507,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     ax1 = axes[0]
     im1 = ax1.imshow(image_no_subhalo.native, extent=extent, origin='lower', 
                      cmap='viridis', vmin=vmin, vmax=vmax)
-    ax1.set_title('No Subhalo', fontsize=14, fontweight='bold')
-    ax1.set_xlabel('arcsec', fontsize=12)
-    ax1.set_ylabel('arcsec', fontsize=12)
+    ax1.set_title('No Subhalo', fontsize=14)
     # Mark subhalo position for reference
     ax1.scatter(*subhalo_position[::-1], c='red', s=80, marker='x', alpha=0.7)
     
@@ -346,9 +515,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     ax2 = axes[1] 
     im2 = ax2.imshow(image_with_subhalo, extent=extent, origin='lower',
                      cmap='viridis', vmin=vmin, vmax=vmax)
-    ax2.set_title(f'With Subhalo (${mass_latex}$)', fontsize=14, fontweight='bold')
-    ax2.set_xlabel('arcsec', fontsize=12)
-    ax2.set_ylabel('arcsec', fontsize=12)
+    ax2.set_title(f'With Subhalo (${mass_latex}$)', fontsize=14)
     # Mark subhalo position
     ax2.scatter(*subhalo_position[::-1], c='red', s=80, marker='x', alpha=0.7)
     
@@ -357,11 +524,13 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     max_diff = np.max(np.abs(difference_image))
     im3 = ax3.imshow(difference_image, extent=extent, origin='lower', 
                      cmap='RdBu_r', vmin=-max_diff, vmax=max_diff)
-    ax3.set_title(f'Residual (${mass_latex}$)', fontsize=14, fontweight='bold')
-    ax3.set_xlabel('arcsec', fontsize=12)
-    ax3.set_ylabel('arcsec', fontsize=12)
+    ax3.set_title(f'Residual (${mass_latex}$)', fontsize=14)
     # Mark subhalo position in black for contrast
     ax3.scatter(*subhalo_position[::-1], c='black', s=80, marker='x', alpha=0.8)
+    
+    for ax in [ax1, ax2, ax3]:
+        ax.set_xlabel('arcsec')
+        ax.set_ylabel('arcsec')
     
     # Add colorbars
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
@@ -503,7 +672,8 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     
     # Calculate field of view for extent
     fov_arcsec = grid.shape_native[0] * pixel_scale
-    extent = (-fov_arcsec/2, fov_arcsec/2, -fov_arcsec/2, fov_arcsec/2)
+    re = einstein_radius
+    extent_norm = (-fov_arcsec/(2*re), fov_arcsec/(2*re), -fov_arcsec/(2*re), fov_arcsec/(2*re))
     
     # Create the methodology figure
     plt.style.use('default')
@@ -513,50 +683,51 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     ax_main = plt.subplot(1, 1, 1)
     
     # Show baseline Einstein ring
-    im = ax_main.imshow(baseline_image.native, extent=extent, origin='lower', 
+    im = ax_main.imshow(baseline_image.native, extent=extent_norm, origin='lower', 
                        cmap='viridis', alpha=0.8)
     
     # Create allowable placement band (annular region)
     # Inner and outer radii based on scatter
     scatter_arcsec = scatter_pixels * pixel_scale
-    inner_radius = einstein_radius - scatter_arcsec
-    outer_radius = einstein_radius + scatter_arcsec
+    inner_radius_norm = (einstein_radius - scatter_arcsec) / re
+    outer_radius_norm = (einstein_radius + scatter_arcsec) / re
+    einstein_radius_norm = 1.0
     
     # Create circular patches for the allowable band
     from matplotlib.patches import Circle
     import matplotlib.patches as patches
     
     # Outer circle (transparent)
-    outer_circle = Circle((0, 0), outer_radius, fill=True, 
+    outer_circle = Circle((0, 0), outer_radius_norm, fill=True, 
                          facecolor='yellow', alpha=0.2, 
                          edgecolor='orange', linewidth=2, linestyle='--')
     ax_main.add_patch(outer_circle)
     
     # Inner circle (to create annular region by overlay)
-    inner_circle = Circle((0, 0), inner_radius, fill=True, 
+    inner_circle = Circle((0, 0), inner_radius_norm, fill=True, 
                          facecolor='white', alpha=0.3)
     ax_main.add_patch(inner_circle)
     
     # Show Einstein ring itself
-    einstein_circle = Circle((0, 0), einstein_radius, fill=False,
+    einstein_circle = Circle((0, 0), einstein_radius_norm, fill=False,
                            edgecolor='red', linewidth=2, alpha=0.8)
     ax_main.add_patch(einstein_circle)
     
     # Plot sample subhalo positions
     for i, (y, x) in enumerate(sample_positions):
-        ax_main.scatter(x, y, c='red', s=60, marker='o', 
+        ax_main.scatter(x/re, y/re, c='red', s=60, marker='o', 
                        edgecolors='white', linewidth=1.5, 
                        zorder=10, alpha=0.9)
         # Optionally number the sample positions
-        ax_main.annotate(f'{i+1}', (x, y), xytext=(3, 3), 
+        ax_main.annotate(f'{i+1}', (x/re, y/re), xytext=(3, 3), 
                         textcoords='offset points', fontsize=8, 
                         color='white', fontweight='bold')
     
     # Set up main plot
-    ax_main.set_xlim(extent[0], extent[1])
-    ax_main.set_ylim(extent[2], extent[3])
-    ax_main.set_xlabel('arcsec', fontsize=12)
-    ax_main.set_ylabel('arcsec', fontsize=12)
+    ax_main.set_xlim(extent_norm[0], extent_norm[1])
+    ax_main.set_ylim(extent_norm[2], extent_norm[3])
+    ax_main.set_xlabel(r'$x / R_E$', fontsize=12)
+    ax_main.set_ylabel(r'$y / R_E$', fontsize=12)
     ax_main.set_title('Subhalo Placement Methodology', fontsize=14, fontweight='bold')
     
     # Add colorbar
@@ -565,6 +736,7 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     # Create inset for residual zoom
     # Choose one sample position for the inset (first one)
     sample_y, sample_x = sample_positions[0]
+    sample_y_norm, sample_x_norm = sample_y/re, sample_x/re
     
     # Generate a test image with subhalo at this position for residual demonstration
     # Create a small subhalo for demonstration
@@ -589,23 +761,23 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     
     # Create inset axes for residual zoom
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-    zoom_size = 0.8  # arcsec
+    zoom_size_norm = 0.8 / re  # arcsec / RE
     axins = inset_axes(ax_main, width="30%", height="30%", loc='upper right')
     
     # Show residual in inset
-    zoom_extent = [sample_x - zoom_size/2, sample_x + zoom_size/2,
-                   sample_y - zoom_size/2, sample_y + zoom_size/2]
+    zoom_extent_norm = [sample_x_norm - zoom_size_norm/2, sample_x_norm + zoom_size_norm/2,
+                        sample_y_norm - zoom_size_norm/2, sample_y_norm + zoom_size_norm/2]
     
     max_residual = np.max(np.abs(residual_image))
-    axins.imshow(residual_image, extent=extent, origin='lower', 
+    axins.imshow(residual_image, extent=extent_norm, origin='lower', 
                 cmap='RdBu_r', vmin=-max_residual, vmax=max_residual)
-    axins.set_xlim(zoom_extent[0], zoom_extent[1])
-    axins.set_ylim(zoom_extent[2], zoom_extent[3])
+    axins.set_xlim(zoom_extent_norm[0], zoom_extent_norm[1])
+    axins.set_ylim(zoom_extent_norm[2], zoom_extent_norm[3])
     axins.set_title('Residual Zoom', fontsize=10)
     
     # Mark the zoom region on main plot
-    zoom_box = patches.Rectangle((zoom_extent[0], zoom_extent[2]), 
-                                zoom_size, zoom_size,
+    zoom_box = patches.Rectangle((zoom_extent_norm[0], zoom_extent_norm[2]), 
+                                zoom_size_norm, zoom_size_norm,
                                 linewidth=1.5, edgecolor='cyan', 
                                 facecolor='none', linestyle='-')
     ax_main.add_patch(zoom_box)
