@@ -143,57 +143,6 @@ class DetectionData:
         return (height * self.pixel_scale, width * self.pixel_scale)
 
 
-def validate_detection_results(detection_data: DetectionData) -> Dict[str, bool]:
-    """Comprehensive validation of detection results.
-    
-    Implements key validation checks from the prototype notebook
-    to ensure mathematical accuracy and physical plausibility.
-    
-    Returns
-    -------
-    validation_results : dict
-        Dictionary of validation check results (True = passed).
-    """
-    validation = {}
-    
-    # 1. Basic data consistency
-    validation['pixels_consistent'] = (
-        detection_data.pixels_unmasked == np.sum(detection_data.snr_mask)
-    )
-    validation['arrays_same_size'] = (
-        len(detection_data.snr_array) == len(detection_data.snr_mask) == 
-        len(detection_data.residual_map)
-    )
-    
-    # 2. SNR calculation verification
-    snr_nonzero = detection_data.snr_array[detection_data.snr_array > 0]
-    validation['snr_reasonable'] = len(snr_nonzero) > 0 and np.max(snr_nonzero) > detection_data.snr_threshold
-    
-    # 3. Detection mask consistency
-    validation['mask_threshold_consistent'] = np.all(
-        detection_data.snr_array[detection_data.snr_mask] > detection_data.snr_threshold
-    )
-    
-    # 4. Chi-square value plausibility
-    validation['chi2_positive'] = detection_data.chi2_value > 0
-    validation['chi2_finite'] = np.isfinite(detection_data.chi2_value)
-    validation['dof_positive'] = detection_data.degrees_of_freedom > 0
-    
-    # 5. Detection results consistency
-    all_results_valid = True
-    for sig_level, result in detection_data.detection_results.items():
-        if not (result.chi2_value == detection_data.chi2_value and 
-                result.dof == detection_data.degrees_of_freedom):
-            all_results_valid = False
-            break
-    validation['detection_results_consistent'] = all_results_valid
-    
-    # 6. P-value reasonableness
-    validation['p_value_valid'] = 0 <= detection_data.chi2_p_value <= 1
-    
-    return validation
-
-
 def print_detection_summary(detection_data: DetectionData) -> None:
     """Print concise detection results summary."""
     print("Detection Summary:")
@@ -246,34 +195,3 @@ def print_detection_summary(detection_data: DetectionData) -> None:
         print(f"  Mass: {detection_data.true_subhalo_mass:.1e} M_sun")
         print(f"  Model: {detection_data.true_subhalo_model}")
         print(f"  Position: {detection_data.true_subhalo_position}")
-
-
-def validate_and_print_summary(detection_data: DetectionData) -> Dict[str, bool]:
-    """Validate detection results and print summary if validation passes.
-    
-    Parameters
-    ----------
-    detection_data : DetectionData
-        Detection results to validate and summarize.
-        
-    Returns
-    -------
-    validation_results : dict
-        Dictionary of validation check results.
-    """
-    validation = validate_detection_results(detection_data)
-    
-    # Print validation results
-    failed_checks = [check for check, passed in validation.items() if not passed]
-    if failed_checks:
-        print(f"⚠️  Validation failed for: {', '.join(failed_checks)}")
-    else:
-        print("✓ All validation checks passed")
-    
-    # Print summary if basic validation passes
-    basic_checks = ['arrays_same_size', 'chi2_positive', 'chi2_finite', 'dof_positive']
-    if all(validation.get(check, False) for check in basic_checks):
-        print()
-        print_detection_summary(detection_data)
-    
-    return validation

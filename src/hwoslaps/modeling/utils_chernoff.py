@@ -2,34 +2,9 @@
 Utilities for presenting and validating Chernoff-based detection outputs.
 """
 
-from typing import Dict
-
-import numpy as np
 from scipy.stats import chi2 as chi2_dist, norm
 
 from .chernoff_detector import ChernoffDetectionData
-
-
-def validate_chernoff_results(detection_data: ChernoffDetectionData) -> Dict[str, bool]:
-    """Basic validations for Chernoff detection outputs.
-
-    Returns a dictionary of boolean flags for quick health checks.
-    """
-    result = detection_data.result
-    validation: Dict[str, bool] = {}
-
-    validation["pixels_unmasked_positive"] = detection_data.result.pixels_unmasked > 0
-    validation["delta_chi2_nonnegative"] = result.delta_chi2 >= 0
-    validation["p_in_unit_interval"] = (0.0 <= result.p_value <= 1.0)
-    validation["sigma_finite"] = np.isfinite(result.sigma)
-
-    # Mask consistency
-    validation["mask_matches_count"] = (
-        int(np.sum(result.snr_mask)) == detection_data.result.pixels_unmasked
-    )
-
-    return validation
-
 
 def print_chernoff_summary(detection_data: ChernoffDetectionData) -> None:
     """Chernoff detection summary aligned with the GOF printout style."""
@@ -76,6 +51,5 @@ def print_chernoff_summary(detection_data: ChernoffDetectionData) -> None:
     )
     if r.asimov_delta_chi2 is not None:
         print(f"Asimov Δχ² (expected): {r.asimov_delta_chi2:.2f}")
-
 
 

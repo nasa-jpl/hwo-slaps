@@ -8,11 +8,6 @@ import numpy as np
 from typing import Dict, Tuple, Optional
 
 
-def get_default_detector_config() -> Dict[str, float]:
-    """Deprecated. Configuration must explicitly specify detector parameters."""
-    raise RuntimeError("get_default_detector_config is deprecated. Provide detector config explicitly.")
-
-
 def apply_detector_noise(
     source_eps: np.ndarray,
     exposure_time: float,
@@ -153,82 +148,3 @@ def create_noise_map(
     noise_map_adu = np.sqrt(total_variance_e2) / gain
     
     return noise_map_adu
-
-
-def calculate_snr(
-    signal_adu: np.ndarray,
-    noise_map_adu: np.ndarray
-) -> np.ndarray:
-    """Calculate signal-to-noise ratio.
-    
-    Parameters
-    ----------
-    signal_adu : `np.ndarray`
-        Signal array in ADU.
-    noise_map_adu : `np.ndarray`
-        Noise map in ADU.
-        
-    Returns
-    -------
-    snr : `np.ndarray`
-        Signal-to-noise ratio array.
-    """
-    # Avoid division by zero
-    with np.errstate(divide='ignore', invalid='ignore'):
-        snr = np.where(noise_map_adu > 0, signal_adu / noise_map_adu, 0)
-    
-    return snr
-
-
-def estimate_limiting_magnitude(
-    detector_config: Dict[str, float],
-    exposure_time: float,
-    snr_threshold: float = 5.0,
-    pixel_scale: float = 0.05,
-    aperture_radius_arcsec: float = 0.5
-) -> Dict[str, float]:
-    """Estimate limiting magnitude for point source detection.
-    
-    Parameters
-    ----------
-    detector_config : `dict`
-        Detector configuration parameters.
-    exposure_time : `float`
-        Exposure time in seconds.
-    snr_threshold : `float`, optional
-        Required SNR for detection (default: 5.0).
-    pixel_scale : `float`, optional
-        Pixel scale in arcsec/pixel (default: 0.05).
-    aperture_radius_arcsec : `float`, optional
-        Aperture radius in arcsec (default: 0.5).
-        
-    Returns
-    -------
-    results : `dict`
-        Dictionary with limiting magnitude estimates.
-    """
-    # Calculate aperture area in pixels
-    aperture_radius_pix = aperture_radius_arcsec / pixel_scale
-    aperture_area_pix = np.pi * aperture_radius_pix**2
-    
-    # Background noise per pixel
-    sky_e = detector_config['sky_background'] * exposure_time
-    dark_e = detector_config['dark_current'] * exposure_time
-    read_e = detector_config['read_noise']
-    
-    # Total background noise in aperture
-    background_variance_per_pixel = sky_e + dark_e + read_e**2
-    total_background_noise = np.sqrt(aperture_area_pix * background_variance_per_pixel)
-    
-    # Required source counts for detection
-    # Using approximation: SNR ≈ S / sqrt(S + B)
-    # Where S = source counts, B = background noise²
-    required_source_e = snr_threshold * total_background_noise
-    
-    return {
-        'aperture_radius_arcsec': aperture_radius_arcsec,
-        'aperture_area_pix': aperture_area_pix,
-        'background_noise_e': total_background_noise,
-        'required_source_e': required_source_e,
-        'required_source_eps': required_source_e / exposure_time
-    }

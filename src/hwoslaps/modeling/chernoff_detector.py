@@ -279,41 +279,6 @@ class ChernoffSubhaloDetector:
             d = E1_ref - E0
             asimov_delta = float(np.sum((d * d) * w))
 
-        # === TRIAGE DEBUG SECTION ===
-        print("\n=== TRIAGE ===")
-        N_mask = int(np.sum(mask))
-        image_shape = observation_with_subhalo.data.native.shape
-        print(f"N_mask: {N_mask}")
-        print(f"image shape: {image_shape}")
-        print(f"sigma = np.sqrt(delta_chi2): {sigma}")
-        print(f"delta_chi2: {delta_chi2}")
-        
-        var_masked = Var_full[mask]
-        print(f"np.median(var_masked): {np.median(var_masked)}")
-        print(f"np.percentile(var_masked,[5,50,95]): {np.percentile(var_masked, [5,50,95])}")
-        
-        T_squared_over_Var = (T**2) / V
-        print(f"np.median(((T**2)/Var)[mask]): {np.median(T_squared_over_Var)}")
-        print(f"95th percentile of ((T**2)/Var)[mask]: {np.percentile(T_squared_over_Var, 95)}")
-        print(f"sum to get D: {np.sum(T_squared_over_Var)}")
-        
-        r_T_over_Var = (r * T) / V
-        print(f"np.median(((r*T)/Var)[mask]): {np.median(r_T_over_Var)}")
-        print(f"sum to get N: {np.sum(r_T_over_Var)}")
-        
-        if compute_asimov:
-            asimov_per_pixel = ((E1_ref - E0)**2) / V
-            print(f"np.median(((E1_ref-E0)**2)/Var)[mask]) - rough per-pixel Asimov: {np.median(asimov_per_pixel)}")
-            
-            # Histogram of c_i = (Δμ_i)^2/Var_i
-            c_i = ((E1_ref - E0)**2) / V
-            fraction_above_1 = np.mean(c_i > 1)
-            print(f"Histogram of c_i = (Δμ_i)^2/Var_i:")
-            print(f"  min: {np.min(c_i):.6f}, max: {np.max(c_i):.6f}")
-            print(f"  median: {np.median(c_i):.6f}, mean: {np.mean(c_i):.6f}")
-            print(f"  fraction of mask pixels with c_i > 1: {fraction_above_1:.6f}")
-        print("=== END TRIAGE ===\n")
-
         result = ChernoffDetectionResult(
             delta_chi2=delta_chi2,
             p_value=float(p_delta),
@@ -336,5 +301,4 @@ class ChernoffSubhaloDetector:
             variance_2d=self.variance_2d,
             config=None,
         )
-
 

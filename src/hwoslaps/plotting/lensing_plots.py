@@ -810,5 +810,5 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     print(f"Einstein radius: {einstein_radius:.3f} arcsec")
     print(f"Scatter range: ±{scatter_pixels} pixels (±{scatter_arcsec:.3f} arcsec)")
     print(f"Generated {len(sample_positions)} sample positions")
-    print(f"Band coverage: {inner_radius:.3f} to {outer_radius:.3f} arcsec")
+    print(f"Band coverage: {einstein_radius - scatter_arcsec:.3f} to {einstein_radius + scatter_arcsec:.3f} arcsec")
     print(f"Seeded RNG ensures reproducible placement across sweeps")

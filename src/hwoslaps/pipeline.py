@@ -319,15 +319,6 @@ class Pipeline:
         if 'lensing' in test_config and 'subhalo' in test_config['lensing']:
             test_config['lensing']['subhalo']['enabled'] = True
         return test_config
-    
-    def _validate_config(self, config: Dict) -> None:
-        """Deprecated: validation handled by validate_or_raise at entry."""
-        return
-    
-    def _validate_detection_config(self, config: Dict) -> None:
-        """Deprecated: validation handled by validate_or_raise at entry."""
-        return
-    
 
 
 def run_pipeline(config_path: str, verbose: bool = True, modules: Optional[List[str]] = None) -> Tuple[Optional[LensingData], Optional[PSFData], Optional[ObservationData]]:
@@ -422,26 +413,6 @@ def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[Obser
     validate_or_raise(config)
     
     # Create and run pipeline
-    pipeline = Pipeline(verbose=verbose)
-    return pipeline.run(config)
-
-
-def run_pipeline_from_config(config: Dict, verbose: bool = True) -> Union[ObservationData, 'DetectionData']:
-    """Run the HWO-SLAPS pipeline from a configuration dictionary.
-    
-    Parameters
-    ----------
-    config : dict
-        Complete pipeline configuration dictionary.
-    verbose : bool, optional
-        Whether to print progress information.
-        
-    Returns
-    -------
-    result : ObservationData or DetectionData
-        - ObservationData in standard mode
-        - DetectionData in detection mode (when modeling.enabled: true)
-    """
     pipeline = Pipeline(verbose=verbose)
     return pipeline.run(config)
 

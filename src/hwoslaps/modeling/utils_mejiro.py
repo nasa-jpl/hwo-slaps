@@ -2,31 +2,9 @@
 Utilities for presenting and validating Mejiro detectability outputs.
 """
 
-from typing import Dict
-
-import numpy as np
 from scipy.stats import norm, chi2 as chi2_dist
 
 from .utils import DetectionData
-
-
-def validate_mejiro_results(detection_data: DetectionData) -> Dict[str, bool]:
-    """Basic validations for Mejiro detection outputs.
-
-    Returns a dictionary of boolean flags for quick health checks.
-    """
-    validation: Dict[str, bool] = {}
-
-    validation["pixels_unmasked_positive"] = detection_data.pixels_unmasked > 0
-    validation["chi2_positive_or_zero"] = detection_data.chi2_value >= 0
-    validation["p_in_unit_interval"] = (0.0 <= detection_data.chi2_p_value <= 1.0)
-    validation["dof_positive"] = detection_data.degrees_of_freedom > 0
-    validation["arrays_same_size"] = (
-        len(detection_data.snr_array) == len(detection_data.snr_mask) == len(detection_data.residual_map)
-    )
-
-    return validation
-
 
 def print_mejiro_summary(detection_data: DetectionData) -> None:
     """Mejiro detectability summary aligned with GOF/Chernoff style."""
@@ -63,5 +41,4 @@ def print_mejiro_summary(detection_data: DetectionData) -> None:
             f"  {label} (p={p:.2e}, σ={sigma:.2f}): {status} "
             f"(χ²={chi2_val:.2f} vs χ²_threshold={chi2_thresh:.2f})"
         )
-
 

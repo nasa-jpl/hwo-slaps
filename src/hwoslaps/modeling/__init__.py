@@ -6,7 +6,7 @@ subhalos using validated methodology from prototype studies.
 """
 
 from .generator import perform_subhalo_detection
-from .utils import DetectionData, validate_detection_results, print_detection_summary, validate_and_print_summary
+from .utils import DetectionData, print_detection_summary
 from .chi_square_detector import ChiSquareSubhaloDetector, DetectionResult
 
 __all__ = [
@@ -14,7 +14,5 @@ __all__ = [
     'DetectionData', 
     'ChiSquareSubhaloDetector',
     'DetectionResult',
-    'validate_detection_results',
-    'print_detection_summary', 
-    'validate_and_print_summary'
+    'print_detection_summary'
 ]

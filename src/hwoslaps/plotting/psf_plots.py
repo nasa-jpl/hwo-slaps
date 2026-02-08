@@ -400,52 +400,6 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     print(f"Saved diverging path comparison: {filepath}")
 
 
-def _calculate_radial_profile(image, pixel_scale):
-    """Calculate normalized radial profile of an image.
-    
-    Parameters
-    ----------
-    image : `numpy.ndarray`
-        2D image array.
-    pixel_scale : `float`
-        Pixel scale in arcseconds.
-        
-    Returns
-    -------
-    profile : `dict`
-        Dictionary with 'radius' and 'intensity' arrays.
-    """
-    # Find center.
-    center = np.array(image.shape) // 2
-    y, x = np.ogrid[:image.shape[0], :image.shape[1]]
-    r = np.sqrt((x - center[1])**2 + (y - center[0])**2) * pixel_scale
-    
-    # Create radial bins.
-    max_radius = min(center) * pixel_scale * 0.8  # Use 80% to avoid edge effects.
-    bins = np.linspace(0, max_radius, 100)
-    
-    # Calculate mean intensity in each bin.
-    intensity = []
-    radius = []
-    
-    for i in range(len(bins) - 1):
-        mask = (r >= bins[i]) & (r < bins[i+1])
-        if np.any(mask):
-            mean_val = np.mean(image[mask])
-            if mean_val > 0:  # Only include positive values.
-                intensity.append(mean_val)
-                radius.append((bins[i] + bins[i+1]) / 2)
-    
-    # Convert to arrays and normalize.
-    intensity = np.array(intensity)
-    radius = np.array(radius)
-    
-    if len(intensity) > 0 and intensity[0] > 0:
-        intensity /= intensity[0]  # Normalize to peak.
-    
-    return {'radius': radius, 'intensity': intensity}
-
-
 @plot_function(module='psf', description="Complete PSF analysis suite including all diagnostic plots")
 def plot_psf_complete_analysis(psf_data, plot_config):
     """Create complete PSF analysis including all diagnostic plots.

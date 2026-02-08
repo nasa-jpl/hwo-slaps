@@ -32,58 +32,6 @@ def _normalize_segment_hexike_dict(segment_hexike_dict):
     return normalized
 
 
-def make_segment_modes(segments, segment_centers, segment_diameter, pupil_grid, 
-                       num_modes_per_segment, pointy_top=False):
-    """Make a list of modes containing segment-level modes for each segment.
-
-    Parameters
-    ----------
-    segments : `list` of `hcipy.Field`
-        List of segment apertures.
-    segment_centers : `hcipy.Grid`
-        Grid containing the center positions of each segment.
-    segment_diameter : `float`
-        The circumscribed diameter of each hexagonal segment.
-    pupil_grid : `hcipy.Grid`
-        The pupil grid.
-    num_modes_per_segment : `int`
-        The number of modes per segment.
-    pointy_top : `bool`, optional
-        Whether the hexagons have a pointy top. Default is False (flat top).
-
-    Returns
-    -------
-    modes : `list` of `numpy.ndarray`
-        A list of computed modes, normalized to RMS=1 over each segment.
-    """
-    modes = []
-    angle = 0 if pointy_top else np.pi / 2
-
-    for i, center in enumerate(segment_centers.points):
-        # Create hexike basis shifted to segment center.
-        basis = hcipy.make_hexike_basis(
-            pupil_grid.shifted(-center),
-            int(num_modes_per_segment),
-            segment_diameter,
-            hexagon_angle=angle,
-        )
-
-        # Extract the modes and normalize them over the segment.
-        for mode in basis:
-            mode_array = np.asarray(mode.shaped)
-            segment_mask = segments[i].shaped
-
-            # Normalize to RMS=1 over the segment.
-            mode_over_segment = mode_array * segment_mask
-            rms = np.sqrt(np.mean(mode_over_segment[segment_mask > 0.5]**2))
-            if rms > 0:
-                mode_array /= rms
-
-            modes.append(mode_array)
-
-    return modes
-
-
 def nm_to_opd(nm_rms):
     """Convert nanometers of wavefront OPD to meters.
 
@@ -441,9 +389,8 @@ def generate_random_segment_aberrations(
     Notes
     -----
     - This mapping is an approximation and depends on aperture discretization and
-      basis details. For scientific use, follow with
-      ``generate_calibrated_segment_aberrations`` which numerically rescales to the
-      exact target RMS on the configured system.
+      basis details. For scientific use, follow with a numerical calibration pass
+      that rescales to the exact target RMS on the configured system.
     - If ``segment_flat_to_flat`` is not provided, we generate unit-variance
       tip/tilts in µrad without attempting a physically inconsistent nm→µrad
       conversion. The calibration step should then be used to match the target.
