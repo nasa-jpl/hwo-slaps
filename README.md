@@ -37,6 +37,14 @@ This will create a conda environment called hwo-slaps:
 ```bash
 bash install.sh
 ```
+
+Then manually install HCIPy:
+```bash
+conda activate hwo-slaps
+git clone https://github.com/ehpor/hcipy.git
+pip install -e ./hcipy
+```
+
 Next, test that the installation imports with:
 ```bash
 python tests/test_installation.py

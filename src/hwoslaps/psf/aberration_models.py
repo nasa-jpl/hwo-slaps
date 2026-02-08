@@ -11,58 +11,25 @@ import numpy as np
 import hcipy
 
 
-def make_hexike_basis(num_modes, circum_diameter, grid, hexagon_angle=0):
-    """Make a hexike basis.
+def _normalize_segment_hexike_dict(segment_hexike_dict):
+    """Normalize segment/mode indices to HCIPy Noll indexing."""
+    normalized = {}
 
-    This is based on [Mahajan2006]_. This function creates a Zernike mode basis and
-    numerically orthogonalizes it using Gramm-Schmidt orthogonalization.
+    for raw_seg_id, raw_mode_dict in segment_hexike_dict.items():
+        seg_id = int(raw_seg_id)
+        if seg_id < 0:
+            raise ValueError('Segment indices must be >= 0.')
 
-    .. [Mahajan2006] Virendra N. Mahajan and Guang-ming Dai,
-        "Orthonormal polynomials for hexagonal pupils," Opt.
-        Lett. 31, 2462-2464 (2006)
+        if not raw_mode_dict:
+            normalized[seg_id] = {}
+            continue
 
-    Parameters
-    ----------
-    num_modes : `int`
-        The number of hexike modes to compute.
-    circum_diameter : `float`
-        The circumdiameter of the hexagonal aperture.
-    grid : `hcipy.Grid`
-        The grid on which to compute the mode basis.
-    hexagon_angle : `float`, optional
-        The rotation angle of the hexagon in radians. Default is 0.
+        parsed_mode_dict = {int(raw_mode): coeff for raw_mode, coeff in raw_mode_dict.items()}
+        if any(mode_idx < 1 for mode_idx in parsed_mode_dict):
+            raise ValueError('Hexike mode indices must be 1-based Noll integers (>= 1).')
+        normalized[seg_id] = parsed_mode_dict
 
-    Returns
-    -------
-    hexike_basis : `hcipy.ModeBasis`
-        The hexike mode basis.
-    """
-    zernike_basis = hcipy.make_zernike_basis(int(num_modes), circum_diameter, grid)
-    # Create hexagonal aperture for this basis.
-    hexagonal_aperture = hcipy.make_hexagonal_aperture(circum_diameter, hexagon_angle)(grid)
-    sqrt_weights = np.sqrt(grid.weights)
-
-    if np.isscalar(sqrt_weights):
-        sqrt_weights = np.array([sqrt_weights])
-
-    # Un-normalize the zernike modes using the weights of the grid.
-    # Reshape to properly broadcast: (n_pixels,) -> (n_pixels, 1).
-    weights_factor = (hexagonal_aperture * sqrt_weights)[:, np.newaxis]
-    zernike_basis.transformation_matrix *= weights_factor
-
-    # Perform Gramm-Schmidt orthogonalization using a QR decomposition.
-    Q, R = np.linalg.qr(zernike_basis.transformation_matrix)
-
-    # Correct for negative sign of components of the Q matrix.
-    hexike_basis = hcipy.ModeBasis(Q / np.sign(np.diag(R)), grid)
-
-    # Renormalize the resulting functions using the area of a hexagon and the grid weights.
-    area_hexagon = 3 * np.sqrt(3) / 8 * circum_diameter**2
-    # Reshape sqrt_weights for proper broadcasting.
-    normalization_factor = (np.sqrt(area_hexagon) / sqrt_weights)[:, np.newaxis]
-    hexike_basis.transformation_matrix *= normalization_factor
-
-    return hexike_basis
+    return normalized
 
 
 def make_segment_modes(segments, segment_centers, segment_diameter, pupil_grid, 
@@ -94,8 +61,12 @@ def make_segment_modes(segments, segment_centers, segment_diameter, pupil_grid,
 
     for i, center in enumerate(segment_centers.points):
         # Create hexike basis shifted to segment center.
-        basis = make_hexike_basis(num_modes_per_segment, segment_diameter, 
-                                  pupil_grid.shifted(-center), angle)
+        basis = hcipy.make_hexike_basis(
+            pupil_grid.shifted(-center),
+            int(num_modes_per_segment),
+            segment_diameter,
+            hexagon_angle=angle,
+        )
 
         # Extract the modes and normalize them over the segment.
         for mode in basis:
@@ -230,9 +201,8 @@ def apply_segment_zernikes_manual(segment_zernike_dict, segments, telescope_data
     Parameters
     ----------
     segment_zernike_dict : `dict`
-        Dictionary mapping segment ID to another dict of {mode: amplitude_nm}.
-        Example: {0: {4: 20, 5: 10}, 5: {6: 15}} applies Z4=20nm and Z5=10nm
-        to segment 0, and Z6=15nm to segment 5.
+        Dictionary mapping segment ID to another dict of {mode_noll: amplitude_nm},
+        where mode indices follow 1-based Noll indexing.
     segments : `list`
         List of segment aperture functions.
     telescope_data : `dict`
@@ -263,26 +233,36 @@ def apply_segment_zernikes_manual(segment_zernike_dict, segments, telescope_data
     # Initialize phase screen.
     phase_screen = pupil_grid.zeros()
 
+    normalized_segment_dict = _normalize_segment_hexike_dict(segment_zernike_dict)
+
     # Process each segment that has aberrations.
-    for seg_id, mode_dict in segment_zernike_dict.items():
+    for seg_id, mode_dict in normalized_segment_dict.items():
         if seg_id < len(segments):
+            if not mode_dict:
+                continue
+
             # Get the center of this segment.
             center = segment_centers_grid.points[seg_id]
 
-            # Find the maximum mode needed for this segment.
+            # Find the maximum 1-based Noll mode needed for this segment.
             max_mode_for_segment = max(mode_dict.keys())
 
             # Create hexike basis for this segment only.
             angle = np.pi / 2  # For flat-top hexagons.
-            basis = make_hexike_basis(int(max_mode_for_segment + 1), segment_diameter,
-                                      pupil_grid.shifted(-center), angle)
+            basis = hcipy.make_hexike_basis(
+                pupil_grid.shifted(-center),
+                int(max_mode_for_segment),
+                segment_diameter,
+                hexagon_angle=angle,
+            )
 
             # Apply each requested mode.
-            for mode, coeff_nm in mode_dict.items():
-                if mode < len(basis):
+            for mode_noll, coeff_nm in mode_dict.items():
+                mode_idx = mode_noll - 1
+                if mode_idx < len(basis):
                     phase_rad = 2 * np.pi * nm_to_opd(coeff_nm) / wavelength
                     # Get the mode as a Field (already 1D).
-                    mode_field = basis[mode]
+                    mode_field = basis[mode_idx]
                     # Apply segment mask to ensure mode only affects this segment.
                     segment_mask = segments[seg_id]
                     phase_screen += phase_rad * mode_field * segment_mask
@@ -299,9 +279,10 @@ def apply_segment_zernikes_api(segment_hexike_dict, telescope_data, wavelength):
     Parameters
     ----------
     segment_hexike_dict : `dict`
-        Dictionary mapping segment ID to another dict of {mode: amplitude_nm}.
-        Example: {0: {0: 100}, 1: {1: 100}} applies hexike mode 0 with 100nm RMS
-        to segment 0, and hexike mode 1 with 100nm RMS to segment 1.
+        Dictionary mapping segment ID to another dict of {mode_noll: amplitude_nm},
+        where mode indices follow 1-based Noll indexing.
+        Example: {0: {1: 100}, 1: {2: 100}} applies Noll mode 1 with 100nm RMS
+        to segment 0, and Noll mode 2 with 100nm RMS to segment 1.
     telescope_data : `dict`
         Dictionary containing telescope parameters.
     wavelength : `float`
@@ -319,42 +300,43 @@ def apply_segment_zernikes_api(segment_hexike_dict, telescope_data, wavelength):
     segment_flat_to_flat = telescope_data['segment_flat_to_flat']
     gap_size = telescope_data['gap_size']
     num_rings = telescope_data['num_rings']
-    segment_point_to_point = telescope_data['segment_point_to_point']
+    normalized_segment_dict = _normalize_segment_hexike_dict(segment_hexike_dict)
 
     # Determine how many modes per segment are required.
-    max_mode = -1
-    for mode_dict in segment_hexike_dict.values():
+    max_mode = 0
+    for mode_dict in normalized_segment_dict.values():
         if mode_dict:
             max_mode = max(max_mode, max(mode_dict.keys()))
-    num_modes = max_mode + 1 if max_mode >= 0 else 0
+    num_modes = max_mode
 
     # Build or reuse a segmented hexike surface for this telescope geometry.
     hexike_surface = telescope_data.get('segment_hexike_surface')
     expected_shape = (len(segments), num_modes)
     if (hexike_surface is None or hexike_surface.input_grid is not pupil_grid
             or hexike_surface.coefficients.shape != expected_shape):
-        segment_pitch = segment_flat_to_flat + gap_size
-        segment_centers = hcipy.make_hexagonal_grid(segment_pitch, num_rings, False)
-        mask = segment_centers.ones(dtype='bool')
-        segment_centers_grid = segment_centers.subset(mask)
-
-        hexike_surface = hcipy.SegmentedHexikeSurface(
-            segments,
-            segment_centers_grid,
-            segment_point_to_point,
-            pupil_grid,
-            num_modes,
+        hexike_surface = hcipy.make_segment_hexike_surface_from_hex_aperture(
+            num_rings=num_rings,
+            segment_flat_to_flat=segment_flat_to_flat,
+            gap_size=gap_size,
+            pupil_grid=pupil_grid,
+            num_modes=num_modes,
             hexagon_angle=np.pi / 2  # Flat-top orientation.
         )
+
+        if hexike_surface.coefficients.shape[0] != len(segments):
+            raise ValueError(
+                'HCIPy segment hexike surface segment count does not match telescope segment count.'
+            )
+
         telescope_data['segment_hexike_surface'] = hexike_surface
     else:
         hexike_surface.flatten()
 
-    # Set per-segment coefficients. Input dict uses 0-based indices and OPD in nm RMS.
-    for seg_id, mode_dict in segment_hexike_dict.items():
+    # Set per-segment coefficients using HCIPy Noll indexing and surface-height units.
+    for seg_id, mode_dict in normalized_segment_dict.items():
         if seg_id < len(segments) and mode_dict:
             coeffs_m = {
-                mode_idx + 1: nm_to_opd(coeff_nm) / 2
+                mode_idx: nm_to_opd(coeff_nm) / 2
                 for mode_idx, coeff_nm in mode_dict.items()
             }
             hexike_surface.set_segment_coefficients(seg_id, coeffs_m, indexing='noll')
@@ -373,7 +355,8 @@ def apply_segment_zernikes(segment_zernike_dict, segments, telescope_data, wavel
     Parameters
     ----------
     segment_zernike_dict : `dict`
-        Dictionary mapping segment ID to another dict of {mode: amplitude_nm}.
+        Dictionary mapping segment ID to another dict of {mode_noll: amplitude_nm},
+        where mode indices follow 1-based Noll indexing.
     segments : `list`
         List of segment aperture functions.
     telescope_data : `dict`
@@ -382,7 +365,7 @@ def apply_segment_zernikes(segment_zernike_dict, segments, telescope_data, wavel
         Wavelength in meters.
     use_api : `bool`, optional
         If True, use the HCIPy API method. If False, use manual implementation.
-        Default is False for backward compatibility.
+        Default is False.
 
     Returns
     -------

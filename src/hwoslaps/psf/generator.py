@@ -440,6 +440,7 @@ def generate_aberrated_psf(
         Dictionary mapping segment indices to (tip, tilt) tuples in microradians.
     segment_hexikes : `dict`, optional
         Dictionary mapping segment indices to hexike coefficient dictionaries.
+        Hexike mode indices should use HCIPy Noll indexing (1-based).
     zernike_coeffs : `dict`, optional
         Dictionary mapping Zernike indices to coefficient values in nm RMS.
     use_segment_api : `bool`, optional

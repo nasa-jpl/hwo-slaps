@@ -130,27 +130,27 @@ psf:
       17: [0.000016, 0.000016]
       18: [0.000010, 0.000010]
       
-    # Segment-level hexike aberrations in nm RMS
+    # Segment-level hexike aberrations in nm RMS (noll indexing)
     segment_hexikes:
-      0: {0: 100}  # Segment 0: hexike 0 with 100 nm
-      1: {1: 100}  # Segment 1: hexike 1 with 100 nm
-      2: {2: 100}  # Segment 2: hexike 2 with 100 nm
-      3: {3: 100}  # Segment 3: hexike 3 with 100 nm
-      4: {4: 100}  # Segment 4: hexike 4 with 100 nm
-      5: {5: 100}  # Segment 5: hexike 5 with 100 nm
-      6: {6: 100}  # Segment 6: hexike 6 with 100 nm
-      7: {7: 100}  # Segment 7: hexike 7 with 100 nm
-      8: {8: 100}  # Segment 8: hexike 8 with 100 nm
-      9: {9: 100}  # Segment 9: hexike 9 with 100 nm
-      10: {10: 100}  # Segment 10: hexike 10 with 100 nm
-      11: {11: 100}  # Segment 11: hexike 11 with 100 nm
-      12: {12: 100}  # Segment 12: hexike 12 with 100 nm
-      13: {13: 100}  # Segment 13: hexike 13 with 100 nm
-      14: {14: 100}  # Segment 14: hexike 14 with 100 nm
-      15: {15: 100}  # Segment 15: hexike 15 with 100 nm
-      16: {16: 100}  # Segment 16: hexike 16 with 100 nm
-      17: {17: 100}  # Segment 17: hexike 17 with 100 nm
-      18: {18: 100}  # Segment 18: hexike 18 with 100 nm
+      0: {1: 100}   # Segment 0: hexike Noll mode 1 with 100 nm
+      1: {2: 100}   # Segment 1: hexike Noll mode 2 with 100 nm
+      2: {3: 100}   # Segment 2: hexike Noll mode 3 with 100 nm
+      3: {4: 100}   # Segment 3: hexike Noll mode 4 with 100 nm
+      4: {5: 100}   # Segment 4: hexike Noll mode 5 with 100 nm
+      5: {6: 100}   # Segment 5: hexike Noll mode 6 with 100 nm
+      6: {7: 100}   # Segment 6: hexike Noll mode 7 with 100 nm
+      7: {8: 100}   # Segment 7: hexike Noll mode 8 with 100 nm
+      8: {9: 100}   # Segment 8: hexike Noll mode 9 with 100 nm
+      9: {10: 100}  # Segment 9: hexike Noll mode 10 with 100 nm
+      10: {11: 100} # Segment 10: hexike Noll mode 11 with 100 nm
+      11: {12: 100} # Segment 11: hexike Noll mode 12 with 100 nm
+      12: {13: 100} # Segment 12: hexike Noll mode 13 with 100 nm
+      13: {14: 100} # Segment 13: hexike Noll mode 14 with 100 nm
+      14: {15: 100} # Segment 14: hexike Noll mode 15 with 100 nm
+      15: {16: 100} # Segment 15: hexike Noll mode 16 with 100 nm
+      16: {17: 100} # Segment 16: hexike Noll mode 17 with 100 nm
+      17: {18: 100} # Segment 17: hexike Noll mode 18 with 100 nm
+      18: {19: 100} # Segment 18: hexike Noll mode 19 with 100 nm
       
     # Global Zernike aberrations in nm RMS
     global_zernikes:

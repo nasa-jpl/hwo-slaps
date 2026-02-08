@@ -108,15 +108,6 @@ else
 fi
 
 echo ""
-if ! step_completed "HCIPy installation"; then
-    echo "→ Installing HCIPy..."
-    pip install hcipy
-    check_status "HCIPy installation"
-else
-    echo "→ HCIPy already installed, skipping..."
-fi
-
-echo ""
 if ! step_completed "Additional dependencies"; then
     echo "→ Installing additional dependencies..."
     pip install pyyaml matplotlib numpy scipy astropy tqdm
