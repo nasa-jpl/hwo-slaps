@@ -7,14 +7,14 @@ mode and subhalo detection mode.
 
 import yaml
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List, Union
+from typing import Dict, Union
 from copy import deepcopy
 
 from .lensing import generate_lensing_system
 from .psf import generate_psf_system  
 from .observation import generate_observation
-from .lensing.utils import print_lensing_data_summary, LensingData
-from .psf.utils import print_psf_data_summary, PSFData
+from .lensing.utils import print_lensing_data_summary
+from .psf.utils import print_psf_data_summary
 from .observation.utils import print_observation_summary, ObservationData
 from .plotting import generate_all_plots
 from .modeling.utils import print_detection_summary, DetectionData
@@ -321,60 +321,6 @@ class Pipeline:
         return test_config
 
 
-def run_pipeline(config_path: str, verbose: bool = True, modules: Optional[List[str]] = None) -> Tuple[Optional[LensingData], Optional[PSFData], Optional[ObservationData]]:
-    """Run the complete HWO-SLAPS pipeline (legacy function for backward compatibility).
-    
-    This function maintains backward compatibility with existing code.
-    For detection mode support, use `run_enhanced_pipeline()` instead.
-    
-    Parameters
-    ----------
-    config_path : str
-        Path to the master configuration file.
-    verbose : bool, optional
-        Whether to print summaries at each step.
-    modules : list of str, optional
-        Specific modules to run. Options: 'lensing', 'psf', 'observation'.
-        If None, runs all configured modules.
-        
-    Returns
-    -------
-    lensing_data : LensingData or None
-        Generated lensing system (None if not run).
-    psf_data : PSFData or None
-        Generated PSF system (None if not run).
-    observation_data : ObservationData or None
-        Simulated observation (None if not run).
-        
-    Notes
-    -----
-    This function only supports standard observation mode. If the configuration
-    contains `modeling.enabled: true`, it will be ignored. Use 
-    `run_enhanced_pipeline()` for detection mode support.
-    """
-    # Load configuration
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    validate_or_raise(config)
-    
-    # Force standard mode for backward compatibility
-    if 'modeling' in config:
-        config = deepcopy(config)
-        config['modeling']['enabled'] = False
-    
-    # Use legacy logic for specific modules or full pipeline
-    if modules is not None:
-        return _run_legacy_modules(config, verbose, modules)
-    
-    # Otherwise use standard pipeline but return individual components
-    pipeline = Pipeline(verbose=verbose)
-    result = pipeline._run_standard_pipeline(config)
-    
-    # Return in legacy format - we can't easily separate components in the new architecture
-    # This is a limitation of maintaining backward compatibility
-    return None, None, result
-
-
 def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[ObservationData, 'DetectionData']:
     """Run the enhanced HWO-SLAPS pipeline with detection mode support.
     
@@ -415,77 +361,3 @@ def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[Obser
     # Create and run pipeline
     pipeline = Pipeline(verbose=verbose)
     return pipeline.run(config)
-
-
-def _run_legacy_modules(config: Dict, verbose: bool, modules: List[str]) -> Tuple[Optional[LensingData], Optional[PSFData], Optional[ObservationData]]:
-    """Legacy module-specific pipeline execution for backward compatibility."""
-    # Initialize return values
-    lensing_data = None
-    psf_data = None
-    observation_data = None
-    
-    # Step 1: Generate lensing system
-    if 'lensing' in modules:
-        if verbose:
-            print("Generating lensing system...")
-        lensing_data = generate_lensing_system(config['lensing'], full_config=config)
-        if verbose:
-            print_lensing_data_summary(lensing_data)
-    
-    # Step 2: Generate PSF system
-    if 'psf' in modules:
-        if verbose:
-            print("\nGenerating PSF system...")
-        psf_data = generate_psf_system(config['psf'], full_config=config)
-        if verbose:
-            print_psf_data_summary(psf_data)
-    
-    # Step 3: Generate observation
-    if 'observation' in modules:
-        # For observation, we need lensing and PSF data
-        if lensing_data is None or psf_data is None:
-            if verbose:
-                print("\nObservation module requires lensing and PSF data. Running dependencies...")
-            if lensing_data is None:
-                if verbose:
-                    print("Generating lensing system...")
-                lensing_data = generate_lensing_system(config['lensing'], full_config=config)
-                if verbose:
-                    print_lensing_data_summary(lensing_data)
-            if psf_data is None:
-                if verbose:
-                    print("Generating PSF system...")
-                psf_data = generate_psf_system(config['psf'], full_config=config)
-                if verbose:
-                    print_psf_data_summary(psf_data)
-        
-        if verbose:
-            print("\nSimulating observation...")
-        observation_data = generate_observation(
-            lensing_data=lensing_data,
-            psf_data=psf_data,
-            observation_config=config['observation'],
-            full_config=config
-        )
-        if verbose:
-            print_observation_summary(observation_data)
-    
-    # Step 4: Generate plots if enabled
-    if config['plotting']['enabled']:
-        if verbose:
-            print("\nGenerating plots...")
-        
-        # Create context for automatic plot generation
-        context = {
-            'mode': 'standard',
-            'has_subhalo': lensing_data.has_subhalo if lensing_data else False,
-            'lensing_data': lensing_data,
-            'psf_data': psf_data,
-            'obs_data': observation_data,
-            'run_name': config['run_name']
-        }
-        
-        # Generate all applicable plots automatically
-        generate_all_plots(context, config['plotting'], verbose=verbose)
-    
-    return lensing_data, psf_data, observation_data
