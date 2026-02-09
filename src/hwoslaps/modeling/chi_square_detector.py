@@ -181,19 +181,17 @@ class ChiSquareSubhaloDetector:
         
         # Degrees of freedom (number of pixels)
         dof = self.pixels_unmasked
+        rv = chi2(dof)
+        full_residual = np.zeros_like(expected_full)
+        residual = observed - expected
+        full_residual[self.snr_mask] = residual
         
         # Test against significance thresholds
         results = {}
         for sig_level in self.significance_levels:
             # Get threshold from chi-square distribution
-            rv = chi2(dof)
             threshold = rv.isf(sig_level)
             detected = chi2_value > threshold
-            
-            # Create residual map
-            full_residual = np.zeros_like(expected_full)
-            residual = observed - expected
-            full_residual[self.snr_mask] = residual
             
             # Store result
             results[sig_level] = DetectionResult(

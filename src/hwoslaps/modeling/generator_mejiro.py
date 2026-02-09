@@ -9,12 +9,12 @@ remain compatible.
 
 from typing import Optional, Dict
 
-import numpy as np
 from scipy.stats import chi2 as chi2_dist
 
 from ..observation.utils import ObservationData
 from ..lensing.utils import LensingData
 from .utils import DetectionData
+from .chi_square_detector import DetectionResult
 from .mejiro_detector import MejiroDetector, MejiroConfig
 
 
@@ -65,7 +65,6 @@ def perform_mejiro_detection(
 
     # Build per-threshold results with the same DetectionResult class as GOF
     detection_results = {}
-    from .chi_square_detector import DetectionResult  # reuse container
 
     # Scalars used across thresholds
     dof_for_thresholds = dof
@@ -110,5 +109,4 @@ def perform_mejiro_detection(
         detector_config=observation_baseline.detector_config,
         config=full_config,
     )
-
 

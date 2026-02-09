@@ -48,9 +48,6 @@ def perform_subhalo_detection(
         
     Notes
     -----
-    This function preserves the exact methodology from the validated
-    prototype implementation in notebooks/mod4-chisquare.py.
-    
     The chi-square detection uses:
     - SNR-based pixel masking (absolute SNR threshold)
     - Regional connectivity analysis with cross-shaped structure  
@@ -73,19 +70,19 @@ def perform_subhalo_detection(
     if detection_config is None:
         raise ValueError("detection_config must be provided explicitly when modeling is enabled")
     
-    # Extract ground truth source counts (EXACTLY as in prototype lines 313-315)
+    # Ground-truth source counts in electrons.
     source_counts_ground_truth = (
         observation_baseline.noiseless_source_eps * observation_baseline.exposure_time
     )
     
-    # Initialize detector (EXACTLY as in prototype lines 318-322)
+    # Initialize detector from validated configuration.
     detector = ChiSquareSubhaloDetector(
         observation_data_no_subhalo=observation_baseline,
         source_counts_ground_truth=source_counts_ground_truth,
         snr_threshold=detection_config['snr_threshold'],
         significance_levels=detection_config['significance_levels']
     )
-    # Get subhalo position from test case (EXACTLY as in prototype lines 344-345)
+    # Get subhalo position from test case.
     if lensing_test.has_subhalo:
         subhalo_x = lensing_test.subhalo_position[1]  # x is second coordinate
         subhalo_y = lensing_test.subhalo_position[0]  # y is first coordinate
@@ -93,16 +90,18 @@ def perform_subhalo_detection(
     else:
         subhalo_position = (0.0, 0.0)  # Default for null tests
     
-    # Perform detection (EXACTLY as in prototype line 349)
+    # Perform detection.
     results = detector.detect_at_position(observation_test, subhalo_position)
+    primary_level = min(detector.significance_levels)
+    primary_result = results[primary_level]
     
     # Package results in unified structure
     return DetectionData(
         # Primary results
         detection_results=results,
         # Use the most stringent (smallest p-value) result for main value
-        chi2_value=results[min(detector.significance_levels)].chi2_value,
-        degrees_of_freedom=results[min(detector.significance_levels)].dof,
+        chi2_value=primary_result.chi2_value,
+        degrees_of_freedom=primary_result.dof,
         
         # Detection parameters
         snr_threshold=detector.snr_threshold,
@@ -115,7 +114,7 @@ def perform_subhalo_detection(
         snr_mask=detector.snr_mask,
         snr_array=detector.snr_array,
         labeled_regions=detector.labeled_regions,
-        residual_map=results[min(detector.significance_levels)].residual,
+        residual_map=primary_result.residual,
         variance_2d=getattr(detector, 'variance_2d', None),
         image_shape=observation_baseline.data.shape_native,
         

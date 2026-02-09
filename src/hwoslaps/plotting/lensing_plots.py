@@ -7,8 +7,10 @@ and subhalo effects.
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import SymLogNorm
+from matplotlib.patches import Circle, Rectangle
 import autolens as al
 from pathlib import Path
+from ..lensing.utils import get_einstein_ring_position
 from .registry import plot_function
 
 
@@ -148,7 +150,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     plt.style.use('default')
     
     # Create the comparison figure - 2x2 layout
-    fig = plt.figure(figsize=(12, 10))
+    plt.figure(figsize=(12, 10))
     
     # Calculate normalized extent (x/RE, y/RE)
     fov_arcsec = grid.shape_native[0] * pixel_scale
@@ -210,7 +212,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     total_signal = np.sum(np.abs(difference_image))
     signal_rms = np.sqrt(np.mean(difference_image**2))
     
-    print(f"\nSubhalo Effect Analysis:")
+    print("\nSubhalo Effect Analysis:")
     print(f"Model: {subhalo_model}")
     print(f"Mass: {subhalo_mass:.1e} M_sun")
     print(f"Einstein radius: {lensing_data.subhalo_einstein_radius:.6f} arcsec")
@@ -262,7 +264,6 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
     
     # Get subhalo information
     subhalo_position = lensing_data.subhalo_position
-    subhalo_model = lensing_data.subhalo_model
     subhalo_mass = lensing_data.subhalo_mass
     mass_latex = _format_mass_latex(subhalo_mass)
     
@@ -353,7 +354,7 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
     vfrac_percent = max_frac_percent if max_frac_percent > 0 else 1e-4
     im3 = ax3.imshow(fractional_residual_percent, extent=extent, origin='lower',
                      cmap='RdBu_r', vmin=-vfrac_percent, vmax=vfrac_percent)
-    ax3.set_title(f'Fractional Residual (%)', fontsize=18)
+    ax3.set_title('Fractional Residual (%)', fontsize=18)
     ax3.scatter(*subhalo_position[::-1], c='black', s=80, marker='x', alpha=0.8)
 
     for ax in [ax1, ax2, ax3]:
@@ -551,7 +552,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     print(f"Saved lensing baseline scene plot: {filepath}")
     
     # Print summary for presentation context
-    print(f"\nBaseline Scene Summary:")
+    print("\nBaseline Scene Summary:")
     print(f"Subhalo mass: {subhalo_mass:.1e} M_sun")
     print(f"Peak residual signal: {max_diff:.6e}")
     print(f"Position: ({subhalo_position[0]:.3f}, {subhalo_position[1]:.3f}) arcsec")
@@ -661,7 +662,6 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
         offset_pixels = np.random.uniform(-scatter_pixels, scatter_pixels)
         
         # Calculate position using same logic as pipeline
-        from ..lensing.utils import get_einstein_ring_position
         position = get_einstein_ring_position(
             angle_deg=angle_deg,
             einstein_radius=einstein_radius,
@@ -677,7 +677,7 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     
     # Create the methodology figure
     plt.style.use('default')
-    fig = plt.figure(figsize=(10, 8))
+    plt.figure(figsize=(10, 8))
     
     # Main plot showing Einstein ring with placement methodology
     ax_main = plt.subplot(1, 1, 1)
@@ -694,9 +694,6 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     einstein_radius_norm = 1.0
     
     # Create circular patches for the allowable band
-    from matplotlib.patches import Circle
-    import matplotlib.patches as patches
-    
     # Outer circle (transparent)
     outer_circle = Circle((0, 0), outer_radius_norm, fill=True, 
                          facecolor='yellow', alpha=0.2, 
@@ -776,10 +773,15 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     axins.set_title('Residual Zoom', fontsize=10)
     
     # Mark the zoom region on main plot
-    zoom_box = patches.Rectangle((zoom_extent_norm[0], zoom_extent_norm[2]), 
-                                zoom_size_norm, zoom_size_norm,
-                                linewidth=1.5, edgecolor='cyan', 
-                                facecolor='none', linestyle='-')
+    zoom_box = Rectangle(
+        (zoom_extent_norm[0], zoom_extent_norm[2]),
+        zoom_size_norm,
+        zoom_size_norm,
+        linewidth=1.5,
+        edgecolor='cyan',
+        facecolor='none',
+        linestyle='-',
+    )
     ax_main.add_patch(zoom_box)
     
     # Add methodology text box
@@ -806,9 +808,9 @@ def plot_subhalo_placement_methodology(lensing_data, plot_config):
     print(f"Saved subhalo placement methodology plot: {filepath}")
     
     # Print methodology summary
-    print(f"\nPlacement Methodology Summary:")
+    print("\nPlacement Methodology Summary:")
     print(f"Einstein radius: {einstein_radius:.3f} arcsec")
     print(f"Scatter range: ±{scatter_pixels} pixels (±{scatter_arcsec:.3f} arcsec)")
     print(f"Generated {len(sample_positions)} sample positions")
     print(f"Band coverage: {einstein_radius - scatter_arcsec:.3f} to {einstein_radius + scatter_arcsec:.3f} arcsec")
-    print(f"Seeded RNG ensures reproducible placement across sweeps")
+    print("Seeded RNG ensures reproducible placement across sweeps")

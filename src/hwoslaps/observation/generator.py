@@ -7,7 +7,7 @@ PSF convolution and realistic detector noise modeling.
 import numpy as np
 import autolens as al
 from datetime import datetime
-from typing import Dict, Optional, Union
+from typing import Dict, Optional
 
 from ..lensing.utils import LensingData
 from ..psf.utils import PSFData

@@ -10,7 +10,6 @@ import numpy as np
 from astropy import constants as const
 from astropy import units as u
 from ..constants import MPC_TO_M, KM_TO_M, ARCSEC_PER_RAD
-import autolens as al
 
 def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
     """Calculate Einstein radius for a point mass subhalo.

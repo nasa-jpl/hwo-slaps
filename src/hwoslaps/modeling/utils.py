@@ -6,7 +6,7 @@ HWO-SLAPS pattern.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List
 from datetime import datetime
 import numpy as np
 from scipy.stats import chi2 as chi2_dist, norm
@@ -163,7 +163,7 @@ def print_detection_summary(detection_data: DetectionData) -> None:
             )
     
     # Key statistics
-    print(f"\nAnalysis parameters:")
+    print("\nAnalysis parameters:")
     print(f"  SNR threshold: {detection_data.snr_threshold}")
     print(f"  Pixels analyzed: {detection_data.pixels_unmasked}")
     print(f"  Analysis fraction: {detection_data.detection_mask_fraction:.3f}")
@@ -191,7 +191,7 @@ def print_detection_summary(detection_data: DetectionData) -> None:
     
     # Subhalo info if available
     if detection_data.has_subhalo_truth:
-        print(f"\nSubhalo truth:")
+        print("\nSubhalo truth:")
         print(f"  Mass: {detection_data.true_subhalo_mass:.1e} M_sun")
         print(f"  Model: {detection_data.true_subhalo_model}")
         print(f"  Position: {detection_data.true_subhalo_position}")

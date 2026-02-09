@@ -339,7 +339,7 @@ def print_psf_data_summary(psf_data):
     print(f"Pixel scale: {psf_data.pixel_scale_arcsec:.6f} arcsec/pixel")
     
     # Diverging-path sampling information.
-    print(f"\n=== Diverging-Path Sampling ===")
+    print("\n=== Diverging-Path Sampling ===")
     print(f"Requested sampling: {psf_data.requested_sampling_factor:.2f} pixels/λ/D")
     print(f"Auto-adjusted sampling: {psf_data.used_sampling_factor:.3f} pixels/λ/D")
     print(f"Integer subsampling factor: {psf_data.integer_subsampling_factor}")
@@ -347,13 +347,13 @@ def print_psf_data_summary(psf_data):
     print(f"Detector pixel scale: {psf_data.kernel_pixel_scale*1000:.3f} mas")
     
     # Physical scales.
-    print(f"\n=== Physical Scales ===")
+    print("\n=== Physical Scales ===")
     print(f"Diffraction limit: {psf_data.diffraction_limit_arcsec:.6f} arcsec")
     print(f"Angular resolution: {psf_data.angular_resolution_mas:.1f} mas") 
     print(f"Airy disk diameter: {psf_data.airy_disk_diameter_arcsec:.6f} arcsec")
     
     # PSF quality.
-    print(f"\n=== PSF Quality ===")
+    print("\n=== PSF Quality ===")
     if psf_data.fwhm_arcsec is not None:
         print(f"FWHM: {psf_data.fwhm_arcsec:.6f} arcsec ({psf_data.fwhm_mas:.1f} mas)")
     if psf_data.strehl_ratio is not None:
@@ -364,7 +364,7 @@ def print_psf_data_summary(psf_data):
     print(f"Total flux: {psf_data.total_flux:.6e}")
     
     # Detailed kernel statistics.
-    print(f"\n=== PyAutoLens Kernel Statistics ===")
+    print("\n=== PyAutoLens Kernel Statistics ===")
     print(f"Kernel shape: {psf_data.kernel.shape_native}")
     print(f"Kernel pixel scale: {psf_data.kernel_pixel_scale:.6f} arcsec/pixel")
     
@@ -380,7 +380,7 @@ def print_psf_data_summary(psf_data):
     
     # Aberrations.
     if psf_data.has_aberrations:
-        print(f"\n=== Aberration Summary ===")
+        print("\n=== Aberration Summary ===")
         print(f"Total RMS: {psf_data.total_rms_nm:.1f} nm")
         print(f"Has segment pistons: {psf_data.has_segment_pistons}")
         print(f"Has segment tip/tilts: {psf_data.has_segment_tiptilts}")
@@ -393,7 +393,7 @@ def print_psf_data_summary(psf_data):
             for source, value in breakdown.items():
                 print(f"  {source}: {value}")
     else:
-        print(f"\n=== Aberrations ===")
+        print("\n=== Aberrations ===")
         print("Perfect PSF (no aberrations)")
     
     # Phase screens.

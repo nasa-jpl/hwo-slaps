@@ -16,7 +16,7 @@ from typing import Dict, Tuple, List, Optional
 
 import numpy as np
 from scipy import ndimage
-from scipy.stats import chi2 as chi2_dist, norm
+from scipy.stats import norm
 
 from ..observation.utils import ObservationData
 from ..lensing.utils import LensingData
@@ -301,4 +301,3 @@ class ChernoffSubhaloDetector:
             variance_2d=self.variance_2d,
             config=None,
         )
-

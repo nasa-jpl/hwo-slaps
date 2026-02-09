@@ -6,12 +6,31 @@ This module provides visualization functions for subhalo detection results.
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Tuple
 
 from ..observation.utils import ObservationData
 from ..modeling.utils import DetectionData
 from ..modeling.chernoff_detector import ChernoffDetectionData
 from .registry import plot_function
+
+
+def _reshape_flat_map(flat_array: np.ndarray, image_shape: Tuple[int, int], label: str) -> np.ndarray:
+    """Reshape 1D arrays to 2D image shape with a compatibility fallback."""
+    expected_size = image_shape[0] * image_shape[1]
+    if flat_array.size == expected_size:
+        return flat_array.reshape(image_shape)
+
+    side_length = int(np.sqrt(flat_array.size))
+    if side_length * side_length != flat_array.size:
+        raise ValueError(
+            f"Cannot reshape {label}: size {flat_array.size} does not match image shape {image_shape} "
+            "and is not a perfect square."
+        )
+    print(
+        f"Warning: {label} size {flat_array.size} does not match image shape {image_shape}; "
+        f"falling back to square reshape ({side_length}, {side_length})."
+    )
+    return flat_array.reshape(side_length, side_length)
 
 
 @plot_function(module='detection', detection_mode_only=True,
@@ -184,15 +203,15 @@ def plot_chernoff_detection_comparison(
     
     # 4. SNR map - reshape from 1D to 2D
     ax = axes[1, 0]
-    side_length = int(np.sqrt(detection_data.snr_array.size))
-    snr_2d = detection_data.snr_array.reshape(side_length, side_length)
+    image_shape = obs_baseline.data.native.shape
+    snr_2d = _reshape_flat_map(detection_data.snr_array, image_shape, label="Chernoff SNR map")
     im4 = ax.imshow(snr_2d, origin='lower', cmap='viridis')
     ax.set_title('SNR Map')
     plt.colorbar(im4, ax=ax, fraction=0.046)
     
     # 5. Detection mask - reshape from 1D to 2D
     ax = axes[1, 1]
-    mask_2d = detection_data.result.snr_mask.reshape(side_length, side_length)
+    mask_2d = _reshape_flat_map(detection_data.result.snr_mask, image_shape, label="Chernoff mask")
     im5 = ax.imshow(mask_2d, origin='lower', cmap='binary')
     ax.set_title(f'Detection Mask (SNR > {detection_data.snr_threshold})')
     plt.colorbar(im5, ax=ax, fraction=0.046)

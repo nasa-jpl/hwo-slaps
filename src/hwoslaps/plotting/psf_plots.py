@@ -84,8 +84,6 @@ def plot_psf_comparison(psf_data, plot_config):
     )
     
     # Extract data using unified structure.
-    telescope_data = psf_data.telescope_data
-    aper = telescope_data['aper']
     wavelength_nm = psf_data.wavelength_nm
     
     # Set up the plotting style.
@@ -191,9 +189,6 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
         'psf'
     )
     
-    telescope_data = psf_data.telescope_data
-    pupil_grid = telescope_data['pupil_grid']
-    aper = telescope_data['aper']
     wavelength_nm = psf_data.wavelength_nm
     
     # Create zoom plot.
@@ -379,8 +374,7 @@ def plot_diverging_path_comparison(psf_data, plot_config):
                    origin='lower', cmap='hot',
                    norm=LogNorm(vmin=kernel.native.max()*1e-5,
                                vmax=kernel.native.max()))
-    ax.set_title(f'Detector Kernel',
-                 fontsize=11)
+    ax.set_title('Detector Kernel', fontsize=11)
     ax.set_xlabel('arcsec')
     ax.set_ylabel('arcsec')
     plt.colorbar(im, ax=ax, label='Log(Intensity)')
@@ -416,7 +410,6 @@ def plot_psf_complete_analysis(psf_data, plot_config):
     >>> plot_psf_complete_analysis(psf_data, plot_config)
     """
     # Original plots.
-    from .psf_plots import plot_psf_system_overview
     plot_psf_system_overview(psf_data, plot_config)
     
     # New diagnostic plots.
@@ -472,8 +465,6 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     telescope_data = psf_data.telescope_data
     aperture = telescope_data['aper']
     segments = telescope_data['segments']
-    pupil_grid = telescope_data['pupil_grid']
-    
     # Get actual config parameters (not defaults)
     psf_config = config['psf']
     telescope_config = psf_config['telescope']
@@ -571,7 +562,7 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     print(f"Saved PSF segmented pupil baseline plot: {filepath}")
     
     # Print configuration summary
-    print(f"\nPSF Engine Configuration Summary:")
+    print("\nPSF Engine Configuration Summary:")
     print(f"Telescope: {pupil_diameter_m:.2f} m diameter, f/{f_number:.1f}")
     print(f"Segmentation: {len(segments)} segments in {num_rings} rings")
     print(f"Wavelength: {wavelength_nm:.0f} nm")

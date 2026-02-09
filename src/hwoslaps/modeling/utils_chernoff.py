@@ -21,11 +21,11 @@ def print_chernoff_summary(detection_data: ChernoffDetectionData) -> None:
 
     # Key statistics (mirror structure of GOF summary where applicable)
     frac = r.pixels_unmasked / detection_data.snr_array.size if detection_data.snr_array.size > 0 else 0.0
-    print(f"\nAnalysis parameters:")
+    print("\nAnalysis parameters:")
     print(f"  SNR threshold: {detection_data.snr_threshold}")
     print(f"  Pixels analyzed: {r.pixels_unmasked}")
     print(f"  Analysis fraction: {frac:.3f}")
-    print(f"  Degrees of freedom (Chernoff test): 1 (½·χ¹²)")
+    print("  Degrees of freedom (Chernoff test): 1 (½·χ¹²)")
     print(f"  Global p-value (Chernoff): {r.p_value:.2e}")
 
     # Standard sigma checks (use Chernoff thresholds): Δχ² >= χ¹²_isf(2p)
@@ -35,9 +35,10 @@ def print_chernoff_summary(detection_data: ChernoffDetectionData) -> None:
         (2.866516e-7, "5σ"),
     ]
     delta = r.delta_chi2
+    chi2_df1 = chi2_dist(df=1)
     for p, label in standard_ps:
         sigma = norm.isf(p)
-        delta_thresh = chi2_dist(df=1).isf(2.0 * p)
+        delta_thresh = chi2_df1.isf(2.0 * p)
         detected = delta >= delta_thresh
         status = "YES" if detected else "NO"
         print(
@@ -51,5 +52,3 @@ def print_chernoff_summary(detection_data: ChernoffDetectionData) -> None:
     )
     if r.asimov_delta_chi2 is not None:
         print(f"Asimov Δχ² (expected): {r.asimov_delta_chi2:.2f}")
-
-

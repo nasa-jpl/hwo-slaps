@@ -10,7 +10,6 @@ generated for science applications.
 
 import numpy as np
 import os
-import hcipy
 from hcipy.optics import Wavefront
 from hcipy.field import (
     make_focal_grid,
@@ -154,11 +153,9 @@ def generate_psf_system(config, full_config=None):
     hsm.flatten()
     
     if segment_pistons is not None:
-        from .aberration_models import apply_segment_pistons
         apply_segment_pistons(hsm, segment_pistons, wavelength, num_segments)
         
     if segment_tiptilts is not None:
-        from .aberration_models import apply_segment_tiptilts
         apply_segment_tiptilts(hsm, segment_tiptilts, num_segments)
     
     # Create initial wavefront from aperture.
@@ -170,7 +167,6 @@ def generate_psf_system(config, full_config=None):
     # Apply segment-level Zernikes (hexikes) as phase screen.
     if segment_hexikes is not None:
         if use_segment_api:
-            from .aberration_models import apply_segment_zernikes
             phase_screen, hexike_surface = apply_segment_zernikes(
                 segment_hexikes, segments, telescope_data, wavelength, use_api=True
             )
@@ -178,7 +174,6 @@ def generate_psf_system(config, full_config=None):
             # Apply hexike phase via the segmented hexike surface to avoid double-application hazards.
             wf_pupil = hexike_surface(wf_pupil)
         else:
-            from .aberration_models import apply_segment_zernikes
             phase_screen = apply_segment_zernikes(
                 segment_hexikes, segments, telescope_data, wavelength, use_api=False
             )
@@ -187,7 +182,6 @@ def generate_psf_system(config, full_config=None):
     
     # Apply global Zernikes as phase screen.
     if global_zernikes is not None:
-        from .aberration_models import apply_global_zernikes
         phase_screen = apply_global_zernikes(global_zernikes, telescope_data, wavelength)
         phase_screens['global_zernikes'] = phase_screen
         wf_pupil.electric_field *= np.exp(1j * np.array(phase_screen))
@@ -313,11 +307,7 @@ def generate_psf_system(config, full_config=None):
             lambda_m = telescope_data['wavelength']
             rad_to_opd = lambda_m / (2 * np.pi)
             for screen in phase_screens.values():
-                try:
-                    opd_total += screen * rad_to_opd
-                except Exception:
-                    # Fallback if stored as ndarray instead of Field
-                    opd_total += np.array(screen) * rad_to_opd
+                opd_total += np.asarray(screen) * rad_to_opd
 
         # Compute RMS over illuminated pupil after removing piston.
         aper_field = telescope_data['aper']
@@ -514,13 +504,11 @@ def generate_aberrated_psf(
     # Apply segment-level Zernikes (hexikes) as phase screen.
     if segment_hexikes is not None:
         if use_segment_api:
-            from .aberration_models import apply_segment_zernikes
             result = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=True)
             phase_screen, hexike_surface = result  # API version returns tuple.
             phase_screens['segment_hexikes_api'] = phase_screen
             wf = hexike_surface(wf)
         else:
-            from .aberration_models import apply_segment_zernikes
             phase_screen = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=False)
             phase_screens['segment_hexikes'] = phase_screen
             wf.electric_field *= np.exp(1j * np.array(phase_screen))

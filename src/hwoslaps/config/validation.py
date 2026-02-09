@@ -12,7 +12,7 @@ Policy enforced (per user requirements):
 - Cosmology: `lensing.cosmology` must be explicitly defined.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict
 import math
 
 
@@ -123,7 +123,7 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
         mass_val = _require(subhalo, 'mass', 'lensing.subhalo')
         try:
             mass_float = float(mass_val)
-        except Exception:
+        except (TypeError, ValueError):
             raise ValueError("lensing.subhalo.mass must be a number")
         if not math.isfinite(mass_float) or mass_float <= 0:
             raise ValueError("lensing.subhalo.mass must be positive")
@@ -239,4 +239,3 @@ def validate_or_raise(config: Dict[str, Any]) -> None:
     validate_psf_config(config['psf'])
     validate_observation_config(config['observation'])
     validate_modeling_config(config['modeling'])
-

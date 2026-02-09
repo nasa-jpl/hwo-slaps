@@ -250,14 +250,14 @@ def print_lensing_data_summary(lensing_data):
     print(f"Cosmology: {lensing_data.cosmology_name}")
     
     # Lens galaxy
-    print(f"\n=== Lens Galaxy ===")
+    print("\n=== Lens Galaxy ===")
     print(f"Redshift: {lensing_data.lens_redshift}")
     print(f"Einstein radius: {lensing_data.lens_einstein_radius:.6f} arcsec")
     print(f"Centre: ({lensing_data.lens_centre[0]:.6f}, {lensing_data.lens_centre[1]:.6f}) arcsec")
     print(f"Ellipticity: e1={lensing_data.lens_ellipticity[0]:.3f}, e2={lensing_data.lens_ellipticity[1]:.3f}")
     
     # Source galaxy
-    print(f"\n=== Source Galaxy ===")
+    print("\n=== Source Galaxy ===")
     print(f"Redshift: {lensing_data.source_redshift}")
     print(f"Centre: ({lensing_data.source_centre[0]:.6f}, {lensing_data.source_centre[1]:.6f}) arcsec")
     print(f"Ellipticity: e1={lensing_data.source_ellipticity[0]:.3f}, e2={lensing_data.source_ellipticity[1]:.3f}")
@@ -266,7 +266,7 @@ def print_lensing_data_summary(lensing_data):
     
     # Subhalo information
     if lensing_data.has_subhalo:
-        print(f"\n=== Subhalo Properties ===")
+        print("\n=== Subhalo Properties ===")
         print(f"Model: {lensing_data.subhalo_model}")
         print(f"Mass: {lensing_data.subhalo_mass:.2e} M_sun")
         print(f"Einstein radius: {lensing_data.subhalo_einstein_radius:.6f} arcsec")
@@ -288,11 +288,11 @@ def print_lensing_data_summary(lensing_data):
         if lensing_data.subhalo_model == 'NFW' and lensing_data.subhalo_concentration is not None:
             print(f"Concentration: {lensing_data.subhalo_concentration:.1f}")
     else:
-        print(f"\n=== Subhalo Properties ===")
+        print("\n=== Subhalo Properties ===")
         print("No subhalo in this system")
     
     # Image statistics
-    print(f"\n=== Image Statistics ===")
+    print("\n=== Image Statistics ===")
     print(f"Total flux: {lensing_data.total_flux:.6e}")
     print(f"Peak intensity: {lensing_data.peak_intensity:.6e}")
     print(f"Min intensity: {np.min(lensing_data.image):.6e}")
@@ -301,7 +301,7 @@ def print_lensing_data_summary(lensing_data):
     
     # Critical curves info (if available)
     if hasattr(lensing_data, 'critical_curves'):
-        print(f"\n=== Critical Curves ===")
+        print("\n=== Critical Curves ===")
         print("Critical curve computation available")
     
     # Provenance

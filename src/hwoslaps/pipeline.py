@@ -6,7 +6,6 @@ mode and subhalo detection mode.
 """
 
 import yaml
-from pathlib import Path
 from typing import Dict, Union
 from copy import deepcopy
 
@@ -68,9 +67,6 @@ class Pipeline:
     
     def _run_detection_pipeline(self, config: Dict) -> 'DetectionData':
         """Generate paired observations and perform detection analysis.
-        
-        This method replicates the exact workflow from the prototype notebook
-        (lines 75-361) within the pipeline architecture.
         
         Parameters
         ----------
@@ -214,7 +210,7 @@ class Pipeline:
         return detection_data
     
     def _run_standard_pipeline(self, config: Dict) -> ObservationData:
-        """Standard single observation pipeline (unchanged for backward compatibility).
+        """Standard single observation pipeline.
         
         Parameters
         ----------
@@ -280,10 +276,6 @@ class Pipeline:
     def _create_baseline_config(self, config: Dict) -> Dict:
         """Create configuration for baseline observation (no subhalo).
         
-        Replicates prototype lines 82-84:
-        config_no_subhalo = deepcopy(config)
-        config_no_subhalo['lensing']['subhalo']['enabled'] = False
-        
         Parameters
         ----------
         config : dict
@@ -301,9 +293,6 @@ class Pipeline:
     
     def _create_test_config(self, config: Dict) -> Dict:
         """Create configuration for test observation (with subhalo).
-        
-        Replicates prototype lines 329:
-        config['lensing']['subhalo']['enabled'] = True
         
         Parameters
         ----------

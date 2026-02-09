@@ -346,7 +346,6 @@ def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):
         Phase screen containing global Zernike aberrations.
     """
     pupil_grid = telescope_data['pupil_grid']
-    pupil_diameter = telescope_data['pupil_diameter']
     
     # Create Zernike basis for the full pupil.
     num_zernike_modes = 50

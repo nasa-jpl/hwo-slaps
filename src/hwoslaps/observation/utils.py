@@ -5,7 +5,7 @@ for managing observation data and metadata.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Tuple
 import numpy as np
 import autolens as al
 
