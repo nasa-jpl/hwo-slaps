@@ -16,6 +16,7 @@ from .mass_models import (
 )
 from astropy import constants as const
 
+
 def generate_lensing_system(config, full_config=None):
     """Generate a complete lensing system from configuration.
     
@@ -77,6 +78,10 @@ def generate_lensing_system(config, full_config=None):
     subhalo_position = None
     subhalo_einstein_radius = None
     subhalo_concentration = None
+    subhalo_concentration_model = None
+    subhalo_concentration_x_sub = None
+    subhalo_concentration_h = None
+    subhalo_concentration_source = None
 
     # Create subhalo if enabled explicitly
     if 'subhalo' in config and config['subhalo'] is not None and config['subhalo']['enabled']:
@@ -103,6 +108,10 @@ def generate_lensing_system(config, full_config=None):
         subhalo_einstein_radius = subhalo_info['einstein_radius_arcsec']
         if 'concentration' in subhalo_info:
             subhalo_concentration = subhalo_info['concentration']
+            subhalo_concentration_model = subhalo_info.get('concentration_model')
+            subhalo_concentration_x_sub = subhalo_info.get('concentration_x_sub')
+            subhalo_concentration_h = subhalo_info.get('concentration_h')
+            subhalo_concentration_source = subhalo_info.get('concentration_source')
     
     # Create tracer
     tracer = al.Tracer(
@@ -135,6 +144,10 @@ def generate_lensing_system(config, full_config=None):
         subhalo_position=subhalo_position,
         subhalo_einstein_radius=subhalo_einstein_radius,
         subhalo_concentration=subhalo_concentration,
+        subhalo_concentration_model=subhalo_concentration_model,
+        subhalo_concentration_x_sub=subhalo_concentration_x_sub,
+        subhalo_concentration_h=subhalo_concentration_h,
+        subhalo_concentration_source=subhalo_concentration_source,
         
         # Galaxy parameters
         lens_centre=tuple(lens_config['mass']['centre']),
@@ -332,8 +345,12 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
             einstein_radius=einstein_radius
         )
     elif model == 'NFW':
-        # Get concentration
-        concentration = concentration_mass_relation(mass, lens_z)
+        concentration, concentration_meta = _resolve_nfw_concentration(
+            subhalo_config=subhalo_config,
+            mass_msun=mass,
+            lens_z=lens_z,
+            cosmology=cosmology,
+        )
         
         # Get NFW parameters
         rs_kpc, rho_s = nfw_scale_parameters(mass, concentration, lens_z, cosmology)
@@ -370,10 +387,117 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
         subhalo_info['kappa_s'] = kappa_s
         subhalo_info['scale_radius_arcsec'] = scale_radius_arcsec
         subhalo_info['concentration'] = concentration
+        subhalo_info.update(concentration_meta)
     else:
         raise ValueError(f"Unsupported subhalo model: {model}")
         
     return subhalo, subhalo_info
+
+
+def _resolve_nfw_concentration(subhalo_config, mass_msun, lens_z, cosmology):
+    """Resolve NFW concentration and provenance metadata.
+
+    Parameters
+    ----------
+    subhalo_config : `dict`
+        Subhalo configuration containing a concentration block.
+    mass_msun : `float`
+        Subhalo mass in solar masses.
+    lens_z : `float`
+        Lens-plane redshift for power-law concentration mode.
+    cosmology : `object`
+        Cosmology object used to infer ``h`` when configured as null.
+
+    Returns
+    -------
+    concentration : `float`
+        Concentration value used for the NFW profile.
+    metadata : `dict`
+        Provenance payload with model name and model inputs.
+    """
+    concentration_config = subhalo_config.get('concentration')
+    if not isinstance(concentration_config, dict):
+        raise ValueError(
+            "lensing.subhalo.concentration must be a dict when lensing.subhalo.model is 'NFW'"
+        )
+
+    model = concentration_config.get('model')
+    if model == 'moline2017_eq7':
+        # Eq. (7) mode requires x_sub; h may be explicit or inferred.
+        x_sub = float(concentration_config['x_sub'])
+        h_value = concentration_config.get('h')
+        if h_value is None:
+            h_value = _infer_reduced_h(cosmology)
+        else:
+            h_value = float(h_value)
+        concentration = concentration_mass_relation(
+            mass_msun,
+            model='moline2017_eq7',
+            x_sub=x_sub,
+            h=h_value,
+        )
+        metadata = {
+            'concentration_model': 'moline2017_eq7',
+            'concentration_x_sub': x_sub,
+            'concentration_h': h_value,
+            'concentration_source': 'Moline2017 Eq7 Table2',
+        }
+        return concentration, metadata
+
+    if model == 'power_law':
+        # Power-law mode preserves the baseline c(M, z) relation.
+        concentration = concentration_mass_relation(
+            mass_msun,
+            model='power_law',
+            z=lens_z,
+        )
+        metadata = {
+            'concentration_model': 'power_law',
+            'concentration_x_sub': None,
+            'concentration_h': None,
+            'concentration_source': 'power_law',
+        }
+        return concentration, metadata
+
+    raise ValueError(
+        "lensing.subhalo.concentration.model must be 'moline2017_eq7' or 'power_law'"
+    )
+
+
+def _infer_reduced_h(cosmology):
+    """Infer reduced Hubble parameter ``h`` from the configured cosmology.
+
+    Parameters
+    ----------
+    cosmology : `object`
+        Cosmology object from PyAutoLens.
+
+    Returns
+    -------
+    h : `float`
+        Reduced Hubble parameter ``h = H0 / 100``.
+    """
+    # This project currently validates to Planck15 only; use H0 directly.
+    if hasattr(cosmology, 'H'):
+        H0_value = cosmology.H(0.0)
+        if hasattr(H0_value, 'value'):
+            H0_value = H0_value.value
+        H0_float = float(H0_value)
+        if np.isfinite(H0_float) and H0_float > 0:
+            return H0_float / 100.0
+
+    # Fallback path for cosmology objects exposing H0 instead of H(z).
+    if hasattr(cosmology, 'H0'):
+        H0_value = cosmology.H0
+        if hasattr(H0_value, 'value'):
+            H0_value = H0_value.value
+        H0_float = float(H0_value)
+        if np.isfinite(H0_float) and H0_float > 0:
+            return H0_float / 100.0
+
+    # Stable default for Planck15 in case of unexpected backend behavior.
+    return 0.6774
+
 
 def _get_cosmology(cosmology_name):
     """

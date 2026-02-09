@@ -46,12 +46,26 @@ class LensingData:
         Model type for the subhalo ('PointMass', 'SIS', or 'NFW'). 
         None if no subhalo present.
     subhalo_position : `tuple` of `float`, optional
-        Position of the subhalo as (y, x) in arcseconds relative to lens center.
+        Position of the subhalo as (y, x) in arcseconds relative to lens
+        center.
         None if no subhalo present.
     subhalo_einstein_radius : `float`, optional
-        Einstein radius of the subhalo in arcseconds. None if no subhalo present.
+        Einstein radius of the subhalo in arcseconds. None if no subhalo
+        present.
     subhalo_concentration : `float`, optional
-        Concentration parameter for NFW subhalos. None if not NFW or no subhalo.
+        Concentration parameter for NFW subhalos. None if not NFW or no
+        subhalo.
+    subhalo_concentration_model : `str`, optional
+        Concentration model used for NFW subhalos ('moline2017_eq7' or
+        'power_law'). None if not NFW or no subhalo.
+    subhalo_concentration_x_sub : `float`, optional
+        Dimensionless radial parameter x_sub used by the concentration model.
+        None when not applicable.
+    subhalo_concentration_h : `float`, optional
+        Reduced Hubble parameter h used by the concentration model.
+        None when not applicable.
+    subhalo_concentration_source : `str`, optional
+        Human-readable provenance string for concentration model source.
     lens_centre : `tuple` of `float`
         Centre position of the lens as (y, x) in arcseconds.
     lens_ellipticity : `tuple` of `float`
@@ -106,6 +120,10 @@ class LensingData:
     subhalo_position: Optional[Tuple[float, float]] = None
     subhalo_einstein_radius: Optional[float] = None
     subhalo_concentration: Optional[float] = None
+    subhalo_concentration_model: Optional[str] = None
+    subhalo_concentration_x_sub: Optional[float] = None
+    subhalo_concentration_h: Optional[float] = None
+    subhalo_concentration_source: Optional[str] = None
     
     # === GALAXY PARAMETERS ===
     lens_centre: Tuple[float, float] = (0.0, 0.0)
@@ -287,6 +305,14 @@ def print_lensing_data_summary(lensing_data):
         # NFW-specific parameters
         if lensing_data.subhalo_model == 'NFW' and lensing_data.subhalo_concentration is not None:
             print(f"Concentration: {lensing_data.subhalo_concentration:.1f}")
+            if lensing_data.subhalo_concentration_model is not None:
+                print(f"Concentration model: {lensing_data.subhalo_concentration_model}")
+            if lensing_data.subhalo_concentration_x_sub is not None:
+                print(f"Concentration x_sub: {lensing_data.subhalo_concentration_x_sub:.4f}")
+            if lensing_data.subhalo_concentration_h is not None:
+                print(f"Concentration h: {lensing_data.subhalo_concentration_h:.6f}")
+            if lensing_data.subhalo_concentration_source is not None:
+                print(f"Concentration source: {lensing_data.subhalo_concentration_source}")
     else:
         print("\n=== Subhalo Properties ===")
         print("No subhalo in this system")

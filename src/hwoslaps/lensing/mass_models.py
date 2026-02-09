@@ -11,6 +11,24 @@ from astropy import constants as const
 from astropy import units as u
 from ..constants import MPC_TO_M, KM_TO_M, ARCSEC_PER_RAD
 
+MOLINE_EQ7_C0 = 19.9
+MOLINE_EQ7_A1 = -0.195
+MOLINE_EQ7_A2 = 0.089
+MOLINE_EQ7_A3 = 0.089
+MOLINE_EQ7_B = -0.54
+
+
+def _require_positive_finite(value, name):
+    """Validate numeric domain for physical parameters."""
+    try:
+        value_float = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite positive number")
+    if not np.isfinite(value_float) or value_float <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    return value_float
+
+
 def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
     """Calculate Einstein radius for a point mass subhalo.
 
@@ -76,39 +94,109 @@ def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
     return float(theta_E_arcsec)
 
 
-def concentration_mass_relation(M200_msun, z=0.5):
-    """Calculate NFW concentration parameter from mass.
-
-    Uses the concentration-mass relation for subhalos from
-    Moline et al. (2017) and similar studies.
+def concentration_moline2017_eq7(M200_msun, x_sub, h):
+    """Moline et al. (2017) Eq. 7 concentration model for subhalos.
 
     Parameters
     ----------
-    M200_msun : float
-        M200 mass in solar masses.
-    z : float, optional
-        Redshift. Default is 0.5.
+    M200_msun : `float`
+        Subhalo M200 in solar masses.
+    x_sub : `float`
+        Dimensionless radial position, x_sub = r_sub / R_vir_host.
+    h : `float`
+        Reduced Hubble parameter H0 / (100 km s^-1 Mpc^-1).
 
     Returns
     -------
-    c200 : float
-        Concentration parameter (r200/rs).
+    c200 : `float`
+        Concentration parameter r200 / r_s.
 
     Notes
     -----
-    For subhalos, concentrations are typically ~2x higher than
-    field halos due to tidal stripping of outer regions.
+    Implements Eq. (7) with Table 2 coefficients for c200:
+
+    c200(m200, x_sub) =
+        c0 * [1 + sum_{i=1}^3 a_i * log10(m200 / (1e8 h^-1 Msun))^i]
+           * [1 + b * log10(x_sub)].
     """
-    # Subhalo concentration-mass relation
-    # c = c0 * (M/M0)^alpha * (1+z)^beta
-    c0 = 19.9  # Normalization at z=0
-    M0 = 1e8   # Pivot mass in Msun
-    alpha = -0.195  # Mass dependence
-    beta = -0.54    # Redshift evolution
+    mass = _require_positive_finite(M200_msun, "M200_msun")
+    radial_position = _require_positive_finite(x_sub, "x_sub")
+    hubble_reduced = _require_positive_finite(h, "h")
 
-    c200 = c0 * (M200_msun / M0)**alpha * (1 + z)**beta
+    # Eq. (7) uses log10[m200 / (1e8 h^-1 Msun)] = log10[(m200*h)/1e8].
+    log_mass_term = np.log10((mass * hubble_reduced) / 1.0e8)
+    polynomial = (
+        1.0
+        + MOLINE_EQ7_A1 * log_mass_term
+        + MOLINE_EQ7_A2 * log_mass_term**2
+        + MOLINE_EQ7_A3 * log_mass_term**3
+    )
+    # Radial correction lowers concentration for larger x_sub because b < 0.
+    radial_factor = 1.0 + MOLINE_EQ7_B * np.log10(radial_position)
+    return float(MOLINE_EQ7_C0 * polynomial * radial_factor)
 
+
+def concentration_power_law(M200_msun, z=0.5):
+    """Power-law subhalo concentration relation.
+
+    Notes
+    -----
+    Implementation:
+    c = c0 * (M / M0)^alpha * (1 + z)^beta.
+    """
+    mass = _require_positive_finite(M200_msun, "M200_msun")
+    redshift = _require_positive_finite(1.0 + float(z), "1 + z") - 1.0
+
+    c0 = 19.9
+    M0 = 1e8
+    alpha = -0.195
+    beta = -0.54
+    c200 = c0 * (mass / M0)**alpha * (1 + redshift)**beta
     return float(c200)
+
+
+def concentration_mass_relation(
+    M200_msun,
+    *,
+    model="power_law",
+    z=0.5,
+    x_sub=None,
+    h=None,
+):
+    """Calculate NFW concentration with explicit model provenance.
+
+    Parameters
+    ----------
+    M200_msun : `float`
+        M200 mass in solar masses.
+    model : `str`, optional
+        Concentration model. Supported values:
+        - 'moline2017_eq7'
+        - 'power_law'
+    z : `float`, optional
+        Lens redshift used by the power-law model only.
+    x_sub : `float`, optional
+        Dimensionless radial position for Moline Eq. 7 model.
+    h : `float`, optional
+        Reduced Hubble parameter for Moline Eq. 7 model.
+
+    Returns
+    -------
+    c200 : `float`
+        Concentration parameter (r200/rs).
+    """
+    if model == "moline2017_eq7":
+        if x_sub is None:
+            raise ValueError("x_sub is required when model='moline2017_eq7'")
+        if h is None:
+            raise ValueError("h is required when model='moline2017_eq7'")
+        # Explicit dispatch keeps concentration provenance unambiguous.
+        return concentration_moline2017_eq7(M200_msun, x_sub=x_sub, h=h)
+    if model == "power_law":
+        return concentration_power_law(M200_msun, z=z)
+    raise ValueError(
+        "Unsupported concentration model. Supported: 'moline2017_eq7', 'power_law'"
+    )
 
 
 def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):

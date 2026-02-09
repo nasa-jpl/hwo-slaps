@@ -127,6 +127,33 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
             raise ValueError("lensing.subhalo.mass must be a number")
         if not math.isfinite(mass_float) or mass_float <= 0:
             raise ValueError("lensing.subhalo.mass must be positive")
+        if model == 'NFW':
+            # NFW runs must declare concentration provenance explicitly.
+            concentration = _require(subhalo, 'concentration', 'lensing.subhalo')
+            _require_type(concentration, dict, 'lensing.subhalo.concentration')
+            concentration_model = _require(concentration, 'model', 'lensing.subhalo.concentration')
+            if concentration_model not in {'moline2017_eq7', 'power_law'}:
+                raise ValueError(
+                    "lensing.subhalo.concentration.model must be one of: "
+                    "'moline2017_eq7', 'power_law'"
+                )
+            if concentration_model == 'moline2017_eq7':
+                x_sub_val = _require(concentration, 'x_sub', 'lensing.subhalo.concentration')
+                try:
+                    x_sub_float = float(x_sub_val)
+                except (TypeError, ValueError):
+                    raise ValueError("lensing.subhalo.concentration.x_sub must be a number")
+                if not math.isfinite(x_sub_float) or x_sub_float <= 0:
+                    raise ValueError("lensing.subhalo.concentration.x_sub must be positive")
+
+                if 'h' in concentration and concentration['h'] is not None:
+                    h_val = concentration['h']
+                    try:
+                        h_float = float(h_val)
+                    except (TypeError, ValueError):
+                        raise ValueError("lensing.subhalo.concentration.h must be a number or null")
+                    if not math.isfinite(h_float) or h_float <= 0:
+                        raise ValueError("lensing.subhalo.concentration.h must be positive when provided")
         position = _require(subhalo, 'position', 'lensing.subhalo')
         _require_type(position, dict, 'lensing.subhalo.position')
         ptype = _require(position, 'type', 'lensing.subhalo.position')

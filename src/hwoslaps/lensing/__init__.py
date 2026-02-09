@@ -11,7 +11,7 @@ from .mass_models import (
     einstein_radius_point_mass,
     einstein_radius_sis_m200,
     nfw_scale_parameters,
-    concentration_mass_relation
+    concentration_mass_relation,
 )
 
 __all__ = [
@@ -20,5 +20,5 @@ __all__ = [
     'einstein_radius_point_mass',
     'einstein_radius_sis_m200', 
     'nfw_scale_parameters',
-    'concentration_mass_relation'
+    'concentration_mass_relation',
 ]

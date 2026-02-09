@@ -40,6 +40,10 @@ lensing:
     enabled: true  # Set to false to create system with no subhalo
     mass: 1.0e9  # Solar masses
     model: NFW  # PointMass, SIS, or NFW
+    concentration:
+      model: moline2017_eq7  # moline2017_eq7 or power_law
+      x_sub: 1.0             # required for moline2017_eq7
+      h: null                # null => infer from configured cosmology
     position:
       type: 'random'        # 'random', 'angle', or 'direct'
       scatter_pixels: 20    # Random scatter ±10 pixels around Einstein ring
@@ -175,6 +179,6 @@ modeling:
   enabled: true  # Set to true to enable detection mode
   snr_threshold: 10.0                           # Absolute SNR threshold for pixel masking (Mejiro paper-exact)
   significance_levels: [1.349898e-3, 3.167124e-5, 2.866516e-7]  # 3σ, 4σ, 5σ p-values
-  detection: 'gof'     # 'gof' (legacy chi-square), 'chernoff', or 'mejiro' (paper-exact)
+  detection: 'gof'     # 'gof' (chi-square), 'chernoff', or 'mejiro' (paper-exact)
   #alpha: 2.866516e-7      # ~3σ one-sided (Mejiro threshold)
   #dof_offset: -3          # dof = N_mask - 3 (Mejiro)
