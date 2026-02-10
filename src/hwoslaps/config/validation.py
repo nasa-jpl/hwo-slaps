@@ -87,7 +87,7 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     if not isinstance(einstein_radius, (int, float)) or einstein_radius <= 0:
         raise ValueError("lensing.lens_galaxy.mass.einstein_radius must be positive")
     _require_list_length(_require(mass, 'ell_comps', 'lensing.lens_galaxy.mass'), 2, 'lensing.lens_galaxy.mass.ell_comps')
-    _require(lens_galaxy, 'redshift', 'lensing.lens_galaxy')
+    lens_redshift_val = _require(lens_galaxy, 'redshift', 'lensing.lens_galaxy')
 
     source_galaxy = _require(lensing, 'source_galaxy', 'lensing')
     _require_type(source_galaxy, dict, 'lensing.source_galaxy')
@@ -105,7 +105,20 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     eff_r = _require(light, 'effective_radius', 'lensing.source_galaxy.light')
     if not isinstance(eff_r, (int, float)) or eff_r <= 0:
         raise ValueError("lensing.source_galaxy.light.effective_radius must be positive")
-    _require(source_galaxy, 'redshift', 'lensing.source_galaxy')
+    source_redshift_val = _require(source_galaxy, 'redshift', 'lensing.source_galaxy')
+
+    try:
+        lens_redshift = float(lens_redshift_val)
+        source_redshift = float(source_redshift_val)
+    except (TypeError, ValueError):
+        raise ValueError("lensing lens/source redshifts must be numeric")
+    if not math.isfinite(lens_redshift) or not math.isfinite(source_redshift):
+        raise ValueError("lensing lens/source redshifts must be finite")
+    if source_redshift <= lens_redshift:
+        raise ValueError(
+            "Physical-domain error: lensing.source_galaxy.redshift must be greater than "
+            "lensing.lens_galaxy.redshift"
+        )
 
     cosmology = _require(lensing, 'cosmology', 'lensing')
     _require_type(cosmology, str, 'lensing.cosmology')
