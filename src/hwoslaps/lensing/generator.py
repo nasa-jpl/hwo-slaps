@@ -17,6 +17,17 @@ from .mass_models import (
 from astropy import constants as const
 
 
+def _coerce_positive_finite_redshift(value, key_path):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{key_path} must be numeric")
+    redshift = float(value)
+    if not np.isfinite(redshift):
+        raise ValueError(f"{key_path} must be finite")
+    if redshift <= 0:
+        raise ValueError(f"{key_path} must be positive")
+    return redshift
+
+
 def generate_lensing_system(config, full_config=None):
     """Generate a complete lensing system from configuration.
     
@@ -59,15 +70,26 @@ def generate_lensing_system(config, full_config=None):
     # Create coordinate grid
     grid = _create_grid(config['grid'])
     
-    # Create lens galaxy
-    lens_galaxy = _create_lens_galaxy(config['lens_galaxy'])
-    
-    # Create source galaxy
-    source_galaxy = _create_source_galaxy(config['source_galaxy'])
-    
     # Extract lens and source parameters for unified structure
     lens_config = config['lens_galaxy']
     source_config = config['source_galaxy']
+    lens_redshift = _coerce_positive_finite_redshift(
+        lens_config['redshift'], "lensing.lens_galaxy.redshift"
+    )
+    source_redshift = _coerce_positive_finite_redshift(
+        source_config['redshift'], "lensing.source_galaxy.redshift"
+    )
+    if source_redshift <= lens_redshift:
+        raise ValueError(
+            "Physical-domain error: lensing.source_galaxy.redshift must be greater than "
+            "lensing.lens_galaxy.redshift"
+        )
+    lens_config = {**lens_config, 'redshift': lens_redshift}
+    source_config = {**source_config, 'redshift': source_redshift}
+
+    # Create lens and source galaxies from validated redshifts.
+    lens_galaxy = _create_lens_galaxy(lens_config)
+    source_galaxy = _create_source_galaxy(source_config)
     
     # Create cosmology (explicit in config) before any subhalo calculations
     cosmology = _get_cosmology(config['cosmology'])
@@ -86,9 +108,9 @@ def generate_lensing_system(config, full_config=None):
     # Create subhalo if enabled explicitly
     if 'subhalo' in config and config['subhalo'] is not None and config['subhalo']['enabled']:
         subhalo, subhalo_info = _create_subhalo(
-            config['subhalo'], 
-            lens_config['redshift'],
-            source_config['redshift'],
+            config['subhalo'],
+            lens_redshift,
+            source_redshift,
             lens_galaxy,
             pixel_scale=config['grid']['pixel_scale'],
             cosmology=cosmology,
@@ -96,7 +118,7 @@ def generate_lensing_system(config, full_config=None):
         )
         # Add subhalo to lens galaxy
         lens_galaxy = al.Galaxy(
-            redshift=lens_config['redshift'],
+            redshift=lens_redshift,
             mass=lens_galaxy.mass,
             subhalo=subhalo
         )
@@ -133,8 +155,8 @@ def generate_lensing_system(config, full_config=None):
         
         # System parameters
         pixel_scale=config['grid']['pixel_scale'],
-        lens_redshift=lens_config['redshift'],
-        source_redshift=source_config['redshift'],
+        lens_redshift=lens_redshift,
+        source_redshift=source_redshift,
         lens_einstein_radius=lens_config['mass']['einstein_radius'],
         cosmology_name=config['cosmology'],
         
@@ -264,7 +286,9 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
     pixel_scale : float
         Pixel scale in arcseconds per pixel.
     global_seed : int, optional
-        Global seed for randomization. If None, uses current random state.
+        Global seed for randomization. If provided, subhalo placement uses
+        ``global_seed + 1`` as a dedicated local RNG stream. If None, the
+        placement RNG is initialized from entropy.
         
     Returns
     -------
@@ -289,19 +313,21 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
     position_type = position_config['type']
     
     if position_type == 'random':
-        # Set random seed if provided
+        # Use a local RNG stream to avoid mutating NumPy global RNG state.
         if global_seed is not None:
-            np.random.seed(global_seed + 1)  # offset for subhalo positioning
+            rng = np.random.default_rng(global_seed + 1)  # offset for subhalo positioning
+        else:
+            rng = np.random.default_rng()
         
         # Random angle on Einstein ring
         lens_einstein_radius = lens_galaxy.mass.einstein_radius
-        angle_deg = np.random.uniform(0, 360)
+        angle_deg = float(rng.uniform(0.0, 360.0))
         
         # Get scatter in pixels
         scatter_pixels = position_config['scatter_pixels']
         
         # Use existing function with random offset
-        offset_pixels = np.random.uniform(-scatter_pixels, scatter_pixels)
+        offset_pixels = float(rng.uniform(-scatter_pixels, scatter_pixels))
         subhalo_position = get_einstein_ring_position(
             angle_deg=angle_deg,
             einstein_radius=lens_einstein_radius,

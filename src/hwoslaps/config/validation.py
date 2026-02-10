@@ -34,6 +34,17 @@ def _require_list_length(value: Any, n: int, key_path: str):
     return value
 
 
+def _require_positive_finite_number(value: Any, key_path: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{key_path} must be numeric")
+    value_float = float(value)
+    if not math.isfinite(value_float):
+        raise ValueError(f"{key_path} must be finite")
+    if value_float <= 0:
+        raise ValueError(f"{key_path} must be positive")
+    return value_float
+
+
 def validate_top_level(config: Dict[str, Any]) -> None:
     # Top-level required keys
     run_name = _require(config, 'run_name', 'top-level')
@@ -84,8 +95,7 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
         raise ValueError("Only 'Isothermal' mass profile is supported for lens_galaxy.mass.type")
     _require_list_length(_require(mass, 'centre', 'lensing.lens_galaxy.mass'), 2, 'lensing.lens_galaxy.mass.centre')
     einstein_radius = _require(mass, 'einstein_radius', 'lensing.lens_galaxy.mass')
-    if not isinstance(einstein_radius, (int, float)) or einstein_radius <= 0:
-        raise ValueError("lensing.lens_galaxy.mass.einstein_radius must be positive")
+    _require_positive_finite_number(einstein_radius, "lensing.lens_galaxy.mass.einstein_radius")
     _require_list_length(_require(mass, 'ell_comps', 'lensing.lens_galaxy.mass'), 2, 'lensing.lens_galaxy.mass.ell_comps')
     lens_redshift_val = _require(lens_galaxy, 'redshift', 'lensing.lens_galaxy')
 
@@ -100,20 +110,18 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_list_length(_require(light, 'centre', 'lensing.source_galaxy.light'), 2, 'lensing.source_galaxy.light.centre')
     _require_list_length(_require(light, 'ell_comps', 'lensing.source_galaxy.light'), 2, 'lensing.source_galaxy.light.ell_comps')
     intensity = _require(light, 'intensity', 'lensing.source_galaxy.light')
-    if not isinstance(intensity, (int, float)) or intensity <= 0:
-        raise ValueError("lensing.source_galaxy.light.intensity must be positive")
+    _require_positive_finite_number(intensity, "lensing.source_galaxy.light.intensity")
     eff_r = _require(light, 'effective_radius', 'lensing.source_galaxy.light')
-    if not isinstance(eff_r, (int, float)) or eff_r <= 0:
-        raise ValueError("lensing.source_galaxy.light.effective_radius must be positive")
+    _require_positive_finite_number(eff_r, "lensing.source_galaxy.light.effective_radius")
     source_redshift_val = _require(source_galaxy, 'redshift', 'lensing.source_galaxy')
-
-    try:
-        lens_redshift = float(lens_redshift_val)
-        source_redshift = float(source_redshift_val)
-    except (TypeError, ValueError):
-        raise ValueError("lensing lens/source redshifts must be numeric")
-    if not math.isfinite(lens_redshift) or not math.isfinite(source_redshift):
-        raise ValueError("lensing lens/source redshifts must be finite")
+    lens_redshift = _require_positive_finite_number(
+        lens_redshift_val,
+        "lensing.lens_galaxy.redshift",
+    )
+    source_redshift = _require_positive_finite_number(
+        source_redshift_val,
+        "lensing.source_galaxy.redshift",
+    )
     if source_redshift <= lens_redshift:
         raise ValueError(
             "Physical-domain error: lensing.source_galaxy.redshift must be greater than "
