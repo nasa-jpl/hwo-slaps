@@ -78,6 +78,7 @@ def test_nfw_concentration_provenance_is_recorded():
     assert lensing_data.subhalo_concentration_x_sub == pytest.approx(1.2)
     assert lensing_data.subhalo_concentration_h is not None
     assert lensing_data.subhalo_concentration_h > 0
+    assert lensing_data.subhalo_einstein_radius is None
 
     expected = mass_models.concentration_mass_relation(
         cfg["lensing"]["subhalo"]["mass"],
@@ -86,3 +87,20 @@ def test_nfw_concentration_provenance_is_recorded():
         h=lensing_data.subhalo_concentration_h,
     )
     assert lensing_data.subhalo_concentration == pytest.approx(expected, rel=1e-12)
+
+
+def test_pointmass_subhalo_einstein_radius_is_populated():
+    generator, _ = _load_lensing_modules()
+
+    config = _load_master_config()
+    cfg = copy.deepcopy(config)
+    cfg["lensing"]["grid"]["shape"] = [120, 120]
+    cfg["lensing"]["subhalo"]["enabled"] = True
+    cfg["lensing"]["subhalo"]["model"] = "PointMass"
+    cfg["lensing"]["subhalo"].pop("concentration", None)
+
+    lensing_data = generator.generate_lensing_system(cfg["lensing"], full_config=cfg)
+
+    assert lensing_data.subhalo_model == "PointMass"
+    assert lensing_data.subhalo_einstein_radius is not None
+    assert lensing_data.subhalo_einstein_radius > 0

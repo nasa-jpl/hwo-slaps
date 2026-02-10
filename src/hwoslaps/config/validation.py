@@ -186,11 +186,23 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
             angle_val = _require(position, 'angle', 'lensing.subhalo.position')
             if not isinstance(angle_val, (int, float)):
                 raise ValueError("lensing.subhalo.position.angle must be numeric (degrees)")
-            # Optional: offset_pixels must be non-negative if provided
+            # Optional: signed radial offset in pixels (finite numeric).
             if 'offset_pixels' in position:
                 off = position['offset_pixels']
-                if not isinstance(off, (int, float)) or off < 0:
-                    raise ValueError("lensing.subhalo.position.offset_pixels must be a non-negative number if provided")
+                if isinstance(off, bool):
+                    raise ValueError(
+                        "lensing.subhalo.position.offset_pixels must be a finite number if provided"
+                    )
+                try:
+                    off_float = float(off)
+                except (TypeError, ValueError):
+                    raise ValueError(
+                        "lensing.subhalo.position.offset_pixels must be a finite number if provided"
+                    )
+                if not math.isfinite(off_float):
+                    raise ValueError(
+                        "lensing.subhalo.position.offset_pixels must be a finite number if provided"
+                    )
         elif ptype == 'direct':
             _require_list_length(_require(position, 'centre', 'lensing.subhalo.position'), 2, 'lensing.subhalo.position.centre')
         else:

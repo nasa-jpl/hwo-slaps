@@ -215,7 +215,10 @@ def plot_lensing_comparison(lensing_data, plot_config):
     print("\nSubhalo Effect Analysis:")
     print(f"Model: {subhalo_model}")
     print(f"Mass: {subhalo_mass:.1e} M_sun")
-    print(f"Einstein radius: {lensing_data.subhalo_einstein_radius:.6f} arcsec")
+    if lensing_data.subhalo_einstein_radius is None:
+        print("Einstein radius: N/A for this subhalo model")
+    else:
+        print(f"Einstein radius: {lensing_data.subhalo_einstein_radius:.6f} arcsec")
     print(f"Peak signal: {peak_signal:.6e}")
     print(f"Total |signal|: {total_signal:.6e}")
     print(f"Signal RMS: {signal_rms:.6e}")

@@ -307,11 +307,12 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
     model = subhalo_config['model']
     # Use cosmology passed from parent context
 
-    # Initialize subhalo_info once to prevent overwriting
+    # Initialize subhalo_info once to prevent overwriting.
+    # Einstein radius is model-dependent and not defined for NFW.
     subhalo_info = {
         'mass_msun': mass,
         'model': model,
-        'einstein_radius_arcsec': 0.0  # Default value
+        'einstein_radius_arcsec': None,
     }
     
     # Determine position

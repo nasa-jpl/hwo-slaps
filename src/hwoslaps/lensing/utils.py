@@ -50,7 +50,8 @@ class LensingData:
         center.
         None if no subhalo present.
     subhalo_einstein_radius : `float`, optional
-        Einstein radius of the subhalo in arcseconds. None if no subhalo
+        Einstein radius of the subhalo in arcseconds. Set for PointMass and
+        SIS models; None when not defined (for example NFW) or no subhalo is
         present.
     subhalo_concentration : `float`, optional
         Concentration parameter for NFW subhalos. None if not NFW or no
@@ -214,7 +215,8 @@ def get_einstein_ring_position(angle_deg, einstein_radius, offset_pixels=0, pixe
     einstein_radius : `float`
         Einstein radius of the lens in arcseconds.
     offset_pixels : `float`, optional
-        Additional radial offset in pixels. Default is 0.
+        Signed additional radial offset in pixels. Positive values move
+        outward, negative values inward. Default is 0.
     pixel_scale : `float`, optional
         Pixel scale in arcseconds per pixel. Default is 0.05.
         
@@ -287,7 +289,10 @@ def print_lensing_data_summary(lensing_data):
         print("\n=== Subhalo Properties ===")
         print(f"Model: {lensing_data.subhalo_model}")
         print(f"Mass: {lensing_data.subhalo_mass:.2e} M_sun")
-        print(f"Einstein radius: {lensing_data.subhalo_einstein_radius:.6f} arcsec")
+        if lensing_data.subhalo_einstein_radius is None:
+            print("Einstein radius: N/A for this subhalo model")
+        else:
+            print(f"Einstein radius: {lensing_data.subhalo_einstein_radius:.6f} arcsec")
         print(f"Position: ({lensing_data.subhalo_position[0]:.6f}, {lensing_data.subhalo_position[1]:.6f}) arcsec")
         
         # Distance from lens center
