@@ -169,6 +169,24 @@ class Pipeline:
                 print("\n🎯 Mejiro detectability analysis complete!")
                 print_mejiro_summary(mejiro_data)
             detection_data = mejiro_data
+        elif detection_method == 'fisher':
+            if self.verbose:
+                print("\nPerforming Fisher v1 detectability (local/map Asimov metrics)...")
+            from .modeling.generator_fisher import perform_fisher_detection
+            from .modeling.utils_fisher import print_fisher_summary
+            fisher_data = perform_fisher_detection(
+                observation_baseline=obs_baseline,
+                observation_test=obs_test,
+                lensing_baseline=lensing_baseline,
+                lensing_test=lensing_test,
+                psf_data=psf_data,
+                detection_config=config['modeling'],
+                full_config=config,
+            )
+            if self.verbose:
+                print("\n🎯 Fisher detectability analysis complete!")
+                print_fisher_summary(fisher_data)
+            detection_data = fisher_data
         else:
             if self.verbose:
                 print("\nPerforming chi-square subhalo detection (goodness-of-fit)...")

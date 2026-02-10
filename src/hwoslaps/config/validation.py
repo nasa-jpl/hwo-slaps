@@ -282,14 +282,84 @@ def validate_observation_config(observation: Dict[str, Any]) -> None:
 
 
 def validate_modeling_config(modeling: Dict[str, Any]) -> None:
-    # modeling.enabled already checked at top-level; if True, require thresholds
-    if modeling['enabled']:
-        snr_threshold = _require(modeling, 'snr_threshold', 'modeling')
-        if not isinstance(snr_threshold, (int, float)) or snr_threshold <= 0:
-            raise ValueError("modeling.snr_threshold must be a positive number")
-        levels = _require(modeling, 'significance_levels', 'modeling')
-        if not isinstance(levels, list) or not all(isinstance(x, (int, float)) and x > 0 for x in levels):
-            raise ValueError("modeling.significance_levels must be a list of positive numbers (p-values)")
+    # modeling.enabled already checked at top-level
+    if not modeling['enabled']:
+        return
+
+    detection = _require(modeling, 'detection', 'modeling')
+    _require_type(detection, str, 'modeling.detection')
+    detection = detection.lower()
+    if detection not in {'gof', 'chernoff', 'mejiro', 'fisher'}:
+        raise ValueError("modeling.detection must be one of: 'gof', 'chernoff', 'mejiro', 'fisher'")
+
+    if detection == 'fisher':
+        fisher = _require(modeling, 'fisher', 'modeling')
+        _require_type(fisher, dict, 'modeling.fisher')
+        mode = _require(fisher, 'mode', 'modeling.fisher')
+        _require_type(mode, str, 'modeling.fisher.mode')
+        if mode.lower() not in {'local', 'map', 'both'}:
+            raise ValueError("modeling.fisher.mode must be one of: 'local', 'map', 'both'")
+
+        snr_threshold = _require(fisher, 'snr_threshold', 'modeling.fisher')
+        _require_positive_finite_number(snr_threshold, "modeling.fisher.snr_threshold")
+
+        include_background_offset = _require(
+            fisher, 'include_background_offset', 'modeling.fisher'
+        )
+        _require_type(include_background_offset, bool, 'modeling.fisher.include_background_offset')
+
+        finite_diff = _require(fisher, 'finite_diff', 'modeling.fisher')
+        _require_type(finite_diff, dict, 'modeling.fisher.finite_diff')
+        for key in (
+            'centre_arcsec',
+            'einstein_radius_arcsec',
+            'ell_comp',
+            'source_intensity_frac',
+            'source_reff_frac',
+        ):
+            _require_positive_finite_number(
+                _require(finite_diff, key, 'modeling.fisher.finite_diff'),
+                f"modeling.fisher.finite_diff.{key}",
+            )
+
+        map_cfg = _require(fisher, 'map', 'modeling.fisher')
+        _require_type(map_cfg, dict, 'modeling.fisher.map')
+        num_angles = _require(map_cfg, 'num_angles', 'modeling.fisher.map')
+        if isinstance(num_angles, bool) or not isinstance(num_angles, int) or num_angles <= 0:
+            raise ValueError("modeling.fisher.map.num_angles must be a positive integer")
+        offset_pixels = _require(map_cfg, 'offset_pixels', 'modeling.fisher.map')
+        if isinstance(offset_pixels, bool) or not isinstance(offset_pixels, (int, float)):
+            raise ValueError("modeling.fisher.map.offset_pixels must be numeric")
+        if not math.isfinite(float(offset_pixels)):
+            raise ValueError("modeling.fisher.map.offset_pixels must be finite")
+
+        explicit_positions = map_cfg.get('explicit_positions_yx')
+        if explicit_positions is not None:
+            if not isinstance(explicit_positions, list):
+                raise ValueError("modeling.fisher.map.explicit_positions_yx must be a list when provided")
+            for idx, pair in enumerate(explicit_positions):
+                if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                    raise ValueError(
+                        "modeling.fisher.map.explicit_positions_yx entries must be [y, x] pairs"
+                    )
+                for jdx, value in enumerate(pair):
+                    if isinstance(value, bool) or not isinstance(value, (int, float)):
+                        raise ValueError(
+                            "modeling.fisher.map.explicit_positions_yx entries must be numeric"
+                        )
+                    if not math.isfinite(float(value)):
+                        raise ValueError(
+                            "modeling.fisher.map.explicit_positions_yx entries must be finite"
+                        )
+        return
+
+    # Legacy methods share these required thresholds.
+    snr_threshold = _require(modeling, 'snr_threshold', 'modeling')
+    if not isinstance(snr_threshold, (int, float)) or snr_threshold <= 0:
+        raise ValueError("modeling.snr_threshold must be a positive number")
+    levels = _require(modeling, 'significance_levels', 'modeling')
+    if not isinstance(levels, list) or not all(isinstance(x, (int, float)) and x > 0 for x in levels):
+        raise ValueError("modeling.significance_levels must be a list of positive numbers (p-values)")
 
 
 def validate_or_raise(config: Dict[str, Any]) -> None:

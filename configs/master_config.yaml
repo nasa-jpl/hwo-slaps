@@ -1,7 +1,7 @@
 # HWO-SLAPS Configuration
 
 # Run identification
-run_name: hexike_run
+run_name: fisher_run
 global_seed: 11  # null=random, int=reproducible 
 
 # Output and plotting
@@ -38,7 +38,7 @@ lensing:
   # Dark matter subhalo
   subhalo:
     enabled: true  # Set to false to create system with no subhalo
-    mass: 1.0e9  # Solar masses
+    mass: 1.0e7  # Solar masses
     model: NFW  # PointMass, SIS, or NFW
     concentration:
       model: moline2017_eq7  # moline2017_eq7 or power_law
@@ -179,6 +179,20 @@ modeling:
   enabled: true  # Set to true to enable detection mode
   snr_threshold: 10.0                           # Absolute SNR threshold for pixel masking (Mejiro paper-exact)
   significance_levels: [1.349898e-3, 3.167124e-5, 2.866516e-7]  # 3σ, 4σ, 5σ p-values
-  detection: 'gof'     # 'gof' (chi-square), 'chernoff', or 'mejiro' (paper-exact)
+  detection: 'fisher'     # 'gof' (chi-square), 'chernoff', 'mejiro' (paper-exact), or 'fisher'
+  fisher:
+    mode: both                    # local | map | both
+    snr_threshold: 3.0
+    include_background_offset: true
+    finite_diff:
+      centre_arcsec: 1.0e-3
+      einstein_radius_arcsec: 1.0e-3
+      ell_comp: 1.0e-3
+      source_intensity_frac: 1.0e-2
+      source_reff_frac: 1.0e-2
+    map:
+      num_angles: 24
+      offset_pixels: 0.0
+      explicit_positions_yx: null
   #alpha: 2.866516e-7      # ~3σ one-sided (Mejiro threshold)
   #dof_offset: -3          # dof = N_mask - 3 (Mejiro)
