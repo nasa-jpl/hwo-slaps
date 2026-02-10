@@ -66,10 +66,10 @@ def plot_detection_comparison(
     
     # Subhalo pixel marker (if truth available)
     if detection_data.has_subhalo_truth:
-        subhalo_x, subhalo_y = detection_data.true_subhalo_position
+        subhalo_y, subhalo_x = detection_data.true_subhalo_position
         h, w = detection_data.image_shape
-        pixel_x = subhalo_x / detection_data.pixel_scale + w/2
-        pixel_y = subhalo_y / detection_data.pixel_scale + h/2
+        pixel_x = subhalo_x / detection_data.pixel_scale + w / 2.0
+        pixel_y = subhalo_y / detection_data.pixel_scale + h / 2.0
     else:
         pixel_x = pixel_y = None
 
@@ -169,13 +169,15 @@ def plot_chernoff_detection_comparison(
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     
     # Subhalo pixel marker (from lensing truth)
-    subhalo_x, subhalo_y = detection_data.result.position
-    h, w = obs_baseline.data.native.shape
+    subhalo_position_yx = detection_data.result.position
+    image_shape = obs_baseline.data.native.shape
     pixel_scale = 0.05  # Default pixel scale, could be extracted from obs data
     if hasattr(obs_baseline, 'pixel_scale'):
         pixel_scale = obs_baseline.pixel_scale
-    pixel_x = subhalo_x / pixel_scale + w/2
-    pixel_y = subhalo_y / pixel_scale + h/2
+    subhalo_y, subhalo_x = subhalo_position_yx
+    h, w = image_shape
+    pixel_x = subhalo_x / pixel_scale + w / 2.0
+    pixel_y = subhalo_y / pixel_scale + h / 2.0
 
     # 1) Original image (No Subhalo)
     ax = axes[0, 0]
@@ -203,7 +205,6 @@ def plot_chernoff_detection_comparison(
     
     # 4. SNR map - reshape from 1D to 2D
     ax = axes[1, 0]
-    image_shape = obs_baseline.data.native.shape
     snr_2d = _reshape_flat_map(detection_data.snr_array, image_shape, label="Chernoff SNR map")
     im4 = ax.imshow(snr_2d, origin='lower', cmap='viridis')
     ax.set_title('SNR Map')

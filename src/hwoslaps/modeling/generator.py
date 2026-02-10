@@ -82,11 +82,9 @@ def perform_subhalo_detection(
         snr_threshold=detection_config['snr_threshold'],
         significance_levels=detection_config['significance_levels']
     )
-    # Get subhalo position from test case.
+    # Preserve canonical lensing convention: (y, x) in arcsec.
     if lensing_test.has_subhalo:
-        subhalo_x = lensing_test.subhalo_position[1]  # x is second coordinate
-        subhalo_y = lensing_test.subhalo_position[0]  # y is first coordinate
-        subhalo_position = (subhalo_x, subhalo_y)
+        subhalo_position = lensing_test.subhalo_position
     else:
         subhalo_position = (0.0, 0.0)  # Default for null tests
     

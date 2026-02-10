@@ -142,7 +142,8 @@ class ChiSquareSubhaloDetector:
         observation_with_subhalo : ObservationData
             Observation that may contain a subhalo.
         subhalo_position : Tuple[float, float]
-            Position where subhalo was injected (for recording).
+            Position where subhalo was injected (for recording), stored as
+            `(y, x)` in arcseconds.
             
         Returns
         -------

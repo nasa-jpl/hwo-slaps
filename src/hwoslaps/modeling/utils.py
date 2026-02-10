@@ -20,6 +20,11 @@ class DetectionData:
     This class contains all products from chi-square subhalo detection
     in a unified structure with direct access to all key parameters,
     results, and diagnostic information.
+
+    Notes
+    -----
+    Subhalo truth positions use the canonical lensing convention `(y, x)`
+    in arcseconds.
     """
     # === PRIMARY RESULTS ===
     detection_results: Dict[float, DetectionResult]  # By significance level
