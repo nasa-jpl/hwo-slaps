@@ -28,7 +28,7 @@ def _coerce_positive_finite_redshift(value, key_path):
     return redshift
 
 
-def generate_lensing_system(config, full_config=None):
+def generate_lensing_system(config, full_config):
     """Generate a complete lensing system from configuration.
     
     This function creates a strong lensing system including grid creation,
@@ -39,9 +39,9 @@ def generate_lensing_system(config, full_config=None):
     config : `dict`
         Lensing configuration dictionary containing grid, lens_galaxy,
         source_galaxy, subhalo, and cosmology parameters.
-    full_config : `dict`, optional
-        Full configuration dictionary containing run_name and other top-level
-        parameters. If provided, this will be stored in LensingData.
+    full_config : `dict`
+        Full top-level configuration dictionary. Must include
+        ``global_seed`` for deterministic subhalo placement and provenance.
         
     Returns
     -------
@@ -59,14 +59,20 @@ def generate_lensing_system(config, full_config=None):
     --------
     Generate a lensing system and access key properties:
     
-    >>> lensing_data = generate_lensing_system(config)
+    >>> full_config = {"global_seed": 1, "run_name": "example"}
+    >>> lensing_data = generate_lensing_system(config, full_config=full_config)
     >>> print(f"Lens z={lensing_data.lens_redshift}")
     >>> print(f"Einstein radius: {lensing_data.lens_einstein_radius} arcsec")
     >>> if lensing_data.has_subhalo:
     ...     print(f"Subhalo mass: {lensing_data.subhalo_mass:.1e} M_sun")
     """
-    # Extract global seed (required globally by validation)
+    if not isinstance(full_config, dict):
+        raise ValueError("full_config must be a dict for generate_lensing_system")
+    if 'global_seed' not in full_config:
+        raise ValueError("Missing required key 'global_seed' in full_config")
     global_seed = full_config['global_seed']
+    if isinstance(global_seed, bool) or not isinstance(global_seed, int):
+        raise ValueError("full_config.global_seed must be an int")
     # Create coordinate grid
     grid = _create_grid(config['grid'])
     

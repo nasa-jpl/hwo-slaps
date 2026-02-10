@@ -54,6 +54,30 @@ def test_subhalo_random_position_reproducible_for_same_seed():
     np.testing.assert_allclose(a.subhalo_position, b.subhalo_position, rtol=0.0, atol=0.0)
 
 
+def test_generate_lensing_system_requires_full_config_argument():
+    config = _make_lensing_config()
+    with pytest.raises(TypeError):
+        generate_lensing_system(copy.deepcopy(config))
+
+
+def test_generate_lensing_system_requires_global_seed_key():
+    config = _make_lensing_config()
+    with pytest.raises(ValueError, match="Missing required key 'global_seed'"):
+        generate_lensing_system(
+            copy.deepcopy(config),
+            full_config={"run_name": "missing-seed"},
+        )
+
+
+def test_generate_lensing_system_rejects_non_int_global_seed():
+    config = _make_lensing_config()
+    with pytest.raises(ValueError, match="full_config.global_seed must be an int"):
+        generate_lensing_system(
+            copy.deepcopy(config),
+            full_config={"global_seed": True, "run_name": "bad-seed-type"},
+        )
+
+
 def test_subhalo_random_position_changes_with_seed():
     config = _make_lensing_config()
 
