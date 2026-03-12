@@ -177,9 +177,7 @@ observation:
 # Module 4: Subhalo Detection
 modeling:
   enabled: true  # Set to true to enable detection mode
-  snr_threshold: 10.0                           # Absolute SNR threshold for pixel masking (Mejiro paper-exact)
-  significance_levels: [1.349898e-3, 3.167124e-5, 2.866516e-7]  # 3σ, 4σ, 5σ p-values
-  detection: 'fisher'     # 'gof' (chi-square), 'chernoff', 'mejiro' (paper-exact), or 'fisher'
+  detection: 'fisher'
   fisher:
     version: publication          # publication | v1
     mode: both                    # local | map | both
@@ -232,5 +230,3 @@ modeling:
       num_angles: 24
       offset_pixels: 0.0
       explicit_positions_yx: null
-  #alpha: 2.866516e-7      # ~3σ one-sided (Mejiro threshold)
-  #dof_offset: -3          # dof = N_mask - 3 (Mejiro)

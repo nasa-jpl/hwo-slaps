@@ -32,10 +32,12 @@ hwo-slaps/src/hwoslaps/
 │   ├── generator.py  # Main API: generate_observation() 
 │   ├── utils.py      # ObservationData class and utilities
 │   └── noise_models.py # Detector noise modeling functions
-├── modeling/         # ✅ Subhalo detection via χ² analysis (COMPLETE)
-│   ├── generator.py  # Main API: perform_subhalo_detection()
-│   ├── utils.py      # DetectionData class and validation
-│   └── chi_square_detector.py # Core χ² detection logic
+├── modeling/         # ✅ Fisher-based detectability modeling (COMPLETE)
+│   ├── generator_fisher.py  # Main API: perform_fisher_detection()
+│   ├── utils_fisher.py      # FisherDetectionData class and reporting
+│   ├── fisher_detector.py   # Historical Fisher v1 backend
+│   ├── fisher_publication_detector.py # Publication-grade detector
+│   └── fisher_publication_core.py # Shared Fisher / Asimov utilities
 ├── analysis/         # 🚧 Performance metrics & requirements (PLANNED)
 └── pipeline.py       # ✅ Simple pipeline orchestration (BASIC)
 ```
@@ -44,7 +46,7 @@ hwo-slaps/src/hwoslaps/
 1. **Lensing** → Produces: `LensingData` object (unified structure with image, subhalo truth, all system parameters)
 2. **PSF** → Produces: `PSFData` object (unified structure with PSF, detector kernel, quality metrics, aberration summary)  
 3. **Observation** → Produces: `ObservationData` object (PyAutoLens imaging dataset + noise components + metadata)
-4. **Modeling** → Produces: `DetectionData` object (χ² results, multi-significance detection, comprehensive diagnostics, truth validation)
+4. **Modeling** → Produces: `FisherDetectionData` object (local/map detectability metrics, nuisance bookkeeping, truth validation)
 5. **Analysis** → Produces: requirements, performance metrics (saved to disk)
 
 **Key Features**: Each data object provides direct property access to all parameters, automatic computation of derived quantities, rich metadata, and seamless format conversion capabilities.
@@ -209,25 +211,18 @@ class ObservationData:
     def total_flux_electrons(self) -> float        # Total flux in electrons
 
 @dataclass
-class DetectionData:
-    """Complete subhalo detection results with unified access."""
-    # === PRIMARY RESULTS ===
-    detection_results: Dict[float, DetectionResult]  # By significance level
-    chi2_value: float                               # Chi-square statistic
-    degrees_of_freedom: int                         # Degrees of freedom
-    
-    # === DETECTION PARAMETERS ===
-    snr_threshold: float                            # SNR threshold for masking
-    significance_levels: List[float]                # Significance levels tested
-    pixels_unmasked: int                            # Number of pixels analyzed
-    num_regions: int                                # Number of connected regions
-    max_region_snr: float                           # Maximum regional SNR
-    
-    # === MASKS AND ARRAYS ===
-    snr_mask: np.ndarray                            # Boolean mask for analysis
-    snr_array: np.ndarray                           # SNR values per pixel
-    labeled_regions: np.ndarray                     # Connected region labels
-    residual_map: np.ndarray                        # Detection residual map
+class FisherDetectionData:
+    """Complete Fisher detectability results with unified access."""
+    mode: str
+    local: Optional[FisherLocalData]
+    map: Optional[FisherMapData]
+    snr_threshold: float
+    include_background_offset: bool
+    pixels_unmasked: int
+    n_nuisance: int
+    gram_condition_number: float
+    pixel_scale: float
+    config: Optional[Dict]
     variance_2d: Optional[np.ndarray] = None        # Pixel variance map
     
     # === SUBHALO TRUTH ===
@@ -847,86 +842,49 @@ The implemented observation simulation provides physically accurate detector mod
 
 ---
 
-## Module 4: Subhalo Detection via Chi-Square Analysis
+## Module 4: Fisher-Based Subhalo Detectability
 
 ### Purpose
-Quantify subhalo detectability by comparing a simulated observation containing a subhalo against a baseline (null hypothesis) observation without one. This module uses a rapid, statistically robust chi-square analysis rather than full lens modeling.
+Quantify subhalo detectability with Fisher / Asimov forecasts derived from baseline and test observations, nuisance parameter linearization, and optional position-map scans.
 
 ### Implementation Status: ✅ **COMPLETE**
 
-The module is fully implemented with a robust chi-square detection system that exactly follows the validated prototype methodology. It provides computationally efficient, statistically rigorous detection ideal for large parameter sweeps.
+The module is fully implemented around Fisher-based local and map outputs, with both the historical v1 backend and the publication-grade backend available under one pipeline interface.
 
 **Core Classes Implemented:**
-- `ChiSquareSubhaloDetector`: Main detection engine with SNR masking and statistical testing
-- `DetectionData`: Unified data structure with rich computed properties  
-- `DetectionResult`: Individual detection results storage
-- `perform_subhalo_detection()`: Main API function following HWO-SLAPS pattern
+- `FisherDetectionData`: Top-level detectability payload
+- `FisherLocalData`: Injected-position metrics
+- `FisherMapData`: Ring/map scan metrics
+- `perform_fisher_detection()`: Main API function following HWO-SLAPS pattern
 
 ### Key Implementation Features
 
-**Statistical Detection Methodology**
-- **Relative Comparison Approach**: Direct statistical hypothesis test comparing baseline (no subhalo) vs test (with subhalo) observations
-- **Null Hypothesis (H₀)**: Observed data consistent with smooth lens model
-- **Alternative Hypothesis (H₁)**: Observed data contains subhalo perturbations
+**Detectability Methodology**
+- **Local Fisher mode**: Evaluates the injected subhalo position with nuisance profiling
+- **Map Fisher mode**: Evaluates a bank of candidate positions at fixed mass
+- **Publication backend**: Supports PSF nuisance modeling, priors, and Asimov/profile-likelihood-style summaries
 
-**SNR-Based Pixel Masking**
-```python
-# Absolute SNR threshold pixel selection (default: 3.0)
-snr_array_2d = source_adu_2d / noise_map_adu_2d  
-snr_mask_2d = snr_array_2d > snr_threshold
-
-# Cross-shaped connectivity for region identification
-structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]])
-labeled_regions_2d, num_regions = ndimage.label(snr_mask_2d, structure=structure)
-```
-
-**Physically Accurate Variance Modeling**
-- **Best Practice**: Reuses baseline observation's noise map for both SNR calculation and chi-square weighting
-- **Complete Physics**: Includes Poisson shot noise (source + sky + dark) and detector read noise
-- **Consistent Units**: All calculations performed in ADU space using observation's gain factor
-
-**Pearson's Chi-Square Implementation**
-```python
-# Statistical test with proper degrees of freedom
-chi2_value = np.sum((observed - expected)**2 / variance_adu)
-dof = pixels_unmasked - 3  # Account for subhalo parameters (mass, x, y)
-
-# Multi-significance testing with proper p-values
-significance_levels = [1.349898e-3, 3.167124e-5, 2.866516e-7]  # 3σ, 4σ, 5σ
-threshold = chi2(dof).isf(sig_level)
-detected = chi2_value > threshold
-```
-
-**DetectionData Unified Structure**
-- **Primary Results**: Chi-square values, degrees of freedom, detection flags
-- **Rich Properties**: `max_significance_detected`, `detection_summary`, `is_detected_5sigma`
-- **Complete Diagnostics**: SNR masks, residual maps, regional analysis
-- **Truth Integration**: Subhalo mass, model, position from lensing data
-- **Validation**: Comprehensive validation functions with mathematical consistency checks
-
-**Advanced Features**
-- **Regional SNR Analysis**: Connected region identification with maximum regional SNR calculation  
-- **Comprehensive Validation**: `validate_detection_results()` with consistency checks
-- **Rich Reporting**: `print_detection_summary()` with multi-significance breakdown
-- **Exact Prototype Fidelity**: Implementation preserves validated methodology from notebooks
+**Core Implementation Features**
+- Fisher / Asimov detectability metrics for local significance forecasts
+- Nuisance-direction bookkeeping with degradation summaries
+- Optional ring-map scans over explicit candidate positions
+- Unified reporting through `print_fisher_summary()`
 
 ### Current Outputs ✅
-- `DetectionData` objects with complete unified access to:
-  - Detection results at 3σ, 4σ, 5σ significance levels with proper p-values
-  - Chi-square statistics (χ² value, DOF, global p-value, thresholds)
-  - High-quality diagnostics (SNR masks, residual maps, regional analysis)
+- `FisherDetectionData` objects with complete unified access to:
+  - Local Fisher / Asimov summaries at the injected position
+  - Optional map outputs over candidate subhalo positions
+  - Nuisance counts, conditioning, and PSF-mode bookkeeping
   - Ground truth integration (subhalo mass, model, position validation)
   - Comprehensive metadata (detection parameters, observation config, provenance)
-  - Rich computed properties (`max_significance_detected`, `detection_mask_fraction`)
   - Mathematical validation with consistency checks
   - Direct property access following HWO-SLAPS unified pattern
 
 ### Scientific Impact
-The implemented detection system provides:
-- **Statistical Rigor**: Proper chi-square testing with validated variance modeling
-- **Computational Efficiency**: ~1000x faster than full lens modeling for parameter sweeps  
+The implemented Fisher-based modeling system provides:
+- **Statistical Rigor**: Fisher / Asimov detectability metrics with nuisance profiling
+- **Computational Efficiency**: Fast local and map forecasts for parameter sweeps
 - **Physical Accuracy**: Complete noise physics matching observation module
-- **Prototype Validation**: Exactly preserves validated methodology from prototype studies
 - **Integration Ready**: Seamless data flow to Module 5 performance analysis
 
 ---
@@ -1107,10 +1065,10 @@ save_aggregated_metrics(results)  # Save once at end
 - Astropy >= 5.0 (for units)
 - Dataclasses (for ObservationData structure)
 
-**Module 4 (Subhalo Detection):**
+**Module 4 (Fisher Detectability):**
 - NumPy >= 1.20
-- SciPy >= 1.7 (for ndimage and chi2 distribution)
-- Dataclasses (for DetectionData and DetectionResult structures)
+- SciPy >= 1.7
+- Dataclasses (for FisherDetectionData and related structures)
 - ObservationData and LensingData from other modules
 
 **Module 5 (Performance Analysis):**

@@ -16,7 +16,7 @@ from .lensing.utils import print_lensing_data_summary
 from .psf.utils import print_psf_data_summary
 from .observation.utils import print_observation_summary, ObservationData
 from .plotting import generate_all_plots
-from .modeling.utils import print_detection_summary, DetectionData
+from .modeling.utils_fisher import FisherDetectionData, print_fisher_summary
 from .config.validation import validate_or_raise
 
 
@@ -38,7 +38,7 @@ class Pipeline:
         """
         self.verbose = verbose
     
-    def run(self, config: Dict) -> Union[ObservationData, 'DetectionData']:
+    def run(self, config: Dict) -> Union[ObservationData, FisherDetectionData]:
         """Main pipeline entry point with automatic mode detection.
         
         Parameters
@@ -48,9 +48,9 @@ class Pipeline:
             
         Returns
         -------
-        result : ObservationData or DetectionData
+        result : ObservationData or FisherDetectionData
             - ObservationData in standard mode
-            - DetectionData in detection mode (when modeling.enabled: true)
+            - FisherDetectionData in detection mode (when modeling.enabled: true)
         """
         # Validate configuration (strict, fail-fast)
         validate_or_raise(config)
@@ -65,8 +65,8 @@ class Pipeline:
                 print("📊 Standard mode - running single observation pipeline")
             return self._run_standard_pipeline(config)
     
-    def _run_detection_pipeline(self, config: Dict) -> 'DetectionData':
-        """Generate paired observations and perform detection analysis.
+    def _run_detection_pipeline(self, config: Dict) -> FisherDetectionData:
+        """Generate paired observations and perform Fisher detection analysis.
         
         Parameters
         ----------
@@ -75,8 +75,8 @@ class Pipeline:
             
         Returns
         -------
-        detection_data : DetectionData
-            Complete detection results with unified structure.
+        detection_data : FisherDetectionData
+            Complete Fisher detection results.
         """
         # Strict validation already applied at entry
         
@@ -134,75 +134,30 @@ class Pipeline:
         if self.verbose:
             print_observation_summary(obs_test)
         
-        # Perform detection (Module 4), routing by modeling.detection
-        detection_method = config['modeling'].get('detection', 'gof').lower()
-        if detection_method == 'chernoff':
-            if self.verbose:
-                print("\nPerforming Chernoff minimal-fit detection (fixed position)...")
-            from .modeling.generator_chernoff import perform_chernoff_detection
-            from .modeling.utils_chernoff import print_chernoff_summary
-            # Use the test observation for both reference (template) and test (noisy)
-            chernoff_data = perform_chernoff_detection(
-                observation_baseline=obs_baseline,
-                observation_ref_with_subhalo=obs_test,
-                observation_test=obs_test,
-                lensing_test=lensing_test,
-                detection_config=config['modeling'],
+        # Legacy detector families were removed; only Fisher-based modeling
+        # remains supported.
+        detection_method = config['modeling'].get('detection', 'fisher').lower()
+        if detection_method != 'fisher':
+            raise ValueError(
+                f"Unsupported modeling.detection={detection_method!r}. "
+                "Only 'fisher' is supported."
             )
-            if self.verbose:
-                print("\n🎯 Chernoff detection analysis complete!")
-                print_chernoff_summary(chernoff_data)
-            detection_data = chernoff_data
-        elif detection_method == 'mejiro':
-            if self.verbose:
-                print("\nPerforming Mejiro detectability (paper-exact)...")
-            from .modeling.generator_mejiro import perform_mejiro_detection
-            from .modeling.utils_mejiro import print_mejiro_summary
-            mejiro_data = perform_mejiro_detection(
-                observation_baseline=obs_baseline,
-                observation_test=obs_test,
-                lensing_test=lensing_test,
-                detection_config=config['modeling'],
-                full_config=config,
-            )
-            if self.verbose:
-                print("\n🎯 Mejiro detectability analysis complete!")
-                print_mejiro_summary(mejiro_data)
-            detection_data = mejiro_data
-        elif detection_method == 'fisher':
-            if self.verbose:
-                print("\nPerforming Fisher detectability (local/map Asimov metrics)...")
-            from .modeling.generator_fisher import perform_fisher_detection
-            from .modeling.utils_fisher import print_fisher_summary
-            fisher_data = perform_fisher_detection(
-                observation_baseline=obs_baseline,
-                observation_test=obs_test,
-                lensing_baseline=lensing_baseline,
-                lensing_test=lensing_test,
-                psf_data=psf_data,
-                detection_config=config['modeling'],
-                full_config=config,
-            )
-            if self.verbose:
-                print("\n🎯 Fisher detectability analysis complete!")
-                print_fisher_summary(fisher_data)
-            detection_data = fisher_data
-        else:
-            if self.verbose:
-                print("\nPerforming chi-square subhalo detection (goodness-of-fit)...")
-            from .modeling import perform_subhalo_detection
-            detection_data = perform_subhalo_detection(
-                observation_baseline=obs_baseline,
-                observation_test=obs_test,
-                lensing_baseline=lensing_baseline,
-                lensing_test=lensing_test,
-                detection_config=config['modeling'],
-                full_config=config
-            )
-            if self.verbose:
-                print("\n🎯 Detection analysis complete!")
-                # Comprehensive significance summary (includes 3σ/4σ/5σ with exact sigma and p)
-                print_detection_summary(detection_data)
+
+        if self.verbose:
+            print("\nPerforming Fisher detectability (local/map Asimov metrics)...")
+        from .modeling.generator_fisher import perform_fisher_detection
+        detection_data = perform_fisher_detection(
+            observation_baseline=obs_baseline,
+            observation_test=obs_test,
+            lensing_baseline=lensing_baseline,
+            lensing_test=lensing_test,
+            psf_data=psf_data,
+            detection_config=config['modeling'],
+            full_config=config,
+        )
+        if self.verbose:
+            print("\n🎯 Fisher detectability analysis complete!")
+            print_fisher_summary(detection_data)
         
         # Generate plots if enabled
         if config['plotting']['enabled']:
@@ -328,7 +283,7 @@ class Pipeline:
         return test_config
 
 
-def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[ObservationData, 'DetectionData']:
+def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[ObservationData, FisherDetectionData]:
     """Run the enhanced HWO-SLAPS pipeline with detection mode support.
     
     This function automatically detects whether to run in standard mode or
@@ -343,9 +298,9 @@ def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[Obser
         
     Returns
     -------
-    result : ObservationData or DetectionData
+    result : ObservationData or FisherDetectionData
         - ObservationData in standard mode
-        - DetectionData in detection mode (when modeling.enabled: true)
+        - FisherDetectionData in detection mode (when modeling.enabled: true)
         
     Examples
     --------
@@ -354,11 +309,11 @@ def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[Obser
     >>> obs_data = run_enhanced_pipeline('standard_config.yaml')
     >>> print(f"Peak SNR: {obs_data.signal_to_noise_map.native.max():.2f}")
     
-    Subhalo detection study:
+    Fisher detection study:
     
-    >>> detection_data = run_enhanced_pipeline('detection_config.yaml')  
-    >>> print(f"5σ detection: {detection_data.is_detected_5sigma}")
-    >>> print(f"Chi² value: {detection_data.chi2_value:.2f}")
+    >>> detection_data = run_enhanced_pipeline('detection_config.yaml')
+    >>> print(f"Mode: {detection_data.mode}")
+    >>> print(f"Pixels analyzed: {detection_data.pixels_unmasked}")
     """
     # Load configuration
     with open(config_path, 'r') as f:

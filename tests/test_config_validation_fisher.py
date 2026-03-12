@@ -64,6 +64,14 @@ def test_fisher_detection_requires_fisher_block():
         validation.validate_or_raise(bad_config)
 
 
+def test_modeling_rejects_non_fisher_detection_mode():
+    config = _load_master_config()
+    config["modeling"]["detection"] = "legacy"
+
+    with pytest.raises(ValueError, match="modeling.detection must be 'fisher'"):
+        validation.validate_or_raise(config)
+
+
 def test_fisher_rejects_invalid_mode():
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["mode"] = "invalid"

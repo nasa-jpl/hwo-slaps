@@ -14,8 +14,6 @@ from .psf_plots import (
 )
 from .observation_plots import plot_observation_comparison
 from .detection_plots import (
-    plot_detection_comparison,
-    plot_chernoff_detection_comparison,
     plot_fisher_detection_map_summary,
 )
 from .registry import generate_all_plots, get_plot_registry
@@ -28,8 +26,6 @@ __all__ = [
     'plot_psf_system_overview',
     'plot_psf_complete_analysis',
     'plot_observation_comparison',
-    'plot_detection_comparison',
-    'plot_chernoff_detection_comparison',
     'plot_fisher_detection_map_summary',
     'generate_all_plots',
     'get_plot_registry'

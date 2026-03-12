@@ -75,9 +75,8 @@ def _make_detector_stub(label: str):
 def test_pipeline_routes_detection_to_fisher(monkeypatch):
     import hwoslaps.pipeline as pipeline_module
     import hwoslaps.modeling.generator_fisher as fisher_generator
-    import hwoslaps.modeling as modeling_module
 
-    call_counts = {"fisher": 0, "legacy": 0}
+    call_counts = {"fisher": 0}
 
     dummy_psf = SimpleNamespace()
     dummy_lensing = SimpleNamespace(has_subhalo=True)
@@ -116,12 +115,7 @@ def test_pipeline_routes_detection_to_fisher(monkeypatch):
         call_counts["fisher"] += 1
         return fisher_result
 
-    def _fake_legacy(*args, **kwargs):
-        call_counts["legacy"] += 1
-        raise AssertionError("Legacy chi-square detector should not run for modeling.detection='fisher'.")
-
     monkeypatch.setattr(fisher_generator, "perform_fisher_detection", _fake_fisher)
-    monkeypatch.setattr(modeling_module, "perform_subhalo_detection", _fake_legacy)
 
     config = {
         "run_name": "unit",
@@ -140,7 +134,6 @@ def test_pipeline_routes_detection_to_fisher(monkeypatch):
 
     assert result is fisher_result
     assert call_counts["fisher"] == 1
-    assert call_counts["legacy"] == 0
 
 
 def test_generator_defaults_to_publication_backend(monkeypatch):
