@@ -1,13 +1,13 @@
 # HWO-SLAPS Configuration
 
 # Run identification
-run_name: fisher_run
+run_name: fisher_branch_validation
 global_seed: 11  # null=random, int=reproducible 
 
 # Output and plotting
 plotting:
   enabled: true
-  output_dir: /Users/vassig/research/hwo/outputs
+  output_dir: /Users/vassig/research/hwo/hwo-slaps/outputs
 
 # Lensing system generation
 lensing:
@@ -45,11 +45,12 @@ lensing:
       x_sub: 1.0             # required for moline2017_eq7
       h: null                # null => infer from configured cosmology
     position:
-      type: 'random'        # 'random', 'angle', or 'direct'
-      scatter_pixels: 20    # Random scatter ±10 pixels around Einstein ring
-      # For fixed-angle placement (on Einstein ring):
-      # angle: 90.0          # degrees (0-360), measured from +x toward +y
-      # offset_pixels: 0     # optional radial offset in pixels (default 0)
+      type: 'angle'         # 'random', 'angle', or 'direct'
+      # Deterministic first branch-validation run: place the subhalo on the Einstein ring.
+      angle: 90.0           # degrees (0-360), measured from +x toward +y
+      offset_pixels: 0      # optional radial offset in pixels (default 0)
+      # For random placement:
+      # scatter_pixels: 20  # Random scatter ±10 pixels around Einstein ring
       # For direct placement only:
       # centre: [0.12, 0.81]  # [y, x] in arcseconds
     
