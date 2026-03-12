@@ -456,17 +456,9 @@ class PublicationFisherDetector:
             pixel_scales=self.lensing_baseline.pixel_scale,
         )
         lensed_image = al.Array2D(values=self.lensing_baseline.image, mask=mask)
-
-        simulator_noiseless = al.SimulatorImaging(
-            exposure_time=self.observation_baseline.exposure_time,
-            psf=psf_kernel,
-            background_sky_level=0.0,
-            normalize_psf=False,
-            add_poisson_noise_to_data=False,
-            noise_seed=0,
-        )
-        noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
-        source_only_eps = noiseless_dataset.data.native
+        # PSF derivative kernels are signed and therefore cannot pass through
+        # the simulator's Poisson-count path. Use the raw linear convolution.
+        source_only_eps = psf_kernel.convolved_array_from(array=lensed_image).native
         source_e = source_only_eps * self.observation_baseline.exposure_time
         return source_e / self.observation_baseline.gain
 

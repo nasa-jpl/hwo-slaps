@@ -1,7 +1,7 @@
 # HWO-SLAPS Configuration
 
 # Run identification
-run_name: fisher_branch_validation
+run_name: fisher_paper_pilot_scan_loworder_global_segment
 global_seed: 11  # null=random, int=reproducible 
 
 # Output and plotting
@@ -193,13 +193,28 @@ modeling:
     publication:
       mask_mode: source_snr       # source_snr | all_pixels
       include_psf_nuisance: false
-      compute_psf_mode_scan: false
+      compute_psf_mode_scan: true
       mode_scan_z_tolerance: 1.0
       psf_mode_steps:
         segment_pistons: 1.0      # nm OPD
         segment_tiptilts: 0.1     # microradians
         segment_hexikes: 1.0      # nm RMS
         global_zernikes: 1.0      # nm RMS
+      psf_mode_prior_sigmas:
+        segment_hexikes: 5.0
+        global_zernikes: 5.0
+      psf_basis:
+        segment_hexikes:
+          segments: all
+          mode_nolls: [1, 2]
+        global_zernikes:
+          mode_nolls: [4, 5, 6, 7, 8]
+      scan_psf_mode_selection:
+        segment_hexikes:
+          segments: all
+          mode_nolls: [1, 2]
+        global_zernikes:
+          mode_nolls: [4, 5, 6, 7, 8]
       # covariance_path: /absolute/path/to/noise_covariance.npy
       # prior_sigmas:
       #   lens.centre_y: 5.0e-3
@@ -207,9 +222,7 @@ modeling:
       #   lens.einstein_radius: 1.0e-2
       #   source.centre_y: 5.0e-3
       #   source.centre_x: 5.0e-3
-      # psf_mode_prior_sigmas:
-      #   segment_hexikes: 5.0
-      #   global_zernikes: 5.0
+      # Example larger PSF scan basis:
       # psf_basis:
       #   segment_pistons:
       #     segments: all

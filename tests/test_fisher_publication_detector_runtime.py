@@ -218,3 +218,65 @@ def test_publication_detector_runtime_psf_scan_executes(runtime_setup):
     assert np.isfinite(coupling.z_per_unit)
     assert coupling.one_sigma_z is not None
     assert np.isfinite(coupling.one_sigma_z)
+
+
+def test_publication_detector_runtime_psf_scan_executes_with_signed_derivative_kernel(runtime_setup):
+    config = copy.deepcopy(runtime_setup["config"])
+    aberr = config["psf"]["aberrations"]
+    aberr["enable_segment_hexikes"] = True
+    aberr["segment_hexikes"] = {
+        0: {4: 35.0},
+        1: {5: -20.0},
+    }
+    aberr["enable_global_zernikes"] = False
+    aberr["global_zernikes"] = {}
+
+    config_baseline = copy.deepcopy(config)
+    config_baseline["lensing"]["subhalo"]["enabled"] = False
+
+    psf_data = generate_psf_system(config["psf"], full_config=config)
+    lensing_baseline = generate_lensing_system(
+        config_baseline["lensing"],
+        full_config=config_baseline,
+    )
+    lensing_test = generate_lensing_system(config["lensing"], full_config=config)
+    observation_baseline = generate_observation(
+        lensing_baseline,
+        psf_data,
+        observation_config=config_baseline["observation"],
+        full_config=config_baseline,
+    )
+    observation_test = generate_observation(
+        lensing_test,
+        psf_data,
+        observation_config=config["observation"],
+        full_config=config,
+    )
+
+    fisher_config = copy.deepcopy(config["modeling"]["fisher"])
+    fisher_config["publication"].update(
+        {
+            "compute_psf_mode_scan": True,
+            "include_psf_nuisance": False,
+            "psf_basis": {"global_zernikes": {"mode_nolls": [4]}},
+            "scan_psf_mode_selection": {"global_zernikes": {"mode_nolls": [4]}},
+            "psf_mode_prior_sigmas": {"global_zernikes": 5.0},
+        }
+    )
+
+    detector = PublicationFisherDetector(
+        observation_baseline=observation_baseline,
+        lensing_baseline=lensing_baseline,
+        psf_data=psf_data,
+        full_config=config,
+        fisher_config=fisher_config,
+    )
+    local = detector.compute_local(
+        observation_test=observation_test,
+        lensing_test=lensing_test,
+    )
+
+    assert detector.n_psf_scan_modes == 1
+    assert local.psf_mode_scan is not None
+    coupling = local.psf_mode_scan.couplings[0]
+    assert np.isfinite(coupling.z_per_unit)
