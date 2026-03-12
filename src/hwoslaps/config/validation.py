@@ -300,6 +300,11 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         if mode.lower() not in {'local', 'map', 'both'}:
             raise ValueError("modeling.fisher.mode must be one of: 'local', 'map', 'both'")
 
+        version = fisher.get('version', 'publication')
+        _require_type(version, str, 'modeling.fisher.version')
+        if version.lower() not in {'v1', 'publication'}:
+            raise ValueError("modeling.fisher.version must be one of: 'v1', 'publication'")
+
         snr_threshold = _require(fisher, 'snr_threshold', 'modeling.fisher')
         _require_positive_finite_number(snr_threshold, "modeling.fisher.snr_threshold")
 
@@ -351,6 +356,176 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                         raise ValueError(
                             "modeling.fisher.map.explicit_positions_yx entries must be finite"
                         )
+
+        publication = fisher.get('publication')
+        if publication is not None:
+            _require_type(publication, dict, 'modeling.fisher.publication')
+
+            mask_mode = publication.get('mask_mode', 'source_snr')
+            _require_type(mask_mode, str, 'modeling.fisher.publication.mask_mode')
+            if mask_mode.lower() not in {'source_snr', 'all_pixels'}:
+                raise ValueError(
+                    "modeling.fisher.publication.mask_mode must be one of: 'source_snr', 'all_pixels'"
+                )
+
+            include_psf_nuisance = publication.get('include_psf_nuisance', False)
+            _require_type(
+                include_psf_nuisance,
+                bool,
+                'modeling.fisher.publication.include_psf_nuisance',
+            )
+            compute_psf_mode_scan = publication.get('compute_psf_mode_scan', False)
+            _require_type(
+                compute_psf_mode_scan,
+                bool,
+                'modeling.fisher.publication.compute_psf_mode_scan',
+            )
+
+            mode_scan_z_tolerance = publication.get('mode_scan_z_tolerance')
+            if mode_scan_z_tolerance is not None:
+                _require_positive_finite_number(
+                    mode_scan_z_tolerance,
+                    'modeling.fisher.publication.mode_scan_z_tolerance',
+                )
+
+            covariance_path = publication.get('covariance_path')
+            if covariance_path is not None:
+                _require_type(covariance_path, str, 'modeling.fisher.publication.covariance_path')
+
+            prior_sigmas = publication.get('prior_sigmas')
+            if prior_sigmas is not None:
+                _require_type(prior_sigmas, dict, 'modeling.fisher.publication.prior_sigmas')
+                for key, value in prior_sigmas.items():
+                    _require_positive_finite_number(
+                        value,
+                        f"modeling.fisher.publication.prior_sigmas[{key}]",
+                    )
+
+            psf_mode_steps = publication.get('psf_mode_steps')
+            if psf_mode_steps is not None:
+                _require_type(psf_mode_steps, dict, 'modeling.fisher.publication.psf_mode_steps')
+                for key, value in psf_mode_steps.items():
+                    _require_positive_finite_number(
+                        value,
+                        f"modeling.fisher.publication.psf_mode_steps[{key}]",
+                    )
+
+            psf_mode_prior_sigmas = publication.get('psf_mode_prior_sigmas')
+            if psf_mode_prior_sigmas is not None:
+                _require_type(
+                    psf_mode_prior_sigmas,
+                    dict,
+                    'modeling.fisher.publication.psf_mode_prior_sigmas',
+                )
+                for key, value in psf_mode_prior_sigmas.items():
+                    _require_positive_finite_number(
+                        value,
+                        f"modeling.fisher.publication.psf_mode_prior_sigmas[{key}]",
+                    )
+
+            def _validate_segment_selection_block(value, path_name):
+                if value is None:
+                    return
+                if isinstance(value, str):
+                    if value.lower() != 'all':
+                        raise ValueError(f"{path_name} must be 'all', a list of segment ids, or a dict with a 'segments' field")
+                    return
+                if isinstance(value, dict):
+                    segments = value.get('segments')
+                    if segments is None:
+                        raise ValueError(f"{path_name} dict form must contain a 'segments' field")
+                    _validate_segment_selection_block(segments, f"{path_name}.segments")
+                    return
+                if not isinstance(value, (list, tuple)):
+                    raise ValueError(f"{path_name} must be 'all', a list of segment ids, or a dict with a 'segments' field")
+                for idx, seg_id in enumerate(value):
+                    if isinstance(seg_id, bool) or not isinstance(seg_id, int) or seg_id < 0:
+                        raise ValueError(f"{path_name}[{idx}] must be a non-negative integer segment id")
+
+            def _validate_global_mode_block(value, path_name):
+                if value is None:
+                    return
+                modes = value.get('mode_nolls') if isinstance(value, dict) else value
+                if not isinstance(modes, (list, tuple)):
+                    raise ValueError(f"{path_name} must be a list of 1-based Noll mode indices or a dict with mode_nolls")
+                for idx, mode_idx in enumerate(modes):
+                    if isinstance(mode_idx, bool) or not isinstance(mode_idx, int) or mode_idx < 1:
+                        raise ValueError(f"{path_name}[{idx}] must be a 1-based integer Noll index")
+
+            def _validate_segment_hexike_block(value, path_name):
+                if value is None:
+                    return
+                if isinstance(value, dict) and ('segments' in value or 'mode_nolls' in value):
+                    if 'segments' not in value or 'mode_nolls' not in value:
+                        raise ValueError(f"{path_name} cross-product form must contain both 'segments' and 'mode_nolls'")
+                    _validate_segment_selection_block(value['segments'], f"{path_name}.segments")
+                    _validate_global_mode_block(value['mode_nolls'], f"{path_name}.mode_nolls")
+                    return
+                if isinstance(value, dict):
+                    for seg_id, mode_list in value.items():
+                        if isinstance(seg_id, bool) or not isinstance(seg_id, int) or seg_id < 0:
+                            raise ValueError(f"{path_name} segment keys must be non-negative integers")
+                        _validate_global_mode_block(mode_list, f"{path_name}[{seg_id}]")
+                    return
+                if not isinstance(value, (list, tuple)):
+                    raise ValueError(
+                        f"{path_name} must be either {{segments, mode_nolls}}, a mapping seg->modes, or a list of (seg, mode) pairs"
+                    )
+                for idx, pair in enumerate(value):
+                    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                        raise ValueError(f"{path_name}[{idx}] must be a (segment, mode_noll) pair")
+                    seg_id, mode_idx = pair
+                    if isinstance(seg_id, bool) or not isinstance(seg_id, int) or seg_id < 0:
+                        raise ValueError(f"{path_name}[{idx}][0] must be a non-negative integer segment id")
+                    if isinstance(mode_idx, bool) or not isinstance(mode_idx, int) or mode_idx < 1:
+                        raise ValueError(f"{path_name}[{idx}][1] must be a 1-based integer Noll index")
+
+            def _validate_psf_basis(value, path_name):
+                if value is None:
+                    return
+                _require_type(value, dict, path_name)
+                for key, block in value.items():
+                    if key == 'segment_pistons':
+                        _validate_segment_selection_block(block, f"{path_name}.segment_pistons")
+                    elif key == 'segment_tiptilts':
+                        _validate_segment_selection_block(block, f"{path_name}.segment_tiptilts")
+                    elif key == 'segment_hexikes':
+                        _validate_segment_hexike_block(block, f"{path_name}.segment_hexikes")
+                    elif key == 'global_zernikes':
+                        _validate_global_mode_block(block, f"{path_name}.global_zernikes")
+                    else:
+                        raise ValueError(
+                            f"{path_name} contains unsupported PSF family '{key}'. Supported families are: segment_pistons, segment_tiptilts, segment_hexikes, global_zernikes"
+                        )
+
+            if 'psf_mode_selection' in publication:
+                raise ValueError(
+                    "modeling.fisher.publication.psf_mode_selection is not supported; use modeling.fisher.publication.psf_basis"
+                )
+
+            psf_basis = publication.get('psf_basis')
+            fit_psf_mode_selection = publication.get('fit_psf_mode_selection')
+            scan_psf_mode_selection = publication.get('scan_psf_mode_selection')
+
+            _validate_psf_basis(psf_basis, 'modeling.fisher.publication.psf_basis')
+            _validate_psf_basis(
+                fit_psf_mode_selection,
+                'modeling.fisher.publication.fit_psf_mode_selection',
+            )
+            _validate_psf_basis(
+                scan_psf_mode_selection,
+                'modeling.fisher.publication.scan_psf_mode_selection',
+            )
+
+            if (include_psf_nuisance or compute_psf_mode_scan) and psf_basis is None:
+                raise ValueError(
+                    'modeling.fisher.publication.psf_basis is required when PSF nuisance fitting or PSF mode scanning is enabled'
+                )
+
+            if compute_psf_mode_scan and scan_psf_mode_selection is None:
+                raise ValueError(
+                    'modeling.fisher.publication.scan_psf_mode_selection is required when compute_psf_mode_scan is true'
+                )
         return
 
     # Legacy methods share these required thresholds.

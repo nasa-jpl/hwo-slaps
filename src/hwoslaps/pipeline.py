@@ -171,7 +171,7 @@ class Pipeline:
             detection_data = mejiro_data
         elif detection_method == 'fisher':
             if self.verbose:
-                print("\nPerforming Fisher v1 detectability (local/map Asimov metrics)...")
+                print("\nPerforming Fisher detectability (local/map Asimov metrics)...")
             from .modeling.generator_fisher import perform_fisher_detection
             from .modeling.utils_fisher import print_fisher_summary
             fisher_data = perform_fisher_detection(

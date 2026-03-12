@@ -1,4 +1,14 @@
-"""Orchestration wrapper for Fisher v1 detectability evaluation."""
+"""Orchestration wrapper for Fisher detectability evaluation.
+
+This module now supports two detector backends:
+
+- ``version='v1'``: the historical hard-coded prototype.
+- ``version='publication'``: the publication-grade Fisher / Asimov detector.
+
+The public pipeline interface is unchanged.
+"""
+
+from __future__ import annotations
 
 from copy import deepcopy
 from typing import Optional, Dict
@@ -7,7 +17,11 @@ from ..lensing.utils import LensingData
 from ..observation.utils import ObservationData
 from ..psf.utils import PSFData
 from .fisher_detector import FisherDetector
+from .fisher_publication_detector import PublicationFisherDetector
 from .utils_fisher import FisherDetectionData
+
+
+_DEF_VERSION = "publication"
 
 
 def perform_fisher_detection(
@@ -19,23 +33,23 @@ def perform_fisher_detection(
     detection_config: Optional[Dict] = None,
     full_config: Optional[Dict] = None,
 ) -> FisherDetectionData:
-    """Run Fisher v1 detectability with local/map modes.
+    """Run Fisher detectability with local / map modes.
 
     Parameters
     ----------
-    observation_baseline : ObservationData
+    observation_baseline
         Baseline observation (no subhalo).
-    observation_test : ObservationData
+    observation_test
         Test observation (with injected subhalo).
-    lensing_baseline : LensingData
+    lensing_baseline
         Baseline lensing data used for nuisance linearization.
-    lensing_test : LensingData
+    lensing_test
         Test lensing data providing subhalo truth metadata.
-    psf_data : PSFData
+    psf_data
         PSF system object shared by baseline and test observations.
-    detection_config : dict, optional
-        Full `modeling` config section containing the nested `fisher` block.
-    full_config : dict, optional
+    detection_config
+        Full ``modeling`` config section containing the nested ``fisher`` block.
+    full_config
         Full pipeline config for provenance.
     """
     if detection_config is None:
@@ -50,7 +64,12 @@ def perform_fisher_detection(
     if mode not in {"local", "map", "both"}:
         raise ValueError("modeling.fisher.mode must be one of: local, map, both")
 
-    detector = FisherDetector(
+    version = str(fisher_cfg.get("version", _DEF_VERSION)).lower()
+    if version not in {"v1", "publication"}:
+        raise ValueError("modeling.fisher.version must be one of: v1, publication")
+
+    detector_cls = FisherDetector if version == "v1" else PublicationFisherDetector
+    detector = detector_cls(
         observation_baseline=observation_baseline,
         lensing_baseline=lensing_baseline,
         psf_data=psf_data,
@@ -68,6 +87,8 @@ def perform_fisher_detection(
     if mode in {"map", "both"}:
         map_data = detector.compute_map()
 
+    publication_cfg = deepcopy(fisher_cfg.get("publication")) if version == "publication" else None
+
     return FisherDetectionData(
         mode=mode,
         local=local_data,
@@ -78,7 +99,19 @@ def perform_fisher_detection(
         map_config=deepcopy(fisher_cfg["map"]),
         pixels_unmasked=detector.pixels_unmasked,
         n_nuisance=detector.n_nuisance,
-        gram_condition_number=detector.gram_condition_number,
+        gram_condition_number=float(detector.gram_condition_number),
         pixel_scale=observation_baseline.pixel_scale,
         config=full_config,
+        version=version,
+        nuisance_names=list(getattr(detector, "nuisance_names", []) or []),
+        prior_precision_diagonal=list(
+            getattr(detector, "prior_precision_diagonal", []) or []
+        ),
+        n_psf_modes=int(getattr(detector, "n_psf_modes", 0)),
+        psf_mode_names=list(getattr(detector, "psf_mode_names", []) or []),
+        n_psf_fit_modes=int(getattr(detector, "n_psf_fit_modes", 0)),
+        n_psf_scan_modes=int(getattr(detector, "n_psf_scan_modes", 0)),
+        psf_fit_mode_names=list(getattr(detector, "psf_fit_mode_names", []) or []),
+        psf_scan_mode_names=list(getattr(detector, "psf_scan_mode_names", []) or []),
+        publication_config=publication_cfg,
     )

@@ -181,6 +181,7 @@ modeling:
   significance_levels: [1.349898e-3, 3.167124e-5, 2.866516e-7]  # 3σ, 4σ, 5σ p-values
   detection: 'fisher'     # 'gof' (chi-square), 'chernoff', 'mejiro' (paper-exact), or 'fisher'
   fisher:
+    version: publication          # publication | v1
     mode: both                    # local | map | both
     snr_threshold: 3.0
     include_background_offset: true
@@ -190,6 +191,43 @@ modeling:
       ell_comp: 1.0e-3
       source_intensity_frac: 1.0e-2
       source_reff_frac: 1.0e-2
+    publication:
+      mask_mode: source_snr       # source_snr | all_pixels
+      include_psf_nuisance: false
+      compute_psf_mode_scan: false
+      mode_scan_z_tolerance: 1.0
+      psf_mode_steps:
+        segment_pistons: 1.0      # nm OPD
+        segment_tiptilts: 0.1     # microradians
+        segment_hexikes: 1.0      # nm RMS
+        global_zernikes: 1.0      # nm RMS
+      # covariance_path: /absolute/path/to/noise_covariance.npy
+      # prior_sigmas:
+      #   lens.centre_y: 5.0e-3
+      #   lens.centre_x: 5.0e-3
+      #   lens.einstein_radius: 1.0e-2
+      #   source.centre_y: 5.0e-3
+      #   source.centre_x: 5.0e-3
+      # psf_mode_prior_sigmas:
+      #   segment_hexikes: 5.0
+      #   global_zernikes: 5.0
+      # psf_basis:
+      #   segment_pistons:
+      #     segments: all
+      #   segment_tiptilts:
+      #     segments: all
+      #   segment_hexikes:
+      #     segments: all
+      #     mode_nolls: [1, 2, 3]
+      #   global_zernikes:
+      #     mode_nolls: [4, 5, 6]
+      # fit_psf_mode_selection:
+      #   segment_hexikes:
+      #     segments: all
+      #     mode_nolls: [1, 2]
+      # scan_psf_mode_selection:
+      #   global_zernikes:
+      #     mode_nolls: [4, 5, 6]
     map:
       num_angles: 24
       offset_pixels: 0.0
