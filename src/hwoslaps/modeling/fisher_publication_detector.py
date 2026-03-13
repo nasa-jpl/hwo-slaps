@@ -31,12 +31,18 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import sys
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import autolens as al
+
+try:
+    from tqdm.auto import tqdm as _tqdm
+except ImportError:  # pragma: no cover - optional dependency
+    _tqdm = None
 
 from ..lensing import generate_lensing_system
 from ..lensing.utils import LensingData, get_einstein_ring_position
@@ -119,6 +125,7 @@ class PublicationFisherDetector:
         self.snr_threshold = float(self.fisher_config["snr_threshold"])
         self.finite_diff = deepcopy(self.fisher_config["finite_diff"])
         self.map_config = deepcopy(self.fisher_config["map"])
+        self.show_progress = self._progress_enabled()
 
         self.mask_mode = str(self.publication_config.get("mask_mode", "source_snr")).lower()
         self.include_psf_nuisance = bool(self.publication_config.get("include_psf_nuisance", False))
@@ -312,7 +319,14 @@ class PublicationFisherDetector:
     def compute_map(self) -> FisherMapData:
         """Compute a signal-bank detectability map over candidate positions."""
         positions_yx = self._candidate_positions()
-        subhalo_mean_images = [self._mean_adu_for_position(pos) for pos in positions_yx]
+        subhalo_mean_images = [
+            self._mean_adu_for_position(pos)
+            for pos in self._progress_iter(
+                positions_yx,
+                desc="Fisher map positions",
+                total=len(positions_yx),
+            )
+        ]
         result = evaluate_signal_bank_from_images(
             smooth_mean_image=self.mu0_adu_2d,
             subhalo_mean_images=subhalo_mean_images,
@@ -354,6 +368,63 @@ class PublicationFisherDetector:
     # ------------------------------------------------------------------
     # Forward-model runtime helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _progress_enabled() -> bool:
+        if _tqdm is None:
+            return False
+        disable_env = os.environ.get("HWOSLAPS_DISABLE_TQDM", "").strip().lower()
+        if disable_env in {"1", "true", "yes", "on"}:
+            return False
+        stream = sys.stderr
+        isatty = getattr(stream, "isatty", None)
+        if callable(isatty):
+            try:
+                return bool(isatty())
+            except Exception:
+                return False
+        wrapped_streams = getattr(stream, "_streams", ())
+        for wrapped in wrapped_streams:
+            wrapped_isatty = getattr(wrapped, "isatty", None)
+            if callable(wrapped_isatty):
+                try:
+                    if wrapped_isatty():
+                        return True
+                except Exception:
+                    continue
+        return False
+
+    def _progress_iter(
+        self,
+        iterable: Iterable[Any],
+        *,
+        desc: str,
+        total: Optional[int] = None,
+    ) -> Iterable[Any]:
+        if not self.show_progress:
+            return iterable
+        return _tqdm(
+            iterable,
+            desc=desc,
+            total=total,
+            dynamic_ncols=True,
+            leave=False,
+            mininterval=0.2,
+        )
+
+    def _progress_wrapper(
+        self,
+        *,
+        desc: str,
+        total: Optional[int] = None,
+    ):
+        if not self.show_progress:
+            return None
+
+        def _wrap(iterable: Iterable[int]) -> Iterable[int]:
+            return self._progress_iter(iterable, desc=desc, total=total)
+
+        return _wrap
 
     def _candidate_positions(self) -> List[Tuple[float, float]]:
         """Build map candidate positions using explicit list or ring sampling."""
@@ -757,7 +828,14 @@ class PublicationFisherDetector:
             )
 
     def _build_psf_mode_images(self, specs: Sequence[_PsfModeSpec]) -> List[np.ndarray]:
-        return [self._psf_derivative_image(spec) for spec in specs]
+        return [
+            self._psf_derivative_image(spec)
+            for spec in self._progress_iter(
+                specs,
+                desc="Fisher PSF derivatives",
+                total=len(specs),
+            )
+        ]
 
     def _build_science_psf_config_template(self) -> Dict[str, Any]:
         config = deepcopy(self.full_config)
@@ -824,6 +902,10 @@ class PublicationFisherDetector:
             z_tolerance=self.mode_scan_z_tolerance,
             systematic_covariance=syst_cov,
             covariance=self.full_covariance,
+            progress=self._progress_wrapper(
+                desc="Fisher mode scan",
+                total=len(self.scan_psf_mode_images),
+            ),
         )
 
         couplings: List[FisherModeCouplingData] = []

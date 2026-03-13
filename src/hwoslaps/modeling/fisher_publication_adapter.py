@@ -8,7 +8,7 @@ models.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -229,6 +229,7 @@ def scan_systematic_modes_from_images(
     z_tolerance: Optional[float] = 1.0,
     systematic_covariance: Optional[np.ndarray] = None,
     covariance: Optional[np.ndarray] = None,
+    progress: Optional[Callable[[Iterable[int]], Iterable[int]]] = None,
 ) -> SystematicModeScanResult:
     """Mode-by-mode PSF/systematics scan working directly on 2D images."""
     smooth = np.asarray(smooth_mean_image, dtype=float)
@@ -263,6 +264,7 @@ def scan_systematic_modes_from_images(
         mode_sigmas=mode_sigmas,
         z_tolerance=z_tolerance,
         systematic_covariance=systematic_covariance,
+        progress=progress,
     )
 
 

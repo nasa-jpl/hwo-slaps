@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
-from typing import Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from scipy.stats import norm
@@ -596,6 +596,7 @@ class ProfileLikelihoodWorkspace:
         mode_sigmas: Optional[ArrayLike] = None,
         z_tolerance: Optional[float] = 1.0,
         systematic_covariance: Optional[MatrixLike] = None,
+        progress: Optional[Callable[[Iterable[int]], Iterable[int]]] = None,
     ) -> SystematicModeScanResult:
         """Scan a basis of systematic modes for spurious subhalo coupling.
 
@@ -669,7 +670,10 @@ class ProfileLikelihoodWorkspace:
             )
 
         amp_per_unit = np.empty(n_modes, dtype=float)
-        for idx in range(n_modes):
+        mode_indices: Iterable[int] = range(n_modes)
+        if progress is not None:
+            mode_indices = progress(mode_indices)
+        for idx in mode_indices:
             amp_per_unit[idx] = self.spurious_from_bias(signal, modes[:, idx]).amplitude_spurious
         z_per_unit = np.abs(amp_per_unit) / sigma_amp
 
@@ -866,6 +870,7 @@ def scan_systematic_modes(
     mode_sigmas: Optional[ArrayLike] = None,
     z_tolerance: Optional[float] = 1.0,
     systematic_covariance: Optional[MatrixLike] = None,
+    progress: Optional[Callable[[Iterable[int]], Iterable[int]]] = None,
     rcond: float = 1.0e-12,
 ) -> SystematicModeScanResult:
     """Convenience wrapper for systematic mode scans on unwhitened arrays."""
@@ -889,6 +894,7 @@ def scan_systematic_modes(
         mode_sigmas=mode_sigmas,
         z_tolerance=z_tolerance,
         systematic_covariance=systematic_covariance,
+        progress=progress,
     )
 
 
