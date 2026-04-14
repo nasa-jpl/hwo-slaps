@@ -11,6 +11,8 @@ The public pipeline interface is unchanged.
 from __future__ import annotations
 
 from copy import deepcopy
+import os
+from time import perf_counter
 from typing import Optional, Dict
 
 from ..lensing.utils import LensingData
@@ -22,6 +24,16 @@ from .utils_fisher import FisherDetectionData
 
 
 _DEF_VERSION = "publication"
+
+
+def _fisher_timing_enabled() -> bool:
+    disable_env = os.environ.get("HWOSLAPS_DISABLE_FISHER_TIMING", "").strip().lower()
+    return disable_env not in {"1", "true", "yes", "on"}
+
+
+def _log_fisher_timing(label: str, elapsed_s: float) -> None:
+    if _fisher_timing_enabled():
+        print(f"[Fisher] timing: {label} finished in {elapsed_s:.2f} s")
 
 
 def perform_fisher_detection(
@@ -69,6 +81,7 @@ def perform_fisher_detection(
         raise ValueError("modeling.fisher.version must be one of: v1, publication")
 
     detector_cls = FisherDetector if version == "v1" else PublicationFisherDetector
+    start = perf_counter()
     detector = detector_cls(
         observation_baseline=observation_baseline,
         lensing_baseline=lensing_baseline,
@@ -76,16 +89,21 @@ def perform_fisher_detection(
         full_config=full_config,
         fisher_config=fisher_cfg,
     )
+    _log_fisher_timing("detector initialization", perf_counter() - start)
 
     local_data = None
     map_data = None
     if mode in {"local", "both"}:
+        start = perf_counter()
         local_data = detector.compute_local(
             observation_test=observation_test,
             lensing_test=lensing_test,
         )
+        _log_fisher_timing("top-level local computation", perf_counter() - start)
     if mode in {"map", "both"}:
+        start = perf_counter()
         map_data = detector.compute_map()
+        _log_fisher_timing("top-level map computation", perf_counter() - start)
 
     publication_cfg = deepcopy(fisher_cfg.get("publication")) if version == "publication" else None
 

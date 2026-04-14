@@ -32,6 +32,7 @@ import contextlib
 import io
 import os
 import sys
+from time import perf_counter
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -126,6 +127,7 @@ class PublicationFisherDetector:
         self.finite_diff = deepcopy(self.fisher_config["finite_diff"])
         self.map_config = deepcopy(self.fisher_config["map"])
         self.show_progress = self._progress_enabled()
+        self.show_timing = self._timing_enabled()
 
         self.mask_mode = str(self.publication_config.get("mask_mode", "source_snr")).lower()
         self.include_psf_nuisance = bool(self.publication_config.get("include_psf_nuisance", False))
@@ -182,6 +184,7 @@ class PublicationFisherDetector:
             "type": "direct",
             "centre": [0.0, 0.0],
         }
+        self._candidate_positions_cache: Optional[List[Tuple[float, float]]] = None
 
         self.science_psf_config_template = self._build_science_psf_config_template()
 
@@ -195,7 +198,7 @@ class PublicationFisherDetector:
             raise ValueError("Degenerate Fisher mask: no pixels selected for analysis.")
 
         self.scalar_nuisance_specs = self._build_scalar_nuisance_specs()
-        self.scalar_nuisance_images = self._build_scalar_nuisance_images()
+        self.n_scalar_nuisances = len(self.scalar_nuisance_specs)
 
         self.instrument_psf_mode_specs = self._build_psf_mode_specs_from_selection(
             self.psf_basis_config,
@@ -208,8 +211,33 @@ class PublicationFisherDetector:
         self.scan_psf_mode_specs = self._resolve_scan_psf_mode_specs()
         self._validate_psf_mode_spec_sets()
 
-        self.fit_psf_mode_images = self._build_psf_mode_images(self.fit_psf_mode_specs)
-        self.scan_psf_mode_images = self._build_psf_mode_images(self.scan_psf_mode_specs)
+        self.n_psf_fit_modes = len(self.fit_psf_mode_specs)
+        self.n_psf_scan_modes = len(self.scan_psf_mode_specs)
+        self.n_map_positions = len(self._candidate_positions())
+        self._log_modeling_summary()
+
+        self.scalar_nuisance_images = self._timed_call(
+            "scalar nuisance derivatives",
+            self._build_scalar_nuisance_images,
+            count=self.n_scalar_nuisances,
+            unit="direction",
+        )
+        self.fit_psf_mode_images = self._timed_call(
+            "PSF fit derivatives",
+            self._build_psf_mode_images,
+            self.fit_psf_mode_specs,
+            desc="Fisher PSF fit derivatives",
+            count=self.n_psf_fit_modes,
+            unit="mode",
+        )
+        self.scan_psf_mode_images = self._timed_call(
+            "PSF scan derivatives",
+            self._build_psf_mode_images,
+            self.scan_psf_mode_specs,
+            desc="Fisher PSF scan derivatives",
+            count=self.n_psf_scan_modes,
+            unit="mode",
+        )
 
         self.nuisance_names: List[str] = [spec.name for spec in self.scalar_nuisance_specs]
         self.nuisance_images: List[np.ndarray] = list(self.scalar_nuisance_images)
@@ -228,8 +256,6 @@ class PublicationFisherDetector:
         self.n_psf_modes = len(self.fit_psf_mode_specs)
         self.psf_mode_names = [spec.name for spec in self.fit_psf_mode_specs]
         self.psf_mode_sigmas = [spec.prior_sigma for spec in self.fit_psf_mode_specs]
-        self.n_psf_fit_modes = len(self.fit_psf_mode_specs)
-        self.n_psf_scan_modes = len(self.scan_psf_mode_specs)
         self.psf_fit_mode_names = [spec.name for spec in self.fit_psf_mode_specs]
         self.psf_scan_mode_names = [spec.name for spec in self.scan_psf_mode_specs]
         self.psf_scan_mode_sigmas = [spec.prior_sigma for spec in self.scan_psf_mode_specs]
@@ -274,7 +300,9 @@ class PublicationFisherDetector:
     ) -> FisherLocalData:
         """Compute local profiled Asimov detectability at the injected position."""
         mu1_adu_2d = self._mean_adu_from_observation(observation_test)
-        result = compute_asimov_from_images(
+        result = self._timed_call(
+            "local Asimov evaluation",
+            compute_asimov_from_images,
             smooth_mean_image=self.mu0_adu_2d,
             subhalo_mean_image=mu1_adu_2d,
             sigma_image=None if self.masked_covariance is not None else self.sigma_adu_2d,
@@ -319,15 +347,24 @@ class PublicationFisherDetector:
     def compute_map(self) -> FisherMapData:
         """Compute a signal-bank detectability map over candidate positions."""
         positions_yx = self._candidate_positions()
+        build_start = perf_counter()
         subhalo_mean_images = [
             self._mean_adu_for_position(pos)
             for pos in self._progress_iter(
                 positions_yx,
-                desc="Fisher map positions",
+                desc="Fisher map templates",
                 total=len(positions_yx),
             )
         ]
-        result = evaluate_signal_bank_from_images(
+        self._log_timing(
+            "map template generation",
+            perf_counter() - build_start,
+            count=len(positions_yx),
+            unit="position",
+        )
+        result = self._timed_call(
+            "map bank evaluation",
+            evaluate_signal_bank_from_images,
             smooth_mean_image=self.mu0_adu_2d,
             subhalo_mean_images=subhalo_mean_images,
             sigma_image=None if self.masked_covariance is not None else self.sigma_adu_2d,
@@ -394,6 +431,61 @@ class PublicationFisherDetector:
                     continue
         return False
 
+    @staticmethod
+    def _timing_enabled() -> bool:
+        disable_env = os.environ.get("HWOSLAPS_DISABLE_FISHER_TIMING", "").strip().lower()
+        return disable_env not in {"1", "true", "yes", "on"}
+
+    def _timed_call(
+        self,
+        label: str,
+        func,
+        *args,
+        count: Optional[int] = None,
+        unit: str = "item",
+        **kwargs,
+    ):
+        if not self.show_timing:
+            return func(*args, **kwargs)
+        start = perf_counter()
+        result = func(*args, **kwargs)
+        self._log_timing(label, perf_counter() - start, count=count, unit=unit)
+        return result
+
+    def _log_modeling_summary(self) -> None:
+        if not self.show_timing:
+            return
+        print(
+            "[Fisher] modeling summary: "
+            f"pixels={self.pixels_unmasked}, "
+            f"scalar_nuisances={self.n_scalar_nuisances}, "
+            f"psf_fit_modes={self.n_psf_fit_modes}, "
+            f"psf_scan_modes={self.n_psf_scan_modes}, "
+            f"map_positions={self.n_map_positions}"
+        )
+
+    def _log_timing(
+        self,
+        label: str,
+        elapsed_s: float,
+        *,
+        count: Optional[int] = None,
+        unit: str = "item",
+    ) -> None:
+        if not self.show_timing:
+            return
+        message = f"[Fisher] timing: {label} finished in {elapsed_s:.2f} s"
+        if count is not None:
+            if count <= 0:
+                message += f" ({count} {unit}s)"
+            else:
+                rate = count / elapsed_s if elapsed_s > 0.0 else float('inf')
+                sec_per = elapsed_s / count
+                message += (
+                    f" ({count} {unit}s, {rate:.3f} {unit}/s, {sec_per:.3f} s/{unit})"
+                )
+        print(message)
+
     def _progress_iter(
         self,
         iterable: Iterable[Any],
@@ -428,9 +520,15 @@ class PublicationFisherDetector:
 
     def _candidate_positions(self) -> List[Tuple[float, float]]:
         """Build map candidate positions using explicit list or ring sampling."""
+        if self._candidate_positions_cache is not None:
+            return list(self._candidate_positions_cache)
+
         explicit = self.map_config.get("explicit_positions_yx")
         if explicit:
-            return [tuple(float(v) for v in pair) for pair in explicit]
+            self._candidate_positions_cache = [
+                tuple(float(v) for v in pair) for pair in explicit
+            ]
+            return list(self._candidate_positions_cache)
 
         num_angles = int(self.map_config["num_angles"])
         offset_pixels = float(self.map_config["offset_pixels"])
@@ -447,7 +545,8 @@ class PublicationFisherDetector:
                     pixel_scale=pixel_scale,
                 )
             )
-        return positions
+        self._candidate_positions_cache = positions
+        return list(self._candidate_positions_cache)
 
     def _mean_adu_for_position(self, position_yx: Tuple[float, float]) -> np.ndarray:
         """Generate mean ADU image for a specific direct subhalo position."""
@@ -638,7 +737,11 @@ class PublicationFisherDetector:
 
     def _build_scalar_nuisance_images(self) -> List[np.ndarray]:
         images: List[np.ndarray] = []
-        for spec in self.scalar_nuisance_specs:
+        for spec in self._progress_iter(
+            self.scalar_nuisance_specs,
+            desc="Fisher scalar nuisances",
+            total=len(self.scalar_nuisance_specs),
+        ):
             if spec.path is None:
                 images.append(np.ones_like(self.mu0_adu_2d, dtype=float))
                 continue
@@ -827,12 +930,17 @@ class PublicationFisherDetector:
                 f"{overlap}"
             )
 
-    def _build_psf_mode_images(self, specs: Sequence[_PsfModeSpec]) -> List[np.ndarray]:
+    def _build_psf_mode_images(
+        self,
+        specs: Sequence[_PsfModeSpec],
+        *,
+        desc: str,
+    ) -> List[np.ndarray]:
         return [
             self._psf_derivative_image(spec)
             for spec in self._progress_iter(
                 specs,
-                desc="Fisher PSF derivatives",
+                desc=desc,
                 total=len(specs),
             )
         ]
@@ -889,7 +997,9 @@ class PublicationFisherDetector:
             sigmas_arr = np.asarray(self.psf_scan_mode_sigmas, dtype=float)
             syst_cov = np.diag(sigmas_arr * sigmas_arr)
 
-        scan = scan_systematic_modes_from_images(
+        scan = self._timed_call(
+            "local mode scan",
+            scan_systematic_modes_from_images,
             smooth_mean_image=self.mu0_adu_2d,
             subhalo_mean_image=mu1_adu_2d,
             systematic_mode_images=self.scan_psf_mode_images,
@@ -906,6 +1016,8 @@ class PublicationFisherDetector:
                 desc="Fisher mode scan",
                 total=len(self.scan_psf_mode_images),
             ),
+            count=len(self.scan_psf_mode_images),
+            unit="mode",
         )
 
         couplings: List[FisherModeCouplingData] = []
