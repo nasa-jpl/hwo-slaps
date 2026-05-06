@@ -14,7 +14,7 @@ The package has four active modules:
 1. `lensing`: galaxy-galaxy strong-lensing scenes with optional subhalos.
 2. `psf`: segmented-aperture HWO-style PSFs with controlled aberrations.
 3. `observation`: PSF convolution and detector-noise simulation.
-4. `modeling`: publication-grade Fisher/Asimov subhalo detectability.
+4. `modeling`: Fisher / Asimov subhalo detectability.
 
 The missing study layer is intentional next work: canonical study configs, sweep manifests, aggregation, and publication figures.
 

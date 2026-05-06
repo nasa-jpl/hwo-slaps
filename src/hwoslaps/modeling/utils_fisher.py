@@ -1,9 +1,6 @@
 """Utility classes and summary helpers for Fisher-based detectability.
 
-This module defines result containers for both the legacy Fisher v1 detector and
-for the publication-grade Fisher/Asimov detector.  The publication path keeps
-backward-compatible field names (for existing plots and pipeline routing) while
-adding the statistically meaningful quantities needed for a paper:
+This module defines result containers for the Fisher / Asimov detector:
 
 - profiled Fisher information on a subhalo-template amplitude,
 - Asimov / expected local significance,
@@ -59,11 +56,7 @@ class FisherModeScanData:
 
 @dataclass
 class FisherLocalData:
-    """Single-position Fisher detectability output.
-
-    The first block of fields is kept compatible with the legacy v1 detector.
-    Additional optional fields expose the publication-grade quantities.
-    """
+    """Single-position Fisher detectability output."""
 
     snr_asimov: float
     delta_chi2_raw: float
@@ -76,7 +69,7 @@ class FisherLocalData:
     true_subhalo_mass: Optional[float] = None
     true_subhalo_model: Optional[str] = None
 
-    # Publication-grade amplitude-test bookkeeping.
+    # Fisher / Asimov amplitude-test bookkeeping.
     fisher_raw: Optional[float] = None
     fisher_profiled: Optional[float] = None
     sigma_amplitude_raw: Optional[float] = None
@@ -107,7 +100,7 @@ class FisherMapData:
     min_snr_asimov: float
     max_snr_asimov: float
 
-    # Publication-grade vector outputs.
+    # Fisher / Asimov vector outputs.
     fisher_raw_by_position: Optional[np.ndarray] = None
     fisher_profiled_by_position: Optional[np.ndarray] = None
     q_asimov_local_by_position: Optional[np.ndarray] = None
@@ -135,8 +128,7 @@ class FisherDetectionData:
     config: Optional[Dict] = None
     generation_timestamp: Optional[str] = None
 
-    # Publication / provenance extras.
-    version: str = "v1"
+    # Provenance extras.
     nuisance_names: Optional[List[str]] = None
     prior_precision_diagonal: Optional[List[float]] = None
     n_psf_modes: int = 0
@@ -145,7 +137,6 @@ class FisherDetectionData:
     n_psf_scan_modes: int = 0
     psf_fit_mode_names: Optional[List[str]] = None
     psf_scan_mode_names: Optional[List[str]] = None
-    publication_config: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         if self.generation_timestamp is None:
@@ -189,16 +180,9 @@ def _format_mode_scan(mode_scan: FisherModeScanData, max_modes: int = 5) -> List
 
 
 def print_fisher_summary(fisher_data: FisherDetectionData) -> None:
-    """Print concise summary for Fisher detectability.
-
-    The function is intentionally backward-compatible with v1 output while also
-    surfacing the publication-grade amplitude / mode-scan quantities when they
-    are present.
-    """
-    version = getattr(fisher_data, "version", "v1")
+    """Print concise summary for Fisher detectability."""
     print("Fisher Detectability Summary:")
     print("-" * 32)
-    print(f"Version: {version}")
     print(f"Mode: {fisher_data.mode}")
     print(f"Pixels analyzed: {fisher_data.pixels_unmasked}")
     print(f"Nuisance directions: {fisher_data.n_nuisance}")

@@ -85,7 +85,6 @@ def _make_local_detection_data(with_psf_scan: bool = False) -> FisherDetectionDa
         n_nuisance=4,
         gram_condition_number=15.0,
         pixel_scale=0.1,
-        version="publication",
     )
 
 
@@ -119,7 +118,6 @@ def _make_map_detection_data() -> FisherDetectionData:
         n_nuisance=5,
         gram_condition_number=22.0,
         pixel_scale=0.1,
-        version="publication",
     )
 
 

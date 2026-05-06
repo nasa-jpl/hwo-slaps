@@ -136,23 +136,17 @@ def test_pipeline_routes_detection_to_fisher(monkeypatch):
     assert call_counts["fisher"] == 1
 
 
-def test_generator_defaults_to_publication_backend(monkeypatch):
+def test_generator_uses_fisher_detector(monkeypatch):
     import hwoslaps.modeling.generator_fisher as fisher_generator
 
     calls = []
 
-    class _PublicationDetector(_make_detector_stub("publication")):
+    class _Detector(_make_detector_stub("fisher")):
         def __init__(self, *args, **kwargs):
-            calls.append("publication")
+            calls.append("fisher")
             super().__init__(*args, **kwargs)
 
-    class _V1Detector(_make_detector_stub("v1")):
-        def __init__(self, *args, **kwargs):
-            calls.append("v1")
-            super().__init__(*args, **kwargs)
-
-    monkeypatch.setattr(fisher_generator, "PublicationFisherDetector", _PublicationDetector)
-    monkeypatch.setattr(fisher_generator, "FisherDetector", _V1Detector)
+    monkeypatch.setattr(fisher_generator, "FisherDetector", _Detector)
 
     result = fisher_generator.perform_fisher_detection(
         observation_baseline=SimpleNamespace(pixel_scale=0.1),
@@ -164,39 +158,5 @@ def test_generator_defaults_to_publication_backend(monkeypatch):
         full_config={"run_name": "unit"},
     )
 
-    assert calls == ["publication"]
-    assert result.version == "publication"
-
-
-def test_generator_respects_explicit_v1_backend(monkeypatch):
-    import hwoslaps.modeling.generator_fisher as fisher_generator
-
-    calls = []
-
-    class _PublicationDetector(_make_detector_stub("publication")):
-        def __init__(self, *args, **kwargs):
-            calls.append("publication")
-            super().__init__(*args, **kwargs)
-
-    class _V1Detector(_make_detector_stub("v1")):
-        def __init__(self, *args, **kwargs):
-            calls.append("v1")
-            super().__init__(*args, **kwargs)
-
-    monkeypatch.setattr(fisher_generator, "PublicationFisherDetector", _PublicationDetector)
-    monkeypatch.setattr(fisher_generator, "FisherDetector", _V1Detector)
-
-    fisher_config = _make_fisher_config_with_required_fields()
-    fisher_config["version"] = "v1"
-    result = fisher_generator.perform_fisher_detection(
-        observation_baseline=SimpleNamespace(pixel_scale=0.1),
-        observation_test=SimpleNamespace(),
-        lensing_baseline=SimpleNamespace(),
-        lensing_test=SimpleNamespace(),
-        psf_data=SimpleNamespace(),
-        detection_config={"fisher": fisher_config},
-        full_config={"run_name": "unit"},
-    )
-
-    assert calls == ["v1"]
-    assert result.version == "v1"
+    assert calls == ["fisher"]
+    assert result.mode == "local"

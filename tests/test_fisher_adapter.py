@@ -1,4 +1,4 @@
-"""Tests for the image-space adapters around the publication Fisher core."""
+"""Tests for the image-space adapters around the Fisher core."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CORE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_publication_core.py"
-ADAPTER_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_publication_adapter.py"
-TEST_PACKAGE = "hwoslaps_publication_adapter_testpkg"
+CORE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_core.py"
+ADAPTER_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_adapter.py"
+TEST_PACKAGE = "hwoslaps_fisher_adapter_testpkg"
 
 # Load core first so relative imports in the adapter resolve cleanly when imported by path.
 import sys
@@ -27,7 +27,7 @@ modeling_pkg = sys.modules.setdefault(modeling_pkg_name, types.ModuleType(modeli
 modeling_pkg.__path__ = []
 
 core_spec = importlib.util.spec_from_file_location(
-    f"{modeling_pkg_name}.fisher_publication_core",
+    f"{modeling_pkg_name}.fisher_core",
     CORE_PATH,
 )
 core_module = importlib.util.module_from_spec(core_spec)
@@ -35,7 +35,7 @@ sys.modules[core_spec.name] = core_module
 core_spec.loader.exec_module(core_module)
 
 adapter_spec = importlib.util.spec_from_file_location(
-    f"{modeling_pkg_name}.fisher_publication_adapter",
+    f"{modeling_pkg_name}.fisher_adapter",
     ADAPTER_PATH,
 )
 adapter_module = importlib.util.module_from_spec(adapter_spec)

@@ -1,7 +1,7 @@
-"""Runtime smoke tests for the publication Fisher detector.
+"""Runtime smoke tests for the Fisher detector.
 
 These tests use the real AutoLens + HCIPy stack with a deliberately tiny
-configuration to ensure the integrated publication backend executes end to end.
+configuration to ensure the integrated detector executes end to end.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from hwoslaps.lensing import generate_lensing_system
-from hwoslaps.modeling.fisher_publication_detector import PublicationFisherDetector
+from hwoslaps.modeling.fisher_detector import FisherDetector
 from hwoslaps.observation import generate_observation
 from hwoslaps.psf.generator import generate_psf_system
 
@@ -37,7 +37,7 @@ def _load_master_config() -> dict:
 
 def _build_runtime_config(tmp_dir: Path) -> dict:
     config = _load_master_config()
-    config["run_name"] = "publication_runtime_test"
+    config["run_name"] = "fisher_runtime_test"
     config["plotting"]["enabled"] = False
     config["plotting"]["output_dir"] = str(tmp_dir)
 
@@ -77,7 +77,6 @@ def _build_runtime_config(tmp_dir: Path) -> dict:
     config["observation"]["detector"]["sky_background"] = 0.5
 
     config["modeling"]["detection"] = "fisher"
-    config["modeling"]["fisher"]["version"] = "publication"
     config["modeling"]["fisher"]["snr_threshold"] = 3.0
     config["modeling"]["fisher"]["mode"] = "local"
     config["modeling"]["fisher"]["map"] = {
@@ -85,17 +84,15 @@ def _build_runtime_config(tmp_dir: Path) -> dict:
         "offset_pixels": 0.0,
         "explicit_positions_yx": [[0.2, -0.1], [0.0, 0.3]],
     }
-    config["modeling"]["fisher"]["publication"] = {
-        "mask_mode": "all_pixels",
-        "include_psf_nuisance": False,
-        "compute_psf_mode_scan": False,
-    }
+    config["modeling"]["fisher"]["mask_mode"] = "all_pixels"
+    config["modeling"]["fisher"]["include_psf_nuisance"] = False
+    config["modeling"]["fisher"]["compute_psf_mode_scan"] = False
     return config
 
 
 @pytest.fixture(scope="module")
 def runtime_setup(tmp_path_factory):
-    tmp_dir = tmp_path_factory.mktemp("publication-runtime")
+    tmp_dir = tmp_path_factory.mktemp("fisher-runtime")
     os.environ["NUMBA_CACHE_DIR"] = str(tmp_dir / "numba-cache")
     os.environ["MPLCONFIGDIR"] = str(tmp_dir / "mplconfig")
     os.environ["XDG_CACHE_HOME"] = str(tmp_dir / "xdg-cache")
@@ -133,13 +130,13 @@ def runtime_setup(tmp_path_factory):
     }
 
 
-def _make_detector(runtime_setup, *, mode: str, publication_overrides: dict | None = None):
+def _make_detector(runtime_setup, *, mode: str, fisher_overrides: dict | None = None):
     config = copy.deepcopy(runtime_setup["config"])
     fisher_config = copy.deepcopy(config["modeling"]["fisher"])
     fisher_config["mode"] = mode
-    if publication_overrides:
-        fisher_config["publication"].update(publication_overrides)
-    return PublicationFisherDetector(
+    if fisher_overrides:
+        fisher_config.update(fisher_overrides)
+    return FisherDetector(
         observation_baseline=runtime_setup["observation_baseline"],
         lensing_baseline=runtime_setup["lensing_baseline"],
         psf_data=runtime_setup["psf_data"],
@@ -148,7 +145,7 @@ def _make_detector(runtime_setup, *, mode: str, publication_overrides: dict | No
     )
 
 
-def test_publication_detector_runtime_local_executes(runtime_setup):
+def test_fisher_detector_runtime_local_executes(runtime_setup):
     detector = _make_detector(runtime_setup, mode="local")
     local = detector.compute_local(
         observation_test=runtime_setup["observation_test"],
@@ -162,7 +159,7 @@ def test_publication_detector_runtime_local_executes(runtime_setup):
     assert local.psf_mode_scan is None
 
 
-def test_publication_detector_runtime_map_executes(runtime_setup):
+def test_fisher_detector_runtime_map_executes(runtime_setup):
     detector = _make_detector(runtime_setup, mode="map")
     result = detector.compute_map()
 
@@ -172,11 +169,11 @@ def test_publication_detector_runtime_map_executes(runtime_setup):
     assert np.all(np.isfinite(result.delta_chi2_profiled_by_position))
 
 
-def test_publication_detector_runtime_psf_fit_executes(runtime_setup):
+def test_fisher_detector_runtime_psf_fit_executes(runtime_setup):
     detector = _make_detector(
         runtime_setup,
         mode="local",
-        publication_overrides={
+        fisher_overrides={
             "include_psf_nuisance": True,
             "psf_basis": {"global_zernikes": {"mode_nolls": [4]}},
             "fit_psf_mode_selection": {"global_zernikes": {"mode_nolls": [4]}},
@@ -194,11 +191,11 @@ def test_publication_detector_runtime_psf_fit_executes(runtime_setup):
     assert local.psf_mode_scan is None
 
 
-def test_publication_detector_runtime_psf_scan_executes(runtime_setup):
+def test_fisher_detector_runtime_psf_scan_executes(runtime_setup):
     detector = _make_detector(
         runtime_setup,
         mode="local",
-        publication_overrides={
+        fisher_overrides={
             "compute_psf_mode_scan": True,
             "psf_basis": {"global_zernikes": {"mode_nolls": [4]}},
             "scan_psf_mode_selection": {"global_zernikes": {"mode_nolls": [4]}},
@@ -220,7 +217,7 @@ def test_publication_detector_runtime_psf_scan_executes(runtime_setup):
     assert np.isfinite(coupling.one_sigma_z)
 
 
-def test_publication_detector_runtime_psf_scan_executes_with_signed_derivative_kernel(runtime_setup):
+def test_fisher_detector_runtime_psf_scan_executes_with_signed_derivative_kernel(runtime_setup):
     config = copy.deepcopy(runtime_setup["config"])
     aberr = config["psf"]["aberrations"]
     aberr["enable_segment_hexikes"] = True
@@ -254,17 +251,15 @@ def test_publication_detector_runtime_psf_scan_executes_with_signed_derivative_k
     )
 
     fisher_config = copy.deepcopy(config["modeling"]["fisher"])
-    fisher_config["publication"].update(
-        {
-            "compute_psf_mode_scan": True,
-            "include_psf_nuisance": False,
-            "psf_basis": {"global_zernikes": {"mode_nolls": [4]}},
-            "scan_psf_mode_selection": {"global_zernikes": {"mode_nolls": [4]}},
-            "psf_mode_prior_sigmas": {"global_zernikes": 5.0},
-        }
-    )
+    fisher_config.update({
+        "compute_psf_mode_scan": True,
+        "include_psf_nuisance": False,
+        "psf_basis": {"global_zernikes": {"mode_nolls": [4]}},
+        "scan_psf_mode_selection": {"global_zernikes": {"mode_nolls": [4]}},
+        "psf_mode_prior_sigmas": {"global_zernikes": 5.0},
+    })
 
-    detector = PublicationFisherDetector(
+    detector = FisherDetector(
         observation_baseline=observation_baseline,
         lensing_baseline=lensing_baseline,
         psf_data=psf_data,

@@ -41,7 +41,7 @@ def _angle_from_positions(positions_yx: np.ndarray) -> np.ndarray:
 @plot_function(
     module="detection",
     detection_mode_only=True,
-    description="Compact local Fisher summary panel for publication/local runs",
+    description="Compact local Fisher summary panel for local runs",
 )
 def plot_fisher_local_summary(
     detection_data: FisherDetectionData,
@@ -63,7 +63,6 @@ def plot_fisher_local_summary(
     ax.axis("off")
 
     rows = [
-        ("Version", detection_data.version),
         ("Mode", detection_data.mode),
         ("Pixels analyzed", f"{detection_data.pixels_unmasked}"),
         ("Nuisance directions", f"{detection_data.n_nuisance}"),
@@ -139,14 +138,14 @@ def plot_fisher_local_summary(
 @plot_function(
     module="detection",
     detection_mode_only=True,
-    description="PSF/systematic mode scan bar chart for publication Fisher runs",
+    description="PSF/systematic mode scan bar chart for Fisher runs",
 )
 def plot_fisher_psf_mode_scan(
     detection_data: FisherDetectionData,
     plot_config: Dict[str, Any],
     run_name: str = None,
 ) -> None:
-    """Plot publication PSF-mode scan outputs for local runs."""
+    """Plot PSF-mode scan outputs for local runs."""
     if not _fisher_detection_guard(detection_data, "Fisher PSF mode scan plot"):
         return
     if detection_data.local is None or detection_data.local.psf_mode_scan is None:

@@ -1,7 +1,7 @@
-"""Image-space adapters for the publication-grade Fisher/Asimov core.
+"""Image-space adapters for the Fisher / Asimov core.
 
 These helpers convert 2D mean images, noise maps, and derivative images into the
-1D vectors required by :mod:`fisher_publication_core`.  They are intentionally kept
+1D vectors required by :mod:`fisher_core`.  They are intentionally kept
 free of AutoLens-specific object types so they can be reused by multiple forward
 models.
 """
@@ -12,7 +12,7 @@ from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-from .fisher_publication_core import (
+from .fisher_core import (
     AsimovAmplitudeResult,
     SpuriousAmplitudeResult,
     SystematicModeScanResult,
@@ -98,7 +98,7 @@ def compute_asimov_from_images(
     nuisance_names: Optional[Sequence[str]] = None,
     covariance: Optional[np.ndarray] = None,
 ) -> AsimovAmplitudeResult:
-    """Compute publication-grade Asimov detectability directly from 2D images."""
+    """Compute Fisher / Asimov Asimov detectability directly from 2D images."""
     smooth = np.asarray(smooth_mean_image, dtype=float)
     subhalo = np.asarray(subhalo_mean_image, dtype=float)
     if smooth.shape != subhalo.shape:

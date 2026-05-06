@@ -127,102 +127,83 @@ def test_valid_fisher_config_passes_validation():
     validation.validate_or_raise(config)
 
 
-def test_master_config_publication_defaults_pass_validation():
+def test_master_config_fisher_defaults_pass_validation():
     validation.validate_or_raise(_load_master_config())
 
 
-def test_fisher_rejects_invalid_version():
+def test_fisher_rejects_unknown_key():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "not-a-version"
+    config["modeling"]["fisher"]["unexpected_option"] = True
 
-    with pytest.raises(ValueError, match="modeling.fisher.version must be one of"):
+    with pytest.raises(ValueError, match="modeling.fisher contains unsupported keys"):
         validation.validate_or_raise(config)
 
 
-def test_publication_block_rejects_invalid_mask_mode():
+def test_fisher_rejects_invalid_mask_mode():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {"mask_mode": "bad"}
+    config["modeling"]["fisher"]["mask_mode"] = "bad"
 
-    with pytest.raises(ValueError, match="modeling.fisher.publication.mask_mode"):
+    with pytest.raises(ValueError, match="modeling.fisher.mask_mode"):
         validation.validate_or_raise(config)
 
 
-def test_publication_block_rejects_nonpositive_psf_mode_step():
+def test_fisher_rejects_nonpositive_psf_mode_step():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {
-        "psf_mode_steps": {"segment_hexikes": 0.0}
-    }
+    config["modeling"]["fisher"]["psf_mode_steps"] = {"segment_hexikes": 0.0}
 
-    with pytest.raises(ValueError, match="modeling.fisher.publication.psf_mode_steps"):
+    with pytest.raises(ValueError, match="modeling.fisher.psf_mode_steps"):
         validation.validate_or_raise(config)
 
 
-def test_publication_block_rejects_nonpositive_psf_mode_prior_sigma():
+def test_fisher_rejects_nonpositive_psf_mode_prior_sigma():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {
-        "psf_mode_prior_sigmas": {"segment_hexikes": 0.0}
-    }
+    config["modeling"]["fisher"]["psf_mode_prior_sigmas"] = {"segment_hexikes": 0.0}
 
-    with pytest.raises(ValueError, match="modeling.fisher.publication.psf_mode_prior_sigmas"):
+    with pytest.raises(ValueError, match="modeling.fisher.psf_mode_prior_sigmas"):
         validation.validate_or_raise(config)
 
 
-def test_publication_block_rejects_legacy_psf_mode_selection_alias():
+def test_fisher_rejects_legacy_psf_mode_selection_alias():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {
-        "psf_mode_selection": {"segment_pistons": {"segments": [0]}}
-    }
+    config["modeling"]["fisher"]["psf_mode_selection"] = {"segment_pistons": {"segments": [0]}}
 
     with pytest.raises(ValueError, match="psf_mode_selection is not supported"):
         validation.validate_or_raise(config)
 
 
-def test_publication_block_rejects_malformed_psf_basis_selector():
+def test_fisher_rejects_malformed_psf_basis_selector():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {
-        "psf_basis": {"segment_pistons": {"segments": ["zero"]}}
-    }
+    config["modeling"]["fisher"]["psf_basis"] = {"segment_pistons": {"segments": ["zero"]}}
 
     with pytest.raises(ValueError, match="segment id"):
         validation.validate_or_raise(config)
 
 
-def test_publication_psf_features_require_psf_basis():
+def test_fisher_psf_features_require_psf_basis():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {
-        "include_psf_nuisance": True,
-        "compute_psf_mode_scan": False,
-    }
+    config["modeling"]["fisher"]["include_psf_nuisance"] = True
+    config["modeling"]["fisher"]["compute_psf_mode_scan"] = False
 
     with pytest.raises(ValueError, match="psf_basis is required"):
         validation.validate_or_raise(config)
 
 
-def test_publication_scan_requires_explicit_scan_selection():
+def test_fisher_scan_requires_explicit_scan_selection():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {
+    config["modeling"]["fisher"].update({
         "include_psf_nuisance": True,
         "compute_psf_mode_scan": True,
-        "psf_basis": {
-            "segment_hexikes": {"segments": [0], "mode_nolls": [1, 2]},
-        },
+        "psf_basis": {"segment_hexikes": {"segments": [0], "mode_nolls": [1, 2]}},
     }
+    )
 
     with pytest.raises(ValueError, match="scan_psf_mode_selection is required"):
         validation.validate_or_raise(config)
 
 
-def test_valid_publication_block_passes_validation():
+def test_valid_fisher_psf_options_pass_validation():
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["version"] = "publication"
-    config["modeling"]["fisher"]["publication"] = {
+    config["modeling"]["fisher"].update({
         "mask_mode": "source_snr",
         "include_psf_nuisance": True,
         "compute_psf_mode_scan": True,
@@ -245,5 +226,5 @@ def test_valid_publication_block_passes_validation():
         "scan_psf_mode_selection": {
             "global_zernikes": {"mode_nolls": [4, 5]},
         },
-    }
+    })
     validation.validate_or_raise(config)

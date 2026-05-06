@@ -1,4 +1,4 @@
-"""Tests for PSF-basis semantics in the publication Fisher detector.
+"""Tests for PSF-basis semantics in the Fisher detector.
 
 These tests target the three design requirements called out in review:
 
@@ -26,7 +26,7 @@ import pytest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src" / "hwoslaps"
-TEST_PACKAGE = "hwoslaps_publication_detector_testpkg"
+TEST_PACKAGE = "hwoslaps_fisher_detector_testpkg"
 
 
 def _install_detector_stubs():
@@ -93,7 +93,7 @@ def _install_detector_stubs():
     psf_utils = ensure_module(f"{TEST_PACKAGE}.psf.utils")
     psf_utils.PSFData = object
 
-    adapter = ensure_module(f"{TEST_PACKAGE}.modeling.fisher_publication_adapter")
+    adapter = ensure_module(f"{TEST_PACKAGE}.modeling.fisher_adapter")
     adapter.compute_asimov_from_images = lambda *args, **kwargs: None
     adapter.evaluate_signal_bank_from_images = lambda *args, **kwargs: None
     adapter.extract_masked_covariance = lambda *args, **kwargs: None
@@ -101,7 +101,7 @@ def _install_detector_stubs():
     adapter.scan_systematic_modes_from_images = lambda *args, **kwargs: None
     adapter.stack_masked_images = lambda *args, **kwargs: None
 
-    core = ensure_module(f"{TEST_PACKAGE}.modeling.fisher_publication_core")
+    core = ensure_module(f"{TEST_PACKAGE}.modeling.fisher_core")
 
     class _Whitener:
         @classmethod
@@ -133,12 +133,12 @@ def _install_detector_stubs():
 
 
 def _load_detector_module():
-    module_name = f"{TEST_PACKAGE}.modeling.fisher_publication_detector"
+    module_name = f"{TEST_PACKAGE}.modeling.fisher_detector"
     if module_name in sys.modules:
         return sys.modules[module_name]
     original_autolens = sys.modules.get("autolens")
     _install_detector_stubs()
-    module_path = SRC_ROOT / "modeling" / "fisher_publication_detector.py"
+    module_path = SRC_ROOT / "modeling" / "fisher_detector.py"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
@@ -155,7 +155,7 @@ def _load_detector_module():
 
 def _make_detector_stub():
     module = _load_detector_module()
-    detector = module.PublicationFisherDetector.__new__(module.PublicationFisherDetector)
+    detector = module.FisherDetector.__new__(module.FisherDetector)
     detector.psf_mode_steps = {}
     detector.psf_mode_prior_sigmas = {}
     detector.psf_data = SimpleNamespace(num_segments=6)

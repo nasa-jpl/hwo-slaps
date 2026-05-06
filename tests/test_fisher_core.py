@@ -1,7 +1,7 @@
-"""Unit tests for the publication-grade Fisher/Asimov statistical core.
+"""Unit tests for the Fisher / Asimov statistical core.
 
 These tests avoid AutoLens / HCIPy entirely and validate the linear-algebra
-identities that the publication-facing detector relies on.
+identities that the detector relies on.
 """
 
 from __future__ import annotations
@@ -14,10 +14,10 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-MODULE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_publication_core.py"
+MODULE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_core.py"
 
 import sys
-spec = importlib.util.spec_from_file_location("hwoslaps_fisher_publication_core", MODULE_PATH)
+spec = importlib.util.spec_from_file_location("hwoslaps_fisher_core", MODULE_PATH)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
 spec.loader.exec_module(module)

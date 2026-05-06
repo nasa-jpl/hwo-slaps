@@ -1,12 +1,4 @@
-"""Orchestration wrapper for Fisher detectability evaluation.
-
-This module now supports two detector backends:
-
-- ``version='v1'``: the historical hard-coded prototype.
-- ``version='publication'``: the publication-grade Fisher / Asimov detector.
-
-The public pipeline interface is unchanged.
-"""
+"""Orchestration wrapper for Fisher detectability evaluation."""
 
 from __future__ import annotations
 
@@ -18,12 +10,8 @@ from typing import Optional, Dict
 from ..lensing.utils import LensingData
 from ..observation.utils import ObservationData
 from ..psf.utils import PSFData
-from .fisher_detector import FisherDetector
-from .fisher_publication_detector import PublicationFisherDetector
 from .utils_fisher import FisherDetectionData
-
-
-_DEF_VERSION = "publication"
+from .fisher_detector import FisherDetector
 
 
 def _fisher_timing_enabled() -> bool:
@@ -76,13 +64,8 @@ def perform_fisher_detection(
     if mode not in {"local", "map", "both"}:
         raise ValueError("modeling.fisher.mode must be one of: local, map, both")
 
-    version = str(fisher_cfg.get("version", _DEF_VERSION)).lower()
-    if version not in {"v1", "publication"}:
-        raise ValueError("modeling.fisher.version must be one of: v1, publication")
-
-    detector_cls = FisherDetector if version == "v1" else PublicationFisherDetector
     start = perf_counter()
-    detector = detector_cls(
+    detector = FisherDetector(
         observation_baseline=observation_baseline,
         lensing_baseline=lensing_baseline,
         psf_data=psf_data,
@@ -105,8 +88,6 @@ def perform_fisher_detection(
         map_data = detector.compute_map()
         _log_fisher_timing("top-level map computation", perf_counter() - start)
 
-    publication_cfg = deepcopy(fisher_cfg.get("publication")) if version == "publication" else None
-
     return FisherDetectionData(
         mode=mode,
         local=local_data,
@@ -120,7 +101,6 @@ def perform_fisher_detection(
         gram_condition_number=float(detector.gram_condition_number),
         pixel_scale=observation_baseline.pixel_scale,
         config=full_config,
-        version=version,
         nuisance_names=list(getattr(detector, "nuisance_names", []) or []),
         prior_precision_diagonal=list(
             getattr(detector, "prior_precision_diagonal", []) or []
@@ -131,5 +111,4 @@ def perform_fisher_detection(
         n_psf_scan_modes=int(getattr(detector, "n_psf_scan_modes", 0)),
         psf_fit_mode_names=list(getattr(detector, "psf_fit_mode_names", []) or []),
         psf_scan_mode_names=list(getattr(detector, "psf_scan_mode_names", []) or []),
-        publication_config=publication_cfg,
     )

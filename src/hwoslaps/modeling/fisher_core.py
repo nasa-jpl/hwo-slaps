@@ -1,4 +1,4 @@
-"""Publication-grade Fisher/Asimov detectability tools.
+"""Fisher / Asimov detectability tools.
 
 This module implements the *statistical core* for a robust, sweepable
 subhalo-detectability metric based on the linear-Gaussian profile likelihood.
