@@ -25,6 +25,13 @@ from _lensing_physics_helpers import (
 )
 
 
+INTEGRATION_ANCHOR_MASSES = {
+    "PointMass": 1.0e8,
+    "SIS": 1.0e8,
+    "NFW": 1.0e9,
+}
+
+
 def _load_lensing_generator_module():
     bootstrap_hwoslaps_namespace()
     load_module("constants.py", "hwoslaps.constants")
@@ -40,6 +47,7 @@ def _build_lensing_config_for_model(model_name: str):
     cfg["global_seed"] = 11
     cfg["lensing"]["grid"]["shape"] = [64, 64]
     cfg["lensing"]["subhalo"]["enabled"] = True
+    cfg["lensing"]["subhalo"]["mass"] = INTEGRATION_ANCHOR_MASSES[model_name]
     cfg["lensing"]["subhalo"]["model"] = model_name
     cfg["lensing"]["subhalo"]["position"] = {
         "type": "direct",
