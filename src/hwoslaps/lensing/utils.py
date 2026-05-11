@@ -201,6 +201,27 @@ class LensingData:
         return float(np.max(self.image))
 
 
+def _require_finite_number(value, name):
+    """Require a finite non-boolean scalar number."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
+    try:
+        value_float = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite number")
+    if not np.isfinite(value_float):
+        raise ValueError(f"{name} must be a finite number")
+    return value_float
+
+
+def _require_positive_finite(value, name):
+    """Require a positive finite non-boolean scalar number."""
+    value_float = _require_finite_number(value, name)
+    if value_float <= 0:
+        raise ValueError(f"{name} must be a finite positive number")
+    return value_float
+
+
 def get_einstein_ring_position(angle_deg, einstein_radius, offset_pixels=0, pixel_scale=0.05):
     """
     Calculate position on or near the Einstein ring.
@@ -237,8 +258,15 @@ def get_einstein_ring_position(angle_deg, einstein_radius, offset_pixels=0, pixe
     >>> pos = get_einstein_ring_position(45.0, 1.6)
     >>> print(f"Subhalo position: y={pos[0]:.3f}, x={pos[1]:.3f}")
     """
+    angle_deg = _require_finite_number(angle_deg, "angle_deg")
+    einstein_radius = _require_positive_finite(einstein_radius, "einstein_radius")
+    offset_pixels = _require_finite_number(offset_pixels, "offset_pixels")
+    pixel_scale = _require_positive_finite(pixel_scale, "pixel_scale")
+
     angle_rad = np.deg2rad(angle_deg)
     r = einstein_radius + offset_pixels * pixel_scale
+    if r <= 0:
+        raise ValueError("Einstein-ring radial position must remain positive")
     x = r * np.cos(angle_rad)
     y = r * np.sin(angle_rad)
     return (y, x)
