@@ -82,9 +82,6 @@ psf:
     
   # Aberrations
   aberrations:
-    # Choose between manual and API methods for segment aberrations
-    use_api: true  # Set to true to use HCIPy API for segment hexikes
-    
     # Toggle flags to enable/disable each aberration type
     enable_segment_pistons: false       
     enable_segment_tiptilts: false

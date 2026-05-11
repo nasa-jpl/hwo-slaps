@@ -18,8 +18,6 @@ from .aberration_models import (
     apply_segment_pistons,
     apply_segment_tiptilts,
     apply_segment_zernikes,
-    apply_segment_zernikes_manual,
-    apply_segment_zernikes_api,
     apply_global_zernikes
 )
 
@@ -34,8 +32,6 @@ __all__ = [
     'apply_segment_pistons',
     'apply_segment_tiptilts',
     'apply_segment_zernikes',
-    'apply_segment_zernikes_manual',
-    'apply_segment_zernikes_api',
     'apply_global_zernikes',
     'plot_psf_complete_analysis'
 ]

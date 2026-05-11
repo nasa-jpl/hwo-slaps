@@ -2,9 +2,6 @@
 
 This module contains all aberration functions for applying various types of
 optical aberrations to segmented mirrors.
-
-The module supports both manual implementation of segment-level aberrations
-and the HCIPy API approach, providing flexibility for different use cases.
 """
 
 import numpy as np
@@ -141,88 +138,8 @@ def apply_segment_tiptilts(hsm, tiptilt_dict, num_segments):
             hsm.set_segment_actuators(seg_id, current_piston, tip_rad, tilt_rad)
 
 
-def apply_segment_zernikes_manual(segment_zernike_dict, segments, telescope_data, wavelength):
-    """Apply Zernike aberrations to individual segments (manual implementation).
-
-    This implementation manually creates hexike basis functions for each segment.
-
-    Parameters
-    ----------
-    segment_zernike_dict : `dict`
-        Dictionary mapping segment ID to another dict of {mode_noll: amplitude_nm},
-        where mode indices follow 1-based Noll indexing.
-    segments : `list`
-        List of segment aperture functions.
-    telescope_data : `dict`
-        Dictionary containing telescope parameters.
-    wavelength : `float`
-        Wavelength in meters.
-
-    Returns
-    -------
-    phase_screen : `hcipy.Field`
-        Phase screen containing segment-level Zernike aberrations.
-    """
-    pupil_grid = telescope_data['pupil_grid']
-    segment_flat_to_flat = telescope_data['segment_flat_to_flat']
-    gap_size = telescope_data['gap_size']
-    num_rings = telescope_data['num_rings']
-    segment_point_to_point = telescope_data['segment_point_to_point']
-    
-    # Calculate segment centers.
-    segment_pitch = segment_flat_to_flat + gap_size
-    segment_centers = hcipy.make_hexagonal_grid(segment_pitch, num_rings, False)
-    mask = segment_centers.ones(dtype='bool')
-    segment_centers_grid = segment_centers.subset(mask)
-
-    # The segment diameter is the circumscribed diameter (vertex-to-vertex).
-    segment_diameter = segment_point_to_point
-
-    # Initialize phase screen.
-    phase_screen = pupil_grid.zeros()
-
-    normalized_segment_dict = _normalize_segment_hexike_dict(segment_zernike_dict)
-
-    # Process each segment that has aberrations.
-    for seg_id, mode_dict in normalized_segment_dict.items():
-        if seg_id < len(segments):
-            if not mode_dict:
-                continue
-
-            # Get the center of this segment.
-            center = segment_centers_grid.points[seg_id]
-
-            # Find the maximum 1-based Noll mode needed for this segment.
-            max_mode_for_segment = max(mode_dict.keys())
-
-            # Create hexike basis for this segment only.
-            angle = np.pi / 2  # For flat-top hexagons.
-            basis = hcipy.make_hexike_basis(
-                pupil_grid.shifted(-center),
-                int(max_mode_for_segment),
-                segment_diameter,
-                hexagon_angle=angle,
-            )
-
-            # Apply each requested mode.
-            for mode_noll, coeff_nm in mode_dict.items():
-                mode_idx = mode_noll - 1
-                if mode_idx < len(basis):
-                    phase_rad = 2 * np.pi * nm_to_opd(coeff_nm) / wavelength
-                    # Get the mode as a Field (already 1D).
-                    mode_field = basis[mode_idx]
-                    # Apply segment mask to ensure mode only affects this segment.
-                    segment_mask = segments[seg_id]
-                    phase_screen += phase_rad * mode_field * segment_mask
-
-    return phase_screen
-
-
-def apply_segment_zernikes_api(segment_hexike_dict, telescope_data, wavelength):
-    """Apply segment-level hexike aberrations using the HCIPy API.
-
-    This uses the HCIPy segmented hexike surface optic for applying
-    segment-level hexike aberrations.
+def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
+    """Apply segment-level hexike aberrations using HCIPy's segmented surface optic.
 
     Parameters
     ----------
@@ -245,9 +162,8 @@ def apply_segment_zernikes_api(segment_hexike_dict, telescope_data, wavelength):
     """
     pupil_grid = telescope_data['pupil_grid']
     segments = telescope_data['segments']
-    segment_flat_to_flat = telescope_data['segment_flat_to_flat']
-    gap_size = telescope_data['gap_size']
-    num_rings = telescope_data['num_rings']
+    segment_centers = telescope_data['segment_centers']
+    segment_circum_diameter = telescope_data['segment_point_to_point']
     normalized_segment_dict = _normalize_segment_hexike_dict(segment_hexike_dict)
 
     # Determine how many modes per segment are required.
@@ -262,10 +178,10 @@ def apply_segment_zernikes_api(segment_hexike_dict, telescope_data, wavelength):
     expected_shape = (len(segments), num_modes)
     if (hexike_surface is None or hexike_surface.input_grid is not pupil_grid
             or hexike_surface.coefficients.shape != expected_shape):
-        hexike_surface = hcipy.make_segment_hexike_surface_from_hex_aperture(
-            num_rings=num_rings,
-            segment_flat_to_flat=segment_flat_to_flat,
-            gap_size=gap_size,
+        hexike_surface = hcipy.SegmentedHexikeSurface(
+            segments=segments,
+            segment_centers=segment_centers,
+            segment_circum_diameter=segment_circum_diameter,
             pupil_grid=pupil_grid,
             num_modes=num_modes,
             hexagon_angle=np.pi / 2  # Flat-top orientation.
@@ -292,40 +208,6 @@ def apply_segment_zernikes_api(segment_hexike_dict, telescope_data, wavelength):
     phase_screen_api = hexike_surface.phase_for(wavelength)
 
     return phase_screen_api, hexike_surface
-
-
-def apply_segment_zernikes(segment_zernike_dict, segments, telescope_data, wavelength, use_api=False):
-    """Apply Zernike/hexike aberrations to individual segments.
-
-    This function provides both the manual implementation and the HCIPy API approach
-    for applying segment-level aberrations.
-
-    Parameters
-    ----------
-    segment_zernike_dict : `dict`
-        Dictionary mapping segment ID to another dict of {mode_noll: amplitude_nm},
-        where mode indices follow 1-based Noll indexing.
-    segments : `list`
-        List of segment aperture functions.
-    telescope_data : `dict`
-        Dictionary containing telescope parameters.
-    wavelength : `float`
-        Wavelength in meters.
-    use_api : `bool`, optional
-        If True, use the HCIPy API method. If False, use manual implementation.
-        Default is False.
-
-    Returns
-    -------
-    phase_screen : `hcipy.Field`
-        Phase screen containing segment-level aberrations (if use_api=False).
-    phase_screen, hexike_surface : `tuple`
-        Phase screen and segmented hexike surface (if use_api=True).
-    """
-    if use_api:
-        return apply_segment_zernikes_api(segment_zernike_dict, telescope_data, wavelength)
-    else:
-        return apply_segment_zernikes_manual(segment_zernike_dict, segments, telescope_data, wavelength)
 
 
 def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):

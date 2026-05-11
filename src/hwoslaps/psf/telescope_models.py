@@ -68,6 +68,8 @@ def create_hcipy_telescope(config):
                                                              gap_size,
                                                              starting_ring=0,
                                                              return_segments=True)
+    segment_pitch = segment_flat_to_flat + gap_size
+    segment_centers = hcipy.make_hexagonal_grid(segment_pitch, num_rings, pointy_top=False)
     
     # Apply supersampling (required explicitly by config validation)
     supersampling_factor = telescope_config['supersampling_factor']
@@ -89,6 +91,6 @@ def create_hcipy_telescope(config):
         'segment_flat_to_flat': segment_flat_to_flat,
         'gap_size': gap_size,
         'num_rings': num_rings,
-        'segment_point_to_point': segment_point_to_point
+        'segment_point_to_point': segment_point_to_point,
+        'segment_centers': segment_centers
     }
-

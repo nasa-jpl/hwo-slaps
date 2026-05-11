@@ -69,29 +69,25 @@ def telescope_data(minimal_psf_config):
     return telescope_models.create_hcipy_telescope(minimal_psf_config)
 
 
-def test_segment_hexike_api_matches_manual_for_noll_indexing(telescope_data):
+def test_segment_hexike_uses_hcipy_surface_for_noll_indexing(telescope_data):
     wavelength = telescope_data["wavelength"]
-    segments = telescope_data["segments"]
     segment_hexikes_noll = {0: {1: 50.0, 3: -20.0}}
 
-    phase_manual = aberration_models.apply_segment_zernikes_manual(
-        segment_hexikes_noll, segments, telescope_data, wavelength
-    )
-    phase_api, hexike_surface = aberration_models.apply_segment_zernikes_api(
+    phase_screen, hexike_surface = aberration_models.apply_segment_zernikes(
         segment_hexikes_noll, telescope_data, wavelength
     )
 
-    # API and manual implementation should agree for the same HCIPy-style Noll indices.
-    assert np.allclose(np.asarray(phase_manual), np.asarray(phase_api), rtol=1e-8, atol=1e-10)
-    # Returned phase screen should be exactly what the HCIPy optic reports.
-    assert np.allclose(np.asarray(phase_api), np.asarray(hexike_surface.phase_for(wavelength)))
+    assert isinstance(hexike_surface, hcipy.SegmentedHexikeSurface)
+    assert np.allclose(np.asarray(phase_screen), np.asarray(hexike_surface.phase_for(wavelength)))
+    assert hexike_surface.coefficients[0, 0] == pytest.approx(25e-9)
+    assert hexike_surface.coefficients[0, 2] == pytest.approx(-10e-9)
 
 
 def test_segment_hexike_api_rejects_zero_based_mode_indices(telescope_data):
     wavelength = telescope_data["wavelength"]
 
     with pytest.raises(ValueError, match="1-based Noll"):
-        aberration_models.apply_segment_zernikes_api(
+        aberration_models.apply_segment_zernikes(
             {0: {0: 40.0, 1: 10.0}}, telescope_data, wavelength
         )
 

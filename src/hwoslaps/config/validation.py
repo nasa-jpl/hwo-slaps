@@ -335,9 +335,6 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
     for f in flags:
         val = _require(aberr, f, 'psf.aberrations')
         _require_type(val, bool, f'psf.aberrations.{f}')
-    use_api = _require(aberr, 'use_api', 'psf.aberrations')
-    _require_type(use_api, bool, 'psf.aberrations.use_api')
-
     # If any flag enabled, require corresponding dict present
     if aberr['enable_segment_pistons']:
         _require_type(_require(aberr, 'segment_pistons', 'psf.aberrations'), dict, 'psf.aberrations.segment_pistons')

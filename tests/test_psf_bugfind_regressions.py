@@ -22,8 +22,7 @@ from hwoslaps.psf.aberration_models import (
     apply_global_zernikes,
     apply_segment_pistons,
     apply_segment_tiptilts,
-    apply_segment_zernikes_api,
-    apply_segment_zernikes_manual,
+    apply_segment_zernikes,
     generate_random_segment_aberrations,
 )
 from hwoslaps.psf.generator import generate_psf_system
@@ -91,22 +90,23 @@ def test_global_zernike_config_keys_are_one_based_noll_indices(compact_telescope
     assert np.allclose(phase_screen, expected_noll_4, rtol=1e-12, atol=1e-14)
 
 
-def test_segment_hexike_manual_matches_api_for_full_segmented_aperture(compact_telescope: dict):
-    """Manual and HCIPy-API hexike paths should agree for the configured 19-segment pupil."""
+def test_segment_hexike_uses_hcipy_surface_with_telescope_segments(compact_telescope: dict):
+    """Segment hexikes should be represented by HCIPy's surface on the telescope masks."""
     wavelength = compact_telescope["wavelength"]
-    segments = compact_telescope["segments"]
     segment_hexikes = {
         0: {1: 50.0, 3: -20.0},
         7: {2: 15.0},
         18: {4: -10.0},
     }
 
-    manual = np.asarray(
-        apply_segment_zernikes_manual(segment_hexikes, segments, compact_telescope, wavelength)
-    )
-    api, _ = apply_segment_zernikes_api(segment_hexikes, compact_telescope, wavelength)
+    phase_screen, hexike_surface = apply_segment_zernikes(segment_hexikes, compact_telescope, wavelength)
 
-    assert np.allclose(manual, np.asarray(api), rtol=1e-8, atol=1e-10)
+    assert isinstance(hexike_surface, hcipy.SegmentedHexikeSurface)
+    assert np.allclose(np.asarray(phase_screen), np.asarray(hexike_surface.phase_for(wavelength)))
+    assert hexike_surface.input_grid is compact_telescope["pupil_grid"]
+    assert hexike_surface.coefficients.shape[0] == len(compact_telescope["segments"])
+    assert np.allclose(hexike_surface.coefficients[0, 0], 25e-9)
+    assert np.allclose(hexike_surface.coefficients[0, 2], -10e-9)
 
 
 @pytest.mark.parametrize(

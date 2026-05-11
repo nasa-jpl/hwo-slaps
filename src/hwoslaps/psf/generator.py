@@ -127,8 +127,6 @@ def generate_psf_system(config, full_config=None):
     
     # Extract aberration configurations (strict: all flags must be explicit)
     aberrations = psf_config['aberrations']
-    use_segment_api = aberrations['use_api']
-    
     # Apply toggle flags to aberrations (explicit True/False required by validation)
     segment_pistons = aberrations['segment_pistons'] if aberrations['enable_segment_pistons'] else None
     segment_tiptilts = aberrations['segment_tiptilts'] if aberrations['enable_segment_tiptilts'] else None
@@ -166,19 +164,11 @@ def generate_psf_system(config, full_config=None):
     
     # Apply segment-level Zernikes (hexikes) as phase screen.
     if segment_hexikes is not None:
-        if use_segment_api:
-            phase_screen, hexike_surface = apply_segment_zernikes(
-                segment_hexikes, segments, telescope_data, wavelength, use_api=True
-            )
-            phase_screens['segment_hexikes_api'] = phase_screen
-            # Apply hexike phase via the segmented hexike surface to avoid double-application hazards.
-            wf_pupil = hexike_surface(wf_pupil)
-        else:
-            phase_screen = apply_segment_zernikes(
-                segment_hexikes, segments, telescope_data, wavelength, use_api=False
-            )
-            phase_screens['segment_hexikes'] = phase_screen
-            wf_pupil.electric_field *= np.exp(1j * np.array(phase_screen))
+        phase_screen, hexike_surface = apply_segment_zernikes(
+            segment_hexikes, telescope_data, wavelength
+        )
+        phase_screens['segment_hexikes'] = phase_screen
+        wf_pupil = hexike_surface(wf_pupil)
     
     # Apply global Zernikes as phase screen.
     if global_zernikes is not None:
@@ -407,7 +397,6 @@ def generate_aberrated_psf(
     segment_tiptilts=None,
     segment_hexikes=None,
     zernike_coeffs=None,
-    use_segment_api=False,
     return_all=False
 ):
     """Generate an aberrated PSF with specified aberrations.
@@ -433,8 +422,6 @@ def generate_aberrated_psf(
         Hexike mode indices should use HCIPy Noll indexing (1-based).
     zernike_coeffs : `dict`, optional
         Dictionary mapping Zernike indices to coefficient values in nm RMS.
-    use_segment_api : `bool`, optional
-        Whether to use HCIPy's new API for segment-level aberrations. Default False.
     return_all : `bool`, optional
         Whether to return wavefront and phase screens in addition to PSF. Default False.
         
@@ -503,15 +490,9 @@ def generate_aberrated_psf(
     
     # Apply segment-level Zernikes (hexikes) as phase screen.
     if segment_hexikes is not None:
-        if use_segment_api:
-            result = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=True)
-            phase_screen, hexike_surface = result  # API version returns tuple.
-            phase_screens['segment_hexikes_api'] = phase_screen
-            wf = hexike_surface(wf)
-        else:
-            phase_screen = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=False)
-            phase_screens['segment_hexikes'] = phase_screen
-            wf.electric_field *= np.exp(1j * np.array(phase_screen))
+        phase_screen, hexike_surface = apply_segment_zernikes(segment_hexikes, telescope_data, wavelength)
+        phase_screens['segment_hexikes'] = phase_screen
+        wf = hexike_surface(wf)
     
     # Apply global Zernikes as phase screen.
     if zernike_coeffs is not None:

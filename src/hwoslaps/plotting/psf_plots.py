@@ -631,15 +631,13 @@ def plot_optics_chain(psf_data, plot_config):
                 fontweight='bold',
             )
 
-    # Panel 2: Pupil OPD / phase screen (Hexike Phase Screen (API), pupil-plane)
+    # Panel 2: Pupil OPD / phase screen (Hexike Phase Screen, pupil-plane)
     ax = axes[1]
     phase_screen = None
     if psf_data.phase_screens:
-        # Prefer the API hexike screen if present.
-        if 'segment_hexikes_api' in psf_data.phase_screens:
-            phase_screen = psf_data.phase_screens['segment_hexikes_api']
+        if 'segment_hexikes' in psf_data.phase_screens:
+            phase_screen = psf_data.phase_screens['segment_hexikes']
         else:
-            # Fallback: any screen that looks like a hexike API product.
             for k, v in psf_data.phase_screens.items():
                 if 'hexike' in k.lower():
                     phase_screen = v
