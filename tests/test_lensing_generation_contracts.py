@@ -1,0 +1,67 @@
+"""Integration-level contracts for generated lensing data."""
+
+from __future__ import annotations
+
+import copy
+
+import pytest
+
+pytest.importorskip("autolens")
+
+from hwoslaps.lensing.generator import generate_lensing_system  # noqa: E402
+
+
+def _small_lensing_config():
+    return {
+        "run_name": "lensing-contract",
+        "global_seed": 123,
+        "lensing": {
+            "grid": {"shape": [48, 48], "pixel_scale": 0.02},
+            "lens_galaxy": {
+                "redshift": 0.2,
+                "mass": {
+                    "type": "Isothermal",
+                    "einstein_radius": 1.0,
+                    "centre": [0.0, 0.0],
+                    "ell_comps": [0.1, 0.0],
+                },
+            },
+            "source_galaxy": {
+                "redshift": 2.5,
+                "light": {
+                    "type": "Exponential",
+                    "centre": [-0.03, 0.08],
+                    "ell_comps": [0.14516129, 0.25142673],
+                    "intensity": 2.0,
+                    "effective_radius": 0.11,
+                },
+            },
+            "subhalo": {
+                "enabled": True,
+                "mass": 1.0e8,
+                "model": "PointMass",
+                "position": {
+                    "type": "direct",
+                    "centre": [0.08, -0.05],
+                },
+            },
+            "cosmology": "Planck15",
+        },
+    }
+
+
+def test_lensing_data_config_is_immutable_snapshot_of_generation_config():
+    config = _small_lensing_config()
+
+    lensing_data = generate_lensing_system(
+        copy.deepcopy(config["lensing"]),
+        full_config=config,
+    )
+
+    config["run_name"] = "mutated-after-generation"
+    config["lensing"]["subhalo"]["mass"] = 9.9e12
+    config["lensing"]["subhalo"]["position"]["centre"] = [9.0, 9.0]
+
+    assert lensing_data.config["run_name"] == "lensing-contract"
+    assert lensing_data.config["lensing"]["subhalo"]["mass"] == pytest.approx(1.0e8)
+    assert lensing_data.config["lensing"]["subhalo"]["position"]["centre"] == [0.08, -0.05]
