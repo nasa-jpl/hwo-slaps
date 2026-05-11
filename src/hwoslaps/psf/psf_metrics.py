@@ -191,8 +191,8 @@ def calculate_strehl_ratio(aberrated_psf, perfect_psf):
     physically the Strehl ratio cannot exceed unity.
     """
     # Get peak intensities
-    aberrated_peak = np.max(aberrated_psf.intensity)
-    perfect_peak = np.max(perfect_psf.intensity)
+    aberrated_peak = float(np.max(aberrated_psf.intensity))
+    perfect_peak = float(np.max(perfect_psf.intensity))
 
     # Strehl ratio is the ratio of peaks
     strehl_ratio = aberrated_peak / perfect_peak

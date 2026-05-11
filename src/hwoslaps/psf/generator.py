@@ -196,6 +196,8 @@ def generate_psf_system(config, full_config=None):
     
     # Propagate the pupil wavefront to get the single high-resolution PSF Wavefront.
     wf_psf_hres = prop_hres(wf_pupil)
+    wf_pupil_perfect = Wavefront(aper, wavelength)
+    wf_psf_perfect_hres = prop_hres(wf_pupil_perfect)
 
     # Optionally save the high-resolution PSF intensity before any downsampling.
     saved_highres_psf_path = None
@@ -225,6 +227,7 @@ def generate_psf_system(config, full_config=None):
     from .psf_metrics import analyze_psf_quality
     quality_metrics = analyze_psf_quality(
         wf_psf_hres,
+        perfect_psf=wf_psf_perfect_hres,
         wavelength=telescope_data['wavelength'],
         pupil_diameter=telescope_data['pupil_diameter'],
         sampling=sim_config['sampling']
