@@ -31,6 +31,19 @@ def _require_positive_finite(value, name):
     return value_float
 
 
+def _require_nonnegative_finite(value, name):
+    """Validate numeric domain for non-negative physical parameters."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    try:
+        value_float = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    if not np.isfinite(value_float) or value_float < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
+    return value_float
+
+
 def _require_ordered_redshifts(z_lens, z_source):
     """Validate lens/source redshifts for a single-plane lens.
 
@@ -178,7 +191,7 @@ def concentration_power_law(M200_msun, z=0.5):
     c = c0 * (M / M0)^alpha * (1 + z)^beta.
     """
     mass = _require_positive_finite(M200_msun, "M200_msun")
-    redshift = _require_positive_finite(1.0 + float(z), "1 + z") - 1.0
+    redshift = _require_nonnegative_finite(z, "z")
 
     c0 = 19.9
     M0 = 1e8
