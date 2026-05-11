@@ -12,8 +12,12 @@ Policy enforced (per user requirements):
 - Cosmology: `lensing.cosmology` must be explicitly defined.
 """
 
-from typing import Any, Dict
 import math
+from typing import Any, Dict
+
+MOLINE_EQ7_MIN_MASS_MSUN = 1.0e6
+MOLINE_EQ7_MAX_MASS_MSUN = 1.0e12
+MOLINE_EQ7_MAX_X_SUB = 1.5
 
 
 def _require(config: Dict[str, Any], key: str, ctx: str = ""):
@@ -42,6 +46,19 @@ def _require_positive_finite_number(value: Any, key_path: str) -> float:
         raise ValueError(f"{key_path} must be finite")
     if value_float <= 0:
         raise ValueError(f"{key_path} must be positive")
+    return value_float
+
+
+def _require_bounded_positive_number(
+    value: Any,
+    key_path: str,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Require a finite positive number within closed bounds."""
+    value_float = _require_positive_finite_number(value, key_path)
+    if value_float < minimum or value_float > maximum:
+        raise ValueError(f"{key_path} must be between {minimum:g} and {maximum:g}")
     return value_float
 
 
@@ -235,10 +252,18 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
                     "'moline2017_eq7', 'power_law'"
                 )
             if concentration_model == 'moline2017_eq7':
+                _require_bounded_positive_number(
+                    mass_float,
+                    "lensing.subhalo.mass",
+                    MOLINE_EQ7_MIN_MASS_MSUN,
+                    MOLINE_EQ7_MAX_MASS_MSUN,
+                )
                 x_sub_val = _require(concentration, 'x_sub', 'lensing.subhalo.concentration')
-                _require_positive_finite_number(
+                _require_bounded_positive_number(
                     x_sub_val,
                     "lensing.subhalo.concentration.x_sub",
+                    0.0,
+                    MOLINE_EQ7_MAX_X_SUB,
                 )
 
                 if 'h' in concentration and concentration['h'] is not None:

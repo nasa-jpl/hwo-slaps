@@ -78,7 +78,7 @@ def test_power_law_concentration_rejects_invalid_redshift(bad_redshift):
         (1.0e9, 100.0),
     ],
 )
-def test_moline_concentration_rejects_non_positive_result(mass_msun, x_sub):
+def test_moline_concentration_rejects_unsupported_domain(mass_msun, x_sub):
     with pytest.raises(ValueError):
         MASS_MODELS.concentration_moline2017_eq7(
             mass_msun,

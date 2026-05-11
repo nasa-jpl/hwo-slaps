@@ -128,6 +128,7 @@ def test_random_position_requires_finite_non_bool_nonnegative_scatter(bad_scatte
     [
         {"model": "moline2017_eq7", "x_sub": True, "h": 0.6774},
         {"model": "moline2017_eq7", "x_sub": np.nan, "h": 0.6774},
+        {"model": "moline2017_eq7", "x_sub": 1.6, "h": 0.6774},
         {"model": "moline2017_eq7", "x_sub": 1.0, "h": True},
         {"model": "moline2017_eq7", "x_sub": 1.0, "h": np.inf},
     ],
@@ -137,4 +138,18 @@ def test_nfw_concentration_inputs_reject_bool_or_non_finite_values(concentration
     config["lensing"]["subhalo"]["enabled"] = True
     config["lensing"]["subhalo"]["model"] = "NFW"
     config["lensing"]["subhalo"]["concentration"] = concentration
+    _assert_rejected(config)
+
+
+@pytest.mark.parametrize("mass_msun", [1.0e5, 1.0e13])
+def test_moline_config_rejects_mass_outside_study_domain(mass_msun):
+    config = _base_config()
+    config["lensing"]["subhalo"]["enabled"] = True
+    config["lensing"]["subhalo"]["model"] = "NFW"
+    config["lensing"]["subhalo"]["mass"] = mass_msun
+    config["lensing"]["subhalo"]["concentration"] = {
+        "model": "moline2017_eq7",
+        "x_sub": 1.0,
+        "h": 0.6774,
+    }
     _assert_rejected(config)

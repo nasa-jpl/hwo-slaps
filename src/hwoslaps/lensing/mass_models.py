@@ -9,13 +9,17 @@ and Navarro-Frenk-White (NFW) profiles.
 import numpy as np
 from astropy import constants as const
 from astropy import units as u
-from ..constants import MPC_TO_M, KM_TO_M, ARCSEC_PER_RAD
+
+from ..constants import ARCSEC_PER_RAD, KM_TO_M, MPC_TO_M
 
 MOLINE_EQ7_C0 = 19.9
 MOLINE_EQ7_A1 = -0.195
 MOLINE_EQ7_A2 = 0.089
 MOLINE_EQ7_A3 = 0.089
 MOLINE_EQ7_B = -0.54
+MOLINE_EQ7_MIN_MASS_MSUN = 1.0e6
+MOLINE_EQ7_MAX_MASS_MSUN = 1.0e12
+MOLINE_EQ7_MAX_X_SUB = 1.5
 
 
 def _require_positive_finite(value, name):
@@ -28,6 +32,14 @@ def _require_positive_finite(value, name):
         raise ValueError(f"{name} must be a finite positive number")
     if not np.isfinite(value_float) or value_float <= 0:
         raise ValueError(f"{name} must be a finite positive number")
+    return value_float
+
+
+def _require_bounded(value, name, minimum, maximum):
+    """Validate a finite physical parameter against closed bounds."""
+    value_float = _require_positive_finite(value, name)
+    if value_float < minimum or value_float > maximum:
+        raise ValueError(f"{name} must be between {minimum:g} and {maximum:g}")
     return value_float
 
 
@@ -162,20 +174,28 @@ def concentration_moline2017_eq7(M200_msun, x_sub, h):
     Implements Eq. (7) with Table 2 coefficients for c200:
 
     c200(m200, x_sub) =
-        c0 * [1 + sum_{i=1}^3 a_i * log10(m200 / (1e8 h^-1 Msun))^i]
-           * [1 + b * log10(x_sub)].
+        c0 * [1 + sum_{i=1}^3 (a_i * L)^i] * [1 + b * log10(x_sub)],
+
+    where ``L = log10(m200 / (1e8 h^-1 Msun))``. HWO-SLAPS uses this
+    model for subhalo masses from 1e6 to 1e12 Msun and host-centric
+    positions 0 < x_sub <= 1.5.
     """
-    mass = _require_positive_finite(M200_msun, "M200_msun")
-    radial_position = _require_positive_finite(x_sub, "x_sub")
+    mass = _require_bounded(
+        M200_msun,
+        "M200_msun",
+        MOLINE_EQ7_MIN_MASS_MSUN,
+        MOLINE_EQ7_MAX_MASS_MSUN,
+    )
+    radial_position = _require_bounded(x_sub, "x_sub", 0.0, MOLINE_EQ7_MAX_X_SUB)
     hubble_reduced = _require_positive_finite(h, "h")
 
     # Eq. (7) uses log10[m200 / (1e8 h^-1 Msun)] = log10[(m200*h)/1e8].
     log_mass_term = np.log10((mass * hubble_reduced) / 1.0e8)
     polynomial = (
         1.0
-        + MOLINE_EQ7_A1 * log_mass_term
-        + MOLINE_EQ7_A2 * log_mass_term**2
-        + MOLINE_EQ7_A3 * log_mass_term**3
+        + (MOLINE_EQ7_A1 * log_mass_term)
+        + (MOLINE_EQ7_A2 * log_mass_term)**2
+        + (MOLINE_EQ7_A3 * log_mass_term)**3
     )
     # Radial correction lowers concentration for larger x_sub because b < 0.
     radial_factor = 1.0 + MOLINE_EQ7_B * np.log10(radial_position)

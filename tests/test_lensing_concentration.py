@@ -48,7 +48,12 @@ def _moline_expected(mass_msun: float, x_sub: float, h: float) -> float:
     log_mass_term = np.log10((mass_msun * h) / 1.0e8)
     return float(
         19.9
-        * (1.0 + (-0.195 * log_mass_term) + (0.089 * log_mass_term**2) + (0.089 * log_mass_term**3))
+        * (
+            1.0
+            + (-0.195 * log_mass_term)
+            + (0.089 * log_mass_term)**2
+            + (0.089 * log_mass_term)**3
+        )
         * (1.0 + (-0.54 * np.log10(x_sub)))
     )
 
@@ -60,18 +65,19 @@ def test_moline_eq7_anchor_value():
     assert value == pytest.approx(19.9, rel=1e-10)
 
 
-def test_moline_eq7_coefficient_regression_points():
+def test_moline_eq7_paper_regression_points():
     test_points = [
-        (1.0e8, 1.0, 0.6774),
-        (1.0e9, 1.0, 0.6774),
-        (5.0e9, 0.5, 0.6774),
-        (1.0e10, 0.3, 0.70),
-        (2.5e7, 2.0, 0.6774),
+        (1.0e6, 1.0, 0.6774, 28.915897079765447),
+        (1.0e8, 1.0, 0.6774, 20.560847592361515),
+        (1.0e9, 1.0, 0.6774, 16.792762422153395),
+        (5.0e9, 0.5, 0.6774, 16.720675479468554),
+        (1.0e10, 0.3, 0.70, 17.138469176898678),
+        (1.0e12, 1.0, 0.6774, 8.136344788704443),
     ]
-    for mass_msun, x_sub, h in test_points:
-        expected = _moline_expected(mass_msun, x_sub, h)
+    for mass_msun, x_sub, h, expected in test_points:
         got = mass_models.concentration_moline2017_eq7(mass_msun, x_sub=x_sub, h=h)
         assert got == pytest.approx(expected, rel=1e-12)
+        assert got == pytest.approx(_moline_expected(mass_msun, x_sub, h), rel=1e-12)
 
 
 def test_moline_eq7_radial_monotonicity():
@@ -79,7 +85,7 @@ def test_moline_eq7_radial_monotonicity():
     h = 0.6774
     c_inner = mass_models.concentration_moline2017_eq7(mass_msun, x_sub=0.3, h=h)
     c_mid = mass_models.concentration_moline2017_eq7(mass_msun, x_sub=1.0, h=h)
-    c_outer = mass_models.concentration_moline2017_eq7(mass_msun, x_sub=3.0, h=h)
+    c_outer = mass_models.concentration_moline2017_eq7(mass_msun, x_sub=1.5, h=h)
     assert c_inner > c_mid > c_outer
 
 
@@ -92,6 +98,9 @@ def test_moline_eq7_radial_monotonicity():
         (1.0e9, -0.5, 0.6774),
         (1.0e9, 1.0, 0.0),
         (1.0e9, 1.0, -0.1),
+        (1.0e5, 1.0, 0.6774),
+        (1.0e13, 1.0, 0.6774),
+        (1.0e9, 1.6, 0.6774),
         (np.inf, 1.0, 0.6774),
         (1.0e9, np.inf, 0.6774),
         (1.0e9, 1.0, np.inf),
