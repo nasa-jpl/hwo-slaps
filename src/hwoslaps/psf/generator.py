@@ -345,7 +345,7 @@ def generate_psf_system(config, full_config=None):
     psf_data = PSFData(
         # Primary data from both branches.
         psf=wf_psf_hres,  # High-resolution PSF from Branch A.
-        wavefront=wf_psf_hres,  # High-resolution wavefront from Branch A.
+        wavefront=wf_pupil.copy(),  # Final aberrated pupil-plane wavefront.
         telescope_data=telescope_data,
         kernel=kernel,  # Physically downsampled kernel from Branch B.
         
