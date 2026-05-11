@@ -113,7 +113,8 @@ def validate_top_level(config: Dict[str, Any]) -> None:
     _require_type(run_name, str, 'run_name')
 
     global_seed = _require(config, 'global_seed', 'top-level')
-    _require_type(global_seed, int, 'global_seed')
+    if isinstance(global_seed, bool) or not isinstance(global_seed, int):
+        raise ValueError("global_seed must be an int")
 
     lensing = _require(config, 'lensing', 'top-level')
     _require_type(lensing, dict, 'lensing')
