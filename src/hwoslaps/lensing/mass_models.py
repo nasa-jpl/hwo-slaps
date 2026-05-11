@@ -20,6 +20,8 @@ MOLINE_EQ7_B = -0.54
 
 def _require_positive_finite(value, name):
     """Validate numeric domain for physical parameters."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite positive number")
     try:
         value_float = float(value)
     except (TypeError, ValueError):
@@ -27,6 +29,36 @@ def _require_positive_finite(value, name):
     if not np.isfinite(value_float) or value_float <= 0:
         raise ValueError(f"{name} must be a finite positive number")
     return value_float
+
+
+def _require_ordered_redshifts(z_lens, z_source):
+    """Validate lens/source redshifts for a single-plane lens.
+
+    Parameters
+    ----------
+    z_lens : `float`
+        Lens-plane redshift.
+    z_source : `float`
+        Source-plane redshift.
+
+    Returns
+    -------
+    z_lens : `float`
+        Validated lens-plane redshift.
+    z_source : `float`
+        Validated source-plane redshift.
+
+    Raises
+    ------
+    ValueError
+        Raised when either redshift is not positive and finite, or when the
+        source is not behind the lens.
+    """
+    z_lens_float = _require_positive_finite(z_lens, "z_lens")
+    z_source_float = _require_positive_finite(z_source, "z_source")
+    if z_source_float <= z_lens_float:
+        raise ValueError("z_source must be greater than z_lens")
+    return z_lens_float, z_source_float
 
 
 def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
@@ -60,7 +92,8 @@ def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
 
     where M is the mass, and D_l, D_s, D_ls are angular diameter distances.
     """
-    # Cosmology must be explicitly provided by caller
+    mass = _require_positive_finite(mass_msun, "mass_msun")
+    z_lens, z_source = _require_ordered_redshifts(z_lens, z_source)
 
     # Get angular diameter distances
     D_l_obj = cosmology.angular_diameter_distance(z_lens)
@@ -78,7 +111,7 @@ def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
     D_ls_m = D_ls * MPC_TO_M
 
     # Convert mass to kg
-    M_kg = mass_msun * float((1 * u.Msun).to(u.kg).value)
+    M_kg = mass * float((1 * u.Msun).to(u.kg).value)
 
     # Get constants
     G_SI = float(const.G.value)
@@ -220,7 +253,9 @@ def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):
     rho_s : float
         NFW scale density in kg/m^3.
     """
-    # Cosmology must be explicitly provided by caller
+    mass = _require_positive_finite(M200_msun, "M200_msun")
+    concentration = _require_positive_finite(c200, "c200")
+    z_lens = _require_positive_finite(z_lens, "z_lens")
 
     # Get Hubble parameter at z_lens
     H_z_obj = cosmology.H(z_lens)
@@ -232,17 +267,17 @@ def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):
     rho_crit = 3 * H_z_SI**2 / (8 * np.pi * G_SI)  # kg/m^3
 
     # Calculate r200 from M200
-    M200_kg = float((M200_msun * u.Msun).to(u.kg).value)
+    M200_kg = float((mass * u.Msun).to(u.kg).value)
     r200_m = ((3 * M200_kg) / (4 * np.pi * 200 * rho_crit))**(1/3)
 
     # Scale radius
-    rs_m = r200_m / c200
+    rs_m = r200_m / concentration
     rs_kpc = float((rs_m * u.m).to(u.kpc).value)
 
     # NFW scale density
     # rho_s = rho_crit * (200/3) * c^3 / [ln(1+c) - c/(1+c)]
-    f_c = np.log(1 + c200) - c200 / (1 + c200)
-    rho_s = rho_crit * (200.0 / 3.0) * c200**3 / f_c
+    f_c = np.log(1 + concentration) - concentration / (1 + concentration)
+    rho_s = rho_crit * (200.0 / 3.0) * concentration**3 / f_c
 
     return rs_kpc, rho_s
 
@@ -276,7 +311,8 @@ def sigma_v_from_m200_sis(M200_msun, z_lens, cosmology):
     where r200 is calculated from the virial definition at 200 times the
     critical density at the lens redshift.
     """
-    # Cosmology must be explicitly provided by caller
+    mass = _require_positive_finite(M200_msun, "M200_msun")
+    z_lens = _require_positive_finite(z_lens, "z_lens")
 
     # Get Hubble parameter at z_lens - PyAutoLens returns it in km/s/Mpc
     H_z_obj = cosmology.H(z_lens)
@@ -291,7 +327,7 @@ def sigma_v_from_m200_sis(M200_msun, z_lens, cosmology):
 
     # Calculate r200 from M200 definition
     # M200 = (4*pi/3) * r200^3 * 200 * rho_crit
-    M200_kg = float((M200_msun * u.Msun).to(u.kg).value)
+    M200_kg = float((mass * u.Msun).to(u.kg).value)
     r200_m = ((3 * M200_kg) / (4 * np.pi * 200 * rho_crit))**(1/3)  # meters
 
     # For SIS truncated at r200: M200 = 2*sigma_v^2*r200/G
@@ -336,7 +372,7 @@ def einstein_radius_sis_m200(M200_msun, z_lens, z_source, cosmology):
 
     where sigma_v is derived from M200 using virial equilibrium at r200.
     """
-    # Cosmology must be explicitly provided by caller
+    _require_ordered_redshifts(z_lens, z_source)
 
     # Convert M200 to velocity dispersion
     sigma_v_km_s = float(sigma_v_from_m200_sis(M200_msun, z_lens, cosmology))
