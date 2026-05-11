@@ -8,8 +8,10 @@ are computed for optical quality metrics while detector-sampled kernels are
 generated for science applications.
 """
 
-import numpy as np
+import copy
 import os
+
+import numpy as np
 from hcipy.optics import Wavefront
 from hcipy.field import (
     make_focal_grid,
@@ -79,7 +81,7 @@ def generate_psf_system(config, full_config=None):
         lensing_config = full_config['lensing']
     else:
         raise ValueError('full_config must be provided and contain a "lensing" key.')
-    psf_config = config
+    psf_config = copy.deepcopy(config)
     # Use the hres_psf block from the new config structure
     if 'hres_psf' not in psf_config or 'telescope' not in psf_config:
         raise ValueError('psf_config must contain "hres_psf" and "telescope" keys.')
