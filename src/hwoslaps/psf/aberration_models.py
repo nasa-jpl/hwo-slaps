@@ -356,14 +356,19 @@ def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):
 
     if isinstance(zernike_coeffs_nm, dict):
         for mode, coeff_nm in zernike_coeffs_nm.items():
-            if mode < len(zernike_basis):
-                phase_rad = 2 * np.pi * nm_to_opd(coeff_nm) / wavelength
-                phase_screen += phase_rad * zernike_basis[mode]
+            if isinstance(mode, bool) or not isinstance(mode, int):
+                raise ValueError('Global Zernike mode indices must be 1-based Noll integers.')
+            if mode < 1 or mode > len(zernike_basis):
+                raise ValueError(
+                    f'Global Zernike mode {mode} is outside the supported 1..{len(zernike_basis)} Noll range.'
+                )
+            phase_rad = 2 * np.pi * nm_to_opd(coeff_nm) / wavelength
+            phase_screen += phase_rad * zernike_basis[mode - 1]
     else:
-        for mode, coeff_nm in enumerate(zernike_coeffs_nm):
-            if coeff_nm != 0 and mode < len(zernike_basis):
+        for mode_idx, coeff_nm in enumerate(zernike_coeffs_nm):
+            if coeff_nm != 0 and mode_idx < len(zernike_basis):
                 phase_rad = 2 * np.pi * nm_to_opd(coeff_nm) / wavelength
-                phase_screen += phase_rad * zernike_basis[mode]
+                phase_screen += phase_rad * zernike_basis[mode_idx]
 
     return phase_screen
 
