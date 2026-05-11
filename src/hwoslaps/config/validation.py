@@ -45,6 +45,68 @@ def _require_positive_finite_number(value: Any, key_path: str) -> float:
     return value_float
 
 
+def _require_finite_number(value: Any, key_path: str) -> float:
+    """Require a finite scalar number.
+
+    Parameters
+    ----------
+    value : `object`
+        Value to validate.
+    key_path : `str`
+        Human-readable configuration path for error messages.
+
+    Returns
+    -------
+    value_float : `float`
+        Validated value.
+
+    Raises
+    ------
+    ValueError
+        Raised when ``value`` is not a finite non-boolean number.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{key_path} must be numeric")
+    value_float = float(value)
+    if not math.isfinite(value_float):
+        raise ValueError(f"{key_path} must be finite")
+    return value_float
+
+
+def _require_nonnegative_finite_number(value: Any, key_path: str) -> float:
+    """Require a finite scalar number greater than or equal to zero."""
+    value_float = _require_finite_number(value, key_path)
+    if value_float < 0:
+        raise ValueError(f"{key_path} must be non-negative")
+    return value_float
+
+
+def _require_positive_int(value: Any, key_path: str) -> int:
+    """Require a positive integer scalar."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key_path} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{key_path} must be a positive integer")
+    return value
+
+
+def _require_finite_pair(value: Any, key_path: str) -> tuple[float, float]:
+    """Require a length-two finite numeric pair."""
+    pair = _require_list_length(value, 2, key_path)
+    return (
+        _require_finite_number(pair[0], f"{key_path}[0]"),
+        _require_finite_number(pair[1], f"{key_path}[1]"),
+    )
+
+
+def _require_ell_comps(value: Any, key_path: str) -> tuple[float, float]:
+    """Require finite PyAutoLens ellipticity components."""
+    e1, e2 = _require_finite_pair(value, key_path)
+    if math.hypot(e1, e2) >= 1.0:
+        raise ValueError(f"{key_path} magnitude must be less than 1")
+    return e1, e2
+
+
 def validate_top_level(config: Dict[str, Any]) -> None:
     # Top-level required keys
     run_name = _require(config, 'run_name', 'top-level')
@@ -81,9 +143,10 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(grid, dict, 'lensing.grid')
     shape = _require(grid, 'shape', 'lensing.grid')
     _require_list_length(shape, 2, 'lensing.grid.shape')
+    _require_positive_int(shape[0], 'lensing.grid.shape[0]')
+    _require_positive_int(shape[1], 'lensing.grid.shape[1]')
     pixel_scale = _require(grid, 'pixel_scale', 'lensing.grid')
-    if not isinstance(pixel_scale, (int, float)) or pixel_scale <= 0:
-        raise ValueError("lensing.grid.pixel_scale must be a positive number")
+    _require_positive_finite_number(pixel_scale, 'lensing.grid.pixel_scale')
 
     lens_galaxy = _require(lensing, 'lens_galaxy', 'lensing')
     _require_type(lens_galaxy, dict, 'lensing.lens_galaxy')
@@ -93,10 +156,16 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(mass_type, str, 'lensing.lens_galaxy.mass.type')
     if mass_type != 'Isothermal':
         raise ValueError("Only 'Isothermal' mass profile is supported for lens_galaxy.mass.type")
-    _require_list_length(_require(mass, 'centre', 'lensing.lens_galaxy.mass'), 2, 'lensing.lens_galaxy.mass.centre')
+    _require_finite_pair(
+        _require(mass, 'centre', 'lensing.lens_galaxy.mass'),
+        'lensing.lens_galaxy.mass.centre',
+    )
     einstein_radius = _require(mass, 'einstein_radius', 'lensing.lens_galaxy.mass')
     _require_positive_finite_number(einstein_radius, "lensing.lens_galaxy.mass.einstein_radius")
-    _require_list_length(_require(mass, 'ell_comps', 'lensing.lens_galaxy.mass'), 2, 'lensing.lens_galaxy.mass.ell_comps')
+    _require_ell_comps(
+        _require(mass, 'ell_comps', 'lensing.lens_galaxy.mass'),
+        'lensing.lens_galaxy.mass.ell_comps',
+    )
     lens_redshift_val = _require(lens_galaxy, 'redshift', 'lensing.lens_galaxy')
 
     source_galaxy = _require(lensing, 'source_galaxy', 'lensing')
@@ -107,8 +176,14 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(light_type, str, 'lensing.source_galaxy.light.type')
     if light_type != 'Exponential':
         raise ValueError("Only 'Exponential' light profile is supported for source_galaxy.light.type")
-    _require_list_length(_require(light, 'centre', 'lensing.source_galaxy.light'), 2, 'lensing.source_galaxy.light.centre')
-    _require_list_length(_require(light, 'ell_comps', 'lensing.source_galaxy.light'), 2, 'lensing.source_galaxy.light.ell_comps')
+    _require_finite_pair(
+        _require(light, 'centre', 'lensing.source_galaxy.light'),
+        'lensing.source_galaxy.light.centre',
+    )
+    _require_ell_comps(
+        _require(light, 'ell_comps', 'lensing.source_galaxy.light'),
+        'lensing.source_galaxy.light.ell_comps',
+    )
     intensity = _require(light, 'intensity', 'lensing.source_galaxy.light')
     _require_positive_finite_number(intensity, "lensing.source_galaxy.light.intensity")
     eff_r = _require(light, 'effective_radius', 'lensing.source_galaxy.light')
@@ -160,32 +235,29 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
                 )
             if concentration_model == 'moline2017_eq7':
                 x_sub_val = _require(concentration, 'x_sub', 'lensing.subhalo.concentration')
-                try:
-                    x_sub_float = float(x_sub_val)
-                except (TypeError, ValueError):
-                    raise ValueError("lensing.subhalo.concentration.x_sub must be a number")
-                if not math.isfinite(x_sub_float) or x_sub_float <= 0:
-                    raise ValueError("lensing.subhalo.concentration.x_sub must be positive")
+                _require_positive_finite_number(
+                    x_sub_val,
+                    "lensing.subhalo.concentration.x_sub",
+                )
 
                 if 'h' in concentration and concentration['h'] is not None:
                     h_val = concentration['h']
-                    try:
-                        h_float = float(h_val)
-                    except (TypeError, ValueError):
-                        raise ValueError("lensing.subhalo.concentration.h must be a number or null")
-                    if not math.isfinite(h_float) or h_float <= 0:
-                        raise ValueError("lensing.subhalo.concentration.h must be positive when provided")
+                    _require_positive_finite_number(
+                        h_val,
+                        "lensing.subhalo.concentration.h",
+                    )
         position = _require(subhalo, 'position', 'lensing.subhalo')
         _require_type(position, dict, 'lensing.subhalo.position')
         ptype = _require(position, 'type', 'lensing.subhalo.position')
         if ptype == 'random':
             scatter = _require(position, 'scatter_pixels', 'lensing.subhalo.position')
-            if not isinstance(scatter, (int, float)) or scatter < 0:
-                raise ValueError("lensing.subhalo.position.scatter_pixels must be non-negative")
+            _require_nonnegative_finite_number(
+                scatter,
+                "lensing.subhalo.position.scatter_pixels",
+            )
         elif ptype == 'angle':
             angle_val = _require(position, 'angle', 'lensing.subhalo.position')
-            if not isinstance(angle_val, (int, float)):
-                raise ValueError("lensing.subhalo.position.angle must be numeric (degrees)")
+            _require_finite_number(angle_val, "lensing.subhalo.position.angle")
             # Optional: signed radial offset in pixels (finite numeric).
             if 'offset_pixels' in position:
                 off = position['offset_pixels']
@@ -204,7 +276,10 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
                         "lensing.subhalo.position.offset_pixels must be a finite number if provided"
                     )
         elif ptype == 'direct':
-            _require_list_length(_require(position, 'centre', 'lensing.subhalo.position'), 2, 'lensing.subhalo.position.centre')
+            _require_finite_pair(
+                _require(position, 'centre', 'lensing.subhalo.position'),
+                'lensing.subhalo.position.centre',
+            )
         else:
             raise ValueError("lensing.subhalo.position.type must be 'random', 'angle', or 'direct'")
 
