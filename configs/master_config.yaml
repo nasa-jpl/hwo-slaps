@@ -74,7 +74,7 @@ psf:
     wavelength: 5.0e-7  # m
     num_airy: 12
     sampling: 5
-    save_highres_psf_npy: true  # Save pre-downsampled PSF intensity as .npy
+    save_highres_psf_npy: false  # Save pre-downsampled PSF intensity as .npy
     
   # Kernel parameters (for PyAutoLens)
   kernel:
