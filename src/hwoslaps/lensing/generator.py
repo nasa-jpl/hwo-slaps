@@ -4,6 +4,8 @@ This module provides the primary API for generating realistic galaxy-galaxy
 strong lensing systems with precisely known subhalo populations.
 """
 
+from copy import deepcopy
+
 import numpy as np
 import autolens as al
 from ..constants import MPC_TO_M, KPC_TO_M, ARCSEC_PER_RAD
@@ -151,7 +153,7 @@ def generate_lensing_system(config, full_config):
     lensed_image = tracer.image_2d_from(grid=grid)
     
     # Extract parameters for unified structure
-    config_to_store = full_config
+    config_to_store = deepcopy(full_config)
     
     return LensingData(
         # Primary data
