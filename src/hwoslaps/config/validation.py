@@ -335,35 +335,66 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
     for f in flags:
         val = _require(aberr, f, 'psf.aberrations')
         _require_type(val, bool, f'psf.aberrations.{f}')
+
+    def _require_nonempty_dict(value: Any, key_path: str) -> Dict[str, Any]:
+        mapping = _require_type(value, dict, key_path)
+        if not mapping:
+            raise ValueError(f"{key_path} must contain at least one coefficient when enabled")
+        return mapping
+
+    def _require_segment_key(seg_idx: Any, key_path: str) -> int:
+        if isinstance(seg_idx, bool) or not isinstance(seg_idx, int) or seg_idx < 0:
+            raise ValueError(f'{key_path} segment indices must be non-negative integers')
+        return seg_idx
+
     # If any flag enabled, require corresponding dict present
     if aberr['enable_segment_pistons']:
-        _require_type(_require(aberr, 'segment_pistons', 'psf.aberrations'), dict, 'psf.aberrations.segment_pistons')
+        segment_pistons = _require_nonempty_dict(
+            _require(aberr, 'segment_pistons', 'psf.aberrations'),
+            'psf.aberrations.segment_pistons'
+        )
+        for seg_idx, piston_nm in segment_pistons.items():
+            _require_segment_key(seg_idx, 'psf.aberrations.segment_pistons')
+            _require_finite_number(piston_nm, f'psf.aberrations.segment_pistons[{seg_idx}]')
     if aberr['enable_segment_tiptilts']:
-        _require_type(_require(aberr, 'segment_tiptilts', 'psf.aberrations'), dict, 'psf.aberrations.segment_tiptilts')
+        segment_tiptilts = _require_nonempty_dict(
+            _require(aberr, 'segment_tiptilts', 'psf.aberrations'),
+            'psf.aberrations.segment_tiptilts'
+        )
+        for seg_idx, tiptilt in segment_tiptilts.items():
+            _require_segment_key(seg_idx, 'psf.aberrations.segment_tiptilts')
+            _require_finite_pair(tiptilt, f'psf.aberrations.segment_tiptilts[{seg_idx}]')
     if aberr['enable_segment_hexikes']:
-        segment_hexikes = _require_type(
+        segment_hexikes = _require_nonempty_dict(
             _require(aberr, 'segment_hexikes', 'psf.aberrations'),
-            dict,
             'psf.aberrations.segment_hexikes'
         )
         for seg_idx, mode_dict in segment_hexikes.items():
-            if not isinstance(seg_idx, int) or seg_idx < 0:
-                raise ValueError('psf.aberrations.segment_hexikes segment indices must be non-negative integers')
-            if not isinstance(mode_dict, dict):
-                raise ValueError(
-                    f'psf.aberrations.segment_hexikes[{seg_idx}] must be a dict of mode_noll -> coeff_nm'
-                )
+            _require_segment_key(seg_idx, 'psf.aberrations.segment_hexikes')
+            mode_dict = _require_nonempty_dict(
+                mode_dict,
+                f'psf.aberrations.segment_hexikes[{seg_idx}]'
+            )
             for mode_noll, coeff_nm in mode_dict.items():
-                if not isinstance(mode_noll, int) or mode_noll < 1:
+                if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
                     raise ValueError(
                         'psf.aberrations.segment_hexikes mode indices must be 1-based Noll integers (>= 1)'
                     )
-                if not isinstance(coeff_nm, (int, float)):
-                    raise ValueError(
-                        f'psf.aberrations.segment_hexikes[{seg_idx}][{mode_noll}] must be numeric (nm RMS)'
-                    )
+                _require_finite_number(
+                    coeff_nm,
+                    f'psf.aberrations.segment_hexikes[{seg_idx}][{mode_noll}]'
+                )
     if aberr['enable_global_zernikes']:
-        _require_type(_require(aberr, 'global_zernikes', 'psf.aberrations'), dict, 'psf.aberrations.global_zernikes')
+        global_zernikes = _require_nonempty_dict(
+            _require(aberr, 'global_zernikes', 'psf.aberrations'),
+            'psf.aberrations.global_zernikes'
+        )
+        for mode_noll, coeff_nm in global_zernikes.items():
+            if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
+                raise ValueError(
+                    'psf.aberrations.global_zernikes mode indices must be 1-based Noll integers (>= 1)'
+                )
+            _require_finite_number(coeff_nm, f'psf.aberrations.global_zernikes[{mode_noll}]')
 
 
 def validate_observation_config(observation: Dict[str, Any]) -> None:
