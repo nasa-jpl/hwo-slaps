@@ -8,14 +8,20 @@ import numpy as np
 import hcipy
 
 
-def _normalize_segment_hexike_dict(segment_hexike_dict):
+def _validate_segment_id(raw_seg_id, num_segments):
+    if isinstance(raw_seg_id, bool) or not isinstance(raw_seg_id, int):
+        raise ValueError('segment indices must be integers.')
+    if raw_seg_id < 0 or raw_seg_id >= num_segments:
+        raise ValueError(f'segment index {raw_seg_id} is outside the valid 0..{num_segments - 1} range.')
+    return raw_seg_id
+
+
+def _normalize_segment_hexike_dict(segment_hexike_dict, num_segments):
     """Normalize segment/mode indices to HCIPy Noll indexing."""
     normalized = {}
 
     for raw_seg_id, raw_mode_dict in segment_hexike_dict.items():
-        seg_id = int(raw_seg_id)
-        if seg_id < 0:
-            raise ValueError('Segment indices must be >= 0.')
+        seg_id = _validate_segment_id(raw_seg_id, num_segments)
 
         if not raw_mode_dict:
             normalized[seg_id] = {}
@@ -87,11 +93,11 @@ def apply_segment_pistons(hsm, piston_dict, wavelength, num_segments):
     """
     hsm.flatten()
     for seg_id, piston_nm in piston_dict.items():
-        if seg_id < num_segments:
-            # Convert OPD (nm) → surface height (m). A reflective surface
-            # doubles the OPD, so surface = OPD / 2.
-            piston_m = nm_to_opd(piston_nm) / 2
-            hsm.set_segment_actuators(seg_id, piston_m, 0, 0)
+        seg_id = _validate_segment_id(seg_id, num_segments)
+        # Convert OPD (nm) → surface height (m). A reflective surface
+        # doubles the OPD, so surface = OPD / 2.
+        piston_m = nm_to_opd(piston_nm) / 2
+        hsm.set_segment_actuators(seg_id, piston_m, 0, 0)
 
 
 def apply_segment_tiptilts(hsm, tiptilt_dict, num_segments):
@@ -126,16 +132,16 @@ def apply_segment_tiptilts(hsm, tiptilt_dict, num_segments):
         Total number of segments in the mirror.
     """
     for seg_id, (tip_urad, tilt_urad) in tiptilt_dict.items():
-        if seg_id < num_segments:
-            # Preserve existing piston for this segment.
-            current_piston, _, _ = hsm.get_segment_actuators(seg_id)
+        seg_id = _validate_segment_id(seg_id, num_segments)
+        # Preserve existing piston for this segment.
+        current_piston, _, _ = hsm.get_segment_actuators(seg_id)
 
-            # Convert outgoing beam angles (µrad) to surface slope (rad).
-            tip_rad = urad_to_rad(tip_urad) / 2.0
-            tilt_rad = urad_to_rad(tilt_urad) / 2.0
+        # Convert outgoing beam angles (µrad) to surface slope (rad).
+        tip_rad = urad_to_rad(tip_urad) / 2.0
+        tilt_rad = urad_to_rad(tilt_urad) / 2.0
 
-            # Update all three actuators atomically for this segment.
-            hsm.set_segment_actuators(seg_id, current_piston, tip_rad, tilt_rad)
+        # Update all three actuators atomically for this segment.
+        hsm.set_segment_actuators(seg_id, current_piston, tip_rad, tilt_rad)
 
 
 def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
@@ -164,7 +170,7 @@ def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
     segments = telescope_data['segments']
     segment_centers = telescope_data['segment_centers']
     segment_circum_diameter = telescope_data['segment_point_to_point']
-    normalized_segment_dict = _normalize_segment_hexike_dict(segment_hexike_dict)
+    normalized_segment_dict = _normalize_segment_hexike_dict(segment_hexike_dict, len(segments))
 
     # Determine how many modes per segment are required.
     max_mode = 0
@@ -198,7 +204,7 @@ def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
 
     # Set per-segment coefficients using HCIPy Noll indexing and surface-height units.
     for seg_id, mode_dict in normalized_segment_dict.items():
-        if seg_id < len(segments) and mode_dict:
+        if mode_dict:
             coeffs_m = {
                 mode_idx: nm_to_opd(coeff_nm) / 2
                 for mode_idx, coeff_nm in mode_dict.items()

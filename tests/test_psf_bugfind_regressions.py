@@ -139,6 +139,20 @@ def test_segment_tiptilts_reject_invalid_segment_ids(compact_telescope: dict, ba
 
 
 @pytest.mark.parametrize(
+    "bad_segment",
+    [-1, 19],
+)
+def test_segment_hexikes_reject_invalid_segment_ids(compact_telescope: dict, bad_segment: int):
+    """Segment hexikes should fail fast instead of silently ignoring or wrapping IDs."""
+    with pytest.raises(ValueError, match="segment index"):
+        apply_segment_zernikes(
+            {bad_segment: {1: 10.0}},
+            compact_telescope,
+            compact_telescope["wavelength"],
+        )
+
+
+@pytest.mark.parametrize(
     ("flag", "coeff_key"),
     [
         ("enable_segment_pistons", "segment_pistons"),
