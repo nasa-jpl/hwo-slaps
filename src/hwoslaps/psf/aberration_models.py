@@ -310,26 +310,53 @@ def generate_random_segment_aberrations(
     segment_tiptilts : `dict`
         Dictionary mapping segment indices to (tip_µrad, tilt_µrad).
     """
-    if seed is not None:
-        np.random.seed(seed)
+    if isinstance(num_segments, bool) or not isinstance(num_segments, int) or num_segments < 2:
+        raise ValueError('num_segments must be an integer >= 2.')
+    if not np.isfinite(target_rms_nm) or target_rms_nm < 0:
+        raise ValueError('target_rms_nm must be finite and non-negative.')
+    if not np.isfinite(piston_weight) or piston_weight < 0:
+        raise ValueError('piston_weight must be finite and non-negative.')
+    if not np.isfinite(tiptilt_weight) or tiptilt_weight < 0:
+        raise ValueError('tiptilt_weight must be finite and non-negative.')
+    total_weight = piston_weight + tiptilt_weight
+    if total_weight <= 0:
+        raise ValueError('At least one aberration weight must be positive.')
+    if segment_flat_to_flat is not None and (
+        not np.isfinite(segment_flat_to_flat) or segment_flat_to_flat <= 0
+    ):
+        raise ValueError('segment_flat_to_flat must be finite and positive when provided.')
+
+    rng = np.random.default_rng(seed)
 
     # Generate zero-mean random pistons and tip/tilts for all segments.
-    pistons_raw = np.random.randn(num_segments)
+    pistons_raw = rng.standard_normal(num_segments)
     pistons_raw -= np.mean(pistons_raw)
-    tips_raw = np.random.randn(num_segments)
-    tilts_raw = np.random.randn(num_segments)
+    tips_raw = rng.standard_normal(num_segments)
+    tilts_raw = rng.standard_normal(num_segments)
 
     # Scale to desired RMS contributions.
-    piston_rms_target = target_rms_nm * np.sqrt(piston_weight)
-    tiptilt_rms_target = target_rms_nm * np.sqrt(tiptilt_weight)
+    piston_rms_target = target_rms_nm * np.sqrt(piston_weight / total_weight)
+    tiptilt_rms_target = target_rms_nm * np.sqrt(tiptilt_weight / total_weight)
 
-    pistons_nm = pistons_raw * (piston_rms_target / np.std(pistons_raw))
+    piston_std = np.std(pistons_raw)
+    if piston_rms_target == 0:
+        pistons_nm = np.zeros(num_segments)
+    elif piston_std == 0:
+        raise ValueError('Could not generate non-degenerate piston perturbations.')
+    else:
+        pistons_nm = pistons_raw * (piston_rms_target / piston_std)
 
     # Convert tip/tilts to microradians (small-angle relation RMS_height ≈ slope*R/√3).
-    if segment_flat_to_flat is not None:
+    if tiptilt_rms_target == 0:
+        tips_urad = np.zeros(num_segments)
+        tilts_urad = np.zeros(num_segments)
+    elif segment_flat_to_flat is not None:
         segment_radius = segment_flat_to_flat / 2
         # Match the random vector RMS to the requested nm component before geometry.
-        tiptilt_scale = tiptilt_rms_target / np.sqrt(np.var(tips_raw) + np.var(tilts_raw))
+        tiptilt_variance = np.var(tips_raw) + np.var(tilts_raw)
+        if tiptilt_variance == 0:
+            raise ValueError('Could not generate non-degenerate tip/tilt perturbations.')
+        tiptilt_scale = tiptilt_rms_target / np.sqrt(tiptilt_variance)
         # slope[µrad] ≈ RMS_nm * √3 / R * 1e-3
         geom = np.sqrt(3.0) / segment_radius * 1e-3
         tips_urad = tips_raw * tiptilt_scale * geom
