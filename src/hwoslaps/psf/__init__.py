@@ -5,7 +5,7 @@ This module provides functionality to generate realistic PSFs with various
 optical aberrations using HCIPy for segmented telescope modeling.
 """
 
-from .generator import generate_psf_system, generate_aberrated_psf
+from .generator import generate_psf_system
 from .utils import PSFData
 from ..plotting.psf_plots import plot_psf_complete_analysis
 from .psf_metrics import (
@@ -23,7 +23,6 @@ from .aberration_models import (
 
 __all__ = [
     'generate_psf_system',
-    'generate_aberrated_psf',
     'PSFData',
     'measure_fwhm',
     'calculate_strehl_ratio',

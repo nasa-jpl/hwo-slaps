@@ -115,9 +115,9 @@ def plot_psf_comparison(psf_data, plot_config):
         plt.text(0.5, 0.5, 'No phase screens\navailable', 
                 transform=plt.gca().transAxes, ha='center', va='center')
     
-    # Plot 2: Total wavefront phase (focal plane).
+    # Plot 2: Total wavefront phase (pupil plane).
     plt.subplot(132)
-    plt.title('Focal Plane Wavefront Phase')
+    plt.title('Pupil Plane Wavefront Phase')
     imshow_field(np.angle(psf_data.wavefront.electric_field), cmap='RdBu_r')
     plt.colorbar(label='Phase [rad]')
     
@@ -194,14 +194,14 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
     # Create zoom plot.
     plt.figure(figsize=(8, 6))
     
-    # Get the focal plane grid coordinates (adapted for new architecture).
-    focal_grid = psf_data.wavefront.grid
-    x = focal_grid.coords[0]
-    y = focal_grid.coords[1]
+    # Get the pupil-plane grid coordinates.
+    pupil_grid = psf_data.wavefront.grid
+    x = pupil_grid.coords[0]
+    y = pupil_grid.coords[1]
     
-    # Define zoom region in focal plane coordinates (adapted for focal plane scale).
+    # Define zoom region in pupil-plane coordinates.
     if zoom_mode == 'full':
-        # Use the full focal plane extent.
+        # Use the full pupil-plane extent.
         zoom_xmin, zoom_xmax = x.min(), x.max()
         zoom_ymin, zoom_ymax = y.min(), y.max()
     elif zoom_mode == 'corner':
@@ -213,28 +213,28 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
     else:
         raise ValueError(f"Invalid zoom mode: {zoom_mode}")
     
-    # Mask for the zoomed region (adapted for focal plane).
+    # Mask for the zoomed region.
     zoom_mask = (x >= zoom_xmin) & (x <= zoom_xmax) & (y >= zoom_ymin) & (y <= zoom_ymax)
     
-    # Create a zoomed field for pixel-based visualization (adapted for focal plane).
-    zoom_indices = np.where(zoom_mask.reshape(focal_grid.shape))
+    # Create a zoomed field for pixel-based visualization.
+    zoom_indices = np.where(zoom_mask.reshape(pupil_grid.shape))
     y_indices, x_indices = zoom_indices
     
-    # Get the bounds of the zoom region in grid indices (adapted for focal plane).
+    # Get the bounds of the zoom region in grid indices.
     y_min, y_max = y_indices.min(), y_indices.max() + 1
     x_min, x_max = x_indices.min(), x_indices.max() + 1
     
-    # Extract the zoomed phase data as 2D arrays (adapted for focal plane).
+    # Extract the zoomed phase data as 2D arrays.
     zoom_total_phase_2d = np.angle(psf_data.wavefront.electric_field).shaped[y_min:y_max, x_min:x_max]
     
-    # Create extent for proper axis scaling (adapted for focal plane).
+    # Create extent for proper axis scaling.
     extent = (zoom_xmin, zoom_xmax, zoom_ymin, zoom_ymax)
     
-    # For focal plane, we don't need aperture masking since the PSF already contains the aperture effects.
+    # The stored wavefront is already defined on the pupil-plane grid.
     zoom_phase_masked = zoom_total_phase_2d
     
-    # Plot: Focal plane wavefront phase (adapted for new architecture).
-    plt.title('Focal Plane Wavefront Phase\n(Zoomed)')
+    # Plot: Pupil-plane wavefront phase.
+    plt.title('Pupil Plane Wavefront Phase\n(Zoomed)')
     im = plt.imshow(zoom_phase_masked, cmap='RdBu_r', interpolation='nearest', 
                     extent=extent, origin='lower', aspect='equal')
     plt.xlabel('x [m]')
@@ -261,7 +261,7 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
     
     print(f"Saved PSF zoom plot: {filepath}")
     
-    # Print zoom info (adapted for focal plane).
+    # Print zoom info.
     print(f"Zoom region: x=[{zoom_xmin:.2f}, {zoom_xmax:.2f}], y=[{zoom_ymin:.2f}, {zoom_ymax:.2f}]")
     print(f"Zoomed array shape: {zoom_total_phase_2d.shape}")
     total_phase_pixels = np.count_nonzero(~np.isnan(zoom_phase_masked))

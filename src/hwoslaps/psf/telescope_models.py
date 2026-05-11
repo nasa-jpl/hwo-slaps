@@ -23,10 +23,8 @@ def create_hcipy_telescope(config):
     Returns
     -------
     telescope_data : dict
-        Dictionary containing all telescope components:
+        Dictionary containing pupil-side telescope components:
         - pupil_grid: HCIPy grid for pupil plane
-        - focal_grid: HCIPy grid for focal plane  
-        - prop: Fraunhofer propagator
         - aper: Aperture function
         - segments: List of segment aperture functions
         - hsm: Segmented deformable mirror
@@ -41,26 +39,13 @@ def create_hcipy_telescope(config):
     pupil_diameter = telescope_config['pupil_diameter']
     num_rings = telescope_config['num_rings']
     segment_flat_to_flat = segment_point_to_point * np.sqrt(3) / 2
-    focal_length = telescope_config['focal_length']
     
     # Parameters for the simulation
     num_pix = sim_config['num_pix']
     wavelength = sim_config['wavelength']
-    num_airy = sim_config['num_airy']
-    sampling = sim_config['sampling']
     
-    # HCIPy grids and propagator
+    # HCIPy pupil grid
     pupil_grid = hcipy.make_pupil_grid(dims=num_pix, diameter=pupil_diameter)
-    
-    focal_grid = hcipy.make_focal_grid(
-        sampling,
-        num_airy,
-        pupil_diameter=pupil_diameter,
-        reference_wavelength=wavelength,
-        focal_length=focal_length,
-    )
-    
-    prop = hcipy.FraunhoferPropagator(pupil_grid, focal_grid, focal_length)
     
     # Create segmented aperture
     aper, segments = hcipy.make_hexagonal_segmented_aperture(num_rings,
@@ -81,8 +66,6 @@ def create_hcipy_telescope(config):
     
     return {
         'pupil_grid': pupil_grid,
-        'focal_grid': focal_grid,
-        'prop': prop,
         'aper': aper,
         'segments': segments,
         'hsm': hsm,

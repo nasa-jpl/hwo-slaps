@@ -109,6 +109,14 @@ def test_segment_hexike_uses_hcipy_surface_with_telescope_segments(compact_teles
     assert np.allclose(hexike_surface.coefficients[0, 2], -10e-9)
 
 
+def test_telescope_data_contains_only_pupil_side_optics(compact_telescope: dict):
+    """Telescope setup should not expose stale focal-plane propagation objects."""
+    assert "focal_grid" not in compact_telescope
+    assert "prop" not in compact_telescope
+    assert "pupil_grid" in compact_telescope
+    assert "aper" in compact_telescope
+
+
 @pytest.mark.parametrize(
     "bad_segment",
     [-1, 19],
