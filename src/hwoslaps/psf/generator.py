@@ -314,7 +314,9 @@ def generate_psf_system(config, full_config=None):
         print(f"Warning: Could not calculate total RMS including phase screens: {e}")
         total_rms_nm = 0.0
     
-    # Calculate individual aberration RMS values for statistics.
+    # Calculate individual aberration coefficient summaries for metadata.
+    # These are not independent aperture-weighted RMS budget terms; total_rms_nm
+    # above is the physical OPD RMS over the illuminated pupil.
     segment_piston_rms_nm = 0.0
     segment_tiptilt_rms_urad = 0.0
     global_zernike_rms_nm = 0.0

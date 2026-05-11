@@ -78,13 +78,13 @@ class PSFData:
     encircled_energy_50_arcsec : `float`, optional
         Radius containing 50% of PSF energy in arcseconds.
     total_rms_nm : `float`
-        Total RMS wavefront error in nanometers.
+        Aperture-weighted total RMS wavefront OPD error in nanometers.
     segment_piston_rms_nm : `float`
-        RMS of segment piston errors in nanometers.
+        Standard deviation of configured segment piston coefficients in nanometers.
     segment_tiptilt_rms_urad : `float`
-        RMS of segment tip/tilt errors in microradians.
+        RMS magnitude of configured segment tip/tilt coefficients in microradians.
     global_zernike_rms_nm : `float`
-        RMS of global Zernike aberrations in nanometers.
+        Quadrature norm of configured global Zernike coefficients in nanometers.
     has_segment_pistons : `bool`
         Whether segment piston aberrations are present.
     has_segment_tiptilts : `bool`
@@ -284,13 +284,13 @@ class PSFData:
         """
         breakdown = {}
         if self.has_segment_pistons:
-            breakdown['segment_pistons'] = f"{self.segment_piston_rms_nm:.1f} nm RMS"
+            breakdown['segment_pistons'] = f"{self.segment_piston_rms_nm:.1f} nm coeff std"
         if self.has_segment_tiptilts:
-            breakdown['segment_tiptilts'] = f"{self.segment_tiptilt_rms_urad:.1f} μrad RMS"
+            breakdown['segment_tiptilts'] = f"{self.segment_tiptilt_rms_urad:.1f} urad coeff RMS"
         if self.has_segment_hexikes:
             breakdown['segment_hexikes'] = "Present"
         if self.has_global_zernikes:
-            breakdown['global_zernikes'] = f"{self.global_zernike_rms_nm:.1f} nm RMS"
+            breakdown['global_zernikes'] = f"{self.global_zernike_rms_nm:.1f} nm coeff quadrature"
             
         return breakdown
     
@@ -381,7 +381,7 @@ def print_psf_data_summary(psf_data):
     # Aberrations.
     if psf_data.has_aberrations:
         print("\n=== Aberration Summary ===")
-        print(f"Total RMS: {psf_data.total_rms_nm:.1f} nm")
+        print(f"Total aperture-weighted OPD RMS: {psf_data.total_rms_nm:.1f} nm")
         print(f"Has segment pistons: {psf_data.has_segment_pistons}")
         print(f"Has segment tip/tilts: {psf_data.has_segment_tiptilts}")
         print(f"Has segment hexikes: {psf_data.has_segment_hexikes}")
