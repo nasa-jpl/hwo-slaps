@@ -54,7 +54,20 @@ class ObservationData:
     
     @property
     def signal_to_noise_map(self) -> al.Array2D:
-        """Signal-to-noise ratio map."""
+        """Source signal-to-noise ratio map."""
+        source_adu = self.source_electrons / self.gain
+        noise_adu = self.noise_map.native
+        snr = np.divide(
+            source_adu,
+            noise_adu,
+            out=np.zeros_like(source_adu, dtype=float),
+            where=noise_adu > 0.0,
+        )
+        return al.Array2D(values=snr, mask=self.noise_map.mask)
+
+    @property
+    def observed_signal_to_noise_map(self) -> al.Array2D:
+        """Observed data divided by the noise map."""
         return self.imaging.signal_to_noise_map
     
     @property
@@ -146,7 +159,11 @@ class ObservationData:
         
         return {
             'dark_regions_e': float(np.mean(noise_e[very_dark])) if np.any(very_dark) else 0.0,
-            'background_regions_e': float(np.mean(noise_e[background_dominated])) if np.any(background_dominated) else 0.0,
+            'background_regions_e': (
+                float(np.mean(noise_e[background_dominated]))
+                if np.any(background_dominated)
+                else 0.0
+            ),
             'bright_regions_e': float(np.mean(noise_e[bright])) if np.any(bright) else 0.0,
             'mean_noise_e': float(np.mean(noise_e)),
             'min_noise_e': float(np.min(noise_e)),
