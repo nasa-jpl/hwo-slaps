@@ -94,6 +94,18 @@ def _observation_config(
     }
 
 
+def _source_snr_from_formula(
+    source_eps: np.ndarray,
+    exposure_time: float,
+    detector: dict,
+) -> np.ndarray:
+    source_e = source_eps * exposure_time
+    dark_e = detector["dark_current"] * exposure_time
+    sky_e = detector["sky_background"] * exposure_time
+    variance_e2 = source_e + dark_e + sky_e + detector["read_noise"]**2
+    return source_e / np.sqrt(variance_e2)
+
+
 def test_create_noise_map_matches_ccd_variance_formula():
     source_eps = np.array([[0.0, 1.0], [2.0, 3.0]])
     exposure_time = 7.0
@@ -164,6 +176,168 @@ def test_apply_detector_noise_uses_local_rng_without_mutating_global_state():
     after = np.random.random(5)
 
     np.testing.assert_allclose(after, expected_after, rtol=0.0, atol=0.0)
+
+
+def test_observation_source_snr_scales_with_exposure_depth():
+    source_eps = np.array(
+        [
+            [0.2, 0.5, 1.0],
+            [1.5, 2.0, 3.0],
+            [0.4, 0.8, 1.2],
+        ],
+        dtype=float,
+    )
+    lensing = _make_lensing_data(image=source_eps, pixel_scale=0.1)
+    psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
+    detector = {
+        "gain": 2.0,
+        "read_noise": 3.0,
+        "dark_current": 0.01,
+        "sky_background": 0.4,
+    }
+
+    snr_maps = []
+    for exposure_time in (50.0, 200.0, 800.0):
+        obs = generate_observation(
+            lensing_data=lensing,
+            psf_data=psf_data,
+            observation_config=_observation_config(
+                exposure_time=exposure_time,
+                **detector,
+            ),
+            full_config={
+                "global_seed": int(exposure_time),
+                "run_name": f"exposure_{exposure_time:g}",
+            },
+        )
+        expected_snr = _source_snr_from_formula(source_eps, exposure_time, detector)
+
+        np.testing.assert_allclose(
+            obs.signal_to_noise_map.native,
+            expected_snr,
+            rtol=1e-12,
+            atol=1e-12,
+        )
+        assert obs.peak_snr == pytest.approx(float(np.max(expected_snr)))
+        snr_maps.append(obs.signal_to_noise_map.native)
+
+    assert np.all(snr_maps[1] > snr_maps[0])
+    assert np.all(snr_maps[2] > snr_maps[1])
+
+
+def test_detector_noise_monte_carlo_matches_expected_moments():
+    source_eps = np.full((128, 128), 2.0, dtype=float)
+    exposure_time = 50.0
+    detector = {
+        "gain": 2.0,
+        "read_noise": 4.0,
+        "dark_current": 0.1,
+        "sky_background": 1.0,
+    }
+    expected_e = (
+        source_eps[0, 0]
+        + detector["dark_current"]
+        + detector["sky_background"]
+    ) * exposure_time
+    expected_mean_adu = expected_e / detector["gain"]
+    expected_variance_adu2 = (
+        expected_e
+        + detector["read_noise"]**2
+    ) / detector["gain"]**2
+
+    final_image_adu, components = apply_detector_noise(
+        source_eps,
+        exposure_time,
+        detector,
+        seed=123,
+    )
+
+    samples = final_image_adu.ravel()
+    assert float(np.mean(samples)) == pytest.approx(expected_mean_adu, abs=0.35)
+    assert float(np.var(samples, ddof=1)) == pytest.approx(
+        expected_variance_adu2,
+        rel=0.06,
+    )
+    np.testing.assert_allclose(
+        components["expected_e"],
+        np.full_like(source_eps, expected_e),
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
+def test_generate_observation_seed_controls_noise_only():
+    lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
+    psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
+    observation_config = _observation_config(
+        exposure_time=125.0,
+        gain=1.5,
+        read_noise=0.7,
+        dark_current=0.01,
+        sky_background=0.8,
+    )
+
+    obs_a = generate_observation(
+        lensing_data=lensing,
+        psf_data=psf_data,
+        observation_config=observation_config,
+        full_config={"global_seed": 55, "run_name": "seed_a"},
+    )
+    obs_b = generate_observation(
+        lensing_data=lensing,
+        psf_data=psf_data,
+        observation_config=observation_config,
+        full_config={"global_seed": 55, "run_name": "seed_b"},
+    )
+    obs_c = generate_observation(
+        lensing_data=lensing,
+        psf_data=psf_data,
+        observation_config=observation_config,
+        full_config={"global_seed": 56, "run_name": "seed_c"},
+    )
+
+    np.testing.assert_allclose(obs_a.data.native, obs_b.data.native, rtol=0.0, atol=0.0)
+    assert not np.array_equal(obs_a.data.native, obs_c.data.native)
+    np.testing.assert_allclose(
+        obs_a.noiseless_source_eps,
+        obs_c.noiseless_source_eps,
+        rtol=0.0,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(obs_a.noise_map.native, obs_c.noise_map.native, rtol=0.0, atol=0.0)
+
+
+def test_generate_observation_nontrivial_psf_convolution_centers_kernel():
+    source_eps = np.zeros((7, 7), dtype=float)
+    source_eps[3, 3] = 1.0
+    kernel = np.array(
+        [
+            [0.00, 0.05, 0.00],
+            [0.10, 0.50, 0.20],
+            [0.00, 0.15, 0.00],
+        ],
+        dtype=float,
+    )
+    lensing = _make_lensing_data(image=source_eps, pixel_scale=0.1)
+    psf_data = _make_psf_data(kernel, pixel_scale=0.1)
+
+    obs = generate_observation(
+        lensing_data=lensing,
+        psf_data=psf_data,
+        observation_config=_observation_config(
+            exposure_time=100.0,
+            gain=1.0,
+            read_noise=0.1,
+            dark_current=0.0,
+            sky_background=0.0,
+        ),
+        full_config={"global_seed": 9, "run_name": "nontrivial_psf"},
+    )
+
+    expected = np.zeros_like(source_eps)
+    expected[2:5, 2:5] = kernel
+    np.testing.assert_allclose(obs.noiseless_source_eps, expected, rtol=0.0, atol=1e-12)
+    assert float(np.sum(obs.noiseless_source_eps)) == pytest.approx(1.0)
 
 
 def test_generate_observation_source_free_scene_has_zero_source_snr():
