@@ -399,15 +399,16 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
 
 def validate_observation_config(observation: Dict[str, Any]) -> None:
     exposure_time = _require(observation, 'exposure_time', 'observation')
-    if not isinstance(exposure_time, (int, float)) or exposure_time <= 0:
-        raise ValueError("observation.exposure_time must be positive")
+    _require_positive_finite_number(exposure_time, 'observation.exposure_time')
 
     detector = _require(observation, 'detector', 'observation')
     _require_type(detector, dict, 'observation.detector')
-    for k in ('gain', 'read_noise', 'dark_current', 'sky_background'):
+    gain = _require(detector, 'gain', 'observation.detector')
+    _require_positive_finite_number(gain, 'observation.detector.gain')
+
+    for k in ('read_noise', 'dark_current', 'sky_background'):
         v = _require(detector, k, 'observation.detector')
-        if not isinstance(v, (int, float)):
-            raise ValueError(f"observation.detector.{k} must be numeric")
+        _require_nonnegative_finite_number(v, f'observation.detector.{k}')
 
 
 def validate_modeling_config(modeling: Dict[str, Any]) -> None:
