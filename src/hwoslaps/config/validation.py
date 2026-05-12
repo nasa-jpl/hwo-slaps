@@ -410,6 +410,11 @@ def validate_observation_config(observation: Dict[str, Any]) -> None:
         v = _require(detector, k, 'observation.detector')
         _require_nonnegative_finite_number(v, f'observation.detector.{k}')
 
+    if 'output_format' in observation:
+        output_format = observation['output_format']
+        if output_format != 'pyautolens_ready':
+            raise ValueError("observation.output_format must be 'pyautolens_ready'")
+
 
 def validate_modeling_config(modeling: Dict[str, Any]) -> None:
     # modeling.enabled already checked at top-level

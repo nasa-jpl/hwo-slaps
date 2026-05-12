@@ -163,7 +163,7 @@ psf:
 # Observation simulation parameters
 observation:
   exposure_time: 900.0  # seconds
-  output_format: "pyautolens_ready"  # "adu" or "pyautolens_ready"
+  output_format: "pyautolens_ready"
   
   # Detector configuration
   detector:
