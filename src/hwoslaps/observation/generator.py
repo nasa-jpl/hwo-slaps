@@ -4,18 +4,20 @@ This module implements the main observation simulation pipeline, including
 PSF convolution and realistic detector noise modeling.
 """
 
-import numpy as np
-import autolens as al
+from copy import deepcopy
 from datetime import datetime
 from typing import Dict, Optional
 
+import autolens as al
+import numpy as np
+
 from ..lensing.utils import LensingData
 from ..psf.utils import PSFData
-from .utils import ObservationData
 from .noise_models import (
     apply_detector_noise,
     create_noise_map,
 )
+from .utils import ObservationData
 
 
 def generate_observation(
@@ -142,7 +144,7 @@ def generate_observation(
         'lensing_run': lensing_data.config.get('run_name') if lensing_data.config else None,
         'psf_run': psf_data.config.get('run_name') if psf_data.config else None,
         'exposure_time': exposure_time,
-        'detector': detector_config.copy(),
+        'detector': deepcopy(detector_config),
         'noise_seed': noise_seed,
         'pixel_scale': lensing_data.pixel_scale,
         'field_of_view': lensing_data.field_of_view_arcsec
@@ -156,7 +158,7 @@ def generate_observation(
         imaging=imaging_dataset,
         noiseless_source_eps=source_only_eps,
         noise_components=components,
-        config=observation_config.copy(),
+        config=deepcopy(observation_config),
         metadata=metadata
     )
 
