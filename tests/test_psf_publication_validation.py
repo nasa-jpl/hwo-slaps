@@ -158,21 +158,28 @@ def test_numpy_fft_circular_aperture_matches_analytic_airy_metrics():
 @pytest.mark.parametrize(
     "aberration_update",
     [
-        {
-            "enable_global_zernikes": True,
-            "global_zernikes": {4: 10.0, 5: -5.0},
-        },
-        {
-            "enable_segment_hexikes": True,
-            "segment_hexikes": {0: {2: 5.0, 3: -2.5}, 7: {4: 3.0}},
-        },
+        pytest.param({}, id="no_aberration"),
+        pytest.param(
+            {
+                "enable_global_zernikes": True,
+                "global_zernikes": {4: 10.0, 5: -5.0},
+            },
+            id="global_zernikes",
+        ),
+        pytest.param(
+            {
+                "enable_segment_hexikes": True,
+                "segment_hexikes": {0: {2: 5.0, 3: -2.5}, 7: {4: 3.0}},
+            },
+            id="segment_hexikes",
+        ),
     ],
 )
-def test_aberrated_detector_kernel_matches_binned_highres_branch(
+def test_detector_kernel_matches_binned_highres_branch(
     compact_no_aberration_config: dict,
     aberration_update: dict,
 ):
-    """Detector kernels should equal flux-conserving binning for aberrated wavefronts."""
+    """Detector kernels should equal flux-conserving binning of high-res PSFs."""
     cfg = copy.deepcopy(compact_no_aberration_config)
     cfg["psf"]["aberrations"].update(aberration_update)
 

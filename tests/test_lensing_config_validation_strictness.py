@@ -42,6 +42,19 @@ def test_top_level_global_seed_rejects_bool():
 
 
 @pytest.mark.parametrize(
+    "bad_mass",
+    [np.nan, np.inf, -np.inf, 0.0, -1.0, -1.0e7],
+)
+def test_lensing_subhalo_mass_requires_positive_finite_value(bad_mass):
+    config = _base_config()
+    config["lensing"]["subhalo"]["enabled"] = True
+    config["lensing"]["subhalo"]["mass"] = bad_mass
+
+    with pytest.raises(ValueError, match="lensing.subhalo.mass must be positive"):
+        VALIDATION.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
     "shape",
     [
         [64.5, 64],
@@ -62,6 +75,89 @@ def test_lensing_grid_pixel_scale_requires_positive_finite_non_bool_number(pixel
     config = _base_config()
     config["lensing"]["grid"]["pixel_scale"] = pixel_scale
     _assert_rejected(config)
+
+
+@pytest.mark.parametrize("lens_z,source_z", [(0.5, 0.5), (1.0, 0.8)])
+def test_lensing_redshift_order_requires_source_behind_lens(lens_z, source_z):
+    config = _base_config()
+    config["lensing"]["lens_galaxy"]["redshift"] = lens_z
+    config["lensing"]["source_galaxy"]["redshift"] = source_z
+
+    with pytest.raises(ValueError, match="source_galaxy.redshift must be greater than"):
+        VALIDATION.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "lens_z,source_z,bad_key",
+    [
+        (0.0, 2.0, "lensing.lens_galaxy.redshift"),
+        (-0.1, 2.0, "lensing.lens_galaxy.redshift"),
+        (0.2, 0.0, "lensing.source_galaxy.redshift"),
+        (0.2, -1.0, "lensing.source_galaxy.redshift"),
+    ],
+)
+def test_lensing_redshifts_must_be_positive(lens_z, source_z, bad_key):
+    config = _base_config()
+    config["lensing"]["lens_galaxy"]["redshift"] = lens_z
+    config["lensing"]["source_galaxy"]["redshift"] = source_z
+
+    with pytest.raises(ValueError, match=f"{bad_key} must be positive"):
+        VALIDATION.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "path,value,expected_error",
+    [
+        (("lensing", "lens_galaxy", "redshift"), np.nan, "lensing.lens_galaxy.redshift"),
+        (("lensing", "source_galaxy", "redshift"), np.inf, "lensing.source_galaxy.redshift"),
+        (
+            ("lensing", "lens_galaxy", "mass", "einstein_radius"),
+            np.nan,
+            "lensing.lens_galaxy.mass.einstein_radius",
+        ),
+        (
+            ("lensing", "source_galaxy", "light", "intensity"),
+            np.inf,
+            "lensing.source_galaxy.light.intensity",
+        ),
+        (
+            ("lensing", "source_galaxy", "light", "effective_radius"),
+            np.nan,
+            "lensing.source_galaxy.light.effective_radius",
+        ),
+    ],
+)
+def test_lensing_scalar_domains_reject_non_finite_values(path, value, expected_error):
+    config = _base_config()
+    _set_nested(config, path, value)
+
+    with pytest.raises(ValueError, match=f"{expected_error} must be finite"):
+        VALIDATION.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "path,value,expected_error",
+    [
+        (("lensing", "lens_galaxy", "redshift"), True, "lensing.lens_galaxy.redshift"),
+        (("lensing", "source_galaxy", "redshift"), True, "lensing.source_galaxy.redshift"),
+        (("lensing", "lens_galaxy", "redshift"), "0.2", "lensing.lens_galaxy.redshift"),
+        (("lensing", "source_galaxy", "redshift"), "2.0", "lensing.source_galaxy.redshift"),
+    ],
+)
+def test_lensing_redshift_types_must_be_numeric(path, value, expected_error):
+    config = _base_config()
+    _set_nested(config, path, value)
+
+    with pytest.raises(ValueError, match=f"{expected_error} must be numeric"):
+        VALIDATION.validate_or_raise(config)
+
+
+def test_lensing_accepts_physical_redshift_order():
+    config = _base_config()
+    config["lensing"]["lens_galaxy"]["redshift"] = 0.2
+    config["lensing"]["source_galaxy"]["redshift"] = 2.0
+
+    VALIDATION.validate_or_raise(config)
 
 
 @pytest.mark.parametrize(
@@ -121,6 +217,66 @@ def test_random_position_requires_finite_non_bool_nonnegative_scatter(bad_scatte
         "scatter_pixels": bad_scatter,
     }
     _assert_rejected(config)
+
+
+def test_angle_position_accepts_negative_offset_pixels():
+    config = _base_config()
+    config["lensing"]["subhalo"]["enabled"] = True
+    config["lensing"]["subhalo"]["position"] = {
+        "type": "angle",
+        "angle": 45.0,
+        "offset_pixels": -5.0,
+    }
+
+    VALIDATION.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_offset", [np.inf, -np.inf, np.nan, True, "bad"])
+def test_angle_position_rejects_non_finite_or_non_numeric_offset_pixels(bad_offset):
+    config = _base_config()
+    config["lensing"]["subhalo"]["enabled"] = True
+    config["lensing"]["subhalo"]["position"] = {
+        "type": "angle",
+        "angle": 45.0,
+        "offset_pixels": bad_offset,
+    }
+
+    with pytest.raises(ValueError, match="offset_pixels must be a finite number"):
+        VALIDATION.validate_or_raise(config)
+
+
+def test_nfw_subhalo_requires_concentration_block():
+    config = _base_config()
+    config["lensing"]["subhalo"]["enabled"] = True
+    config["lensing"]["subhalo"]["model"] = "NFW"
+    config["lensing"]["subhalo"].pop("concentration", None)
+
+    with pytest.raises(ValueError, match="Missing required key 'concentration'"):
+        VALIDATION.validate_or_raise(config)
+
+
+def test_moline_concentration_requires_x_sub():
+    config = _base_config()
+    config["lensing"]["subhalo"]["enabled"] = True
+    config["lensing"]["subhalo"]["model"] = "NFW"
+    config["lensing"]["subhalo"]["concentration"] = {
+        "model": "moline2017_eq7",
+        "h": 0.6774,
+    }
+
+    with pytest.raises(ValueError, match="Missing required key 'x_sub'"):
+        VALIDATION.validate_or_raise(config)
+
+
+def test_power_law_concentration_mode_is_accepted():
+    config = _base_config()
+    config["lensing"]["subhalo"]["enabled"] = True
+    config["lensing"]["subhalo"]["model"] = "NFW"
+    config["lensing"]["subhalo"]["concentration"] = {
+        "model": "power_law",
+    }
+
+    VALIDATION.validate_or_raise(config)
 
 
 @pytest.mark.parametrize(

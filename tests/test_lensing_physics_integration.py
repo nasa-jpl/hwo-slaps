@@ -57,6 +57,7 @@ def _build_lensing_config_for_model(model_name: str):
         cfg["lensing"]["subhalo"].pop("concentration", None)
     return cfg
 
+
 @pytest.mark.parametrize("model_name", ["PointMass", "SIS", "NFW"])
 def test_env_02_smoke_generate_lensing_system_by_model(model_name: str):
     generator_module = _load_lensing_generator_module()

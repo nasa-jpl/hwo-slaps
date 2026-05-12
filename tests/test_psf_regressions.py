@@ -1,8 +1,8 @@
-"""Regression tests for PSF physics/math bugfind review.
+"""Regression tests for previously reviewed PSF correctness issues.
 
-These tests intentionally encode correctness expectations that are stricter
-than the existing smoke tests. They should fail until the PSF implementation
-is fixed; they do not modify production code.
+These tests encode focused protections for physics, math, API, and provenance
+bugs found during the PSF review. They are narrower than the publication
+validation tests and should remain fast, surgical checks against regressions.
 """
 
 from __future__ import annotations

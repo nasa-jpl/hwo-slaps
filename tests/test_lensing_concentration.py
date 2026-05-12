@@ -2,46 +2,21 @@
 
 from __future__ import annotations
 
-import importlib.util
 import sys
-import types
 from pathlib import Path
 
 import numpy as np
 import pytest
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src" / "hwoslaps"
+TESTS_ROOT = Path(__file__).resolve().parent
+if str(TESTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(TESTS_ROOT))
+
+from _lensing_physics_helpers import load_mass_models_module  # noqa: E402
 
 
-def _bootstrap_hwoslaps_namespace():
-    if "hwoslaps" not in sys.modules:
-        pkg = types.ModuleType("hwoslaps")
-        pkg.__path__ = [str(SRC_ROOT)]
-        sys.modules["hwoslaps"] = pkg
-    if "hwoslaps.lensing" not in sys.modules:
-        pkg = types.ModuleType("hwoslaps.lensing")
-        pkg.__path__ = [str(SRC_ROOT / "lensing")]
-        sys.modules["hwoslaps.lensing"] = pkg
-
-
-def _load_module(relative_path: str, module_name: str):
-    module_path = SRC_ROOT / relative_path
-    spec = importlib.util.spec_from_file_location(module_name, module_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def _load_mass_models():
-    _bootstrap_hwoslaps_namespace()
-    _load_module("constants.py", "hwoslaps.constants")
-    return _load_module("lensing/mass_models.py", "hwoslaps.lensing.mass_models")
-
-
-mass_models = _load_mass_models()
+mass_models = load_mass_models_module()
 
 
 def _moline_expected(mass_msun: float, x_sub: float, h: float) -> float:
