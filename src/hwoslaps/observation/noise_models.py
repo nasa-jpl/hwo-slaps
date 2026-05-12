@@ -4,8 +4,93 @@ This module implements realistic detector noise models including
 Poisson noise, read noise, dark current, and sky background.
 """
 
+from numbers import Real
+from typing import Dict, Optional, Tuple
+
 import numpy as np
-from typing import Dict, Tuple, Optional
+
+
+def _validate_noise_inputs(
+    source_eps: np.ndarray,
+    exposure_time: float,
+    detector_config: Dict[str, float],
+) -> Tuple[np.ndarray, float, Dict[str, float]]:
+    """Validate common detector-noise inputs.
+
+    Parameters
+    ----------
+    source_eps : array-like
+        Source flux in electrons per second.
+    exposure_time : `float`
+        Exposure time in seconds.
+    detector_config : `dict`
+        Detector configuration with ``gain``, ``read_noise``,
+        ``dark_current``, and ``sky_background`` entries.
+
+    Returns
+    -------
+    source_array : `numpy.ndarray`
+        Validated source flux array.
+    exposure : `float`
+        Validated exposure time.
+    detector : `dict`
+        Validated detector values converted to floats.
+
+    Raises
+    ------
+    ValueError
+        Raised when any input is nonfinite or outside its physical domain.
+    """
+    source_array = np.asarray(source_eps, dtype=float)
+    if not np.all(np.isfinite(source_array)):
+        raise ValueError("source_eps must be finite")
+    if np.any(source_array < 0.0):
+        raise ValueError("source_eps must be non-negative")
+
+    exposure = _validate_scalar(
+        exposure_time,
+        "exposure_time",
+        positive=True,
+    )
+
+    if not isinstance(detector_config, dict):
+        raise ValueError("detector_config must be a dictionary")
+
+    detector = {
+        "gain": _validate_scalar(
+            detector_config.get("gain"),
+            "detector_config.gain",
+            positive=True,
+        ),
+        "read_noise": _validate_scalar(
+            detector_config.get("read_noise"),
+            "detector_config.read_noise",
+        ),
+        "dark_current": _validate_scalar(
+            detector_config.get("dark_current"),
+            "detector_config.dark_current",
+        ),
+        "sky_background": _validate_scalar(
+            detector_config.get("sky_background"),
+            "detector_config.sky_background",
+        ),
+    }
+    return source_array, exposure, detector
+
+
+def _validate_scalar(value: object, key_path: str, positive: bool = False) -> float:
+    """Validate a finite scalar detector parameter."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(value, Real):
+        raise ValueError(f"{key_path} must be numeric")
+    value_float = float(value)
+    if not np.isfinite(value_float):
+        raise ValueError(f"{key_path} must be finite")
+    if positive:
+        if value_float <= 0.0:
+            raise ValueError(f"{key_path} must be positive")
+    elif value_float < 0.0:
+        raise ValueError(f"{key_path} must be non-negative")
+    return value_float
 
 
 def apply_detector_noise(
@@ -54,6 +139,12 @@ def apply_detector_noise(
     3. Add Gaussian read noise
     4. Convert to ADU using gain
     """
+    source_eps, exposure_time, detector_config = _validate_noise_inputs(
+        source_eps,
+        exposure_time,
+        detector_config,
+    )
+
     # Use a local random number generator to avoid global RNG side effects
     rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng()
     
@@ -125,6 +216,12 @@ def create_noise_map(
     Where expected_counts includes source, sky, and dark current.
     This follows from Poisson statistics where variance equals mean.
     """
+    source_eps, exposure_time, detector_config = _validate_noise_inputs(
+        source_eps,
+        exposure_time,
+        detector_config,
+    )
+
     # Extract detector parameters
     gain = detector_config['gain']
     read_noise = detector_config['read_noise']
