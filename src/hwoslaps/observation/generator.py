@@ -138,8 +138,8 @@ def generate_observation(
     # Create metadata dictionary
     metadata = {
         'generated': datetime.now().isoformat(),
-        'lensing_run': lensing_data.config['run_name'] if lensing_data.config and 'run_name' in lensing_data.config else None,
-        'psf_run': psf_data.config['run_name'] if psf_data.config and 'run_name' in psf_data.config else None,
+        'lensing_run': lensing_data.config.get('run_name') if lensing_data.config else None,
+        'psf_run': psf_data.config.get('run_name') if psf_data.config else None,
         'exposure_time': exposure_time,
         'detector': detector_config.copy(),
         'noise_seed': noise_seed,
@@ -161,7 +161,7 @@ def generate_observation(
 
 
 def _ensure_odd_kernel(kernel: al.Kernel2D) -> al.Kernel2D:
-    """Ensure PSF kernel has odd dimensions as required by PyAutoLens.
+    """Validate the PSF kernel for observation convolution.
     
     Parameters
     ----------
@@ -170,24 +170,26 @@ def _ensure_odd_kernel(kernel: al.Kernel2D) -> al.Kernel2D:
         
     Returns
     -------
-    kernel_odd : `al.Kernel2D`
-        PSF kernel with odd dimensions.
+    kernel : `al.Kernel2D`
+        Validated PSF kernel.
+
+    Raises
+    ------
+    ValueError
+        Raised when the kernel support or flux normalization is invalid.
     """
-    kernel_array = kernel.native
-    
-    # Check if dimensions are already odd
-    if kernel_array.shape[0] % 2 == 1 and kernel_array.shape[1] % 2 == 1:
-        return kernel
-    
-    # Trim if even
-    if kernel_array.shape[0] % 2 == 0:
-        kernel_array = kernel_array[:-1, :]
-    if kernel_array.shape[1] % 2 == 0:
-        kernel_array = kernel_array[:, :-1]
-    
-    # Create new kernel with odd dimensions
-    return al.Kernel2D.no_mask(
-        values=kernel_array,
-        pixel_scales=kernel.pixel_scales,
-        normalize=True
-    )
+    kernel_array = np.asarray(kernel.native, dtype=float)
+    if kernel_array.ndim != 2:
+        raise ValueError("PSF kernel must be a two-dimensional array")
+    if kernel_array.shape[0] % 2 == 0 or kernel_array.shape[1] % 2 == 0:
+        raise ValueError("PSF kernel must have odd dimensions")
+    if not np.all(np.isfinite(kernel_array)):
+        raise ValueError("PSF kernel values must be finite")
+    if np.any(kernel_array < 0.0):
+        raise ValueError("PSF kernel values must be non-negative")
+
+    kernel_sum = float(np.sum(kernel_array))
+    if not np.isclose(kernel_sum, 1.0, rtol=0.0, atol=1e-10):
+        raise ValueError("PSF kernel must be normalized to unit flux")
+
+    return kernel
