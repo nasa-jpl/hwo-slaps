@@ -1,7 +1,9 @@
-"""HCIPy telescope model setup for PSF generation.
+"""Build HCIPy pupil-plane telescope models for PSF generation.
 
-This module contains functions to create the telescope aperture, segmented mirror,
-and optical propagation setup.
+This module creates the segmented aperture, pupil grid, segment masks, and
+deformable mirror used by the PSF generator. Focal-plane grids and propagators
+are built by :func:`hwoslaps.psf.generator.generate_psf_system`, where the
+high-resolution and detector-sampled branches choose their own focal grids.
 """
 
 import numpy as np
@@ -9,25 +11,25 @@ import hcipy
 
 
 def create_hcipy_telescope(config):
-    """
-    Create the HCIPy telescope model with aperture, segments, and propagator.
-    
-    This function sets up the complete optical system including the segmented
-    aperture, coordinate grids, and Fraunhofer propagator for PSF generation.
-    
+    """Create the HCIPy pupil-plane telescope model.
+
+    The returned dictionary contains only pupil-side optical components and
+    static telescope geometry. It deliberately does not contain focal grids or
+    propagators, since those depend on whether the caller is generating the
+    high-resolution metric PSF or the detector-sampled kernel.
+
     Parameters
     ----------
-    config : dict
-        Configuration dictionary with telescope and simulation parameters.
-        
+    config : `dict`
+        PSF configuration dictionary containing ``telescope`` and
+        ``hres_psf`` blocks.
+
     Returns
     -------
-    telescope_data : dict
-        Dictionary containing pupil-side telescope components:
-        - pupil_grid: HCIPy grid for pupil plane
-        - aper: Aperture function
-        - segments: List of segment aperture functions
-        - hsm: Segmented deformable mirror
+    telescope_data : `dict`
+        Dictionary containing the HCIPy pupil grid, supersampled segmented
+        aperture, per-segment aperture masks, segmented deformable mirror,
+        wavelength, and telescope geometry metadata.
     """
     # Extract parameters from config
     telescope_config = config['telescope']

@@ -30,13 +30,13 @@ class PSFData:
     Parameters
     ----------
     psf : `hcipy.Field`
-        The PSF field from HCIPy containing intensity and coordinate information.
+        High-resolution focal-plane PSF used for optical metrics.
     wavefront : `hcipy.Wavefront`
-        The wavefront object containing electric field and phase information.
+        Final aberrated pupil-plane wavefront.
     telescope_data : `dict`
-        Dictionary containing HCIPy telescope components (grids, propagators, etc).
+        Pupil-side HCIPy telescope components and geometry metadata.
     kernel : `autolens.Kernel2D`
-        Pre-converted PyAutoLens kernel for immediate use in lensing simulations.
+        Detector-sampled PyAutoLens kernel for lensing simulations.
     kernel_pixel_scale : `float`
         Pixel scale of the kernel if different from PSF pixel scale.
     wavelength_nm : `float`
@@ -80,11 +80,11 @@ class PSFData:
     total_rms_nm : `float`
         Aperture-weighted total RMS wavefront OPD error in nanometers.
     segment_piston_rms_nm : `float`
-        Standard deviation of configured segment piston coefficients in nanometers.
+        Standard deviation of configured segment piston coefficients.
     segment_tiptilt_rms_urad : `float`
-        RMS magnitude of configured segment tip/tilt coefficients in microradians.
+        RMS magnitude of configured segment tip/tilt coefficients.
     global_zernike_rms_nm : `float`
-        Quadrature norm of configured global Zernike coefficients in nanometers.
+        Quadrature norm of configured global Zernike coefficients.
     has_segment_pistons : `bool`
         Whether segment piston aberrations are present.
     has_segment_tiptilts : `bool`
@@ -112,9 +112,9 @@ class PSFData:
     provides immediate access to PyAutoLens format for convolution operations.
     """
     # Primary data.
-    psf: Any  # hcipy.Field - The PSF field from HCIPy.
-    wavefront: Any  # hcipy.Wavefront - The wavefront object.
-    telescope_data: Dict  # Dictionary with HCIPy telescope components.
+    psf: Any  # hcipy.Field - The high-resolution focal-plane PSF.
+    wavefront: Any  # hcipy.Wavefront - The pupil-plane wavefront.
+    telescope_data: Dict  # Dictionary with pupil-side HCIPy components.
     kernel: al.Kernel2D  # Pre-converted PyAutoLens kernel.
     kernel_pixel_scale: float  # Kernel pixel scale if different from PSF.
     

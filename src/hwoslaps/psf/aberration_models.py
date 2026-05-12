@@ -1,7 +1,8 @@
-"""Aberration models for PSF generation.
+"""Apply optical aberrations to segmented HWO pupil models.
 
-This module contains all aberration functions for applying various types of
-optical aberrations to segmented mirrors.
+This module contains small conversion helpers and HCIPy adapters for segment
+pistons, segment tip/tilts, segment hexikes, and global Zernike phase screens.
+Unless otherwise noted, nanometer amplitudes are wavefront OPD amplitudes.
 """
 
 import numpy as np
@@ -9,6 +10,25 @@ import hcipy
 
 
 def _validate_segment_id(raw_seg_id, num_segments):
+    """Validate a zero-based segment identifier.
+
+    Parameters
+    ----------
+    raw_seg_id : `int`
+        Candidate segment identifier.
+    num_segments : `int`
+        Number of available segments.
+
+    Returns
+    -------
+    seg_id : `int`
+        Validated segment identifier.
+
+    Raises
+    ------
+    ValueError
+        Raised if ``raw_seg_id`` is not an integer segment index in range.
+    """
     if isinstance(raw_seg_id, bool) or not isinstance(raw_seg_id, int):
         raise ValueError('segment indices must be integers.')
     if raw_seg_id < 0 or raw_seg_id >= num_segments:
@@ -17,7 +37,21 @@ def _validate_segment_id(raw_seg_id, num_segments):
 
 
 def _normalize_segment_hexike_dict(segment_hexike_dict, num_segments):
-    """Normalize segment/mode indices to HCIPy Noll indexing."""
+    """Normalize segment and hexike mode indices.
+
+    Parameters
+    ----------
+    segment_hexike_dict : `dict`
+        Mapping from zero-based segment identifiers to mode dictionaries.
+        Mode keys are 1-based Noll indices.
+    num_segments : `int`
+        Number of available segments.
+
+    Returns
+    -------
+    normalized : `dict`
+        Validated mapping with integer segment and mode keys.
+    """
     normalized = {}
 
     for raw_seg_id, raw_mode_dict in segment_hexike_dict.items():
@@ -90,6 +124,11 @@ def apply_segment_pistons(hsm, piston_dict, wavelength, num_segments):
         Wavelength in meters.
     num_segments : `int`
         Total number of segments.
+
+    Raises
+    ------
+    ValueError
+        Raised if any segment index is invalid.
     """
     hsm.flatten()
     for seg_id, piston_nm in piston_dict.items():
@@ -103,13 +142,9 @@ def apply_segment_pistons(hsm, piston_dict, wavelength, num_segments):
 def apply_segment_tiptilts(hsm, tiptilt_dict, num_segments):
     """Apply tip and tilt errors to individual segments while preserving piston.
 
-    This function updates the tip and tilt actuator values for each segment in a
-    segmented deformable mirror, keeping the existing piston value intact. The
-    actuator layout for :class:`hcipy.SegmentedDeformableMirror` consists of three
-    contiguous blocks of length ``N`` (number of segments): pistons ``[0..N-1]``,
-    tips ``[N..2N-1]``, and tilts ``[2N..3N-1]``. We therefore either fetch the
-    current piston using the mirror accessor, or directly read from the piston
-    block, and write tip/tilt into their respective blocks.
+    This function updates the tip and tilt actuator values for each segment in
+    a segmented deformable mirror while keeping the existing piston value
+    intact.
 
     Notes
     -----
@@ -126,10 +161,16 @@ def apply_segment_tiptilts(hsm, tiptilt_dict, num_segments):
     hsm : `hcipy.SegmentedDeformableMirror`
         The segmented mirror object.
     tiptilt_dict : `dict`
-        Mapping from segment index to a 2‑tuple ``(tip_urad, tilt_urad)`` giving
-        desired outgoing beam angles in microradians for tip and tilt.
+        Mapping from segment index to a 2-tuple
+        ``(tip_urad, tilt_urad)`` giving desired outgoing beam angles in
+        microradians for tip and tilt.
     num_segments : `int`
         Total number of segments in the mirror.
+
+    Raises
+    ------
+    ValueError
+        Raised if any segment index is invalid.
     """
     for seg_id, (tip_urad, tilt_urad) in tiptilt_dict.items():
         seg_id = _validate_segment_id(seg_id, num_segments)
@@ -150,12 +191,11 @@ def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
     Parameters
     ----------
     segment_hexike_dict : `dict`
-        Dictionary mapping segment ID to another dict of {mode_noll: amplitude_nm},
-        where mode indices follow 1-based Noll indexing.
-        Example: {0: {1: 100}, 1: {2: 100}} applies Noll mode 1 with 100nm RMS
-        to segment 0, and Noll mode 2 with 100nm RMS to segment 1.
+        Mapping from zero-based segment ID to ``{mode_noll: amplitude_nm}``.
+        Mode keys follow 1-based Noll indexing.
     telescope_data : `dict`
-        Dictionary containing telescope parameters.
+        Pupil-side telescope dictionary returned by
+        :func:`hwoslaps.psf.telescope_models.create_hcipy_telescope`.
     wavelength : `float`
         Wavelength in meters.
 
@@ -165,6 +205,11 @@ def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
         Phase screen containing segment-level aberrations.
     hexike_surface : `hcipy.SegmentedHexikeSurface`
         The segmented hexike surface optic.
+
+    Raises
+    ------
+    ValueError
+        Raised if any segment or mode index is invalid.
     """
     pupil_grid = telescope_data['pupil_grid']
     segments = telescope_data['segments']
@@ -222,9 +267,11 @@ def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):
     Parameters
     ----------
     zernike_coeffs_nm : `dict` or `array_like`
-        Global Zernike coefficients in nm RMS.
+        Global Zernike coefficients in nanometers RMS. Dictionary keys are
+        1-based Noll indices.
     telescope_data : `dict`
-        Dictionary containing telescope parameters.
+        Pupil-side telescope dictionary returned by
+        :func:`hwoslaps.psf.telescope_models.create_hcipy_telescope`.
     wavelength : `float`
         Wavelength in meters.
 
@@ -232,6 +279,11 @@ def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):
     -------
     phase_screen : `hcipy.Field`
         Phase screen containing global Zernike aberrations.
+
+    Raises
+    ------
+    ValueError
+        Raised if a dictionary key is not a supported 1-based Noll index.
     """
     pupil_grid = telescope_data['pupil_grid']
     
@@ -269,20 +321,22 @@ def generate_random_segment_aberrations(
     segment_flat_to_flat=None,
     seed=None,
 ):
-    """Generate random segment pistons and tip/tilts for a target RMS (heuristic).
+    """Generate random segment pistons and tip/tilts for a target RMS.
 
-    This function produces zero-mean random pistons (in nm OPD) and tip/tilts (in µrad)
-    as an initial guess to achieve a total RMS wavefront error of ``target_rms_nm``.
-    The tip/tilt scaling uses a geometric relation for a hexagon of flat-to-flat
-    size ``F`` with radius ``R = F/2``:
+    This heuristic produces zero-mean random pistons in nanometers OPD and
+    tip/tilts in microradians as an initial guess for a total wavefront error.
+    If a segment size is supplied, the tip/tilt scaling uses a geometric
+    relation for a hexagon of flat-to-flat size ``F`` with radius ``R = F/2``::
 
-    RMS_height [m] ≈ slope [rad] × R / √3  ⇒  slope [µrad] ≈ RMS_nm × √3 / R × 1e-3
+        RMS_height [m] ~= slope [rad] * R / sqrt(3)
+        slope [urad] ~= RMS_nm * sqrt(3) / R * 1e-3
 
     Notes
     -----
-    - This mapping is an approximation and depends on aperture discretization and
-      basis details. For scientific use, follow with a numerical calibration pass
-      that rescales to the exact target RMS on the configured system.
+    - This mapping is an approximation and depends on aperture
+      discretization and basis details. For scientific use, follow with a
+      numerical calibration pass that rescales to the exact target RMS on the
+      configured system.
     - If ``segment_flat_to_flat`` is not provided, we generate unit-variance
       tip/tilts in µrad without attempting a physically inconsistent nm→µrad
       conversion. The calibration step should then be used to match the target.
@@ -309,6 +363,12 @@ def generate_random_segment_aberrations(
         Dictionary mapping segment indices to piston values (nm OPD).
     segment_tiptilts : `dict`
         Dictionary mapping segment indices to (tip_µrad, tilt_µrad).
+
+    Raises
+    ------
+    ValueError
+        Raised if the segment count, RMS target, weights, or supplied segment
+        size are outside their physical domains.
     """
     if isinstance(num_segments, bool) or not isinstance(num_segments, int) or num_segments < 2:
         raise ValueError('num_segments must be an integer >= 2.')
@@ -372,7 +432,11 @@ def generate_random_segment_aberrations(
 
 
 def calculate_wavefront_rms(hsm, aper, wavelength):
-    """Calculate the RMS wavefront error in nm.
+    """Calculate RMS wavefront OPD from a segmented mirror surface.
+
+    This helper measures only the OPD represented by the segmented deformable
+    mirror surface. It does not include additional phase-screen optics such as
+    segment hexikes or global Zernikes.
     
     Parameters
     ----------
@@ -381,7 +445,8 @@ def calculate_wavefront_rms(hsm, aper, wavelength):
     aper : `hcipy.Field`
         The aperture function.
     wavelength : `float`
-        Wavelength in meters.
+        Wavelength in meters. This parameter is accepted for API compatibility
+        and is not used in the surface-height calculation.
         
     Returns
     -------

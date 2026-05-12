@@ -1,11 +1,10 @@
-"""PSF generation functions for HWO-SLAPS.
-
-This module contains the main PSF generation logic implementing a clean API
-for generating aberrated PSFs.
+"""Generate high-resolution PSFs and detector-sampled kernels.
 
 The module implements a diverging-path architecture where high-resolution PSFs
 are computed for optical quality metrics while detector-sampled kernels are
-generated for science applications.
+generated for science images. Both branches share the same aberrated
+pupil-plane wavefront so that metrics and detector products describe the same
+incoming optical state.
 """
 
 import copy
@@ -35,43 +34,50 @@ from .utils import PSFData
 def generate_psf_system(config, full_config=None):
     """Generate a PSF system with specified aberrations.
 
-    This is the main API function that creates a complete PSF system
-    including telescope setup, aberration application, and PSF generation
-    with comprehensive quality analysis and unified data structure.
+    This function is the canonical PSF runtime path for the project. It builds
+    a pupil-side HCIPy telescope model, applies configured segment and global
+    aberrations, propagates the shared pupil wavefront to a high-resolution
+    focal grid for metrics, and separately propagates it to a supersampled
+    detector grid for flux-conserving binning into a PyAutoLens kernel.
 
     Parameters
     ----------
     config : `dict`
-        Configuration dictionary containing telescope, simulation, and
-        aberration parameters.
+        PSF configuration dictionary containing ``telescope``, ``hres_psf``,
+        ``kernel``, and ``aberrations`` blocks.
     full_config : `dict`, optional
-        Full configuration dictionary containing run_name and other top-level
-        parameters. If provided, this will be stored in PSFData.
+        Full configuration dictionary. It must contain the lensing grid pixel
+        scale used to set the detector kernel scale. The complete dictionary is
+        stored on the returned `PSFData` object for provenance.
 
     Returns
     -------
     psf_data : `PSFData`
-        Complete PSF system data with unified structure providing direct
-        access to all system parameters and quality metrics. Includes
-        pre-converted PyAutoLens Kernel2D for immediate use in lensing
-        simulations.
+        Complete PSF products and metadata. The object contains the
+        high-resolution focal-plane PSF, the final pupil-plane wavefront,
+        pupil-side telescope data, detector-sampled PyAutoLens kernel,
+        sampling metadata, quality metrics, and aberration summaries.
+
+    Raises
+    ------
+    ValueError
+        Raised if ``full_config`` does not contain a lensing block, required
+        PSF blocks are missing, or the requested sampling cannot produce a
+        positive integer detector subsampling factor.
 
     Notes
     -----
-    The returned PSFData object contains all information in a flat structure
-    with direct property access, including pre-computed quality metrics like
-    FWHM and aberration statistics.
+    ``PSFData.psf`` is the high-resolution focal-plane PSF used for optical
+    metrics. ``PSFData.kernel`` is the detector-sampled science kernel. The
+    detector kernel is propagated on its own supersampled focal grid rather
+    than being treated as a cosmetic resize of the metric PSF.
 
     Examples
     --------
-    Generate a PSF system and access key properties:
-    
-    >>> psf_data = generate_psf_system(config)
-    >>> print(f"Wavelength: {psf_data.wavelength_nm} nm")
-    >>> print(f"FWHM: {psf_data.fwhm_arcsec:.3f} arcsec")
-    >>> print(f"Quality: {psf_data.quality_grade}")
-    >>> if psf_data.has_aberrations:
-    ...     print(f"Total RMS: {psf_data.total_rms_nm:.1f} nm")
+    Generate a PSF system and inspect its detector kernel::
+
+        psf_data = generate_psf_system(config["psf"], full_config=config)
+        kernel = psf_data.kernel
     """
     # Automatic sampling calculation and validation.
     
