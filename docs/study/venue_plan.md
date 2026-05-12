@@ -85,7 +85,7 @@ Core scope:
 
 - Expand the SPIE framework into a calibrated, publishable study.
 - Validate the Fisher detector against a sparse set of full nonlinear likelihood fits.
-- Run a fuller PSF-mode sweep.
+- Run a full PSF-mode sweep.
 - Run the full subhalo mass-reach sweep.
 - Produce sensitivity maps, detectable-area curves, and mass-threshold summaries.
 - Test false positives from PSF mismatch.
@@ -95,6 +95,8 @@ Recommended expanded content:
 
 - Multiple PSF families: segment piston, segment tip/tilt, segment hexikes, global Zernikes, and selected combinations.
 - A broader PSF amplitude ladder.
+- Time varying PSF
+- EAC 1 and maybe EAC 2
 - More subhalo locations and masses.
 - Better source realism, especially clumpy or cuspy sources motivated by the SCDD.
 - Perfect-PSF and perturbed-PSF comparison grids.
