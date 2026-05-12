@@ -61,6 +61,7 @@ def generate_observation(
     # Strict: observation_config must be provided by pipeline validation
     if observation_config is None:
         raise ValueError("observation_config must be provided explicitly (no defaults)")
+    full_config = _validate_full_config(full_config)
     
     # Extract parameters
     exposure_time = observation_config['exposure_time']
@@ -158,6 +159,39 @@ def generate_observation(
         config=observation_config.copy(),
         metadata=metadata
     )
+
+
+def _validate_full_config(full_config: Optional[Dict]) -> Dict:
+    """Validate observation-level full configuration requirements.
+
+    Parameters
+    ----------
+    full_config : `dict`
+        Full pipeline configuration.
+
+    Returns
+    -------
+    full_config : `dict`
+        Validated full configuration.
+
+    Raises
+    ------
+    ValueError
+        Raised when required global provenance or seed values are missing.
+    """
+    if not isinstance(full_config, dict):
+        raise ValueError("full_config must be a dict for generate_observation")
+    if 'global_seed' not in full_config:
+        raise ValueError("Missing required key 'global_seed' in full_config")
+    global_seed = full_config['global_seed']
+    if isinstance(global_seed, bool) or not isinstance(global_seed, int):
+        raise ValueError("full_config.global_seed must be an int")
+    if 'run_name' not in full_config:
+        raise ValueError("Missing required key 'run_name' in full_config")
+    run_name = full_config['run_name']
+    if not isinstance(run_name, str) or not run_name:
+        raise ValueError("full_config.run_name must be a non-empty string")
+    return full_config
 
 
 def _ensure_odd_kernel(kernel: al.Kernel2D) -> al.Kernel2D:
