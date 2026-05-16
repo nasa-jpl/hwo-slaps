@@ -564,9 +564,9 @@ class ProfileLikelihoodWorkspace:
         signal_result = self.evaluate_signal(signal)
         fisher_profiled = signal_result.fisher_profiled
         if fisher_profiled <= 0.0:
-            amp_spur = np.inf
+            amp_spur = np.nan
             numerator = np.nan
-            z_spur = np.inf
+            z_spur = np.nan
         elif self.n_nuisance == 0:
             numerator = float(signal @ bias)
             amp_spur = numerator / fisher_profiled
@@ -654,17 +654,17 @@ class ProfileLikelihoodWorkspace:
             couplings = tuple(
                 SystematicModeCoupling(
                     mode_name=name,
-                    amplitude_per_unit=np.inf,
-                    z_per_unit=np.inf,
-                    one_sigma_z=np.inf if sigmas is not None else None,
-                    tolerance_for_zmax=0.0 if z_tolerance is not None else None,
+                    amplitude_per_unit=np.nan,
+                    z_per_unit=np.nan,
+                    one_sigma_z=np.nan if sigmas is not None else None,
+                    tolerance_for_zmax=np.nan if z_tolerance is not None else None,
                 )
                 for name in names
             )
             return SystematicModeScanResult(
                 couplings=couplings,
-                rms_spurious_amplitude=np.inf,
-                rms_spurious_z=np.inf,
+                rms_spurious_amplitude=np.nan if systematic_covariance is not None else None,
+                rms_spurious_z=np.nan if systematic_covariance is not None else None,
                 sigma_amplitude_profiled=float(sigma_amp),
                 fisher_profiled=float(fisher_profiled),
             )

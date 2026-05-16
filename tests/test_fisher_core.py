@@ -173,6 +173,19 @@ def test_spurious_amplitude_matches_closed_form_without_nuisance():
     assert result.z_spurious == pytest.approx(expected_z)
 
 
+def test_spurious_amplitude_is_undefined_for_zero_information_signal():
+    signal = np.zeros(3)
+    bias = np.array([0.3, -0.2, 0.5])
+
+    result = compute_spurious_amplitude(signal, bias, sigma=np.ones(signal.size))
+
+    assert result.fisher_profiled == pytest.approx(0.0)
+    assert np.isinf(result.sigma_amplitude_profiled)
+    assert np.isnan(result.amplitude_spurious)
+    assert np.isnan(result.z_spurious)
+    assert np.isnan(result.numerator)
+
+
 def test_systematic_mode_scan_reports_expected_tolerances_and_rms():
     signal = np.array([1.0, 0.0, 0.0])
     modes = np.eye(3)
@@ -205,6 +218,33 @@ def test_systematic_mode_scan_reports_expected_tolerances_and_rms():
 
     assert scan.rms_spurious_amplitude == pytest.approx(0.5)
     assert scan.rms_spurious_z == pytest.approx(0.5)
+
+
+def test_systematic_mode_scan_is_undefined_for_zero_information_signal():
+    signal = np.zeros(3)
+    modes = np.eye(3)
+    mode_sigmas = np.array([0.5, 2.0, 1.0])
+    systematic_cov = np.diag(mode_sigmas**2)
+
+    scan = scan_systematic_modes(
+        signal=signal,
+        systematic_modes=modes,
+        sigma=np.ones(3),
+        mode_names=["x", "y", "z"],
+        mode_sigmas=mode_sigmas,
+        z_tolerance=1.0,
+        systematic_covariance=systematic_cov,
+    )
+
+    assert scan.fisher_profiled == pytest.approx(0.0)
+    assert np.isinf(scan.sigma_amplitude_profiled)
+    assert np.isnan(scan.rms_spurious_amplitude)
+    assert np.isnan(scan.rms_spurious_z)
+    for coupling in scan.couplings:
+        assert np.isnan(coupling.amplitude_per_unit)
+        assert np.isnan(coupling.z_per_unit)
+        assert np.isnan(coupling.one_sigma_z)
+        assert np.isnan(coupling.tolerance_for_zmax)
 
 
 def test_sidak_and_global_p_are_consistent():
