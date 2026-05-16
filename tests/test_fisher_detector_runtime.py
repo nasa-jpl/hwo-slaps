@@ -145,6 +145,47 @@ def _make_detector(runtime_setup, *, mode: str, fisher_overrides: dict | None = 
     )
 
 
+def _detector_stub_with_map_config(map_config: dict):
+    detector = FisherDetector.__new__(FisherDetector)
+    detector.map_config = map_config
+    detector._candidate_positions_cache = None
+    return detector
+
+
+def test_fisher_detector_rejects_empty_explicit_map_positions():
+    detector = _detector_stub_with_map_config(
+        {
+            "num_angles": 4,
+            "offset_pixels": 0.0,
+            "explicit_positions_yx": [],
+        }
+    )
+
+    with pytest.raises(ValueError, match="explicit_positions_yx must be non-empty"):
+        detector._candidate_positions()
+
+
+@pytest.mark.parametrize(
+    "explicit_positions",
+    [
+        [[0.1]],
+        [["0.1", 0.2]],
+        [[np.nan, 0.2]],
+    ],
+)
+def test_fisher_detector_rejects_malformed_explicit_map_positions(explicit_positions):
+    detector = _detector_stub_with_map_config(
+        {
+            "num_angles": 4,
+            "offset_pixels": 0.0,
+            "explicit_positions_yx": explicit_positions,
+        }
+    )
+
+    with pytest.raises(ValueError, match="explicit_positions_yx"):
+        detector._candidate_positions()
+
+
 def test_fisher_detector_runtime_local_executes(runtime_setup):
     detector = _make_detector(runtime_setup, mode="local")
     local = detector.compute_local(

@@ -522,10 +522,40 @@ class FisherDetector:
             return list(self._candidate_positions_cache)
 
         explicit = self.map_config.get("explicit_positions_yx")
-        if explicit:
-            self._candidate_positions_cache = [
-                tuple(float(v) for v in pair) for pair in explicit
-            ]
+        if explicit is not None:
+            if len(explicit) == 0:
+                raise ValueError(
+                    "modeling.fisher.map.explicit_positions_yx must be non-empty when provided."
+                )
+            positions = []
+            numeric_types = (int, float, np.integer, np.floating)
+            for i, pair in enumerate(explicit):
+                if not isinstance(pair, Sequence) or isinstance(pair, (str, bytes)):
+                    raise ValueError(
+                        f"modeling.fisher.map.explicit_positions_yx[{i}] must be a length-2 coordinate pair."
+                    )
+                if len(pair) != 2:
+                    raise ValueError(
+                        f"modeling.fisher.map.explicit_positions_yx[{i}] must be a length-2 coordinate pair."
+                    )
+                y, x = pair
+                if (
+                    isinstance(y, bool)
+                    or isinstance(x, bool)
+                    or not isinstance(y, numeric_types)
+                    or not isinstance(x, numeric_types)
+                ):
+                    raise ValueError(
+                        f"modeling.fisher.map.explicit_positions_yx[{i}] must contain numeric coordinates."
+                    )
+                y = float(y)
+                x = float(x)
+                if not np.isfinite(y) or not np.isfinite(x):
+                    raise ValueError(
+                        f"modeling.fisher.map.explicit_positions_yx[{i}] must contain finite coordinates."
+                    )
+                positions.append((y, x))
+            self._candidate_positions_cache = positions
             return list(self._candidate_positions_cache)
 
         num_angles = int(self.map_config["num_angles"])
