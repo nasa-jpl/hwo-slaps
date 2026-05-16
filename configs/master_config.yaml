@@ -27,7 +27,7 @@ lensing:
       
   # Background source galaxy
   source_galaxy:
-    redshift: 2.5
+    redshift: 0.6
     light:
       type: Exponential
       centre: [-0.03, 0.08]

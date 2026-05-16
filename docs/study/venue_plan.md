@@ -46,7 +46,7 @@ Present HWO-SLAPS as an end-to-end pipeline and show first quantitative PSF-stab
 Core scope:
 
 - Introduce the science motivation from the SCDD PSF-stability future-work case.
-- Present HWO-SLAPS as the pipeline connecting lens simulation, segmented-mirror PSFs, detector noise, and Fisher detectability.
+- Present HWO-SLAPS as the pipeline connecting lens simulation, segmented-mirror PSFs, detector noise, and Fisher detectability calibrated against a sparse nonlinear-fit subset.
 - Demonstrate subhalo detectability forecasts using a bounded canonical setup.
 - Show first controlled PSF-aberration or drift results.
 - Produce early plots of detection significance or minimum detectable mass versus PSF error.
@@ -54,15 +54,16 @@ Core scope:
 Recommended bounds:
 
 - One canonical SCDD-like strong-lens scene.
-- A small subhalo mass ladder, for example `10^7`, `10^7.5`, and `10^8 Msun`.
+- A subhalo mass ladder spanning `10^6`, `10^6.5`, `10^6.75`, `10^7`, `10^7.25`, `10^7.5`, `10^7.75`, and `10^8 Msun`.
 - A perfect-PSF baseline.
 - One or two PSF mode families, such as segment piston and low-order global Zernikes.
 - One stability or drift axis.
-- One sensitivity-map or detectable-area demonstration if feasible.
+- One required Fisher ring-map demonstration around the Einstein ring, reported as a detectable-ring fraction rather than a full 2D detectable area.
+- A sparse PyAutoLens-JAX nonlinear-fit validation subset comparing the Fisher statistic to direct smooth-versus-subhalo likelihood differences.
 
 Tone:
 
-- "We present a framework and first forecasts."
+- "We present a framework and first forecasts with a sparse nonlinear validation of the detection metric."
 - "We translate PSF perturbations into preliminary subhalo-detection sensitivity curves."
 - Avoid claiming final HWO engineering requirements unless the validation is strong.
 
@@ -72,6 +73,8 @@ SPIE deliverables:
 - Poster.
 - Pipeline schematic.
 - One baseline sensitivity or detectability figure.
+- One ring-map or detectable-ring-fraction figure.
+- One Fisher-versus-nonlinear calibration table or figure.
 - One PSF-mode illustration.
 - One preliminary requirement-style plot.
 
@@ -84,10 +87,10 @@ Submit the full archival science study to the RASTI Habitable World Observatory 
 Core scope:
 
 - Expand the SPIE framework into a calibrated, publishable study.
-- Validate the Fisher detector against a sparse set of full nonlinear likelihood fits.
+- Expand the sparse SPIE nonlinear checks into a calibrated Fisher-versus-fit validation grid.
 - Run a full PSF-mode sweep.
 - Run the full subhalo mass-reach sweep.
-- Produce sensitivity maps, detectable-area curves, and mass-threshold summaries.
+- Produce full 2D sensitivity maps, detectable-area curves, and mass-threshold summaries.
 - Test false positives from PSF mismatch.
 - Translate PSF errors into HWO-relevant requirement language.
 
@@ -97,10 +100,11 @@ Recommended expanded content:
 - A broader PSF amplitude ladder.
 - Time varying PSF
 - EAC 1 and maybe EAC 2
-- More subhalo locations and masses.
+- Full 2D grids of subhalo positions around the lensed arcs, not only Einstein-ring samples.
+- More subhalo masses.
 - Better source realism, especially clumpy or cuspy sources motivated by the SCDD.
 - Perfect-PSF and perturbed-PSF comparison grids.
-- Fisher-versus-fit calibration cases.
+- Fisher-versus-fit calibration across masses, positions, PSF states, and false-positive cases.
 - Reproducible configs, run manifests, analysis tables, and figure-generation scripts.
 
 Tone:

@@ -47,7 +47,7 @@ Checklist:
 - [ ] Add a lightweight study manifest format in `scratch/study`.
 - [ ] Add a lightweight study runner that expands the manifest into configs and run directories.
 - [ ] Add cross-run aggregation to `results.csv` or `results.jsonl`.
-- [ ] Record run name, mass, PSF mode, amplitude, seed, local `Z`, map median `Z`, map max `Z`, degradation, and detectable fraction/area where available.
+- [ ] Record run name, mass, PSF mode, amplitude, seed, local `Z`, profiled Fisher statistic `q_F`, Fisher-equivalent `Delta log L`, ring-map median `Z`, ring-map max `Z`, degradation, and detectable ring fraction.
 - [ ] Add SPIE plotting scripts for the required figures.
 - [ ] Add basic provenance beyond `config_used.yaml`, ideally git commit/hash and environment summary.
 
@@ -69,20 +69,32 @@ Run a bounded study that supports the submitted SPIE abstract without overclaimi
 Recommended scope:
 
 - One canonical strong-lens scene.
-- Masses: `10^7`, `10^7.5`, and `10^8 Msun`.
+- Masses: `10^6`, `10^6.5`, `10^6.75`, `10^7`, `10^7.25`, `10^7.5`, `10^7.75`, and `10^8 Msun`.
 - Perfect-PSF baseline.
 - One or two PSF families:
   - segment piston or segment hexike,
   - low-order global Zernikes.
 - One amplitude ladder per PSF family.
-- Fisher-only forecasts, framed as first quantitative forecasts.
+- Fisher/Asimov forecasts for the headline sweep, calibrated against a sparse PyAutoLens-JAX nonlinear-fit subset.
+- One Fisher ring-map around the Einstein ring, framed as a lightweight SCDD-style sensitivity-map surrogate.
+- One smooth-versus-subhalo nonlinear validation subset, with fixed PSF kernels and selected masses/positions.
 - Optional small seed set if runtime allows.
+
+SPIE detection-metric convention:
+
+- Define the profiled Fisher statistic as \(q_F \equiv \Delta \chi^2_F\).
+- Report the Fisher-equivalent local significance as \(Z_F = \sqrt{q_F}\).
+- Convert to the SCDD likelihood convention with \(\Delta \log \mathcal{L}_{F,\mathrm{equiv}} = q_F / 2\).
+- Adopt the SCDD threshold \(\Delta \log \mathcal{L} > 5\), equivalent to \(q_F > 10\) and \(Z_F > \sqrt{10}\), under the standard \(q = 2\Delta \log \mathcal{L}\) convention.
+- Validate selected cases with nonlinear fits using \(q_{\mathrm{fit}} = 2(\log \mathcal{L}_{\mathrm{subhalo}} - \log \mathcal{L}_{\mathrm{smooth}})\).
 
 SPIE study questions:
 
 - [ ] Does detectability improve with subhalo mass as expected?
 - [ ] Which selected PSF modes couple most strongly to subhalo-like signals?
 - [ ] At what approximate PSF amplitude does detection degrade materially?
+- [ ] What fraction of the sampled Einstein ring remains detectable above the adopted SCDD-threshold convention?
+- [ ] Does \(q_F\) track \(q_{\mathrm{fit}}\) for the sparse nonlinear validation subset?
 - [ ] Can HWO-SLAPS produce requirement-style curves from optics perturbations to subhalo detectability?
 
 SPIE study figures:
@@ -92,13 +104,14 @@ SPIE study figures:
 - [ ] Detection significance versus subhalo mass.
 - [ ] Detection significance or degradation versus PSF amplitude.
 - [ ] PSF-mode coupling or tolerance plot.
-- [ ] Optional sensitivity-map or ring-map figure.
+- [ ] Required Fisher ring-map or detectable-ring-fraction figure.
+- [ ] Fisher-versus-nonlinear calibration plot showing \(q_F\) against \(q_{\mathrm{fit}}\), with the SCDD threshold \(q=10\).
 
 SPIE claim boundary:
 
 Use:
 
-> We present a framework and first quantitative forecasts.
+> We present a framework, first quantitative forecasts, and a sparse nonlinear validation of the Fisher detection metric.
 
 Avoid:
 
@@ -145,9 +158,10 @@ Checklist:
 - [ ] Add a supported study aggregator.
 - [ ] Add requirement-curve generation.
 - [ ] Add publication figure-generation scripts.
-- [ ] Add full detectable-area support, not only local injected-position significance.
-- [ ] Map Fisher `Z` / `Delta chi^2` to the SCDD-style `Delta log L > 5` criterion.
-- [ ] Add sparse nonlinear fit validation cases if feasible.
+- [ ] Add full 2D detectable-area support, not only local injected-position or Einstein-ring significance.
+- [ ] Promote the SPIE metric convention into a supported analysis output: \(q_F\), \(Z_F\), \(\Delta \log \mathcal{L}_{F,\mathrm{equiv}}\), and SCDD-threshold pass/fail.
+- [ ] Add mandatory PyAutoLens-JAX nonlinear-fit calibration across masses, positions, PSF states, and false-positive cases.
+- [ ] Fit or bound the calibration relation between \(q_F\) and \(q_{\mathrm{fit}}\), for example \(q_{\mathrm{fit}} \simeq \alpha q_F\).
 - [ ] Add source-realism stress tests, especially clumpy or cuspy source morphology.
 - [ ] Add false-positive tests: no subhalo plus PSF mismatch.
 - [ ] Add stronger provenance: code hash, config hash, dependency versions, manifest, and output validation checks.
@@ -171,8 +185,8 @@ Run the full science study and derive calibrated PSF-stability and mass-reach im
 
 Recommended scope:
 
-- Mass ladder: `10^7`, `10^7.25`, `10^7.5`, `10^7.75`, and `10^8 Msun`.
-- Multiple subhalo positions or full sensitivity maps.
+- Mass ladder: `10^6`, `10^6.5`, `10^6.75`, `10^7`, `10^7.25`, `10^7.5`, `10^7.75`, and `10^8 Msun`.
+- Full 2D sensitivity maps over subhalo positions around the lensed arcs.
 - Multiple PSF mode families:
   - segment piston,
   - segment tip/tilt,
@@ -183,7 +197,7 @@ Recommended scope:
 - Perfect-PSF and perturbed-PSF comparisons.
 - Fisher-versus-fit validation subset.
 - False-positive analysis.
-- Detectable-area and mass-floor curves.
+- Detectable-area and mass-floor curves derived from thresholded 2D maps.
 - Source-morphology stress test.
 
 RASTI study questions:
@@ -250,4 +264,4 @@ Reference date: 6 May 2026.
 - [ ] Decide the two SPIE PSF families.
 - [ ] Decide the SPIE amplitude ladders.
 - [ ] Decide whether SPIE includes a small seed ensemble or single deterministic scene.
-- [ ] Decide whether the SPIE result includes a map/detectable-area figure or only local/ring detectability.
+- [ ] Decide the SPIE ring-map sampling density, for example 24 or 48 angles on the Einstein ring.
