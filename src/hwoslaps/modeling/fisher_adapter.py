@@ -143,10 +143,13 @@ def evaluate_signal_bank_from_images(
     smooth = np.asarray(smooth_mean_image, dtype=float)
     if len(subhalo_mean_images) == 0:
         raise ValueError("subhalo_mean_images must contain at least one template.")
-    signals = np.vstack([
-        flatten_masked_image(np.asarray(img, dtype=float) - smooth, mask=mask)
-        for img in subhalo_mean_images
-    ])
+    signal_vectors = []
+    for img in subhalo_mean_images:
+        subhalo = np.asarray(img, dtype=float)
+        if subhalo.shape != smooth.shape:
+            raise ValueError("Each subhalo_mean_image must match smooth_mean_image shape.")
+        signal_vectors.append(flatten_masked_image(subhalo - smooth, mask=mask))
+    signals = np.vstack(signal_vectors)
 
     sigma = None
     if sigma_image is not None:

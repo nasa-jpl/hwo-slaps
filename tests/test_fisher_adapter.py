@@ -119,6 +119,17 @@ def test_signal_bank_from_images_is_vectorized_over_templates():
     np.testing.assert_allclose(bank.z_asimov_local, np.array([1.0, 1.0]))
 
 
+def test_signal_bank_rejects_broadcastable_wrong_shape_template():
+    smooth = np.zeros((2, 2))
+
+    with pytest.raises(ValueError, match="subhalo_mean_image"):
+        evaluate_signal_bank_from_images(
+            smooth_mean_image=smooth,
+            subhalo_mean_images=[np.zeros((1, 2))],
+            sigma_image=np.ones((2, 2)),
+        )
+
+
 def test_scan_systematic_modes_from_images_returns_named_modes():
     smooth = np.zeros((2, 2))
     subhalo = np.array([[1.0, 0.0], [0.0, 0.0]])
