@@ -46,6 +46,7 @@ flatten_masked_image = adapter_module.flatten_masked_image
 stack_masked_images = adapter_module.stack_masked_images
 compute_asimov_from_images = adapter_module.compute_asimov_from_images
 evaluate_signal_bank_from_images = adapter_module.evaluate_signal_bank_from_images
+compute_spurious_from_images = adapter_module.compute_spurious_from_images
 scan_systematic_modes_from_images = adapter_module.scan_systematic_modes_from_images
 
 
@@ -126,6 +127,57 @@ def test_signal_bank_rejects_broadcastable_wrong_shape_template():
         evaluate_signal_bank_from_images(
             smooth_mean_image=smooth,
             subhalo_mean_images=[np.zeros((1, 2))],
+            sigma_image=np.ones((2, 2)),
+        )
+
+
+def test_compute_asimov_rejects_wrong_shape_sigma_image():
+    smooth = np.zeros((2, 2))
+    subhalo = np.ones((2, 2))
+
+    with pytest.raises(ValueError, match="sigma_image"):
+        compute_asimov_from_images(
+            smooth_mean_image=smooth,
+            subhalo_mean_image=subhalo,
+            sigma_image=np.ones((1, 2)),
+        )
+
+
+def test_compute_asimov_rejects_wrong_shape_nuisance_image_without_mask():
+    smooth = np.zeros((2, 2))
+    subhalo = np.ones((2, 2))
+
+    with pytest.raises(ValueError, match="images\\[0\\]"):
+        compute_asimov_from_images(
+            smooth_mean_image=smooth,
+            subhalo_mean_image=subhalo,
+            sigma_image=np.ones((2, 2)),
+            nuisance_images=[np.ones((1, 2))],
+        )
+
+
+def test_spurious_adapter_rejects_wrong_shape_bias_image():
+    smooth = np.zeros((2, 2))
+    subhalo = np.ones((2, 2))
+
+    with pytest.raises(ValueError, match="bias_image"):
+        compute_spurious_from_images(
+            smooth_mean_image=smooth,
+            subhalo_mean_image=subhalo,
+            bias_image=np.ones((1, 2)),
+            sigma_image=np.ones((2, 2)),
+        )
+
+
+def test_scan_systematic_modes_rejects_wrong_shape_mode_image_without_mask():
+    smooth = np.zeros((2, 2))
+    subhalo = np.ones((2, 2))
+
+    with pytest.raises(ValueError, match="images\\[0\\]"):
+        scan_systematic_modes_from_images(
+            smooth_mean_image=smooth,
+            subhalo_mean_image=subhalo,
+            systematic_mode_images=[np.ones((1, 2))],
             sigma_image=np.ones((2, 2)),
         )
 

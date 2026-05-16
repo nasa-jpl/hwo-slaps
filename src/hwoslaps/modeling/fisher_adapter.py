@@ -27,6 +27,40 @@ from .fisher_core import (
 Array2DLike = np.ndarray
 
 
+def _as_2d_image(
+    image: Array2DLike,
+    *,
+    name: str,
+    expected_shape: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
+    """Coerce and validate one finite 2D image."""
+    arr = np.asarray(image, dtype=float)
+    if arr.ndim != 2:
+        raise ValueError(f"{name} must be a 2D array.")
+    if expected_shape is not None and arr.shape != expected_shape:
+        raise ValueError(
+            f"{name} shape {arr.shape} does not match expected image shape {expected_shape}."
+        )
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} contains non-finite values.")
+    return arr
+
+
+def _as_2d_image_sequence(
+    images: Sequence[Array2DLike],
+    *,
+    name: str,
+    expected_shape: Optional[Tuple[int, int]] = None,
+) -> List[np.ndarray]:
+    """Validate a non-empty sequence of finite 2D images."""
+    if len(images) == 0:
+        raise ValueError(f"{name} must contain at least one element.")
+    return [
+        _as_2d_image(image, name=f"{name}[{i}]", expected_shape=expected_shape)
+        for i, image in enumerate(images)
+    ]
+
+
 def validate_mask(mask: Optional[np.ndarray], shape: Tuple[int, int]) -> np.ndarray:
     """Return a boolean mask with ``True`` meaning "use this pixel"."""
     if mask is None:
@@ -41,11 +75,7 @@ def validate_mask(mask: Optional[np.ndarray], shape: Tuple[int, int]) -> np.ndar
 
 def flatten_masked_image(image: Array2DLike, mask: Optional[np.ndarray] = None) -> np.ndarray:
     """Flatten a 2D image over the pixels selected by ``mask``."""
-    img = np.asarray(image, dtype=float)
-    if img.ndim != 2:
-        raise ValueError("image must be a 2D array.")
-    if not np.all(np.isfinite(img)):
-        raise ValueError("image contains non-finite values.")
+    img = _as_2d_image(image, name="image")
     use = validate_mask(mask, img.shape)
     flat = img[use]
     if flat.size == 0:
@@ -53,24 +83,20 @@ def flatten_masked_image(image: Array2DLike, mask: Optional[np.ndarray] = None) 
     return flat
 
 
-def stack_masked_images(images: Sequence[Array2DLike], mask: Optional[np.ndarray] = None) -> np.ndarray:
+def stack_masked_images(
+    images: Sequence[Array2DLike],
+    mask: Optional[np.ndarray] = None,
+    expected_shape: Optional[Tuple[int, int]] = None,
+) -> np.ndarray:
     """Stack many 2D derivative images into a masked design matrix.
 
     The returned array has shape ``(n_selected_pixels, n_images)``.
     """
-    if len(images) == 0:
-        raise ValueError("images must contain at least one element.")
-    first = np.asarray(images[0], dtype=float)
-    if first.ndim != 2:
-        raise ValueError("Each image must be a 2D array.")
+    validated = _as_2d_image_sequence(images, name="images", expected_shape=expected_shape)
+    first = validated[0]
     use = validate_mask(mask, first.shape)
     cols: List[np.ndarray] = []
-    for image in images:
-        arr = np.asarray(image, dtype=float)
-        if arr.shape != first.shape:
-            raise ValueError("All images must share the same shape.")
-        if not np.all(np.isfinite(arr)):
-            raise ValueError("One or more images contain non-finite values.")
+    for arr in validated:
         cols.append(arr[use])
     return np.column_stack(cols)
 
@@ -99,19 +125,30 @@ def compute_asimov_from_images(
     covariance: Optional[np.ndarray] = None,
 ) -> AsimovAmplitudeResult:
     """Compute Fisher / Asimov Asimov detectability directly from 2D images."""
-    smooth = np.asarray(smooth_mean_image, dtype=float)
-    subhalo = np.asarray(subhalo_mean_image, dtype=float)
-    if smooth.shape != subhalo.shape:
-        raise ValueError("smooth_mean_image and subhalo_mean_image must have the same shape.")
+    smooth = _as_2d_image(smooth_mean_image, name="smooth_mean_image")
+    subhalo = _as_2d_image(
+        subhalo_mean_image,
+        name="subhalo_mean_image",
+        expected_shape=smooth.shape,
+    )
     signal = flatten_masked_image(subhalo - smooth, mask=mask)
 
     sigma = None
     if sigma_image is not None:
-        sigma = flatten_masked_image(np.asarray(sigma_image, dtype=float), mask=mask)
+        sigma_arr = _as_2d_image(
+            sigma_image,
+            name="sigma_image",
+            expected_shape=smooth.shape,
+        )
+        sigma = flatten_masked_image(sigma_arr, mask=mask)
 
     nuisance = None
     if nuisance_images is not None and len(nuisance_images) > 0:
-        nuisance = stack_masked_images(nuisance_images, mask=mask)
+        nuisance = stack_masked_images(
+            nuisance_images,
+            mask=mask,
+            expected_shape=smooth.shape,
+        )
 
     cov = None
     if covariance is not None:
@@ -140,24 +177,35 @@ def evaluate_signal_bank_from_images(
     covariance: Optional[np.ndarray] = None,
 ) -> SignalBankResult:
     """Vectorized map/mass-sweep helper operating on 2D image templates."""
-    smooth = np.asarray(smooth_mean_image, dtype=float)
+    smooth = _as_2d_image(smooth_mean_image, name="smooth_mean_image")
     if len(subhalo_mean_images) == 0:
         raise ValueError("subhalo_mean_images must contain at least one template.")
     signal_vectors = []
-    for img in subhalo_mean_images:
-        subhalo = np.asarray(img, dtype=float)
-        if subhalo.shape != smooth.shape:
-            raise ValueError("Each subhalo_mean_image must match smooth_mean_image shape.")
+    for i, img in enumerate(subhalo_mean_images):
+        subhalo = _as_2d_image(
+            img,
+            name=f"subhalo_mean_images[{i}]",
+            expected_shape=smooth.shape,
+        )
         signal_vectors.append(flatten_masked_image(subhalo - smooth, mask=mask))
     signals = np.vstack(signal_vectors)
 
     sigma = None
     if sigma_image is not None:
-        sigma = flatten_masked_image(np.asarray(sigma_image, dtype=float), mask=mask)
+        sigma_arr = _as_2d_image(
+            sigma_image,
+            name="sigma_image",
+            expected_shape=smooth.shape,
+        )
+        sigma = flatten_masked_image(sigma_arr, mask=mask)
 
     nuisance = None
     if nuisance_images is not None and len(nuisance_images) > 0:
-        nuisance = stack_masked_images(nuisance_images, mask=mask)
+        nuisance = stack_masked_images(
+            nuisance_images,
+            mask=mask,
+            expected_shape=smooth.shape,
+        )
 
     cov = None
     if covariance is not None:
@@ -186,22 +234,33 @@ def compute_spurious_from_images(
     covariance: Optional[np.ndarray] = None,
 ) -> SpuriousAmplitudeResult:
     """Compute spurious subhalo amplitude from a 2D systematic bias image."""
-    smooth = np.asarray(smooth_mean_image, dtype=float)
-    subhalo = np.asarray(subhalo_mean_image, dtype=float)
-    bias = np.asarray(bias_image, dtype=float)
-    if smooth.shape != subhalo.shape or smooth.shape != bias.shape:
-        raise ValueError("All input images must share the same shape.")
+    smooth = _as_2d_image(smooth_mean_image, name="smooth_mean_image")
+    subhalo = _as_2d_image(
+        subhalo_mean_image,
+        name="subhalo_mean_image",
+        expected_shape=smooth.shape,
+    )
+    bias = _as_2d_image(bias_image, name="bias_image", expected_shape=smooth.shape)
 
     signal = flatten_masked_image(subhalo - smooth, mask=mask)
     bias_flat = flatten_masked_image(bias, mask=mask)
 
     sigma = None
     if sigma_image is not None:
-        sigma = flatten_masked_image(np.asarray(sigma_image, dtype=float), mask=mask)
+        sigma_arr = _as_2d_image(
+            sigma_image,
+            name="sigma_image",
+            expected_shape=smooth.shape,
+        )
+        sigma = flatten_masked_image(sigma_arr, mask=mask)
 
     nuisance = None
     if nuisance_images is not None and len(nuisance_images) > 0:
-        nuisance = stack_masked_images(nuisance_images, mask=mask)
+        nuisance = stack_masked_images(
+            nuisance_images,
+            mask=mask,
+            expected_shape=smooth.shape,
+        )
 
     cov = None
     if covariance is not None:
@@ -235,21 +294,36 @@ def scan_systematic_modes_from_images(
     progress: Optional[Callable[[Iterable[int]], Iterable[int]]] = None,
 ) -> SystematicModeScanResult:
     """Mode-by-mode PSF/systematics scan working directly on 2D images."""
-    smooth = np.asarray(smooth_mean_image, dtype=float)
-    subhalo = np.asarray(subhalo_mean_image, dtype=float)
-    if smooth.shape != subhalo.shape:
-        raise ValueError("smooth_mean_image and subhalo_mean_image must have the same shape.")
+    smooth = _as_2d_image(smooth_mean_image, name="smooth_mean_image")
+    subhalo = _as_2d_image(
+        subhalo_mean_image,
+        name="subhalo_mean_image",
+        expected_shape=smooth.shape,
+    )
 
     signal = flatten_masked_image(subhalo - smooth, mask=mask)
-    modes = stack_masked_images(systematic_mode_images, mask=mask)
+    modes = stack_masked_images(
+        systematic_mode_images,
+        mask=mask,
+        expected_shape=smooth.shape,
+    )
 
     sigma = None
     if sigma_image is not None:
-        sigma = flatten_masked_image(np.asarray(sigma_image, dtype=float), mask=mask)
+        sigma_arr = _as_2d_image(
+            sigma_image,
+            name="sigma_image",
+            expected_shape=smooth.shape,
+        )
+        sigma = flatten_masked_image(sigma_arr, mask=mask)
 
     nuisance = None
     if nuisance_images is not None and len(nuisance_images) > 0:
-        nuisance = stack_masked_images(nuisance_images, mask=mask)
+        nuisance = stack_masked_images(
+            nuisance_images,
+            mask=mask,
+            expected_shape=smooth.shape,
+        )
 
     cov = None
     if covariance is not None:
