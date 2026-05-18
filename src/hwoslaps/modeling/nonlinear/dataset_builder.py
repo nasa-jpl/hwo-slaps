@@ -157,6 +157,36 @@ def mask_from_fisher_use_mask(fisher_use_mask: np.ndarray, pixel_scale: float) -
         return al.Mask2D(values=autolens_mask, pixel_scales=float(pixel_scale))
 
 
+def _exclude_psf_edge_pixels(use_mask: np.ndarray, psf_shape: Tuple[int, int]) -> np.ndarray:
+    """Exclude pixels whose PSF stencil would extend beyond the image.
+
+    Parameters
+    ----------
+    use_mask : `numpy.ndarray`
+        Boolean include-mask where True means use the pixel.
+    psf_shape : `tuple` [`int`, `int`]
+        Native PSF kernel shape.
+
+    Returns
+    -------
+    use_mask : `numpy.ndarray`
+        Include-mask with unsafe edge pixels removed.
+    """
+    use_mask = np.asarray(use_mask, dtype=bool).copy()
+    if use_mask.ndim != 2:
+        raise ValueError("use_mask must be a 2D boolean array")
+
+    y_half = int(psf_shape[0]) // 2
+    x_half = int(psf_shape[1]) // 2
+    if y_half > 0:
+        use_mask[:y_half, :] = False
+        use_mask[-y_half:, :] = False
+    if x_half > 0:
+        use_mask[:, :x_half] = False
+        use_mask[:, -x_half:] = False
+    return use_mask
+
+
 def _all_false_mask(shape_native: Tuple[int, int], pixel_scale: float) -> Any:
     """Create an all-unmasked PyAutoLens mask."""
     import autolens as al
@@ -226,19 +256,26 @@ def imaging_from_observation(
         dataset_kind=dataset_kind,
         background_treatment=background_treatment,
     )
-    if mask_bool_use is None:
-        mask = _all_false_mask(data.shape, observation.pixel_scale)
-        mask_name = "all_pixels"
-        n_unmasked_pixels = int(data.size)
-    else:
-        mask = mask_from_fisher_use_mask(mask_bool_use, observation.pixel_scale)
-        mask_name = "fisher"
-        n_unmasked_pixels = int(np.count_nonzero(mask_bool_use))
-
     psf = _kernel_from_any(
         observation.psf if psf_for_fit is None else psf_for_fit,
         observation.pixel_scale,
     )
+    psf_shape = tuple(np.asarray(psf.native).shape)
+
+    if mask_bool_use is None:
+        use_mask = _exclude_psf_edge_pixels(
+            np.ones(data.shape, dtype=bool),
+            psf_shape=psf_shape,
+        )
+        mask = mask_from_fisher_use_mask(use_mask, observation.pixel_scale)
+        mask_name = "all_pixels_minus_psf_border"
+        n_unmasked_pixels = int(np.count_nonzero(use_mask))
+    else:
+        use_mask = _exclude_psf_edge_pixels(mask_bool_use, psf_shape=psf_shape)
+        mask = mask_from_fisher_use_mask(use_mask, observation.pixel_scale)
+        mask_name = "fisher_minus_psf_border"
+        n_unmasked_pixels = int(np.count_nonzero(use_mask))
+
     data_array = al.Array2D(values=data, mask=mask)
     noise_array = al.Array2D(values=np.asarray(observation.noise_map.native, dtype=float), mask=mask)
     dataset = al.Imaging(data=data_array, noise_map=noise_array, psf=psf)
