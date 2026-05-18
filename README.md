@@ -20,18 +20,21 @@ The missing study layer is intentional next work: canonical study configs, sweep
 
 ## Quick Start
 
-Create the conda environment:
+Create the conda environment and install the developer dependency checkouts:
 
 ```bash
 bash install.sh
 ```
 
-Install HCIPy in that environment:
+This clones or updates PyAutoLens and HCIPy as editable GitHub installs in the
+parent directory of this repo by default. Override the checkout location with
+`--checkout-root` or `HWOSLAPS_DEV_ROOT`.
+
+For an NVIDIA GPU machine such as a B200 node, install the same environment with
+CUDA-enabled JAX:
 
 ```bash
-conda activate hwo-slaps
-git clone https://github.com/ehpor/hcipy.git
-pip install -e ./hcipy
+bash install.sh --gpu
 ```
 
 Run a config:
