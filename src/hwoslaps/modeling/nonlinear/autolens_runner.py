@@ -227,7 +227,7 @@ class AutoLensFitRunner:
             "n_live": int(n_live),
             "number_of_cores": int(self.settings.number_of_cores),
             "iterations_per_update": self.settings.iterations_per_update,
-            "maxcall": self.settings.maxcall,
+            "n_like_max": self.settings.maxcall,
             "resume": self.settings.resume,
         }
         return af.Nautilus(**_filter_kwargs(af.Nautilus, kwargs))
