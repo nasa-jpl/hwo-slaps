@@ -92,6 +92,16 @@ def test_nfw_concentration_provenance_is_recorded():
     assert lensing_data.subhalo_concentration_h is not None
     assert lensing_data.subhalo_concentration_h > 0
     assert lensing_data.subhalo_einstein_radius is None
+    assert lensing_data.subhalo_kappa_s is not None
+    assert lensing_data.subhalo_kappa_s > 0
+    assert lensing_data.subhalo_scale_radius_arcsec is not None
+    assert lensing_data.subhalo_scale_radius_arcsec > 0
+    assert lensing_data.subhalo_profile_parameters["kappa_s"] == pytest.approx(
+        lensing_data.subhalo_kappa_s
+    )
+    assert lensing_data.subhalo_profile_parameters["scale_radius"] == pytest.approx(
+        lensing_data.subhalo_scale_radius_arcsec
+    )
 
     expected = concentration_mass_relation(
         config["lensing"]["subhalo"]["mass"],

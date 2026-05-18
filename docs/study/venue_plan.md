@@ -6,32 +6,43 @@ Use one coherent study, not two separate studies.
 
 The detection and PSF-stability questions are scientifically coupled: a PSF-requirement paper needs a credible detection metric, and a mass-reach paper needs to account for PSF uncertainty. The clean publication strategy is therefore to publish the same scientific arc at two different maturity levels:
 
-- SPIE 2026 proceedings and poster: a preliminary but real conference version.
-- RASTI HWO Special Issue: the expanded, calibrated archival journal version.
+- **SPIE 2026 proceedings and poster:** preliminary but real conference version.
+- **RASTI HWO Special Issue:** expanded, calibrated archival journal version.
 
 This keeps the work coherent while making the RASTI manuscript meaningfully distinct from the SPIE proceedings.
 
 ## External constraints and venue context
 
-This plan is designed to satisfy the SPIE funding and proceedings requirements while preserving a stronger archival submission for RASTI.
+This plan is designed to satisfy the SPIE proceedings/poster requirements while preserving a stronger archival submission for RASTI.
 
-SPIE context:
+### SPIE context
 
-- The SPIE Astronomical Telescopes + Instrumentation 2026 [manuscript submission guidelines](https://www.spiecareercenter.org/conferences-and-exhibitions/astronomical-telescopes-and-instrumentation/presenters/manuscript-submission-guidelines) list the manuscript deadline as 17 June 2026 and the poster PDF deadline as 10 June 2026.
-- SPIE specifies a 2-page minimum and says papers should include the normal elements of a full-length technical manuscript: title, authors, abstract, keywords, sections such as introduction/methods/results, acknowledgments if applicable, and references.
-- SPIE proceedings are framed as rapid reporting of current research. The guidelines state that papers may be status reports of work in progress or descriptions of completed research, provided they are technically sound, contain new research or scientific concepts, include enough technical data to support conclusions, and have adequate references.
-- SPIE also states that conference chairs/editors may require revisions or reject proceedings papers that do not meet technical, suitability, clarity, or quality expectations.
-- The student support email adds a stricter practical constraint for this project: reimbursement is contingent on submitting a full-length manuscript for Paper 14145-260, having it approved for publication, and presenting the poster in person.
+SPIE Astronomical Telescopes + Instrumentation 2026 is scheduled for 5-10 July 2026 in Copenhagen. The relevant preparation dates for this project are:
 
-RASTI context:
+- poster PDFs due: 10 June 2026,
+- manuscripts due: 17 June 2026.
 
-- The RASTI [Habitable World Observatory Special Issue call](https://academic.oup.com/rasti/pages/habitable-world-observatory) explicitly welcomes HWO mission concept development software, tools, methodologies, data simulators, instrument performance evaluators, uncertainty quantification, and preparatory science tools.
-- The call lists a submission deadline of 31 August 2026.
-- Submissions go through the normal RASTI peer-review process and must meet the journal's criteria for acceptance.
+The SPIE manuscript should be a real technical proceedings paper, not a placeholder. It can be a status report or first forecast if it is technically sound, contains new scientific or technical content, and includes enough data to support the conclusions.
 
-Implication:
+### RASTI context
 
-The SPIE manuscript must be a real technical proceedings paper, not a placeholder. However, it does not need to be the final archival version of the study. The RASTI submission should be visibly expanded and revised, with fuller validation, broader sweeps, stronger conclusions, and clearer requirement translation.
+The RASTI Habitable World Observatory Special Issue explicitly welcomes HWO mission concept development software, tools, methodologies, data simulators, instrument performance evaluators, uncertainty quantification, integrated modeling, and preparatory science tools. The submission deadline is 31 August 2026.
+
+HWO-SLAPS fits this call well because it is a science-engineering interface tool: it connects optical/PSF stability assumptions to a quantitative dark-matter science-return metric.
+
+## Publication distinction
+
+| Element | SPIE version | RASTI version |
+|---|---|---|
+| Purpose | First public technical demonstration | Archival calibrated study |
+| Claim level | Framework and first forecasts | Calibrated PSF-stability implications |
+| Scene count | One canonical SCDD-like scene | Multiple scenes or source/lens stress tests |
+| Subhalo positions | Local plus Einstein-ring map | Full 2D sensitivity maps |
+| PSF modes | One required family, optional second family | Multiple segment/global mode families and combinations |
+| Validation | Sparse PyAutoLens-JAX subset if time permits | Mandatory nonlinear validation grid |
+| False positives | Optional demo | Required no-subhalo PSF-mismatch study |
+| Source realism | Smooth source acceptable if caveated | Clumpy/cuspy source stress tests required |
+| Requirement language | Preliminary requirement-style curves | Calibrated requirement translation |
 
 ## SPIE 2026 proceedings and poster
 
@@ -46,37 +57,43 @@ Present HWO-SLAPS as an end-to-end pipeline and show first quantitative PSF-stab
 Core scope:
 
 - Introduce the science motivation from the SCDD PSF-stability future-work case.
-- Present HWO-SLAPS as the pipeline connecting lens simulation, segmented-mirror PSFs, detector noise, and Fisher detectability calibrated against a sparse nonlinear-fit subset.
+- Present HWO-SLAPS as the pipeline connecting lens simulation, segmented-mirror PSFs, detector noise, and Fisher detectability.
 - Demonstrate subhalo detectability forecasts using a bounded canonical setup.
 - Show first controlled PSF-aberration or drift results.
-- Produce early plots of detection significance or minimum detectable mass versus PSF error.
+- Produce early plots of detection significance, detectable-ring fraction, or minimum detectable mass versus PSF error.
 
 Recommended bounds:
 
 - One canonical SCDD-like strong-lens scene.
-- A subhalo mass ladder spanning `10^6`, `10^6.5`, `10^6.75`, `10^7`, `10^7.25`, `10^7.5`, `10^7.75`, and `10^8 Msun`.
-- A perfect-PSF baseline.
-- One or two PSF mode families, such as segment piston and low-order global Zernikes.
-- One stability or drift axis.
-- One required Fisher ring-map demonstration around the Einstein ring, reported as a detectable-ring fraction rather than a full 2D detectable area.
-- A sparse PyAutoLens-JAX nonlinear-fit validation subset comparing the Fisher statistic to direct smooth-versus-subhalo likelihood differences.
+- SCDD anchor masses: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
+- Optional exploratory low masses below `1e7 Msun`, clearly labeled.
+- Perfect-PSF baseline.
+- One or two PSF mode families, such as segment piston/hexike and low-order global Zernikes.
+- One stability or amplitude axis.
+- One Fisher ring-map demonstration around the Einstein ring, reported as a detectable-ring fraction rather than full 2D detectable area.
+- Sparse PyAutoLens-JAX nonlinear-fit validation only if it can be completed without risking the main SPIE figures.
+
+Recommended SPIE figures:
+
+- Pipeline schematic.
+- Canonical lensing scene and subhalo residual.
+- Perfect and perturbed PSF diagnostic.
+- Detection metric versus subhalo mass.
+- Detection degradation or detectable-ring fraction versus PSF amplitude.
+- PSF-mode coupling or tolerance-style figure.
+- Optional Fisher-versus-nonlinear validation figure.
 
 Tone:
 
-- "We present a framework and first forecasts with a sparse nonlinear validation of the detection metric."
-- "We translate PSF perturbations into preliminary subhalo-detection sensitivity curves."
-- Avoid claiming final HWO engineering requirements unless the validation is strong.
+- “We present a framework and first forecasts.”
+- “We translate PSF perturbations into preliminary subhalo-detection sensitivity curves.”
+- “We provide sparse nonlinear validation where available.”
 
-SPIE deliverables:
+Avoid:
 
-- Proceedings manuscript.
-- Poster.
-- Pipeline schematic.
-- One baseline sensitivity or detectability figure.
-- One ring-map or detectable-ring-fraction figure.
-- One Fisher-versus-nonlinear calibration table or figure.
-- One PSF-mode illustration.
-- One preliminary requirement-style plot.
+- “We derive final HWO engineering requirements.”
+- “HWO must meet this exact wavefront stability number.”
+- “The Fisher metric is fully calibrated,” unless the PyAutoLens validation grid is actually complete.
 
 ## RASTI HWO Special Issue
 
@@ -87,7 +104,7 @@ Submit the full archival science study to the RASTI Habitable World Observatory 
 Core scope:
 
 - Expand the SPIE framework into a calibrated, publishable study.
-- Expand the sparse SPIE nonlinear checks into a calibrated Fisher-versus-fit validation grid.
+- Expand sparse SPIE nonlinear checks into a Fisher-versus-fit validation grid.
 - Run a full PSF-mode sweep.
 - Run the full subhalo mass-reach sweep.
 - Produce full 2D sensitivity maps, detectable-area curves, and mass-threshold summaries.
@@ -98,20 +115,20 @@ Recommended expanded content:
 
 - Multiple PSF families: segment piston, segment tip/tilt, segment hexikes, global Zernikes, and selected combinations.
 - A broader PSF amplitude ladder.
-- Time varying PSF
-- EAC 1 and maybe EAC 2
-- Full 2D grids of subhalo positions around the lensed arcs, not only Einstein-ring samples.
+- Time-varying PSF or drift cases, but only after defining the assumed observing cadence and stability timescale.
+- Full 2D grids of subhalo positions around lensed arcs, not only Einstein-ring samples.
 - More subhalo masses.
 - Better source realism, especially clumpy or cuspy sources motivated by the SCDD.
 - Perfect-PSF and perturbed-PSF comparison grids.
 - Fisher-versus-fit calibration across masses, positions, PSF states, and false-positive cases.
+- Lens-light and subtraction-residual stress tests.
 - Reproducible configs, run manifests, analysis tables, and figure-generation scripts.
 
 Tone:
 
-- "We derive calibrated PSF-stability requirements and mass-reach implications."
-- "We quantify which PSF modes most degrade low-mass subhalo detectability."
-- "We estimate the HWO-accessible subhalo mass floor under realistic PSF uncertainty."
+- “We derive calibrated PSF-stability implications and mass-reach forecasts.”
+- “We quantify which PSF modes most degrade low-mass subhalo detectability.”
+- “We estimate the HWO-accessible subhalo mass floor under realistic PSF uncertainty.”
 
 RASTI deliverables:
 
@@ -120,10 +137,15 @@ RASTI deliverables:
 - Full method validation.
 - Full PSF requirement curves.
 - Mass-reach and detectable-area figures.
+- False-positive analysis.
 - Reproducible analysis outputs.
+
+## PyAutoLens validation placement
+
+For SPIE, PyAutoLens nonlinear modeling is best treated as a small validation subset or planned validation. The SPIE story should not depend on completing a large nonlinear grid in one week.
+
+For RASTI, nonlinear validation should be a central requirement. The RASTI claim that PSF stability requirements are calibrated depends on showing how the Fisher/Asimov statistic maps to direct smooth-versus-subhalo nonlinear fits.
 
 ## Bottom line
 
-The SPIE proceedings should be the first public, proceedings-quality version of the integrated study. The RASTI submission should be the substantially expanded and validated journal version.
-
-This avoids splitting the project into two weaker papers while preserving a clear publication distinction between the preliminary conference result and the archival journal result.
+The SPIE proceedings should be the first public, proceedings-quality version of the integrated study. The RASTI submission should be the substantially expanded and validated journal version. This avoids splitting the project into two weaker papers while preserving a clear distinction between preliminary conference results and archival science conclusions.

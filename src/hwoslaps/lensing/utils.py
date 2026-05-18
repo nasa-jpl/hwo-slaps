@@ -67,6 +67,14 @@ class LensingData:
         None when not applicable.
     subhalo_concentration_source : `str`, optional
         Human-readable provenance string for concentration model source.
+    subhalo_kappa_s : `float`, optional
+        NFW scale convergence used by the injected ``NFWSph`` profile.
+        None when not applicable.
+    subhalo_scale_radius_arcsec : `float`, optional
+        NFW scale radius in arcseconds used by the injected ``NFWSph``
+        profile. None when not applicable.
+    subhalo_profile_parameters : `dict`, optional
+        Exact subhalo mass-profile parameters used by the forward model.
     lens_centre : `tuple` of `float`
         Centre position of the lens as (y, x) in arcseconds.
     lens_ellipticity : `tuple` of `float`
@@ -125,6 +133,9 @@ class LensingData:
     subhalo_concentration_x_sub: Optional[float] = None
     subhalo_concentration_h: Optional[float] = None
     subhalo_concentration_source: Optional[str] = None
+    subhalo_kappa_s: Optional[float] = None
+    subhalo_scale_radius_arcsec: Optional[float] = None
+    subhalo_profile_parameters: Optional[Dict[str, float]] = None
     
     # === GALAXY PARAMETERS ===
     lens_centre: Tuple[float, float] = (0.0, 0.0)

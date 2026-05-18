@@ -112,6 +112,9 @@ def generate_lensing_system(config, full_config):
     subhalo_concentration_x_sub = None
     subhalo_concentration_h = None
     subhalo_concentration_source = None
+    subhalo_kappa_s = None
+    subhalo_scale_radius_arcsec = None
+    subhalo_profile_parameters = None
 
     # Create subhalo if enabled explicitly
     if 'subhalo' in config and config['subhalo'] is not None and config['subhalo']['enabled']:
@@ -142,6 +145,9 @@ def generate_lensing_system(config, full_config):
             subhalo_concentration_x_sub = subhalo_info.get('concentration_x_sub')
             subhalo_concentration_h = subhalo_info.get('concentration_h')
             subhalo_concentration_source = subhalo_info.get('concentration_source')
+        subhalo_kappa_s = subhalo_info.get('kappa_s')
+        subhalo_scale_radius_arcsec = subhalo_info.get('scale_radius_arcsec')
+        subhalo_profile_parameters = subhalo_info.get('profile_parameters')
     
     # Create tracer
     tracer = al.Tracer(
@@ -178,6 +184,9 @@ def generate_lensing_system(config, full_config):
         subhalo_concentration_x_sub=subhalo_concentration_x_sub,
         subhalo_concentration_h=subhalo_concentration_h,
         subhalo_concentration_source=subhalo_concentration_source,
+        subhalo_kappa_s=subhalo_kappa_s,
+        subhalo_scale_radius_arcsec=subhalo_scale_radius_arcsec,
+        subhalo_profile_parameters=subhalo_profile_parameters,
         
         # Galaxy parameters
         lens_centre=tuple(lens_config['mass']['centre']),
@@ -368,6 +377,11 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
     if model == 'PointMass':
         einstein_radius = einstein_radius_point_mass(mass, lens_z, source_z, cosmology)
         subhalo_info['einstein_radius_arcsec'] = einstein_radius
+        subhalo_info['profile_parameters'] = {
+            'centre_0': subhalo_position[0],
+            'centre_1': subhalo_position[1],
+            'einstein_radius': einstein_radius,
+        }
         subhalo = al.mp.PointMass(
             centre=subhalo_position,
             einstein_radius=einstein_radius
@@ -375,6 +389,11 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
     elif model == 'SIS':
         einstein_radius = einstein_radius_sis_m200(mass, lens_z, source_z, cosmology)
         subhalo_info['einstein_radius_arcsec'] = einstein_radius
+        subhalo_info['profile_parameters'] = {
+            'centre_0': subhalo_position[0],
+            'centre_1': subhalo_position[1],
+            'einstein_radius': einstein_radius,
+        }
         subhalo = al.mp.IsothermalSph(
             centre=subhalo_position,
             einstein_radius=einstein_radius
@@ -421,6 +440,12 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
         # Add NFW-specific info to the dictionary
         subhalo_info['kappa_s'] = kappa_s
         subhalo_info['scale_radius_arcsec'] = scale_radius_arcsec
+        subhalo_info['profile_parameters'] = {
+            'centre_0': subhalo_position[0],
+            'centre_1': subhalo_position[1],
+            'kappa_s': kappa_s,
+            'scale_radius': scale_radius_arcsec,
+        }
         subhalo_info['concentration'] = concentration
         subhalo_info.update(concentration_meta)
     else:
