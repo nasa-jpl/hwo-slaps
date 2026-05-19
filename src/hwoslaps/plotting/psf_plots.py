@@ -15,6 +15,7 @@ from pathlib import Path
 from hcipy.plotting import imshow_field, imshow_psf
 from matplotlib.colors import LogNorm
 from ..constants import ARCSEC_PER_RAD
+from ..psf.utils import pyauto_kernel_native, pyauto_kernel_shape_native
 from .registry import plot_function
 
 
@@ -270,10 +271,10 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
 
 @plot_function(module='psf', description="Complete PSF system overview with comparison and zoom")
 def plot_psf_system_overview(psf_data, plot_config):
-    """Create comprehensive PSF system plots including the main 3x1 plot and zoom.
+    """Create comprehensive PSF system plots.
     
     This is the main plotting function that creates both the comparison plot
-    and the zoomed view.
+    and the zoomed view, including the main 3x1 plot.
     
     Parameters
     ----------
@@ -341,7 +342,7 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     
     # Calculate extent for high-res PSF.
     #
-    # HCIPy focal-plane grids produced by `make_focal_grid(..., focal_length=...)`
+    # HCIPy focal-plane grids from `make_focal_grid(..., focal_length=...)`
     # are in **meters at the focal plane**. Convert to angle on-sky via
     # theta [rad] = x [m] / f [m].
     psf_grid = psf_data.psf.grid
@@ -366,14 +367,15 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     # Detector-sampled kernel.
     ax = axes[1]
     kernel = psf_data.kernel
-    kernel_extent = np.array(kernel.shape_native) * psf_data.kernel_pixel_scale / 2
+    kernel_native = pyauto_kernel_native(kernel)
+    kernel_extent = np.array(pyauto_kernel_shape_native(kernel)) * psf_data.kernel_pixel_scale / 2
     kernel_extent = [-kernel_extent[1], kernel_extent[1], 
                      -kernel_extent[0], kernel_extent[0]]
     
-    im = ax.imshow(kernel.native, extent=kernel_extent,
+    im = ax.imshow(kernel_native, extent=kernel_extent,
                    origin='lower', cmap='hot',
-                   norm=LogNorm(vmin=kernel.native.max()*1e-5,
-                               vmax=kernel.native.max()))
+                   norm=LogNorm(vmin=kernel_native.max()*1e-5,
+                               vmax=kernel_native.max()))
     ax.set_title('Detector Kernel', fontsize=11)
     ax.set_xlabel('arcsec')
     ax.set_ylabel('arcsec')
@@ -492,7 +494,7 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     ax1 = axes[0]
     
     # Use HCIPy's imshow_field to plot the actual aperture
-    # Switch to 'gray' so segments are white on a black background for better contrast with red labels
+    # Use white segments on black for contrast with red labels.
     imshow_field(aperture, ax=ax1, cmap='gray')
     ax1.set_title('Segmented Aperture', fontsize=14, fontweight='bold')
     ax1.set_xlabel('Position [m]', fontsize=12)
@@ -523,7 +525,7 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     
     # Calculate PSF extent in arcseconds.
     #
-    # The PSF grid coordinates are in meters at the focal plane (HCIPy focal grid).
+    # PSF coordinates are meters at the focal plane on the HCIPy grid.
     # Convert to sky angle using theta [rad] = x [m] / f [m].
     psf_grid = psf_data.psf.grid
     extent_m = [psf_grid.x.min(), psf_grid.x.max(),
@@ -611,7 +613,7 @@ def plot_optics_chain(psf_data, plot_config):
     ax.set_xlabel('Position [m]', fontsize=11)
     ax.set_ylabel('Position [m]', fontsize=11)
 
-    # Add segment labels at centroids (reuse the same approach as the baseline plot).
+    # Add segment labels at centroids using the baseline plot approach.
     for i, segment in enumerate(segments):
         segment_coords = segment.grid.coords
         segment_values = segment.shaped
@@ -674,7 +676,7 @@ def plot_optics_chain(psf_data, plot_config):
     psf_norm = psf_intensity / np.max(psf_intensity)
     psf_log = np.log10(psf_norm + 1e-6)
 
-    # PSF grid coordinates are in meters at the focal plane -> convert to arcsec via theta = x / f.
+    # Convert PSF focal-plane meters to arcsec via theta = x / f.
     psf_grid = psf_data.psf.grid
     extent_m = [psf_grid.x.min(), psf_grid.x.max(), psf_grid.y.min(), psf_grid.y.max()]
     extent_arcsec = [x / psf_data.focal_length_m * ARCSEC_PER_RAD for x in extent_m]
@@ -709,7 +711,7 @@ def plot_optics_chain(psf_data, plot_config):
             bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.5),
         )
 
-    # Presentation styling: remove axis labels and tick marks/labels for all panels.
+    # Remove axis labels and tick marks/labels for all panels.
     for ax in axes:
         ax.set_xlabel('')
         ax.set_ylabel('')

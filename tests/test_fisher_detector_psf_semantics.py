@@ -92,6 +92,10 @@ def _install_detector_stubs():
 
     psf_utils = ensure_module(f"{TEST_PACKAGE}.psf.utils")
     psf_utils.PSFData = object
+    psf_utils.make_pyauto_convolver = lambda kernel: kernel
+    psf_utils.make_pyauto_kernel = lambda *args, **kwargs: None
+    psf_utils.pyauto_kernel_native = lambda kernel: kernel.native
+    psf_utils.pyauto_kernel_pixel_scales = lambda kernel: kernel.pixel_scales
 
     adapter = ensure_module(f"{TEST_PACKAGE}.modeling.fisher_adapter")
     adapter.compute_asimov_from_images = lambda *args, **kwargs: None

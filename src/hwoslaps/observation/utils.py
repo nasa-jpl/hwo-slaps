@@ -48,8 +48,10 @@ class ObservationData:
         return self.imaging.noise_map
     
     @property
-    def psf(self) -> al.Kernel2D:
+    def psf(self):
         """PSF kernel used for convolution."""
+        if hasattr(self.imaging.psf, "kernel"):
+            return self.imaging.psf.kernel
         return self.imaging.psf
     
     @property

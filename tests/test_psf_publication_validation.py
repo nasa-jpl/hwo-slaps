@@ -20,6 +20,7 @@ from scipy.special import j1
 
 from hwoslaps.constants import ARCSEC_PER_RAD
 from hwoslaps.psf.generator import generate_psf_system
+from hwoslaps.psf.utils import make_pyauto_convolver
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -200,7 +201,7 @@ def test_detector_kernel_matches_binned_highres_branch(
 def test_generated_kernel_is_centered_under_pyautolens_delta_convolution(
     compact_no_aberration_config: dict,
 ):
-    """A center delta image convolved by PyAutoLens should reproduce the PSF footprint."""
+    """Check that PyAuto convolution centers the kernel footprint."""
     psf_data = _quiet_generate(compact_no_aberration_config)
     kernel = np.asarray(psf_data.kernel.native)
     image_shape = (kernel.shape[0] + 16, kernel.shape[1] + 16)
@@ -213,7 +214,13 @@ def test_generated_kernel_is_centered_under_pyautolens_delta_convolution(
         pixel_scales=psf_data.kernel_pixel_scale,
     )
     array = al.Array2D(values=delta_image, mask=mask)
-    convolved = np.asarray(psf_data.kernel.convolved_array_from(array=array).native)
+    convolver = make_pyauto_convolver(psf_data.kernel)
+    convolved = np.asarray(
+        convolver.convolved_image_via_real_space_from(
+            image=array,
+            blurring_image=None,
+        ).native
+    )
 
     y0 = image_center[0] - kernel.shape[0] // 2
     x0 = image_center[1] - kernel.shape[1] // 2

@@ -12,7 +12,11 @@ import autolens as al
 import numpy as np
 
 from ..lensing.utils import LensingData
-from ..psf.utils import PSFData
+from ..psf.utils import (
+    PSFData,
+    make_pyauto_convolver,
+    pyauto_kernel_native,
+)
 from .noise_models import (
     apply_detector_noise,
     create_noise_map,
@@ -75,9 +79,10 @@ def generate_observation(
     
     # Ensure PSF kernel has odd dimensions (required by PyAutoLens)
     psf_kernel = _ensure_odd_kernel(psf_data.kernel)
+    psf_convolver = make_pyauto_convolver(psf_kernel)
 
     # Assert pixel scale consistency between PSF kernel and lensing image
-    # This ensures physically meaningful convolution without implicit resampling.
+    # Keep convolution physically meaningful without implicit resampling.
     if hasattr(psf_data, "kernel_pixel_scale") and psf_data.kernel_pixel_scale is not None:
         if not np.isclose(psf_data.kernel_pixel_scale, lensing_data.pixel_scale, rtol=0.0, atol=1e-12):
             raise ValueError(
@@ -99,7 +104,7 @@ def generate_observation(
     # Use SimulatorImaging with no noise to get pure convolution
     simulator_noiseless = al.SimulatorImaging(
         exposure_time=exposure_time,
-        psf=psf_kernel,
+        psf=psf_convolver,
         background_sky_level=0.0,  # No background yet
         normalize_psf=False,
         add_poisson_noise_to_data=False,
@@ -135,7 +140,7 @@ def generate_observation(
     imaging_dataset = al.Imaging(
         data=data,
         noise_map=noise_map,
-        psf=psf_kernel
+        psf=psf_convolver
     )
     
     # Create metadata dictionary
@@ -196,17 +201,17 @@ def _validate_full_config(full_config: Optional[Dict]) -> Dict:
     return full_config
 
 
-def _ensure_odd_kernel(kernel: al.Kernel2D) -> al.Kernel2D:
+def _ensure_odd_kernel(kernel):
     """Validate the PSF kernel for observation convolution.
     
     Parameters
     ----------
-    kernel : `al.Kernel2D`
+    kernel : `object`
         Input PSF kernel.
         
     Returns
     -------
-    kernel : `al.Kernel2D`
+    kernel : `object`
         Validated PSF kernel.
 
     Raises
@@ -214,7 +219,7 @@ def _ensure_odd_kernel(kernel: al.Kernel2D) -> al.Kernel2D:
     ValueError
         Raised when the kernel support or flux normalization is invalid.
     """
-    kernel_array = np.asarray(kernel.native, dtype=float)
+    kernel_array = pyauto_kernel_native(kernel)
     if kernel_array.ndim != 2:
         raise ValueError("PSF kernel must be a two-dimensional array")
     if kernel_array.shape[0] % 2 == 0 or kernel_array.shape[1] % 2 == 0:

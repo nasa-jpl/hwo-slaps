@@ -28,7 +28,7 @@ from .aberration_models import (
     apply_segment_zernikes,
     apply_global_zernikes
 )
-from .utils import PSFData
+from .utils import PSFData, make_pyauto_kernel, pyauto_kernel_pixel_scales
 
 
 def generate_psf_system(config, full_config=None):
@@ -135,7 +135,7 @@ def generate_psf_system(config, full_config=None):
     
     # Extract aberration configurations (strict: all flags must be explicit)
     aberrations = psf_config['aberrations']
-    # Apply toggle flags to aberrations (explicit True/False required by validation)
+    # Apply toggle flags to aberrations.
     segment_pistons = aberrations['segment_pistons'] if aberrations['enable_segment_pistons'] else None
     segment_tiptilts = aberrations['segment_tiptilts'] if aberrations['enable_segment_tiptilts'] else None
     segment_hexikes = aberrations['segment_hexikes'] if aberrations['enable_segment_hexikes'] else None
@@ -188,7 +188,7 @@ def generate_psf_system(config, full_config=None):
     # Define the high-resolution focal grid using parameters from
     # config['psf']['hres_psf'].
     
-    # Create high-resolution focal grid in physical units (meters at focal plane).
+    # Create the high-resolution focal grid in focal-plane meters.
     focal_grid_hres = make_focal_grid(
         q=sim_config['sampling'],
         num_airy=sim_config['num_airy'],
@@ -197,15 +197,15 @@ def generate_psf_system(config, full_config=None):
         reference_wavelength=wavelength,
     )
     
-    # Create FraunhoferPropagator for high-resolution path with correct focal length.
+    # Create the high-resolution propagator with the correct focal length.
     prop_hres = FraunhoferPropagator(telescope_data['pupil_grid'], focal_grid_hres, focal_length)
     
-    # Propagate the pupil wavefront to get the single high-resolution PSF Wavefront.
+    # Propagate the pupil wavefront to get one high-resolution PSF wavefront.
     wf_psf_hres = prop_hres(wf_pupil)
     wf_pupil_perfect = Wavefront(aper, wavelength)
     wf_psf_perfect_hres = prop_hres(wf_pupil_perfect)
 
-    # Optionally save the high-resolution PSF intensity before any downsampling.
+    # Optionally save high-resolution PSF intensity before downsampling.
     saved_highres_psf_path = None
     if sim_config.get('save_highres_psf_npy', False):
         try:
@@ -259,7 +259,7 @@ def generate_psf_system(config, full_config=None):
     # Use the integer subsampling factor N calculated above.
     subsampling_factor = N
     
-    # Define detector grid in focal-plane meters using small-angle approximation (x ≈ f * theta).
+    # Define the detector grid in focal-plane meters.
     autolens_pixel_scale_rad = autolens_pixel_scale * np.pi / (180 * 3600)
     pixel_scale_m = focal_length * autolens_pixel_scale_rad
     detector_grid_m = make_uniform_grid(
@@ -273,7 +273,7 @@ def generate_psf_system(config, full_config=None):
     prop_det = FraunhoferPropagator(telescope_data['pupil_grid'], detector_input_grid, focal_length)
     wf_psf_supersampled = prop_det(wf_pupil)
 
-    # Downsample the supersampled PSF power to the detector grid via summation to conserve flux.
+    # Downsample supersampled PSF power by summation to conserve flux.
     psf_downsampled = subsample_field(
         wf_psf_supersampled.power, subsampling=subsampling_factor, new_grid=detector_grid_m, statistic='sum'
     )
@@ -281,16 +281,17 @@ def generate_psf_system(config, full_config=None):
     # Normalize psf_downsampled to sum to 1.
     psf_downsampled_normalized = psf_downsampled / np.sum(psf_downsampled)
     
-    # Create the final al.Kernel2D object.
-    kernel = al.Kernel2D.no_mask(
-        values=psf_downsampled_normalized.shaped,  # Use .shaped to get 2D array.
+    # Create the detector-sampled PyAuto kernel array.
+    kernel = make_pyauto_kernel(
+        # Use .shaped to get a 2D array.
+        values=psf_downsampled_normalized.shaped,
         pixel_scales=autolens_pixel_scale
     )
     
     # Verify pixel scale matching.
-    if not np.allclose(kernel.pixel_scales, autolens_pixel_scale, rtol=1e-10):
+    if not np.allclose(pyauto_kernel_pixel_scales(kernel), autolens_pixel_scale, rtol=1e-10):
         raise ValueError(
-            f"Pixel scale mismatch: kernel pixel_scales={kernel.pixel_scales}, "
+            f"Pixel scale mismatch: kernel pixel_scales={pyauto_kernel_pixel_scales(kernel)}, "
             f"expected autolens_pixel_scale={autolens_pixel_scale}. "
             f"This indicates a fundamental problem in the downsampling logic."
         )
@@ -321,7 +322,7 @@ def generate_psf_system(config, full_config=None):
         total_rms_nm = 0.0
     
     # Calculate individual aberration coefficient summaries for metadata.
-    # These are not independent aperture-weighted RMS budget terms; total_rms_nm
+    # These are not independent aperture-weighted RMS budget terms.
     # above is the physical OPD RMS over the illuminated pupil.
     segment_piston_rms_nm = 0.0
     segment_tiptilt_rms_urad = 0.0
@@ -336,7 +337,8 @@ def generate_psf_system(config, full_config=None):
         
     if segment_tiptilts:
         # RMS magnitude of tip/tilt vector across segments (μrad).
-        tiptilts_array = np.array(list(segment_tiptilts.values()))  # shape (N, 2)
+        # Shape is (N, 2).
+        tiptilts_array = np.array(list(segment_tiptilts.values()))
         magsq = np.sum(tiptilts_array**2, axis=1)  # tip^2 + tilt^2 per segment
         segment_tiptilt_rms_urad = float(np.sqrt(np.mean(magsq)))
         
@@ -392,7 +394,8 @@ def generate_psf_system(config, full_config=None):
         has_global_zernikes=global_zernikes is not None,
         
         # Kernel metadata.
-        kernel_pixel_scale=autolens_pixel_scale,  # Pixel scale of detector-generated kernel.
+        # Pixel scale of detector-generated kernel.
+        kernel_pixel_scale=autolens_pixel_scale,
         highres_psf_npy_path=saved_highres_psf_path,
         
         # Complex data.

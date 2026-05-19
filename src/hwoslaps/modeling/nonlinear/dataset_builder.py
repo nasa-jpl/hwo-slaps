@@ -7,6 +7,12 @@ from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
+from ...psf.utils import (
+    make_pyauto_convolver,
+    make_pyauto_kernel,
+    pyauto_kernel_native,
+)
+
 
 @dataclass(frozen=True)
 class NonlinearDatasetMetadata:
@@ -187,30 +193,23 @@ def _exclude_psf_edge_pixels(use_mask: np.ndarray, psf_shape: Tuple[int, int]) -
     return use_mask
 
 
-def _all_false_mask(shape_native: Tuple[int, int], pixel_scale: float) -> Any:
-    """Create an all-unmasked PyAutoLens mask."""
-    import autolens as al
-
-    return al.Mask2D.all_false(
-        shape_native=tuple(shape_native),
-        pixel_scales=float(pixel_scale),
-    )
-
-
 def _kernel_from_any(psf_for_fit: Any, pixel_scale: float) -> Any:
-    """Return a PyAutoLens kernel from an existing kernel or array."""
-    import autolens as al
+    """Return a PyAuto convolver from an existing PSF object or array."""
 
-    if hasattr(psf_for_fit, "native"):
+    if hasattr(psf_for_fit, "convolved_image_via_real_space_from"):
         return psf_for_fit
+    if hasattr(psf_for_fit, "native"):
+        return make_pyauto_convolver(psf_for_fit)
     kernel_array = np.asarray(psf_for_fit, dtype=float)
     if kernel_array.ndim != 2:
-        raise ValueError("psf_for_fit must be a 2D kernel or PyAutoLens Kernel2D")
-    try:
-        return al.Kernel2D.no_mask(values=kernel_array, pixel_scales=float(pixel_scale))
-    except AttributeError:
-        mask = _all_false_mask(kernel_array.shape, pixel_scale)
-        return al.Kernel2D(values=kernel_array, mask=mask)
+        raise ValueError("psf_for_fit must be a 2D kernel or PyAuto PSF object")
+    return make_pyauto_convolver(
+        make_pyauto_kernel(
+            values=kernel_array,
+            pixel_scales=float(pixel_scale),
+            normalize=True,
+        )
+    )
 
 
 def imaging_from_observation(
@@ -260,7 +259,7 @@ def imaging_from_observation(
         observation.psf if psf_for_fit is None else psf_for_fit,
         observation.pixel_scale,
     )
-    psf_shape = tuple(np.asarray(psf.native).shape)
+    psf_shape = tuple(pyauto_kernel_native(psf).shape)
 
     if mask_bool_use is None:
         use_mask = _exclude_psf_edge_pixels(

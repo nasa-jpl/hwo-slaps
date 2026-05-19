@@ -48,7 +48,13 @@ from ..lensing import generate_lensing_system
 from ..lensing.utils import LensingData, get_einstein_ring_position
 from ..observation.utils import ObservationData
 from ..psf.generator import generate_psf_system
-from ..psf.utils import PSFData
+from ..psf.utils import (
+    PSFData,
+    make_pyauto_convolver,
+    make_pyauto_kernel,
+    pyauto_kernel_native,
+    pyauto_kernel_pixel_scales,
+)
 from .fisher_adapter import (
     compute_asimov_from_images,
     evaluate_signal_bank_from_images,
@@ -296,7 +302,10 @@ class FisherDetector:
         observation_test: ObservationData,
         lensing_test: LensingData,
     ) -> FisherLocalData:
-        """Compute local profiled Asimov detectability at the injected position."""
+        """Compute local profiled Asimov detectability.
+
+        The calculation uses the injected position.
+        """
         mu1_adu_2d = self._mean_adu_from_observation(observation_test)
         result = self._timed_call(
             "local Asimov evaluation",
@@ -517,7 +526,10 @@ class FisherDetector:
         return _wrap
 
     def _candidate_positions(self) -> List[Tuple[float, float]]:
-        """Build map candidate positions using explicit list or ring sampling."""
+        """Build map candidate positions.
+
+        Positions come from an explicit list or ring sampling.
+        """
         if self._candidate_positions_cache is not None:
             return list(self._candidate_positions_cache)
 
@@ -586,7 +598,10 @@ class FisherDetector:
         return self._mean_adu_from_config(config)
 
     def _mean_adu_from_config(self, config: Dict[str, Any]) -> np.ndarray:
-        """Generate deterministic mean ADU image from a full top-level config."""
+        """Generate a deterministic mean ADU image.
+
+        The image is generated from a full top-level configuration.
+        """
         lensing_data = generate_lensing_system(config["lensing"], full_config=config)
         return self._mean_adu_from_lensing(
             lensing_data=lensing_data,
@@ -598,8 +613,12 @@ class FisherDetector:
         lensing_data: LensingData,
         observation_config: Dict[str, Any],
     ) -> np.ndarray:
-        """Compute noiseless PSF-convolved mean image in ADU from a lensing scene."""
+        """Compute a noiseless PSF-convolved mean image.
+
+        The returned image is in ADU and generated from a lensing scene.
+        """
         psf_kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+        psf_convolver = make_pyauto_convolver(psf_kernel)
         exposure_time = float(observation_config["exposure_time"])
         detector = observation_config["detector"]
         gain = float(detector["gain"])
@@ -614,7 +633,7 @@ class FisherDetector:
 
         simulator_noiseless = al.SimulatorImaging(
             exposure_time=exposure_time,
-            psf=psf_kernel,
+            psf=psf_convolver,
             background_sky_level=0.0,
             normalize_psf=False,
             add_poisson_noise_to_data=False,
@@ -645,9 +664,13 @@ class FisherDetector:
         source_e = observation_data.noiseless_source_eps * observation_data.exposure_time
         return source_e / observation_data.gain
 
-    def _source_adu_from_kernel(self, kernel: al.Kernel2D) -> np.ndarray:
-        """Apply a PSF kernel (possibly a derivative kernel) to the baseline source."""
+    def _source_adu_from_kernel(self, kernel) -> np.ndarray:
+        """Apply a PSF kernel to the baseline source.
+
+        The kernel may be a derivative kernel.
+        """
         psf_kernel = self._ensure_odd_kernel(kernel)
+        psf_convolver = make_pyauto_convolver(psf_kernel)
 
         mask = al.Mask2D.all_false(
             shape_native=self.lensing_baseline.image.shape,
@@ -656,7 +679,10 @@ class FisherDetector:
         lensed_image = al.Array2D(values=self.lensing_baseline.image, mask=mask)
         # PSF derivative kernels are signed and therefore cannot pass through
         # the simulator's Poisson-count path. Use the raw linear convolution.
-        source_only_eps = psf_kernel.convolved_array_from(array=lensed_image).native
+        source_only_eps = psf_convolver.convolved_image_via_real_space_from(
+            image=lensed_image,
+            blurring_image=None,
+        ).native
         source_e = source_only_eps * self.observation_baseline.exposure_time
         return source_e / self.observation_baseline.gain
 
@@ -1010,10 +1036,12 @@ class FisherDetector:
         kernel_plus = self._ensure_odd_kernel(psf_plus.kernel)
         kernel_minus = self._ensure_odd_kernel(psf_minus.kernel)
 
-        derivative_kernel = (kernel_plus.native - kernel_minus.native) / (2.0 * spec.step)
-        derivative_kernel_obj = al.Kernel2D.no_mask(
+        derivative_kernel = (
+            pyauto_kernel_native(kernel_plus) - pyauto_kernel_native(kernel_minus)
+        ) / (2.0 * spec.step)
+        derivative_kernel_obj = make_pyauto_kernel(
             values=derivative_kernel,
-            pixel_scales=kernel_plus.pixel_scales,
+            pixel_scales=pyauto_kernel_pixel_scales(kernel_plus),
             normalize=False,
         )
         return self._source_adu_from_kernel(derivative_kernel_obj)
@@ -1313,8 +1341,8 @@ class FisherDetector:
         current[last] = value
 
     @staticmethod
-    def _ensure_odd_kernel(kernel: al.Kernel2D) -> al.Kernel2D:
-        kernel_array = kernel.native
+    def _ensure_odd_kernel(kernel):
+        kernel_array = pyauto_kernel_native(kernel)
         if kernel_array.shape[0] % 2 == 1 and kernel_array.shape[1] % 2 == 1:
             return kernel
 
@@ -1323,8 +1351,8 @@ class FisherDetector:
         if kernel_array.shape[1] % 2 == 0:
             kernel_array = kernel_array[:, :-1]
 
-        return al.Kernel2D.no_mask(
+        return make_pyauto_kernel(
             values=kernel_array,
-            pixel_scales=kernel.pixel_scales,
+            pixel_scales=pyauto_kernel_pixel_scales(kernel),
             normalize=False,
         )

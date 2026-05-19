@@ -14,7 +14,9 @@ from .mass_models import (
     einstein_radius_point_mass,
     einstein_radius_sis_m200,
     nfw_scale_parameters,
-    concentration_mass_relation
+    concentration_mass_relation,
+    angular_diameter_distance_mpc,
+    angular_diameter_distance_z1z2_mpc,
 )
 from astropy import constants as const
 
@@ -333,7 +335,8 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
     if position_type == 'random':
         # Use a local RNG stream to avoid mutating NumPy global RNG state.
         if global_seed is not None:
-            rng = np.random.default_rng(global_seed + 1)  # offset for subhalo positioning
+            # Offset for subhalo positioning.
+            rng = np.random.default_rng(global_seed + 1)
         else:
             rng = np.random.default_rng()
         
@@ -409,14 +412,12 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
         # Get NFW parameters
         rs_kpc, rho_s = nfw_scale_parameters(mass, concentration, lens_z, cosmology)
         
-        # Get distances for critical density calculation
-        D_l_obj = cosmology.angular_diameter_distance(lens_z)
-        D_s_obj = cosmology.angular_diameter_distance(source_z)
-        D_ls_obj = cosmology.angular_diameter_distance_z1z2(lens_z, source_z)
-
-        D_l_m = float(D_l_obj.value) * MPC_TO_M
-        D_s_m = float(D_s_obj.value) * MPC_TO_M
-        D_ls_m = float(D_ls_obj.value) * MPC_TO_M
+        D_l_m = angular_diameter_distance_mpc(cosmology, lens_z) * MPC_TO_M
+        D_s_m = angular_diameter_distance_mpc(cosmology, source_z) * MPC_TO_M
+        D_ls_m = (
+            angular_diameter_distance_z1z2_mpc(cosmology, lens_z, source_z)
+            * MPC_TO_M
+        )
         
         # Critical surface density calculated robustly in SI units
         c_SI = float(const.c.value)

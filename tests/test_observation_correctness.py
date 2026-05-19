@@ -11,7 +11,7 @@ import pytest
 from hwoslaps.lensing.utils import LensingData
 from hwoslaps.observation import generate_observation
 from hwoslaps.observation.noise_models import apply_detector_noise, create_noise_map
-from hwoslaps.psf.utils import PSFData
+from hwoslaps.psf.utils import PSFData, make_pyauto_kernel
 
 
 def _make_lensing_data(
@@ -47,7 +47,7 @@ def _make_lensing_data(
 
 
 def _make_psf_data(kernel_values: np.ndarray, *, pixel_scale: float = 0.1) -> PSFData:
-    kernel = al.Kernel2D.no_mask(
+    kernel = make_pyauto_kernel(
         values=np.asarray(kernel_values, dtype=float),
         pixel_scales=pixel_scale,
         normalize=False,

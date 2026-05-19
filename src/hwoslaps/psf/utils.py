@@ -17,6 +17,103 @@ from ..constants import ARCSEC_PER_RAD
 from datetime import datetime
 
 
+def make_pyauto_kernel(values, pixel_scales, normalize=True):
+    """Create a detector-sampled PyAuto PSF kernel.
+
+    Parameters
+    ----------
+    values : array-like
+        Two-dimensional PSF kernel samples.
+    pixel_scales : `float` or `tuple` [`float`, `float`]
+        Pixel scale or scales for the kernel, in arcseconds per pixel.
+    normalize : `bool`, optional
+        If `True`, normalize the kernel values to unit flux.
+
+    Returns
+    -------
+    kernel : `autolens.Array2D`
+        PyAuto kernel array.
+    """
+    kernel_array = np.asarray(values, dtype=float)
+    if normalize:
+        kernel_sum = float(np.sum(kernel_array))
+        if kernel_sum != 0.0:
+            kernel_array = kernel_array / kernel_sum
+    return al.Array2D.no_mask(values=kernel_array, pixel_scales=pixel_scales)
+
+
+def make_pyauto_convolver(kernel):
+    """Create a PyAuto convolver from a PSF kernel.
+
+    Parameters
+    ----------
+    kernel : `object`
+        PyAuto PSF kernel array or convolver.
+
+    Returns
+    -------
+    convolver : `autolens.Convolver`
+        PyAuto convolver. Existing convolver inputs are returned unchanged.
+    """
+    if hasattr(kernel, "convolved_image_via_real_space_from"):
+        return kernel
+    return al.Convolver(kernel=kernel)
+
+
+def pyauto_kernel_native(kernel):
+    """Return native two-dimensional kernel values.
+
+    Parameters
+    ----------
+    kernel : `object`
+        PyAuto kernel array or convolver.
+
+    Returns
+    -------
+    values : `numpy.ndarray`
+        Native two-dimensional kernel values.
+    """
+    if hasattr(kernel, "kernel"):
+        kernel = kernel.kernel
+    return np.asarray(kernel.native, dtype=float)
+
+
+def pyauto_kernel_shape_native(kernel):
+    """Return the native kernel shape.
+
+    Parameters
+    ----------
+    kernel : `object`
+        PyAuto kernel array or convolver.
+
+    Returns
+    -------
+    shape : `tuple` [`int`, `int`]
+        Native two-dimensional kernel shape.
+    """
+    if hasattr(kernel, "kernel"):
+        kernel = kernel.kernel
+    return kernel.shape_native
+
+
+def pyauto_kernel_pixel_scales(kernel):
+    """Return the kernel pixel scales.
+
+    Parameters
+    ----------
+    kernel : `object`
+        PyAuto kernel array or convolver.
+
+    Returns
+    -------
+    pixel_scales : `tuple` [`float`, `float`]
+        Kernel pixel scales in arcseconds per pixel.
+    """
+    if hasattr(kernel, "kernel"):
+        kernel = kernel.kernel
+    return kernel.pixel_scales
+
+
 @dataclass
 class PSFData:
     """Complete PSF system data structure.
@@ -35,8 +132,8 @@ class PSFData:
         Final aberrated pupil-plane wavefront.
     telescope_data : `dict`
         Pupil-side HCIPy telescope components and geometry metadata.
-    kernel : `autolens.Kernel2D`
-        Detector-sampled PyAutoLens kernel for lensing simulations.
+    kernel : `autolens.Array2D`
+        Detector-sampled PyAuto kernel array for lensing simulations.
     kernel_pixel_scale : `float`
         Pixel scale of the kernel if different from PSF pixel scale.
     wavelength_nm : `float`
@@ -115,7 +212,7 @@ class PSFData:
     psf: Any  # hcipy.Field - The high-resolution focal-plane PSF.
     wavefront: Any  # hcipy.Wavefront - The pupil-plane wavefront.
     telescope_data: Dict  # Dictionary with pupil-side HCIPy components.
-    kernel: al.Kernel2D  # Pre-converted PyAutoLens kernel.
+    kernel: Any  # Detector-sampled PyAuto kernel array.
     kernel_pixel_scale: float  # Kernel pixel scale if different from PSF.
     
     # System parameters.
@@ -125,7 +222,8 @@ class PSFData:
     pixel_scale_arcsec: float
     sampling_factor: float
     requested_sampling_factor: float  # User-provided value from config.
-    used_sampling_factor: float       # Auto-calculated value for integer subsampling.
+    # Auto-calculated value after enforcing integer subsampling.
+    used_sampling_factor: float
     integer_subsampling_factor: int   # The integer factor for the detector.
     num_segments: int
     
@@ -308,7 +406,13 @@ class PSFData:
 
     @property
     def has_saved_highres_psf(self) -> bool:
-        """Return True if a high-res PSF .npy file path is recorded and exists."""
+        """Whether a saved high-resolution PSF path exists.
+
+        Returns
+        -------
+        has_saved_highres_psf : `bool`
+            True if the high-resolution PSF path is recorded and exists.
+        """
         return bool(self.highres_psf_npy_path) and os.path.exists(self.highres_psf_npy_path)
 
 
@@ -365,11 +469,11 @@ def print_psf_data_summary(psf_data):
     
     # Detailed kernel statistics.
     print("\n=== PyAutoLens Kernel Statistics ===")
-    print(f"Kernel shape: {psf_data.kernel.shape_native}")
+    print(f"Kernel shape: {pyauto_kernel_shape_native(psf_data.kernel)}")
     print(f"Kernel pixel scale: {psf_data.kernel_pixel_scale:.6f} arcsec/pixel")
     
     # Calculate kernel statistics
-    kernel_array = psf_data.kernel.native
+    kernel_array = pyauto_kernel_native(psf_data.kernel)
     kernel_sum = np.sum(kernel_array)
     kernel_max = np.max(kernel_array)
     kernel_min = np.min(kernel_array)
