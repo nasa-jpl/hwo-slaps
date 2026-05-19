@@ -12,6 +12,7 @@ ENV_NAME="hwo-slaps"
 PYTHON_VERSION="3.11"
 INSTALL_GPU_JAX=0
 UPDATE_GIT_REPOS=1
+JAX_VERSION="${HWOSLAPS_JAX_VERSION:-0.4.38}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKOUT_ROOT="${HWOSLAPS_DEV_ROOT:-$(dirname "$SCRIPT_DIR")}"
@@ -37,6 +38,7 @@ Options:
 
 Environment overrides:
   HWOSLAPS_DEV_ROOT    Default checkout root.
+  HWOSLAPS_JAX_VERSION JAX version to install. Default: 0.4.38.
   PYAUTOLENS_REPO_URL  PyAutoLens Git URL.
   HCIPY_REPO_URL       HCIPy Git URL.
   PYAUTOLENS_DIR       Existing or desired PyAutoLens checkout path.
@@ -98,6 +100,7 @@ if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
 else
     echo "JAX mode:          CPU"
 fi
+echo "JAX version:       $JAX_VERSION"
 echo ""
 
 if ! command -v conda >/dev/null 2>&1; then
@@ -152,7 +155,7 @@ clone_or_update "$HCIPY_REPO_URL" "$HCIPY_DIR" "HCIPy"
 
 echo "Installing base runtime and test dependencies."
 python -m pip install \
-    numpy \
+    "numpy<2" \
     scipy \
     matplotlib \
     pyyaml \
@@ -161,14 +164,6 @@ python -m pip install \
     numba \
     pytest \
     nautilus-sampler
-
-if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
-    echo "Installing JAX with CUDA 12 support."
-    python -m pip install -U "jax[cuda12]"
-else
-    echo "Installing CPU JAX."
-    python -m pip install -U jax
-fi
 
 echo "Installing PyAutoLens from editable Git checkout."
 python -m pip install -e "$PYAUTOLENS_DIR"
@@ -179,12 +174,21 @@ python -m pip install -e "$HCIPY_DIR"
 echo "Installing HWO-SLAPS from editable checkout."
 python -m pip install -e "$SCRIPT_DIR"
 
+if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
+    echo "Installing JAX $JAX_VERSION with CUDA 12 support."
+    python -m pip install "jax[cuda12]==$JAX_VERSION"
+else
+    echo "Installing CPU JAX $JAX_VERSION."
+    python -m pip install "jax==$JAX_VERSION"
+fi
+
 echo ""
 echo "Running import and backend checks."
 python - <<'PY'
 import autolens as al
 import autofit as af
 import hcipy
+import hwoslaps
 import jax
 import numpy
 import yaml
@@ -192,6 +196,7 @@ import yaml
 print("autolens", getattr(al, "__version__", "unknown"), al.__file__)
 print("autofit", getattr(af, "__version__", "unknown"), af.__file__)
 print("hcipy", getattr(hcipy, "__version__", "unknown"), hcipy.__file__)
+print("hwoslaps", getattr(hwoslaps, "__version__", "unknown"), hwoslaps.__file__)
 print("jax", jax.__version__)
 print("jax devices", jax.devices())
 print("jax backend", jax.default_backend())
