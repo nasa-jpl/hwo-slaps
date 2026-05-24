@@ -1,156 +1,245 @@
-#!/bin/bash
-# HWO-SLAPS Installation Script
+#!/usr/bin/env bash
+#
+# Install HWO-SLAPS and its developer dependencies.
+#
+# The science stack currently requires GitHub checkouts of PyAutoLens and HCIPy:
+# PyAutoLens for the current nonlinear-validation backend, and HCIPy for the
+# hexike API that is not available in released packages used by this project.
+
+set -euo pipefail
+
+ENV_NAME="hwo-slaps"
+PYTHON_VERSION="3.11"
+INSTALL_GPU_JAX=0
+UPDATE_GIT_REPOS=1
+JAX_VERSION="${HWOSLAPS_JAX_VERSION:-0.4.38}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CHECKOUT_ROOT="${HWOSLAPS_DEV_ROOT:-$(dirname "$SCRIPT_DIR")}"
+
+PYAUTOLENS_REPO_URL="${PYAUTOLENS_REPO_URL:-https://github.com/PyAutoLabs/PyAutoLens.git}"
+HCIPY_REPO_URL="${HCIPY_REPO_URL:-https://github.com/ehpor/hcipy.git}"
+PYAUTOLENS_DIR="${PYAUTOLENS_DIR:-$CHECKOUT_ROOT/PyAutoLens}"
+HCIPY_DIR="${HCIPY_DIR:-$CHECKOUT_ROOT/hcipy}"
+
+usage() {
+    cat <<EOF
+Usage: bash install.sh [options]
+
+Options:
+  --env-name NAME       Conda environment name. Default: hwo-slaps
+  --python VERSION     Python version for new envs. Default: 3.11
+  --gpu                Install JAX with CUDA 12 support for NVIDIA GPUs.
+  --cpu                Install CPU JAX. Default.
+  --checkout-root DIR  Directory for PyAutoLens and HCIPy checkouts.
+                       Default: parent directory of this repo.
+  --no-pull            Do not pull existing dependency checkouts.
+  --help               Show this message.
+
+Environment overrides:
+  HWOSLAPS_DEV_ROOT    Default checkout root.
+  HWOSLAPS_JAX_VERSION JAX version to install. Default: 0.4.38.
+  PYAUTOLENS_REPO_URL  PyAutoLens Git URL.
+  HCIPY_REPO_URL       HCIPy Git URL.
+  PYAUTOLENS_DIR       Existing or desired PyAutoLens checkout path.
+  HCIPY_DIR            Existing or desired HCIPy checkout path.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --env-name)
+            ENV_NAME="$2"
+            shift 2
+            ;;
+        --python)
+            PYTHON_VERSION="$2"
+            shift 2
+            ;;
+        --gpu)
+            INSTALL_GPU_JAX=1
+            shift
+            ;;
+        --cpu)
+            INSTALL_GPU_JAX=0
+            shift
+            ;;
+        --checkout-root)
+            CHECKOUT_ROOT="$2"
+            PYAUTOLENS_DIR="$CHECKOUT_ROOT/PyAutoLens"
+            HCIPY_DIR="$CHECKOUT_ROOT/hcipy"
+            shift 2
+            ;;
+        --no-pull)
+            UPDATE_GIT_REPOS=0
+            shift
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
 
 echo "================================================"
-echo "     HWO-SLAPS Installation Script v1.0         "
-echo "  HWO Strong Lensing and PSF Stability Pipeline "
+echo "     HWO-SLAPS Developer Installation"
 echo "================================================"
 echo ""
+echo "Environment:       $ENV_NAME"
+echo "Python:            $PYTHON_VERSION"
+echo "Checkout root:     $CHECKOUT_ROOT"
+echo "PyAutoLens dir:    $PYAUTOLENS_DIR"
+echo "HCIPy dir:         $HCIPY_DIR"
+if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
+    echo "JAX mode:          CUDA 12 GPU"
+else
+    echo "JAX mode:          CPU"
+fi
+echo "JAX version:       $JAX_VERSION"
+echo ""
 
-# Global variable to track installation state
-INSTALL_STATE_FILE="/tmp/hwoslaps_install_state"
+if ! command -v conda >/dev/null 2>&1; then
+    echo "Conda not found. Install Miniconda or Anaconda first."
+    exit 1
+fi
 
-# Function to log installation progress
-log_progress() {
-    echo "$1" >> "$INSTALL_STATE_FILE"
-}
+if ! command -v git >/dev/null 2>&1; then
+    echo "git not found. Install git first."
+    exit 1
+fi
 
-# Function to check if step was already completed
-step_completed() {
-    if [ -f "$INSTALL_STATE_FILE" ]; then
-        grep -q "$1" "$INSTALL_STATE_FILE"
-        return $?
-    fi
-    return 1
-}
+source "$(conda info --base)/etc/profile.d/conda.sh"
 
-# Function to check if command was successful with error recovery
-check_status() {
-    if [ $? -eq 0 ]; then
-        echo "✓ $1 successful"
-        log_progress "$1"
-    else
-        echo "✗ $1 failed"
-        echo ""
-        echo "Installation failed at step: $1"
-        echo "You can retry the installation by running this script again."
-        echo "The script will skip completed steps and continue from where it failed."
-        echo ""
-        echo "If the problem persists, you can manually complete the remaining steps:"
-        echo "1. Activate the environment: conda activate hwo-slaps"
-        echo "2. Install remaining packages manually"
-        echo ""
+if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
+    echo "Found existing conda env '$ENV_NAME'."
+else
+    echo "Creating conda env '$ENV_NAME' with Python $PYTHON_VERSION."
+    conda create -n "$ENV_NAME" "python=$PYTHON_VERSION" -y
+fi
+
+conda activate "$ENV_NAME"
+
+python -m pip install --upgrade pip setuptools wheel
+
+clone_or_update() {
+    local repo_url="$1"
+    local target_dir="$2"
+    local label="$3"
+
+    if [[ -d "$target_dir/.git" ]]; then
+        echo "Found existing $label checkout at $target_dir."
+        if [[ "$UPDATE_GIT_REPOS" -eq 1 ]]; then
+            echo "Updating $label with git pull --ff-only."
+            git -C "$target_dir" pull --ff-only
+        else
+            echo "Skipping pull for $label."
+        fi
+    elif [[ -e "$target_dir" ]]; then
+        echo "$target_dir exists but is not a git checkout."
+        echo "Set ${label}_DIR to a valid checkout or remove the directory."
         exit 1
+    else
+        echo "Cloning $label from $repo_url to $target_dir."
+        mkdir -p "$(dirname "$target_dir")"
+        git clone "$repo_url" "$target_dir"
     fi
 }
 
-# Function to clean up on successful completion
-cleanup_state() {
-    if [ -f "$INSTALL_STATE_FILE" ]; then
-        rm "$INSTALL_STATE_FILE"
-    fi
-}
+clone_or_update "$PYAUTOLENS_REPO_URL" "$PYAUTOLENS_DIR" "PyAutoLens"
+clone_or_update "$HCIPY_REPO_URL" "$HCIPY_DIR" "HCIPy"
 
-# Check if conda is installed
-if ! command -v conda &> /dev/null; then
-    echo "✗ Conda not found. Please install Anaconda or Miniconda first."
-    echo "  Visit: https://docs.conda.io/en/latest/miniconda.html"
-    exit 1
-fi
+echo "Installing base runtime and test dependencies."
+python -m pip install \
+    "numpy<2" \
+    scipy \
+    matplotlib \
+    pyyaml \
+    astropy \
+    tqdm \
+    numba \
+    pytest \
+    nautilus-sampler
 
-# Check if hwo-slaps environment already exists or was already created
-if conda env list | grep -q "^hwo-slaps " || step_completed "Environment creation"; then
-    echo "→ Found existing 'hwo-slaps' environment, skipping creation..."
+echo "Installing PyAutoLens from editable Git checkout."
+python -m pip install -e "$PYAUTOLENS_DIR"
+
+echo "Installing HCIPy from editable Git checkout."
+python -m pip install -e "$HCIPY_DIR"
+
+echo "Installing HWO-SLAPS from editable checkout."
+python -m pip install -e "$SCRIPT_DIR"
+
+if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
+    echo "Installing JAX $JAX_VERSION with CUDA 12 support."
+    python -m pip install "jax[cuda12]==$JAX_VERSION"
 else
-    echo "→ Creating conda environment 'hwo-slaps' with Python 3.11..."
-    conda create -n hwo-slaps python=3.11 -y
-    check_status "Environment creation"
+    echo "Installing CPU JAX $JAX_VERSION."
+    python -m pip install "jax==$JAX_VERSION"
 fi
 
 echo ""
-echo "→ Activating environment..."
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate hwo-slaps
-check_status "Environment activation"
-
-# Verify we're in the correct environment
-if [ "$CONDA_DEFAULT_ENV" != "hwo-slaps" ]; then
-    echo "✗ Failed to activate hwo-slaps environment"
-    echo "  Current environment: $CONDA_DEFAULT_ENV"
-    exit 1
-fi
-
-echo ""
-if ! step_completed "Pip upgrade"; then
-    echo "→ Upgrading pip..."
-    pip install --upgrade pip
-    check_status "Pip upgrade"
-else
-    echo "→ Pip upgrade already completed, skipping..."
-fi
-
-echo ""
-if ! step_completed "PyAutoLens installation"; then
-    echo "→ Installing PyAutoLens..."
-    pip install autolens --no-cache-dir
-    check_status "PyAutoLens installation"
-else
-    echo "→ PyAutoLens already installed, skipping..."
-fi
-
-echo ""
-if ! step_completed "Numba installation"; then
-    echo "→ Installing numba for performance..."
-    pip install numba --no-cache-dir
-    check_status "Numba installation"
-else
-    echo "→ Numba already installed, skipping..."
-fi
-
-echo ""
-if ! step_completed "Additional dependencies"; then
-    echo "→ Installing additional dependencies..."
-    pip install pyyaml matplotlib numpy scipy astropy tqdm
-    check_status "Additional dependencies"
-else
-    echo "→ Additional dependencies already installed, skipping..."
-fi
-
-echo ""
-if ! step_completed "Import test"; then
-    echo "→ Testing imports..."
-    python -c "
-import autolens
+echo "Running import and backend checks."
+python - <<'PY'
+import autolens as al
+import autofit as af
 import hcipy
+import hwoslaps
+import jax
 import numpy
 import yaml
-print('✓ All imports successful!')
-"
-    check_status "Import test"
-else
-    echo "→ Import test already completed, skipping..."
+
+print("autolens", getattr(al, "__version__", "unknown"), al.__file__)
+print("autofit", getattr(af, "__version__", "unknown"), af.__file__)
+print("hcipy", getattr(hcipy, "__version__", "unknown"), hcipy.__file__)
+print("hwoslaps", getattr(hwoslaps, "__version__", "unknown"), hwoslaps.__file__)
+print("jax", jax.__version__)
+print("jax devices", jax.devices())
+print("jax backend", jax.default_backend())
+
+required_hexike = [
+    "make_hexike_basis",
+    "SegmentedHexikeSurface",
+    "make_segment_hexike_surface_from_hex_aperture",
+]
+missing = [name for name in required_hexike if not hasattr(hcipy, name)]
+if missing:
+    raise RuntimeError(
+        "HCIPy checkout is missing required hexike symbols: "
+        + ", ".join(missing)
+    )
+
+print("All import checks passed.")
+PY
+
+if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
+    echo ""
+    echo "Verifying CUDA JAX backend was selected."
+    python - <<'PY'
+import jax
+
+backend = jax.default_backend()
+if backend != "gpu":
+    raise RuntimeError(
+        f"Expected JAX GPU backend for --gpu install, got {backend!r}. "
+        "Check NVIDIA driver, CUDA compatibility, and JAX CUDA wheel install."
+    )
+print("CUDA JAX backend verified.")
+PY
 fi
 
 echo ""
-if ! step_completed "HWO-SLAPS installation"; then
-    echo "→ Installing HWO-SLAPS in development mode..."
-    pip install -e .
-    check_status "HWO-SLAPS installation"
-else
-    echo "→ HWO-SLAPS already installed, skipping..."
-fi
-
-# Clean up state file on successful completion
-cleanup_state
-
-echo ""
 echo "================================================"
-echo "     ✓ Installation Complete!                   "
+echo "     Installation complete"
 echo "================================================"
 echo ""
-echo "To activate the environment in the future, run:"
-echo "    conda activate hwo-slaps"
+echo "Activate with:"
+echo "    conda activate $ENV_NAME"
 echo ""
-echo "To test the installation, run:"
-echo "    python tests/test_installation.py"
-echo ""
+echo "Recommended validation checks:"
+echo "    python -m pytest -q tests/test_installation.py"
+echo "    python -m pytest -q tests/test_nonlinear_dataset_builder.py tests/test_nonlinear_autolens_model_builder_runtime.py tests/test_nonlinear_autolens_runner.py"

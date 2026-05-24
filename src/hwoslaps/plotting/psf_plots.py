@@ -15,6 +15,7 @@ from pathlib import Path
 from hcipy.plotting import imshow_field, imshow_psf
 from matplotlib.colors import LogNorm
 from ..constants import ARCSEC_PER_RAD
+from ..psf.utils import pyauto_kernel_native, pyauto_kernel_shape_native
 from .registry import plot_function
 
 
@@ -115,9 +116,9 @@ def plot_psf_comparison(psf_data, plot_config):
         plt.text(0.5, 0.5, 'No phase screens\navailable', 
                 transform=plt.gca().transAxes, ha='center', va='center')
     
-    # Plot 2: Total wavefront phase (focal plane).
+    # Plot 2: Total wavefront phase (pupil plane).
     plt.subplot(132)
-    plt.title('Focal Plane Wavefront Phase')
+    plt.title('Pupil Plane Wavefront Phase')
     imshow_field(np.angle(psf_data.wavefront.electric_field), cmap='RdBu_r')
     plt.colorbar(label='Phase [rad]')
     
@@ -194,14 +195,14 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
     # Create zoom plot.
     plt.figure(figsize=(8, 6))
     
-    # Get the focal plane grid coordinates (adapted for new architecture).
-    focal_grid = psf_data.wavefront.grid
-    x = focal_grid.coords[0]
-    y = focal_grid.coords[1]
+    # Get the pupil-plane grid coordinates.
+    pupil_grid = psf_data.wavefront.grid
+    x = pupil_grid.coords[0]
+    y = pupil_grid.coords[1]
     
-    # Define zoom region in focal plane coordinates (adapted for focal plane scale).
+    # Define zoom region in pupil-plane coordinates.
     if zoom_mode == 'full':
-        # Use the full focal plane extent.
+        # Use the full pupil-plane extent.
         zoom_xmin, zoom_xmax = x.min(), x.max()
         zoom_ymin, zoom_ymax = y.min(), y.max()
     elif zoom_mode == 'corner':
@@ -213,28 +214,28 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
     else:
         raise ValueError(f"Invalid zoom mode: {zoom_mode}")
     
-    # Mask for the zoomed region (adapted for focal plane).
+    # Mask for the zoomed region.
     zoom_mask = (x >= zoom_xmin) & (x <= zoom_xmax) & (y >= zoom_ymin) & (y <= zoom_ymax)
     
-    # Create a zoomed field for pixel-based visualization (adapted for focal plane).
-    zoom_indices = np.where(zoom_mask.reshape(focal_grid.shape))
+    # Create a zoomed field for pixel-based visualization.
+    zoom_indices = np.where(zoom_mask.reshape(pupil_grid.shape))
     y_indices, x_indices = zoom_indices
     
-    # Get the bounds of the zoom region in grid indices (adapted for focal plane).
+    # Get the bounds of the zoom region in grid indices.
     y_min, y_max = y_indices.min(), y_indices.max() + 1
     x_min, x_max = x_indices.min(), x_indices.max() + 1
     
-    # Extract the zoomed phase data as 2D arrays (adapted for focal plane).
+    # Extract the zoomed phase data as 2D arrays.
     zoom_total_phase_2d = np.angle(psf_data.wavefront.electric_field).shaped[y_min:y_max, x_min:x_max]
     
-    # Create extent for proper axis scaling (adapted for focal plane).
+    # Create extent for proper axis scaling.
     extent = (zoom_xmin, zoom_xmax, zoom_ymin, zoom_ymax)
     
-    # For focal plane, we don't need aperture masking since the PSF already contains the aperture effects.
+    # The stored wavefront is already defined on the pupil-plane grid.
     zoom_phase_masked = zoom_total_phase_2d
     
-    # Plot: Focal plane wavefront phase (adapted for new architecture).
-    plt.title('Focal Plane Wavefront Phase\n(Zoomed)')
+    # Plot: Pupil-plane wavefront phase.
+    plt.title('Pupil Plane Wavefront Phase\n(Zoomed)')
     im = plt.imshow(zoom_phase_masked, cmap='RdBu_r', interpolation='nearest', 
                     extent=extent, origin='lower', aspect='equal')
     plt.xlabel('x [m]')
@@ -261,7 +262,7 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
     
     print(f"Saved PSF zoom plot: {filepath}")
     
-    # Print zoom info (adapted for focal plane).
+    # Print zoom info.
     print(f"Zoom region: x=[{zoom_xmin:.2f}, {zoom_xmax:.2f}], y=[{zoom_ymin:.2f}, {zoom_ymax:.2f}]")
     print(f"Zoomed array shape: {zoom_total_phase_2d.shape}")
     total_phase_pixels = np.count_nonzero(~np.isnan(zoom_phase_masked))
@@ -270,10 +271,10 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
 
 @plot_function(module='psf', description="Complete PSF system overview with comparison and zoom")
 def plot_psf_system_overview(psf_data, plot_config):
-    """Create comprehensive PSF system plots including the main 3x1 plot and zoom.
+    """Create comprehensive PSF system plots.
     
     This is the main plotting function that creates both the comparison plot
-    and the zoomed view.
+    and the zoomed view, including the main 3x1 plot.
     
     Parameters
     ----------
@@ -341,7 +342,7 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     
     # Calculate extent for high-res PSF.
     #
-    # HCIPy focal-plane grids produced by `make_focal_grid(..., focal_length=...)`
+    # HCIPy focal-plane grids from `make_focal_grid(..., focal_length=...)`
     # are in **meters at the focal plane**. Convert to angle on-sky via
     # theta [rad] = x [m] / f [m].
     psf_grid = psf_data.psf.grid
@@ -366,14 +367,15 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     # Detector-sampled kernel.
     ax = axes[1]
     kernel = psf_data.kernel
-    kernel_extent = np.array(kernel.shape_native) * psf_data.kernel_pixel_scale / 2
+    kernel_native = pyauto_kernel_native(kernel)
+    kernel_extent = np.array(pyauto_kernel_shape_native(kernel)) * psf_data.kernel_pixel_scale / 2
     kernel_extent = [-kernel_extent[1], kernel_extent[1], 
                      -kernel_extent[0], kernel_extent[0]]
     
-    im = ax.imshow(kernel.native, extent=kernel_extent,
+    im = ax.imshow(kernel_native, extent=kernel_extent,
                    origin='lower', cmap='hot',
-                   norm=LogNorm(vmin=kernel.native.max()*1e-5,
-                               vmax=kernel.native.max()))
+                   norm=LogNorm(vmin=kernel_native.max()*1e-5,
+                               vmax=kernel_native.max()))
     ax.set_title('Detector Kernel', fontsize=11)
     ax.set_xlabel('arcsec')
     ax.set_ylabel('arcsec')
@@ -492,7 +494,7 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     ax1 = axes[0]
     
     # Use HCIPy's imshow_field to plot the actual aperture
-    # Switch to 'gray' so segments are white on a black background for better contrast with red labels
+    # Use white segments on black for contrast with red labels.
     imshow_field(aperture, ax=ax1, cmap='gray')
     ax1.set_title('Segmented Aperture', fontsize=14, fontweight='bold')
     ax1.set_xlabel('Position [m]', fontsize=12)
@@ -523,7 +525,7 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     
     # Calculate PSF extent in arcseconds.
     #
-    # The PSF grid coordinates are in meters at the focal plane (HCIPy focal grid).
+    # PSF coordinates are meters at the focal plane on the HCIPy grid.
     # Convert to sky angle using theta [rad] = x [m] / f [m].
     psf_grid = psf_data.psf.grid
     extent_m = [psf_grid.x.min(), psf_grid.x.max(),
@@ -611,7 +613,7 @@ def plot_optics_chain(psf_data, plot_config):
     ax.set_xlabel('Position [m]', fontsize=11)
     ax.set_ylabel('Position [m]', fontsize=11)
 
-    # Add segment labels at centroids (reuse the same approach as the baseline plot).
+    # Add segment labels at centroids using the baseline plot approach.
     for i, segment in enumerate(segments):
         segment_coords = segment.grid.coords
         segment_values = segment.shaped
@@ -631,15 +633,13 @@ def plot_optics_chain(psf_data, plot_config):
                 fontweight='bold',
             )
 
-    # Panel 2: Pupil OPD / phase screen (Hexike Phase Screen (API), pupil-plane)
+    # Panel 2: Pupil OPD / phase screen (Hexike Phase Screen, pupil-plane)
     ax = axes[1]
     phase_screen = None
     if psf_data.phase_screens:
-        # Prefer the API hexike screen if present.
-        if 'segment_hexikes_api' in psf_data.phase_screens:
-            phase_screen = psf_data.phase_screens['segment_hexikes_api']
+        if 'segment_hexikes' in psf_data.phase_screens:
+            phase_screen = psf_data.phase_screens['segment_hexikes']
         else:
-            # Fallback: any screen that looks like a hexike API product.
             for k, v in psf_data.phase_screens.items():
                 if 'hexike' in k.lower():
                     phase_screen = v
@@ -676,7 +676,7 @@ def plot_optics_chain(psf_data, plot_config):
     psf_norm = psf_intensity / np.max(psf_intensity)
     psf_log = np.log10(psf_norm + 1e-6)
 
-    # PSF grid coordinates are in meters at the focal plane -> convert to arcsec via theta = x / f.
+    # Convert PSF focal-plane meters to arcsec via theta = x / f.
     psf_grid = psf_data.psf.grid
     extent_m = [psf_grid.x.min(), psf_grid.x.max(), psf_grid.y.min(), psf_grid.y.max()]
     extent_arcsec = [x / psf_data.focal_length_m * ARCSEC_PER_RAD for x in extent_m]
@@ -711,7 +711,7 @@ def plot_optics_chain(psf_data, plot_config):
             bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.5),
         )
 
-    # Presentation styling: remove axis labels and tick marks/labels for all panels.
+    # Remove axis labels and tick marks/labels for all panels.
     for ax in axes:
         ax.set_xlabel('')
         ax.set_ylabel('')

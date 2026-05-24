@@ -103,7 +103,7 @@ class PlotRegistry:
             module_type = 'psf' 
         elif 'observation' in name:
             module_type = 'observation'
-        elif 'detection' in name or 'chernoff' in name or 'mejiro' in name:
+        elif 'detection' in name:
             module_type = 'detection'
         else:
             return None  # Unknown module type
@@ -114,7 +114,7 @@ class PlotRegistry:
         ])
         
         # Check if detection mode only
-        detection_mode_only = 'detection' in name or 'chernoff' in name or 'mejiro' in name
+        detection_mode_only = 'detection' in name
         
         return PlotMetadata(
             name=name,
@@ -137,7 +137,7 @@ class PlotRegistry:
             - 'lensing_data': LensingData or None
             - 'psf_data': PSFData or None
             - 'obs_data': ObservationData or None
-            - 'detection_data': DetectionData or None
+            - 'detection_data': FisherDetectionData or None
             
         Returns
         -------

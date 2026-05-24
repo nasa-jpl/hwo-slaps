@@ -13,7 +13,12 @@ from .psf_plots import (
     plot_psf_complete_analysis
 )
 from .observation_plots import plot_observation_comparison
-from .detection_plots import plot_detection_comparison, plot_chernoff_detection_comparison
+from .detection_plots import (
+    plot_fisher_local_summary,
+    plot_fisher_psf_mode_scan,
+    plot_fisher_detection_map_summary,
+    plot_fisher_map_degradation,
+)
 from .registry import generate_all_plots, get_plot_registry
 
 __all__ = [
@@ -24,8 +29,10 @@ __all__ = [
     'plot_psf_system_overview',
     'plot_psf_complete_analysis',
     'plot_observation_comparison',
-    'plot_detection_comparison',
-    'plot_chernoff_detection_comparison',
+    'plot_fisher_local_summary',
+    'plot_fisher_psf_mode_scan',
+    'plot_fisher_detection_map_summary',
+    'plot_fisher_map_degradation',
     'generate_all_plots',
     'get_plot_registry'
 ]

@@ -1,15 +1,16 @@
-"""PSF generation functions for HWO-SLAPS.
-
-This module contains the main PSF generation logic implementing a clean API
-for generating aberrated PSFs.
+"""Generate high-resolution PSFs and detector-sampled kernels.
 
 The module implements a diverging-path architecture where high-resolution PSFs
 are computed for optical quality metrics while detector-sampled kernels are
-generated for science applications.
+generated for science images. Both branches share the same aberrated
+pupil-plane wavefront so that metrics and detector products describe the same
+incoming optical state.
 """
 
-import numpy as np
+import copy
 import os
+
+import numpy as np
 from hcipy.optics import Wavefront
 from hcipy.field import (
     make_focal_grid,
@@ -27,49 +28,56 @@ from .aberration_models import (
     apply_segment_zernikes,
     apply_global_zernikes
 )
-from .utils import PSFData
+from .utils import PSFData, make_pyauto_kernel, pyauto_kernel_pixel_scales
 
 
 def generate_psf_system(config, full_config=None):
     """Generate a PSF system with specified aberrations.
 
-    This is the main API function that creates a complete PSF system
-    including telescope setup, aberration application, and PSF generation
-    with comprehensive quality analysis and unified data structure.
+    This function is the canonical PSF runtime path for the project. It builds
+    a pupil-side HCIPy telescope model, applies configured segment and global
+    aberrations, propagates the shared pupil wavefront to a high-resolution
+    focal grid for metrics, and separately propagates it to a supersampled
+    detector grid for flux-conserving binning into a PyAutoLens kernel.
 
     Parameters
     ----------
     config : `dict`
-        Configuration dictionary containing telescope, simulation, and
-        aberration parameters.
+        PSF configuration dictionary containing ``telescope``, ``hres_psf``,
+        ``kernel``, and ``aberrations`` blocks.
     full_config : `dict`, optional
-        Full configuration dictionary containing run_name and other top-level
-        parameters. If provided, this will be stored in PSFData.
+        Full configuration dictionary. It must contain the lensing grid pixel
+        scale used to set the detector kernel scale. The complete dictionary is
+        stored on the returned `PSFData` object for provenance.
 
     Returns
     -------
     psf_data : `PSFData`
-        Complete PSF system data with unified structure providing direct
-        access to all system parameters and quality metrics. Includes
-        pre-converted PyAutoLens Kernel2D for immediate use in lensing
-        simulations.
+        Complete PSF products and metadata. The object contains the
+        high-resolution focal-plane PSF, the final pupil-plane wavefront,
+        pupil-side telescope data, detector-sampled PyAutoLens kernel,
+        sampling metadata, quality metrics, and aberration summaries.
+
+    Raises
+    ------
+    ValueError
+        Raised if ``full_config`` does not contain a lensing block, required
+        PSF blocks are missing, or the requested sampling cannot produce a
+        positive integer detector subsampling factor.
 
     Notes
     -----
-    The returned PSFData object contains all information in a flat structure
-    with direct property access, including pre-computed quality metrics like
-    FWHM and aberration statistics.
+    ``PSFData.psf`` is the high-resolution focal-plane PSF used for optical
+    metrics. ``PSFData.kernel`` is the detector-sampled science kernel. The
+    detector kernel is propagated on its own supersampled focal grid rather
+    than being treated as a cosmetic resize of the metric PSF.
 
     Examples
     --------
-    Generate a PSF system and access key properties:
-    
-    >>> psf_data = generate_psf_system(config)
-    >>> print(f"Wavelength: {psf_data.wavelength_nm} nm")
-    >>> print(f"FWHM: {psf_data.fwhm_arcsec:.3f} arcsec")
-    >>> print(f"Quality: {psf_data.quality_grade}")
-    >>> if psf_data.has_aberrations:
-    ...     print(f"Total RMS: {psf_data.total_rms_nm:.1f} nm")
+    Generate a PSF system and inspect its detector kernel::
+
+        psf_data = generate_psf_system(config["psf"], full_config=config)
+        kernel = psf_data.kernel
     """
     # Automatic sampling calculation and validation.
     
@@ -79,7 +87,7 @@ def generate_psf_system(config, full_config=None):
         lensing_config = full_config['lensing']
     else:
         raise ValueError('full_config must be provided and contain a "lensing" key.')
-    psf_config = config
+    psf_config = copy.deepcopy(config)
     # Use the hres_psf block from the new config structure
     if 'hres_psf' not in psf_config or 'telescope' not in psf_config:
         raise ValueError('psf_config must contain "hres_psf" and "telescope" keys.')
@@ -127,9 +135,7 @@ def generate_psf_system(config, full_config=None):
     
     # Extract aberration configurations (strict: all flags must be explicit)
     aberrations = psf_config['aberrations']
-    use_segment_api = aberrations['use_api']
-    
-    # Apply toggle flags to aberrations (explicit True/False required by validation)
+    # Apply toggle flags to aberrations.
     segment_pistons = aberrations['segment_pistons'] if aberrations['enable_segment_pistons'] else None
     segment_tiptilts = aberrations['segment_tiptilts'] if aberrations['enable_segment_tiptilts'] else None
     segment_hexikes = aberrations['segment_hexikes'] if aberrations['enable_segment_hexikes'] else None
@@ -166,19 +172,11 @@ def generate_psf_system(config, full_config=None):
     
     # Apply segment-level Zernikes (hexikes) as phase screen.
     if segment_hexikes is not None:
-        if use_segment_api:
-            phase_screen, hexike_surface = apply_segment_zernikes(
-                segment_hexikes, segments, telescope_data, wavelength, use_api=True
-            )
-            phase_screens['segment_hexikes_api'] = phase_screen
-            # Apply hexike phase via the segmented hexike surface to avoid double-application hazards.
-            wf_pupil = hexike_surface(wf_pupil)
-        else:
-            phase_screen = apply_segment_zernikes(
-                segment_hexikes, segments, telescope_data, wavelength, use_api=False
-            )
-            phase_screens['segment_hexikes'] = phase_screen
-            wf_pupil.electric_field *= np.exp(1j * np.array(phase_screen))
+        phase_screen, hexike_surface = apply_segment_zernikes(
+            segment_hexikes, telescope_data, wavelength
+        )
+        phase_screens['segment_hexikes'] = phase_screen
+        wf_pupil = hexike_surface(wf_pupil)
     
     # Apply global Zernikes as phase screen.
     if global_zernikes is not None:
@@ -190,7 +188,7 @@ def generate_psf_system(config, full_config=None):
     # Define the high-resolution focal grid using parameters from
     # config['psf']['hres_psf'].
     
-    # Create high-resolution focal grid in physical units (meters at focal plane).
+    # Create the high-resolution focal grid in focal-plane meters.
     focal_grid_hres = make_focal_grid(
         q=sim_config['sampling'],
         num_airy=sim_config['num_airy'],
@@ -199,13 +197,15 @@ def generate_psf_system(config, full_config=None):
         reference_wavelength=wavelength,
     )
     
-    # Create FraunhoferPropagator for high-resolution path with correct focal length.
+    # Create the high-resolution propagator with the correct focal length.
     prop_hres = FraunhoferPropagator(telescope_data['pupil_grid'], focal_grid_hres, focal_length)
     
-    # Propagate the pupil wavefront to get the single high-resolution PSF Wavefront.
+    # Propagate the pupil wavefront to get one high-resolution PSF wavefront.
     wf_psf_hres = prop_hres(wf_pupil)
+    wf_pupil_perfect = Wavefront(aper, wavelength)
+    wf_psf_perfect_hres = prop_hres(wf_pupil_perfect)
 
-    # Optionally save the high-resolution PSF intensity before any downsampling.
+    # Optionally save high-resolution PSF intensity before downsampling.
     saved_highres_psf_path = None
     if sim_config.get('save_highres_psf_npy', False):
         try:
@@ -233,6 +233,7 @@ def generate_psf_system(config, full_config=None):
     from .psf_metrics import analyze_psf_quality
     quality_metrics = analyze_psf_quality(
         wf_psf_hres,
+        perfect_psf=wf_psf_perfect_hres,
         wavelength=telescope_data['wavelength'],
         pupil_diameter=telescope_data['pupil_diameter'],
         sampling=sim_config['sampling']
@@ -258,7 +259,7 @@ def generate_psf_system(config, full_config=None):
     # Use the integer subsampling factor N calculated above.
     subsampling_factor = N
     
-    # Define detector grid in focal-plane meters using small-angle approximation (x ≈ f * theta).
+    # Define the detector grid in focal-plane meters.
     autolens_pixel_scale_rad = autolens_pixel_scale * np.pi / (180 * 3600)
     pixel_scale_m = focal_length * autolens_pixel_scale_rad
     detector_grid_m = make_uniform_grid(
@@ -272,7 +273,7 @@ def generate_psf_system(config, full_config=None):
     prop_det = FraunhoferPropagator(telescope_data['pupil_grid'], detector_input_grid, focal_length)
     wf_psf_supersampled = prop_det(wf_pupil)
 
-    # Downsample the supersampled PSF power to the detector grid via summation to conserve flux.
+    # Downsample supersampled PSF power by summation to conserve flux.
     psf_downsampled = subsample_field(
         wf_psf_supersampled.power, subsampling=subsampling_factor, new_grid=detector_grid_m, statistic='sum'
     )
@@ -280,16 +281,17 @@ def generate_psf_system(config, full_config=None):
     # Normalize psf_downsampled to sum to 1.
     psf_downsampled_normalized = psf_downsampled / np.sum(psf_downsampled)
     
-    # Create the final al.Kernel2D object.
-    kernel = al.Kernel2D.no_mask(
-        values=psf_downsampled_normalized.shaped,  # Use .shaped to get 2D array.
+    # Create the detector-sampled PyAuto kernel array.
+    kernel = make_pyauto_kernel(
+        # Use .shaped to get a 2D array.
+        values=psf_downsampled_normalized.shaped,
         pixel_scales=autolens_pixel_scale
     )
     
     # Verify pixel scale matching.
-    if not np.allclose(kernel.pixel_scales, autolens_pixel_scale, rtol=1e-10):
+    if not np.allclose(pyauto_kernel_pixel_scales(kernel), autolens_pixel_scale, rtol=1e-10):
         raise ValueError(
-            f"Pixel scale mismatch: kernel pixel_scales={kernel.pixel_scales}, "
+            f"Pixel scale mismatch: kernel pixel_scales={pyauto_kernel_pixel_scales(kernel)}, "
             f"expected autolens_pixel_scale={autolens_pixel_scale}. "
             f"This indicates a fundamental problem in the downsampling logic."
         )
@@ -319,7 +321,9 @@ def generate_psf_system(config, full_config=None):
         print(f"Warning: Could not calculate total RMS including phase screens: {e}")
         total_rms_nm = 0.0
     
-    # Calculate individual aberration RMS values for statistics.
+    # Calculate individual aberration coefficient summaries for metadata.
+    # These are not independent aperture-weighted RMS budget terms.
+    # above is the physical OPD RMS over the illuminated pupil.
     segment_piston_rms_nm = 0.0
     segment_tiptilt_rms_urad = 0.0
     global_zernike_rms_nm = 0.0
@@ -333,7 +337,8 @@ def generate_psf_system(config, full_config=None):
         
     if segment_tiptilts:
         # RMS magnitude of tip/tilt vector across segments (μrad).
-        tiptilts_array = np.array(list(segment_tiptilts.values()))  # shape (N, 2)
+        # Shape is (N, 2).
+        tiptilts_array = np.array(list(segment_tiptilts.values()))
         magsq = np.sum(tiptilts_array**2, axis=1)  # tip^2 + tilt^2 per segment
         segment_tiptilt_rms_urad = float(np.sqrt(np.mean(magsq)))
         
@@ -348,7 +353,7 @@ def generate_psf_system(config, full_config=None):
     psf_data = PSFData(
         # Primary data from both branches.
         psf=wf_psf_hres,  # High-resolution PSF from Branch A.
-        wavefront=wf_psf_hres,  # High-resolution wavefront from Branch A.
+        wavefront=wf_pupil.copy(),  # Final aberrated pupil-plane wavefront.
         telescope_data=telescope_data,
         kernel=kernel,  # Physically downsampled kernel from Branch B.
         
@@ -389,7 +394,8 @@ def generate_psf_system(config, full_config=None):
         has_global_zernikes=global_zernikes is not None,
         
         # Kernel metadata.
-        kernel_pixel_scale=autolens_pixel_scale,  # Pixel scale of detector-generated kernel.
+        # Pixel scale of detector-generated kernel.
+        kernel_pixel_scale=autolens_pixel_scale,
         highres_psf_npy_path=saved_highres_psf_path,
         
         # Complex data.
@@ -399,130 +405,3 @@ def generate_psf_system(config, full_config=None):
     )
     
     return psf_data
-
-
-def generate_aberrated_psf(
-    telescope_data,
-    segment_pistons=None,
-    segment_tiptilts=None,
-    segment_hexikes=None,
-    zernike_coeffs=None,
-    use_segment_api=False,
-    return_all=False
-):
-    """Generate an aberrated PSF with specified aberrations.
-
-    This function applies various aberrations to the telescope and generates
-    the resulting PSF. Aberrations are applied in a specific order to ensure
-    proper physical modeling.
-
-    Parameters
-    ----------
-    telescope_data : `dict`
-        Dictionary containing telescope components from create_hcipy_telescope.
-        Required keys: 'aper', 'hsm', 'prop', 'segments', 'wavelength', 
-        'segment_flat_to_flat'.
-    segment_pistons : `dict`, optional
-        Dictionary mapping segment indices to piston amplitudes in nanometers
-        of wavefront OPD. These are converted to mirror-surface height by
-        dividing by two before being sent to the segmented mirror actuators.
-    segment_tiptilts : `dict`, optional
-        Dictionary mapping segment indices to (tip, tilt) tuples in microradians.
-    segment_hexikes : `dict`, optional
-        Dictionary mapping segment indices to hexike coefficient dictionaries.
-        Hexike mode indices should use HCIPy Noll indexing (1-based).
-    zernike_coeffs : `dict`, optional
-        Dictionary mapping Zernike indices to coefficient values in nm RMS.
-    use_segment_api : `bool`, optional
-        Whether to use HCIPy's new API for segment-level aberrations. Default False.
-    return_all : `bool`, optional
-        Whether to return wavefront and phase screens in addition to PSF. Default False.
-        
-    Returns
-    -------
-    psf : `hcipy.Field`
-        The PSF field.
-    wavefront : `hcipy.Wavefront`, optional
-        The wavefront at the pupil plane (if return_all=True).
-    phase_screens : `dict`, optional
-        Dictionary of phase screens by type (if return_all=True).
-
-    Notes
-    -----
-    Aberrations are applied in the following order:
-
-    1. Segment pistons and tip/tilts (via segmented deformable mirror)
-    2. Segment-level Zernikes (as phase screen)
-    3. Global Zernikes (as phase screen)
-
-    Examples
-    --------
-    Generate PSF with segment pistons:
-    
-    >>> segment_pistons = {i: np.random.randn() * 10 for i in range(37)}
-    >>> psf = generate_aberrated_psf(telescope_data, segment_pistons=segment_pistons)
-    
-    Generate PSF with all aberration types:
-    
-    >>> psf, wf, screens = generate_aberrated_psf(
-    ...     telescope_data,
-    ...     segment_pistons=pistons,
-    ...     segment_tiptilts=tiptilts,
-    ...     segment_hexikes=hexikes,
-    ...     zernike_coeffs=zernikes,
-    ...     return_all=True
-    ... )
-    """
-    # Extract telescope components.
-    aper = telescope_data['aper']
-    hsm = telescope_data['hsm']
-    prop = telescope_data['prop']
-    segments = telescope_data['segments']
-    wavelength = telescope_data['wavelength']
-    num_segments = len(segments)
-    
-    # Dictionary to store phase screens.
-    phase_screens = {}
-    
-    # Apply segment pistons and tip/tilts via segmented mirror.
-    hsm.flatten()
-    
-    if segment_pistons is not None:
-        # Convert nm to radians of phase: phi = 2 * 2pi * OPD / lambda.
-        # Factor of 2 for reflection.
-        apply_segment_pistons(hsm, segment_pistons, wavelength, num_segments)
-        
-    if segment_tiptilts is not None:
-        apply_segment_tiptilts(hsm, segment_tiptilts, num_segments)
-    
-    # Create initial wavefront.
-    wf = Wavefront(aper, wavelength)
-    
-    # Apply segmented mirror.
-    wf = hsm(wf)
-    
-    # Apply segment-level Zernikes (hexikes) as phase screen.
-    if segment_hexikes is not None:
-        if use_segment_api:
-            result = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=True)
-            phase_screen, hexike_surface = result  # API version returns tuple.
-            phase_screens['segment_hexikes_api'] = phase_screen
-            wf = hexike_surface(wf)
-        else:
-            phase_screen = apply_segment_zernikes(segment_hexikes, segments, telescope_data, wavelength, use_api=False)
-            phase_screens['segment_hexikes'] = phase_screen
-            wf.electric_field *= np.exp(1j * np.array(phase_screen))
-    
-    # Apply global Zernikes as phase screen.
-    if zernike_coeffs is not None:
-        phase_screen = apply_global_zernikes(zernike_coeffs, telescope_data, wavelength)
-        phase_screens['global_zernikes'] = phase_screen
-        wf.electric_field *= np.exp(1j * np.array(phase_screen))
-    
-    # Propagate to focal plane.
-    psf = prop(wf)
-    
-    if return_all:
-        return psf, wf, phase_screens
-    else:
-        return psf

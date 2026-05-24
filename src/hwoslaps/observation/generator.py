@@ -4,18 +4,24 @@ This module implements the main observation simulation pipeline, including
 PSF convolution and realistic detector noise modeling.
 """
 
-import numpy as np
-import autolens as al
+from copy import deepcopy
 from datetime import datetime
 from typing import Dict, Optional
 
+import autolens as al
+import numpy as np
+
 from ..lensing.utils import LensingData
-from ..psf.utils import PSFData
-from .utils import ObservationData
+from ..psf.utils import (
+    PSFData,
+    make_pyauto_convolver,
+    pyauto_kernel_native,
+)
 from .noise_models import (
     apply_detector_noise,
     create_noise_map,
 )
+from .utils import ObservationData
 
 
 def generate_observation(
@@ -61,6 +67,7 @@ def generate_observation(
     # Strict: observation_config must be provided by pipeline validation
     if observation_config is None:
         raise ValueError("observation_config must be provided explicitly (no defaults)")
+    full_config = _validate_full_config(full_config)
     
     # Extract parameters
     exposure_time = observation_config['exposure_time']
@@ -72,9 +79,10 @@ def generate_observation(
     
     # Ensure PSF kernel has odd dimensions (required by PyAutoLens)
     psf_kernel = _ensure_odd_kernel(psf_data.kernel)
+    psf_convolver = make_pyauto_convolver(psf_kernel)
 
     # Assert pixel scale consistency between PSF kernel and lensing image
-    # This ensures physically meaningful convolution without implicit resampling.
+    # Keep convolution physically meaningful without implicit resampling.
     if hasattr(psf_data, "kernel_pixel_scale") and psf_data.kernel_pixel_scale is not None:
         if not np.isclose(psf_data.kernel_pixel_scale, lensing_data.pixel_scale, rtol=0.0, atol=1e-12):
             raise ValueError(
@@ -96,7 +104,7 @@ def generate_observation(
     # Use SimulatorImaging with no noise to get pure convolution
     simulator_noiseless = al.SimulatorImaging(
         exposure_time=exposure_time,
-        psf=psf_kernel,
+        psf=psf_convolver,
         background_sky_level=0.0,  # No background yet
         normalize_psf=False,
         add_poisson_noise_to_data=False,
@@ -132,16 +140,16 @@ def generate_observation(
     imaging_dataset = al.Imaging(
         data=data,
         noise_map=noise_map,
-        psf=psf_kernel
+        psf=psf_convolver
     )
     
     # Create metadata dictionary
     metadata = {
         'generated': datetime.now().isoformat(),
-        'lensing_run': lensing_data.config['run_name'] if lensing_data.config and 'run_name' in lensing_data.config else None,
-        'psf_run': psf_data.config['run_name'] if psf_data.config and 'run_name' in psf_data.config else None,
+        'lensing_run': lensing_data.config.get('run_name') if lensing_data.config else None,
+        'psf_run': psf_data.config.get('run_name') if psf_data.config else None,
         'exposure_time': exposure_time,
-        'detector': detector_config.copy(),
+        'detector': deepcopy(detector_config),
         'noise_seed': noise_seed,
         'pixel_scale': lensing_data.pixel_scale,
         'field_of_view': lensing_data.field_of_view_arcsec
@@ -155,39 +163,74 @@ def generate_observation(
         imaging=imaging_dataset,
         noiseless_source_eps=source_only_eps,
         noise_components=components,
-        config=observation_config.copy(),
+        config=deepcopy(observation_config),
         metadata=metadata
     )
 
 
-def _ensure_odd_kernel(kernel: al.Kernel2D) -> al.Kernel2D:
-    """Ensure PSF kernel has odd dimensions as required by PyAutoLens.
+def _validate_full_config(full_config: Optional[Dict]) -> Dict:
+    """Validate observation-level full configuration requirements.
+
+    Parameters
+    ----------
+    full_config : `dict`
+        Full pipeline configuration.
+
+    Returns
+    -------
+    full_config : `dict`
+        Validated full configuration.
+
+    Raises
+    ------
+    ValueError
+        Raised when required global provenance or seed values are missing.
+    """
+    if not isinstance(full_config, dict):
+        raise ValueError("full_config must be a dict for generate_observation")
+    if 'global_seed' not in full_config:
+        raise ValueError("Missing required key 'global_seed' in full_config")
+    global_seed = full_config['global_seed']
+    if isinstance(global_seed, bool) or not isinstance(global_seed, int):
+        raise ValueError("full_config.global_seed must be an int")
+    if 'run_name' not in full_config:
+        raise ValueError("Missing required key 'run_name' in full_config")
+    run_name = full_config['run_name']
+    if not isinstance(run_name, str) or not run_name:
+        raise ValueError("full_config.run_name must be a non-empty string")
+    return full_config
+
+
+def _ensure_odd_kernel(kernel):
+    """Validate the PSF kernel for observation convolution.
     
     Parameters
     ----------
-    kernel : `al.Kernel2D`
+    kernel : `object`
         Input PSF kernel.
         
     Returns
     -------
-    kernel_odd : `al.Kernel2D`
-        PSF kernel with odd dimensions.
+    kernel : `object`
+        Validated PSF kernel.
+
+    Raises
+    ------
+    ValueError
+        Raised when the kernel support or flux normalization is invalid.
     """
-    kernel_array = kernel.native
-    
-    # Check if dimensions are already odd
-    if kernel_array.shape[0] % 2 == 1 and kernel_array.shape[1] % 2 == 1:
-        return kernel
-    
-    # Trim if even
-    if kernel_array.shape[0] % 2 == 0:
-        kernel_array = kernel_array[:-1, :]
-    if kernel_array.shape[1] % 2 == 0:
-        kernel_array = kernel_array[:, :-1]
-    
-    # Create new kernel with odd dimensions
-    return al.Kernel2D.no_mask(
-        values=kernel_array,
-        pixel_scales=kernel.pixel_scales,
-        normalize=True
-    )
+    kernel_array = pyauto_kernel_native(kernel)
+    if kernel_array.ndim != 2:
+        raise ValueError("PSF kernel must be a two-dimensional array")
+    if kernel_array.shape[0] % 2 == 0 or kernel_array.shape[1] % 2 == 0:
+        raise ValueError("PSF kernel must have odd dimensions")
+    if not np.all(np.isfinite(kernel_array)):
+        raise ValueError("PSF kernel values must be finite")
+    if np.any(kernel_array < 0.0):
+        raise ValueError("PSF kernel values must be non-negative")
+
+    kernel_sum = float(np.sum(kernel_array))
+    if not np.isclose(kernel_sum, 1.0, rtol=0.0, atol=1e-10):
+        raise ValueError("PSF kernel must be normalized to unit flux")
+
+    return kernel

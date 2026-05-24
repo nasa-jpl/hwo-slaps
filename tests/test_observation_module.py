@@ -4,7 +4,7 @@ import pytest
 
 from hwoslaps.observation import generate_observation, ObservationData
 from hwoslaps.lensing.utils import LensingData
-from hwoslaps.psf.utils import PSFData
+from hwoslaps.psf.utils import PSFData, make_pyauto_kernel
 
 
 def make_lensing_data(shape=( nine := 9, nine ), pixel_scale=0.1) -> LensingData:
@@ -30,7 +30,7 @@ def make_lensing_data(shape=( nine := 9, nine ), pixel_scale=0.1) -> LensingData
     )
 
 
-def make_psfdata_with_kernel(kernel: al.Kernel2D, kernel_pixel_scale: float) -> PSFData:
+def make_psfdata_with_kernel(kernel, kernel_pixel_scale: float) -> PSFData:
     # Construct a full PSFData object with minimal but valid values
     return PSFData(
         psf=None,
@@ -60,8 +60,12 @@ def test_generate_observation_identity_psf_end_to_end():
     pixel_scale = 0.1
     lensing = make_lensing_data(shape=shape, pixel_scale=pixel_scale)
 
-    # Identity PSF (delta kernel) ensures simulator leaves image unchanged for the noiseless rate
-    psf_kernel = al.Kernel2D.no_mask(values=np.array([[1.0]]), pixel_scales=pixel_scale, normalize=False)
+    # Identity PSF leaves the noiseless rate image unchanged.
+    psf_kernel = make_pyauto_kernel(
+        values=np.array([[1.0]]),
+        pixel_scales=pixel_scale,
+        normalize=False,
+    )
     psf_data = make_psfdata_with_kernel(psf_kernel, kernel_pixel_scale=pixel_scale)
 
     exposure_time = 500.0
@@ -115,7 +119,11 @@ def test_pixel_scale_mismatch_raises():
 
     # PSF kernel with different pixel scale triggers assertion
     wrong_pixel_scale = 0.2
-    psf_kernel = al.Kernel2D.no_mask(values=np.array([[1.0]]), pixel_scales=wrong_pixel_scale, normalize=False)
+    psf_kernel = make_pyauto_kernel(
+        values=np.array([[1.0]]),
+        pixel_scales=wrong_pixel_scale,
+        normalize=False,
+    )
     psf_data = make_psfdata_with_kernel(psf_kernel, kernel_pixel_scale=wrong_pixel_scale)
 
     detector = {
@@ -133,14 +141,18 @@ def test_pixel_scale_mismatch_raises():
         )
 
 
-def test_even_psf_is_trimmed_and_normalized():
+def test_even_psf_is_rejected():
     shape = (10, 10)
     pixel_scale = 0.05
     lensing = make_lensing_data(shape=shape, pixel_scale=pixel_scale)
 
-    # Even-shaped PSF; function should trim to odd and normalize
+    # Even-shaped PSFs have ambiguous centers for convolution.
     even_values = np.ones((4, 4), dtype=float)
-    psf_kernel_even = al.Kernel2D.no_mask(values=even_values, pixel_scales=pixel_scale, normalize=False)
+    psf_kernel_even = make_pyauto_kernel(
+        values=even_values,
+        pixel_scales=pixel_scale,
+        normalize=False,
+    )
     psf_data = make_psfdata_with_kernel(psf_kernel_even, kernel_pixel_scale=pixel_scale)
 
     detector = {
@@ -149,16 +161,10 @@ def test_even_psf_is_trimmed_and_normalized():
         'dark_current': 0.0,
         'sky_background': 0.0,
     }
-    obs = generate_observation(
-        lensing_data=lensing,
-        psf_data=psf_data,
-        observation_config={'exposure_time': 100.0, 'detector': detector},
-        full_config={'global_seed': 7, 'run_name': 'unit_test_observation'}
-    )
-
-    # PSF should be odd-shaped and normalized
-    ky, kx = obs.psf.shape_native
-    assert ky % 2 == 1 and kx % 2 == 1
-    assert np.isclose(obs.psf.native.sum(), 1.0, rtol=0, atol=1e-12)
-
-
+    with pytest.raises(ValueError, match="odd"):
+        generate_observation(
+            lensing_data=lensing,
+            psf_data=psf_data,
+            observation_config={'exposure_time': 100.0, 'detector': detector},
+            full_config={'global_seed': 7, 'run_name': 'unit_test_observation'}
+        )

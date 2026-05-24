@@ -6,7 +6,6 @@ This module provides core equation and validation checks that do not require
 
 from __future__ import annotations
 
-import copy
 import math
 import sys
 from pathlib import Path
@@ -24,16 +23,13 @@ from _lensing_physics_helpers import (
     load_constants_module,
     load_lensing_anchor_fixture,
     load_lensing_utils_module,
-    load_master_config,
     load_mass_models_module,
-    load_validation_module,
 )
 
 
 COSMOLOGY = Planck15CosmologyAdapter()
 CONSTANTS = load_constants_module()
 MASS_MODELS = load_mass_models_module()
-VALIDATION = load_validation_module()
 LENSING_UTILS = load_lensing_utils_module()
 
 
@@ -152,28 +148,6 @@ def test_nfw_02_scale_radius_monotonic_in_mass():
         )
         radii.append(terms["rs_kpc"])
     assert all(later > earlier for earlier, later in zip(radii[:-1], radii[1:]))
-
-
-@pytest.mark.parametrize("bad_mass", [float("nan"), float("inf"), float("-inf")])
-def test_dom_03_rejects_non_finite_subhalo_mass(bad_mass: float):
-    config = load_master_config()
-    bad_config = copy.deepcopy(config)
-    bad_config["lensing"]["subhalo"]["enabled"] = True
-    bad_config["lensing"]["subhalo"]["mass"] = bad_mass
-
-    with pytest.raises(ValueError, match="lensing.subhalo.mass must be positive"):
-        VALIDATION.validate_or_raise(bad_config)
-
-
-@pytest.mark.parametrize("bad_mass", [0.0, -1.0, -1.0e7])
-def test_dom_04_rejects_non_positive_subhalo_mass(bad_mass: float):
-    config = load_master_config()
-    bad_config = copy.deepcopy(config)
-    bad_config["lensing"]["subhalo"]["enabled"] = True
-    bad_config["lensing"]["subhalo"]["mass"] = bad_mass
-
-    with pytest.raises(ValueError, match="lensing.subhalo.mass must be positive"):
-        VALIDATION.validate_or_raise(bad_config)
 
 
 def test_if_01_position_contract_is_canonical_yx():

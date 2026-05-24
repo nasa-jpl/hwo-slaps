@@ -191,8 +191,8 @@ def calculate_strehl_ratio(aberrated_psf, perfect_psf):
     physically the Strehl ratio cannot exceed unity.
     """
     # Get peak intensities
-    aberrated_peak = np.max(aberrated_psf.intensity)
-    perfect_peak = np.max(perfect_psf.intensity)
+    aberrated_peak = float(np.max(aberrated_psf.intensity))
+    perfect_peak = float(np.max(perfect_psf.intensity))
 
     # Strehl ratio is the ratio of peaks
     strehl_ratio = aberrated_peak / perfect_peak
@@ -224,7 +224,7 @@ def calculate_psf_pixel_scale(wavelength, pupil_diameter, sampling):
     Notes
     -----
     The calculation uses the small angle approximation and converts
-    to arcseconds using the factor 206264.8062471 (number of arcseconds in one radian).
+    to arcseconds using the number of arcseconds per radian.
     """
     return wavelength / pupil_diameter * ARCSEC_PER_RAD / sampling
 

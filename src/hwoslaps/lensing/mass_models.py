@@ -9,17 +9,23 @@ and Navarro-Frenk-White (NFW) profiles.
 import numpy as np
 from astropy import constants as const
 from astropy import units as u
-from ..constants import MPC_TO_M, KM_TO_M, ARCSEC_PER_RAD
+
+from ..constants import ARCSEC_PER_RAD, KM_TO_M, MPC_TO_M
 
 MOLINE_EQ7_C0 = 19.9
 MOLINE_EQ7_A1 = -0.195
 MOLINE_EQ7_A2 = 0.089
 MOLINE_EQ7_A3 = 0.089
 MOLINE_EQ7_B = -0.54
+MOLINE_EQ7_MIN_MASS_MSUN = 1.0e6
+MOLINE_EQ7_MAX_MASS_MSUN = 1.0e12
+MOLINE_EQ7_MAX_X_SUB = 1.5
 
 
 def _require_positive_finite(value, name):
     """Validate numeric domain for physical parameters."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite positive number")
     try:
         value_float = float(value)
     except (TypeError, ValueError):
@@ -27,6 +33,157 @@ def _require_positive_finite(value, name):
     if not np.isfinite(value_float) or value_float <= 0:
         raise ValueError(f"{name} must be a finite positive number")
     return value_float
+
+
+def _require_bounded(value, name, minimum, maximum):
+    """Validate a finite physical parameter against closed bounds."""
+    value_float = _require_positive_finite(value, name)
+    if value_float < minimum or value_float > maximum:
+        raise ValueError(f"{name} must be between {minimum:g} and {maximum:g}")
+    return value_float
+
+
+def _require_nonnegative_finite(value, name):
+    """Validate numeric domain for non-negative physical parameters."""
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    try:
+        value_float = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    if not np.isfinite(value_float) or value_float < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
+    return value_float
+
+
+def _require_ordered_redshifts(z_lens, z_source):
+    """Validate lens/source redshifts for a single-plane lens.
+
+    Parameters
+    ----------
+    z_lens : `float`
+        Lens-plane redshift.
+    z_source : `float`
+        Source-plane redshift.
+
+    Returns
+    -------
+    z_lens : `float`
+        Validated lens-plane redshift.
+    z_source : `float`
+        Validated source-plane redshift.
+
+    Raises
+    ------
+    ValueError
+        Raised when either redshift is not positive and finite, or when the
+        source is not behind the lens.
+    """
+    z_lens_float = _require_positive_finite(z_lens, "z_lens")
+    z_source_float = _require_positive_finite(z_source, "z_source")
+    if z_source_float <= z_lens_float:
+        raise ValueError("z_source must be greater than z_lens")
+    return z_lens_float, z_source_float
+
+
+def _distance_value_mpc(distance):
+    """Return a scalar distance in Mpc.
+
+    Parameters
+    ----------
+    distance : `object`
+        Astropy quantity, PyAuto scalar, or plain numeric distance value.
+
+    Returns
+    -------
+    distance_mpc : `float`
+        Distance in Mpc.
+    """
+    if hasattr(distance, "to"):
+        return float(distance.to(u.Mpc).value)
+    if hasattr(distance, "value"):
+        return float(distance.value)
+    return float(distance)
+
+
+def angular_diameter_distance_mpc(cosmology, redshift):
+    """Return angular diameter distance to Earth.
+
+    Parameters
+    ----------
+    cosmology : `object`
+        Astropy-style or PyAuto cosmology object.
+    redshift : `float`
+        Redshift of the target plane.
+
+    Returns
+    -------
+    distance_mpc : `float`
+        Angular diameter distance to Earth in Mpc.
+    """
+    if hasattr(cosmology, "angular_diameter_distance"):
+        return _distance_value_mpc(cosmology.angular_diameter_distance(redshift))
+    return (
+        _distance_value_mpc(
+            cosmology.angular_diameter_distance_to_earth_in_kpc_from(redshift)
+        )
+        / 1000.0
+    )
+
+
+def angular_diameter_distance_z1z2_mpc(cosmology, z1, z2):
+    """Return angular diameter distance between two redshifts.
+
+    Parameters
+    ----------
+    cosmology : `object`
+        Astropy-style or PyAuto cosmology object.
+    z1 : `float`
+        Foreground redshift.
+    z2 : `float`
+        Background redshift.
+
+    Returns
+    -------
+    distance_mpc : `float`
+        Angular diameter distance between redshifts in Mpc.
+    """
+    if hasattr(cosmology, "angular_diameter_distance_z1z2"):
+        return _distance_value_mpc(cosmology.angular_diameter_distance_z1z2(z1, z2))
+    return (
+        _distance_value_mpc(
+            cosmology.angular_diameter_distance_between_redshifts_in_kpc_from(z1, z2)
+        )
+        / 1000.0
+    )
+
+
+def hubble_parameter_km_s_mpc(cosmology, redshift):
+    """Return the Hubble parameter at a redshift.
+
+    Parameters
+    ----------
+    cosmology : `object`
+        Astropy-style or PyAuto cosmology object.
+    redshift : `float`
+        Redshift where the Hubble parameter is evaluated.
+
+    Returns
+    -------
+    hubble : `float`
+        Hubble parameter in km/s/Mpc.
+    """
+    if hasattr(cosmology, "H"):
+        hubble = cosmology.H(redshift)
+        return float(hubble.value) if hasattr(hubble, "value") else float(hubble)
+
+    if hasattr(cosmology.H0, "value"):
+        h0 = float(cosmology.H0.value)
+    else:
+        h0 = float(cosmology.H0)
+    om0 = float(cosmology.Om0)
+    ode0 = float(getattr(cosmology, "Ode0", 1.0 - om0))
+    return h0 * np.sqrt(om0 * (1.0 + redshift) ** 3 + ode0)
 
 
 def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
@@ -60,17 +217,12 @@ def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
 
     where M is the mass, and D_l, D_s, D_ls are angular diameter distances.
     """
-    # Cosmology must be explicitly provided by caller
+    mass = _require_positive_finite(mass_msun, "mass_msun")
+    z_lens, z_source = _require_ordered_redshifts(z_lens, z_source)
 
-    # Get angular diameter distances
-    D_l_obj = cosmology.angular_diameter_distance(z_lens)
-    D_s_obj = cosmology.angular_diameter_distance(z_source)
-    D_ls_obj = cosmology.angular_diameter_distance_z1z2(z_lens, z_source)
-
-    # Extract numerical values in Mpc
-    D_l = float(D_l_obj.value) if hasattr(D_l_obj, 'value') else float(D_l_obj)
-    D_s = float(D_s_obj.value) if hasattr(D_s_obj, 'value') else float(D_s_obj)
-    D_ls = float(D_ls_obj.value) if hasattr(D_ls_obj, 'value') else float(D_ls_obj)
+    D_l = angular_diameter_distance_mpc(cosmology, z_lens)
+    D_s = angular_diameter_distance_mpc(cosmology, z_source)
+    D_ls = angular_diameter_distance_z1z2_mpc(cosmology, z_lens, z_source)
 
     # Convert to meters using shared constant
     D_l_m = D_l * MPC_TO_M
@@ -78,7 +230,7 @@ def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):
     D_ls_m = D_ls * MPC_TO_M
 
     # Convert mass to kg
-    M_kg = mass_msun * float((1 * u.Msun).to(u.kg).value)
+    M_kg = mass * float((1 * u.Msun).to(u.kg).value)
 
     # Get constants
     G_SI = float(const.G.value)
@@ -116,20 +268,28 @@ def concentration_moline2017_eq7(M200_msun, x_sub, h):
     Implements Eq. (7) with Table 2 coefficients for c200:
 
     c200(m200, x_sub) =
-        c0 * [1 + sum_{i=1}^3 a_i * log10(m200 / (1e8 h^-1 Msun))^i]
-           * [1 + b * log10(x_sub)].
+        c0 * [1 + sum_{i=1}^3 (a_i * L)^i] * [1 + b * log10(x_sub)],
+
+    where ``L = log10(m200 / (1e8 h^-1 Msun))``. HWO-SLAPS uses this
+    model for subhalo masses from 1e6 to 1e12 Msun and host-centric
+    positions 0 < x_sub <= 1.5.
     """
-    mass = _require_positive_finite(M200_msun, "M200_msun")
-    radial_position = _require_positive_finite(x_sub, "x_sub")
+    mass = _require_bounded(
+        M200_msun,
+        "M200_msun",
+        MOLINE_EQ7_MIN_MASS_MSUN,
+        MOLINE_EQ7_MAX_MASS_MSUN,
+    )
+    radial_position = _require_bounded(x_sub, "x_sub", 0.0, MOLINE_EQ7_MAX_X_SUB)
     hubble_reduced = _require_positive_finite(h, "h")
 
     # Eq. (7) uses log10[m200 / (1e8 h^-1 Msun)] = log10[(m200*h)/1e8].
     log_mass_term = np.log10((mass * hubble_reduced) / 1.0e8)
     polynomial = (
         1.0
-        + MOLINE_EQ7_A1 * log_mass_term
-        + MOLINE_EQ7_A2 * log_mass_term**2
-        + MOLINE_EQ7_A3 * log_mass_term**3
+        + (MOLINE_EQ7_A1 * log_mass_term)
+        + (MOLINE_EQ7_A2 * log_mass_term)**2
+        + (MOLINE_EQ7_A3 * log_mass_term)**3
     )
     # Radial correction lowers concentration for larger x_sub because b < 0.
     radial_factor = 1.0 + MOLINE_EQ7_B * np.log10(radial_position)
@@ -145,7 +305,7 @@ def concentration_power_law(M200_msun, z=0.5):
     c = c0 * (M / M0)^alpha * (1 + z)^beta.
     """
     mass = _require_positive_finite(M200_msun, "M200_msun")
-    redshift = _require_positive_finite(1.0 + float(z), "1 + z") - 1.0
+    redshift = _require_nonnegative_finite(z, "z")
 
     c0 = 19.9
     M0 = 1e8
@@ -220,11 +380,11 @@ def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):
     rho_s : float
         NFW scale density in kg/m^3.
     """
-    # Cosmology must be explicitly provided by caller
+    mass = _require_positive_finite(M200_msun, "M200_msun")
+    concentration = _require_positive_finite(c200, "c200")
+    z_lens = _require_positive_finite(z_lens, "z_lens")
 
-    # Get Hubble parameter at z_lens
-    H_z_obj = cosmology.H(z_lens)
-    H_z = float(H_z_obj.value) if hasattr(H_z_obj, 'value') else float(H_z_obj)
+    H_z = hubble_parameter_km_s_mpc(cosmology, z_lens)
 
     # Critical density at z_lens
     H_z_SI = H_z * KM_TO_M / MPC_TO_M  # 1/s
@@ -232,17 +392,17 @@ def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):
     rho_crit = 3 * H_z_SI**2 / (8 * np.pi * G_SI)  # kg/m^3
 
     # Calculate r200 from M200
-    M200_kg = float((M200_msun * u.Msun).to(u.kg).value)
+    M200_kg = float((mass * u.Msun).to(u.kg).value)
     r200_m = ((3 * M200_kg) / (4 * np.pi * 200 * rho_crit))**(1/3)
 
     # Scale radius
-    rs_m = r200_m / c200
+    rs_m = r200_m / concentration
     rs_kpc = float((rs_m * u.m).to(u.kpc).value)
 
     # NFW scale density
     # rho_s = rho_crit * (200/3) * c^3 / [ln(1+c) - c/(1+c)]
-    f_c = np.log(1 + c200) - c200 / (1 + c200)
-    rho_s = rho_crit * (200.0 / 3.0) * c200**3 / f_c
+    f_c = np.log(1 + concentration) - concentration / (1 + concentration)
+    rho_s = rho_crit * (200.0 / 3.0) * concentration**3 / f_c
 
     return rs_kpc, rho_s
 
@@ -276,11 +436,10 @@ def sigma_v_from_m200_sis(M200_msun, z_lens, cosmology):
     where r200 is calculated from the virial definition at 200 times the
     critical density at the lens redshift.
     """
-    # Cosmology must be explicitly provided by caller
+    mass = _require_positive_finite(M200_msun, "M200_msun")
+    z_lens = _require_positive_finite(z_lens, "z_lens")
 
-    # Get Hubble parameter at z_lens - PyAutoLens returns it in km/s/Mpc
-    H_z_obj = cosmology.H(z_lens)
-    H_z = float(H_z_obj.value) if hasattr(H_z_obj, 'value') else float(H_z_obj)
+    H_z = hubble_parameter_km_s_mpc(cosmology, z_lens)
 
     # Convert H(z) from km/s/Mpc to SI units (1/s)
     H_z_SI = H_z * KM_TO_M / MPC_TO_M  # Convert to 1/s
@@ -291,7 +450,7 @@ def sigma_v_from_m200_sis(M200_msun, z_lens, cosmology):
 
     # Calculate r200 from M200 definition
     # M200 = (4*pi/3) * r200^3 * 200 * rho_crit
-    M200_kg = float((M200_msun * u.Msun).to(u.kg).value)
+    M200_kg = float((mass * u.Msun).to(u.kg).value)
     r200_m = ((3 * M200_kg) / (4 * np.pi * 200 * rho_crit))**(1/3)  # meters
 
     # For SIS truncated at r200: M200 = 2*sigma_v^2*r200/G
@@ -336,19 +495,14 @@ def einstein_radius_sis_m200(M200_msun, z_lens, z_source, cosmology):
 
     where sigma_v is derived from M200 using virial equilibrium at r200.
     """
-    # Cosmology must be explicitly provided by caller
+    _require_ordered_redshifts(z_lens, z_source)
 
     # Convert M200 to velocity dispersion
     sigma_v_km_s = float(sigma_v_from_m200_sis(M200_msun, z_lens, cosmology))
     sigma_v_m_s = sigma_v_km_s * 1000.0  # Convert to m/s
 
-    # Get angular diameter distances from PyAutoLens (in Mpc)
-    D_ls_obj = cosmology.angular_diameter_distance_z1z2(z_lens, z_source)
-    D_s_obj = cosmology.angular_diameter_distance(z_source)
-
-    # Extract numerical values
-    D_ls = float(D_ls_obj.value) if hasattr(D_ls_obj, 'value') else float(D_ls_obj)
-    D_s = float(D_s_obj.value) if hasattr(D_s_obj, 'value') else float(D_s_obj)
+    D_ls = angular_diameter_distance_z1z2_mpc(cosmology, z_lens, z_source)
+    D_s = angular_diameter_distance_mpc(cosmology, z_source)
 
     # Calculate SIS Einstein radius
     # theta_E = 4*pi*(sigma_v/c)^2 * (D_ls/D_s)

@@ -1,61 +1,67 @@
-# hwo-slaps
-HWO-SLAPS: HWO Strong Lensing Analysis Pipeline for Subhalos
+# HWO-SLAPS
 
-## Overview
+HWO-SLAPS is an end-to-end strong-lensing simulation and Fisher-forecast pipeline for connecting Habitable Worlds Observatory PSF stability to low-mass dark-matter subhalo detectability.
 
-This pipeline determines the PSF quality and stability requirements for the Habitable Worlds Observatory (HWO) to detect 10^7 M☉ dark matter subhalos through strong gravitational lensing observations.
+The immediate study target is a controlled SPIE 2026 proceedings/poster analysis, followed by an expanded RASTI HWO Special Issue paper. See:
 
-The pipeline simulates the complete observation process: generates realistic galaxy lensing systems with embedded subhalos, creates time-varying PSFs with telescope aberrations, simulates observations with noise, attempts to recover subhalos through lens modeling, and analyzes detection performance to derive specific telescope requirements.
+- [Venue plan](docs/study/venue_plan.md)
+- [Study roadmap](docs/study/study_roadmap.md)
 
-## Objectives
+## Pipeline
 
-- Quantify static PSF quality needed for 10^7 M☉ subhalo detection
-- Determine PSF stability requirements over various timescales  
-- Identify which optical aberrations are most harmful to subhalo detection
-- Provide actionable requirements for HWO telescope design
+The package has four active modules:
 
-## Pipeline Modules
+1. `lensing`: galaxy-galaxy strong-lensing scenes with optional subhalos.
+2. `psf`: segmented-aperture HWO-style PSFs with controlled aberrations.
+3. `observation`: PSF convolution and detector-noise simulation.
+4. `modeling`: Fisher / Asimov subhalo detectability.
 
-1. **Lensing System Generation** - Creates galaxy-galaxy strong lensing systems with known subhalo populations
-2. **PSF Generation** - Simulates telescope PSFs with realistic aberrations and temporal variations
-3. **Observation Simulation** - Applies PSF convolution and adds instrument noise
-4. **Lens Modeling & Detection** - Attempts to recover injected subhalos from simulated data
+The missing study layer is intentional next work: canonical study configs, sweep manifests, aggregation, and publication figures.
 
-## Implementation Progress
+## Quick Start
 
-| Module      | Component                   | Prototyping | API Integration | Static PSF |
-|-------------|----------------------------|-------------|-----------------|------------|
-| **Module 1** | Lensing System Generation   | ✅          | ✅              | ✅         |
-| **Module 2** | PSF Generation              | ✅          | ✅              | ✅         |
-| **Module 3** | Observation Simulation      | ✅          | ✅              | ✅         |
-| **Module 4** | Lens Modeling & Detection   | ✅          | ✅              | ✅         |
+Create the conda environment and install the developer dependency checkouts:
 
-**Key:** ✅ Complete | 🟡 In Progress | 🔴 Not Started
-
-## Installation
-This will create a conda environment called hwo-slaps:
 ```bash
 bash install.sh
 ```
 
-Then manually install HCIPy:
+This clones or updates PyAutoLens and HCIPy as editable GitHub installs in the
+parent directory of this repo by default. Override the checkout location with
+`--checkout-root` or `HWOSLAPS_DEV_ROOT`.
+
+For an NVIDIA GPU machine such as a B200 node, install the same environment with
+CUDA-enabled JAX:
+
 ```bash
-conda activate hwo-slaps
-git clone https://github.com/ehpor/hcipy.git
-pip install -e ./hcipy
+bash install.sh --gpu
 ```
 
-Next, test that the installation imports with:
+Run a config:
+
 ```bash
-python tests/test_installation.py
+python runner.py --config configs/master_config.yaml
 ```
 
+Run the core tests:
+
+```bash
+python -m pytest -q
+```
+
+## Repository Notes
+
+- `configs/master_config.yaml` is the current runnable example config.
+- `outputs/` is ignored and used for run artifacts.
+- `scratch/` is ignored and used for prototypes, archived runs, and local notes.
+- Planning docs that should persist live under `docs/`.
 
 ## Copyright
+
 Copyright 2025, by the California Institute of Technology. ALL RIGHTS RESERVED. United States Government Sponsorship acknowledged. Any commercial use must be negotiated with the Office of Technology Transfer at the California Institute of Technology.
- 
+
 This software may be subject to U.S. export control laws. By accepting this software, the user agrees to comply with all applicable U.S. export laws and regulations. User has the responsibility to obtain export licenses, or other export authority as may be required before exporting such information to foreign countries or providing access to foreign persons.
 
 ## Authors
+
 Georgios Vassilakis (JPL)
-  

@@ -73,11 +73,17 @@ def _load_lensing_generator_module():
 
 def _build_integration_config(model_name: str) -> dict:
     """Return deterministic config for integration summary anchors."""
+    anchor_masses = {
+        "PointMass": 1.0e8,
+        "SIS": 1.0e8,
+        "NFW": 1.0e9,
+    }
     cfg = copy.deepcopy(load_master_config())
     cfg["run_name"] = f"physics-{model_name.lower()}"
     cfg["global_seed"] = 11
     cfg["lensing"]["grid"]["shape"] = [64, 64]
     cfg["lensing"]["subhalo"]["enabled"] = True
+    cfg["lensing"]["subhalo"]["mass"] = anchor_masses[model_name]
     cfg["lensing"]["subhalo"]["model"] = model_name
     cfg["lensing"]["subhalo"]["position"] = {"type": "direct", "centre": [0.08, -0.05]}
     if model_name != "NFW":

@@ -12,8 +12,12 @@ Policy enforced (per user requirements):
 - Cosmology: `lensing.cosmology` must be explicitly defined.
 """
 
-from typing import Any, Dict
 import math
+from typing import Any, Dict
+
+MOLINE_EQ7_MIN_MASS_MSUN = 1.0e6
+MOLINE_EQ7_MAX_MASS_MSUN = 1.0e12
+MOLINE_EQ7_MAX_X_SUB = 1.5
 
 
 def _require(config: Dict[str, Any], key: str, ctx: str = ""):
@@ -45,13 +49,89 @@ def _require_positive_finite_number(value: Any, key_path: str) -> float:
     return value_float
 
 
+def _require_bounded_positive_number(
+    value: Any,
+    key_path: str,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Require a finite positive number within closed bounds."""
+    value_float = _require_positive_finite_number(value, key_path)
+    if value_float < minimum or value_float > maximum:
+        raise ValueError(f"{key_path} must be between {minimum:g} and {maximum:g}")
+    return value_float
+
+
+def _require_finite_number(value: Any, key_path: str) -> float:
+    """Require a finite scalar number.
+
+    Parameters
+    ----------
+    value : `object`
+        Value to validate.
+    key_path : `str`
+        Human-readable configuration path for error messages.
+
+    Returns
+    -------
+    value_float : `float`
+        Validated value.
+
+    Raises
+    ------
+    ValueError
+        Raised when ``value`` is not a finite non-boolean number.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{key_path} must be numeric")
+    value_float = float(value)
+    if not math.isfinite(value_float):
+        raise ValueError(f"{key_path} must be finite")
+    return value_float
+
+
+def _require_nonnegative_finite_number(value: Any, key_path: str) -> float:
+    """Require a finite scalar number greater than or equal to zero."""
+    value_float = _require_finite_number(value, key_path)
+    if value_float < 0:
+        raise ValueError(f"{key_path} must be non-negative")
+    return value_float
+
+
+def _require_positive_int(value: Any, key_path: str) -> int:
+    """Require a positive integer scalar."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{key_path} must be a positive integer")
+    if value <= 0:
+        raise ValueError(f"{key_path} must be a positive integer")
+    return value
+
+
+def _require_finite_pair(value: Any, key_path: str) -> tuple[float, float]:
+    """Require a length-two finite numeric pair."""
+    pair = _require_list_length(value, 2, key_path)
+    return (
+        _require_finite_number(pair[0], f"{key_path}[0]"),
+        _require_finite_number(pair[1], f"{key_path}[1]"),
+    )
+
+
+def _require_ell_comps(value: Any, key_path: str) -> tuple[float, float]:
+    """Require finite PyAutoLens ellipticity components."""
+    e1, e2 = _require_finite_pair(value, key_path)
+    if math.hypot(e1, e2) >= 1.0:
+        raise ValueError(f"{key_path} magnitude must be less than 1")
+    return e1, e2
+
+
 def validate_top_level(config: Dict[str, Any]) -> None:
     # Top-level required keys
     run_name = _require(config, 'run_name', 'top-level')
     _require_type(run_name, str, 'run_name')
 
     global_seed = _require(config, 'global_seed', 'top-level')
-    _require_type(global_seed, int, 'global_seed')
+    if isinstance(global_seed, bool) or not isinstance(global_seed, int):
+        raise ValueError("global_seed must be an int")
 
     lensing = _require(config, 'lensing', 'top-level')
     _require_type(lensing, dict, 'lensing')
@@ -81,9 +161,10 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(grid, dict, 'lensing.grid')
     shape = _require(grid, 'shape', 'lensing.grid')
     _require_list_length(shape, 2, 'lensing.grid.shape')
+    _require_positive_int(shape[0], 'lensing.grid.shape[0]')
+    _require_positive_int(shape[1], 'lensing.grid.shape[1]')
     pixel_scale = _require(grid, 'pixel_scale', 'lensing.grid')
-    if not isinstance(pixel_scale, (int, float)) or pixel_scale <= 0:
-        raise ValueError("lensing.grid.pixel_scale must be a positive number")
+    _require_positive_finite_number(pixel_scale, 'lensing.grid.pixel_scale')
 
     lens_galaxy = _require(lensing, 'lens_galaxy', 'lensing')
     _require_type(lens_galaxy, dict, 'lensing.lens_galaxy')
@@ -93,10 +174,16 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(mass_type, str, 'lensing.lens_galaxy.mass.type')
     if mass_type != 'Isothermal':
         raise ValueError("Only 'Isothermal' mass profile is supported for lens_galaxy.mass.type")
-    _require_list_length(_require(mass, 'centre', 'lensing.lens_galaxy.mass'), 2, 'lensing.lens_galaxy.mass.centre')
+    _require_finite_pair(
+        _require(mass, 'centre', 'lensing.lens_galaxy.mass'),
+        'lensing.lens_galaxy.mass.centre',
+    )
     einstein_radius = _require(mass, 'einstein_radius', 'lensing.lens_galaxy.mass')
     _require_positive_finite_number(einstein_radius, "lensing.lens_galaxy.mass.einstein_radius")
-    _require_list_length(_require(mass, 'ell_comps', 'lensing.lens_galaxy.mass'), 2, 'lensing.lens_galaxy.mass.ell_comps')
+    _require_ell_comps(
+        _require(mass, 'ell_comps', 'lensing.lens_galaxy.mass'),
+        'lensing.lens_galaxy.mass.ell_comps',
+    )
     lens_redshift_val = _require(lens_galaxy, 'redshift', 'lensing.lens_galaxy')
 
     source_galaxy = _require(lensing, 'source_galaxy', 'lensing')
@@ -107,8 +194,14 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(light_type, str, 'lensing.source_galaxy.light.type')
     if light_type != 'Exponential':
         raise ValueError("Only 'Exponential' light profile is supported for source_galaxy.light.type")
-    _require_list_length(_require(light, 'centre', 'lensing.source_galaxy.light'), 2, 'lensing.source_galaxy.light.centre')
-    _require_list_length(_require(light, 'ell_comps', 'lensing.source_galaxy.light'), 2, 'lensing.source_galaxy.light.ell_comps')
+    _require_finite_pair(
+        _require(light, 'centre', 'lensing.source_galaxy.light'),
+        'lensing.source_galaxy.light.centre',
+    )
+    _require_ell_comps(
+        _require(light, 'ell_comps', 'lensing.source_galaxy.light'),
+        'lensing.source_galaxy.light.ell_comps',
+    )
     intensity = _require(light, 'intensity', 'lensing.source_galaxy.light')
     _require_positive_finite_number(intensity, "lensing.source_galaxy.light.intensity")
     eff_r = _require(light, 'effective_radius', 'lensing.source_galaxy.light')
@@ -159,33 +252,38 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
                     "'moline2017_eq7', 'power_law'"
                 )
             if concentration_model == 'moline2017_eq7':
+                _require_bounded_positive_number(
+                    mass_float,
+                    "lensing.subhalo.mass",
+                    MOLINE_EQ7_MIN_MASS_MSUN,
+                    MOLINE_EQ7_MAX_MASS_MSUN,
+                )
                 x_sub_val = _require(concentration, 'x_sub', 'lensing.subhalo.concentration')
-                try:
-                    x_sub_float = float(x_sub_val)
-                except (TypeError, ValueError):
-                    raise ValueError("lensing.subhalo.concentration.x_sub must be a number")
-                if not math.isfinite(x_sub_float) or x_sub_float <= 0:
-                    raise ValueError("lensing.subhalo.concentration.x_sub must be positive")
+                _require_bounded_positive_number(
+                    x_sub_val,
+                    "lensing.subhalo.concentration.x_sub",
+                    0.0,
+                    MOLINE_EQ7_MAX_X_SUB,
+                )
 
                 if 'h' in concentration and concentration['h'] is not None:
                     h_val = concentration['h']
-                    try:
-                        h_float = float(h_val)
-                    except (TypeError, ValueError):
-                        raise ValueError("lensing.subhalo.concentration.h must be a number or null")
-                    if not math.isfinite(h_float) or h_float <= 0:
-                        raise ValueError("lensing.subhalo.concentration.h must be positive when provided")
+                    _require_positive_finite_number(
+                        h_val,
+                        "lensing.subhalo.concentration.h",
+                    )
         position = _require(subhalo, 'position', 'lensing.subhalo')
         _require_type(position, dict, 'lensing.subhalo.position')
         ptype = _require(position, 'type', 'lensing.subhalo.position')
         if ptype == 'random':
             scatter = _require(position, 'scatter_pixels', 'lensing.subhalo.position')
-            if not isinstance(scatter, (int, float)) or scatter < 0:
-                raise ValueError("lensing.subhalo.position.scatter_pixels must be non-negative")
+            _require_nonnegative_finite_number(
+                scatter,
+                "lensing.subhalo.position.scatter_pixels",
+            )
         elif ptype == 'angle':
             angle_val = _require(position, 'angle', 'lensing.subhalo.position')
-            if not isinstance(angle_val, (int, float)):
-                raise ValueError("lensing.subhalo.position.angle must be numeric (degrees)")
+            _require_finite_number(angle_val, "lensing.subhalo.position.angle")
             # Optional: signed radial offset in pixels (finite numeric).
             if 'offset_pixels' in position:
                 off = position['offset_pixels']
@@ -204,7 +302,10 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
                         "lensing.subhalo.position.offset_pixels must be a finite number if provided"
                     )
         elif ptype == 'direct':
-            _require_list_length(_require(position, 'centre', 'lensing.subhalo.position'), 2, 'lensing.subhalo.position.centre')
+            _require_finite_pair(
+                _require(position, 'centre', 'lensing.subhalo.position'),
+                'lensing.subhalo.position.centre',
+            )
         else:
             raise ValueError("lensing.subhalo.position.type must be 'random', 'angle', or 'direct'")
 
@@ -234,62 +335,326 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
     for f in flags:
         val = _require(aberr, f, 'psf.aberrations')
         _require_type(val, bool, f'psf.aberrations.{f}')
-    use_api = _require(aberr, 'use_api', 'psf.aberrations')
-    _require_type(use_api, bool, 'psf.aberrations.use_api')
+
+    def _require_nonempty_dict(value: Any, key_path: str) -> Dict[str, Any]:
+        mapping = _require_type(value, dict, key_path)
+        if not mapping:
+            raise ValueError(f"{key_path} must contain at least one coefficient when enabled")
+        return mapping
+
+    def _require_segment_key(seg_idx: Any, key_path: str) -> int:
+        if isinstance(seg_idx, bool) or not isinstance(seg_idx, int) or seg_idx < 0:
+            raise ValueError(f'{key_path} segment indices must be non-negative integers')
+        return seg_idx
 
     # If any flag enabled, require corresponding dict present
     if aberr['enable_segment_pistons']:
-        _require_type(_require(aberr, 'segment_pistons', 'psf.aberrations'), dict, 'psf.aberrations.segment_pistons')
+        segment_pistons = _require_nonempty_dict(
+            _require(aberr, 'segment_pistons', 'psf.aberrations'),
+            'psf.aberrations.segment_pistons'
+        )
+        for seg_idx, piston_nm in segment_pistons.items():
+            _require_segment_key(seg_idx, 'psf.aberrations.segment_pistons')
+            _require_finite_number(piston_nm, f'psf.aberrations.segment_pistons[{seg_idx}]')
     if aberr['enable_segment_tiptilts']:
-        _require_type(_require(aberr, 'segment_tiptilts', 'psf.aberrations'), dict, 'psf.aberrations.segment_tiptilts')
+        segment_tiptilts = _require_nonempty_dict(
+            _require(aberr, 'segment_tiptilts', 'psf.aberrations'),
+            'psf.aberrations.segment_tiptilts'
+        )
+        for seg_idx, tiptilt in segment_tiptilts.items():
+            _require_segment_key(seg_idx, 'psf.aberrations.segment_tiptilts')
+            _require_finite_pair(tiptilt, f'psf.aberrations.segment_tiptilts[{seg_idx}]')
     if aberr['enable_segment_hexikes']:
-        segment_hexikes = _require_type(
+        segment_hexikes = _require_nonempty_dict(
             _require(aberr, 'segment_hexikes', 'psf.aberrations'),
-            dict,
             'psf.aberrations.segment_hexikes'
         )
         for seg_idx, mode_dict in segment_hexikes.items():
-            if not isinstance(seg_idx, int) or seg_idx < 0:
-                raise ValueError('psf.aberrations.segment_hexikes segment indices must be non-negative integers')
-            if not isinstance(mode_dict, dict):
-                raise ValueError(
-                    f'psf.aberrations.segment_hexikes[{seg_idx}] must be a dict of mode_noll -> coeff_nm'
-                )
+            _require_segment_key(seg_idx, 'psf.aberrations.segment_hexikes')
+            mode_dict = _require_nonempty_dict(
+                mode_dict,
+                f'psf.aberrations.segment_hexikes[{seg_idx}]'
+            )
             for mode_noll, coeff_nm in mode_dict.items():
-                if not isinstance(mode_noll, int) or mode_noll < 1:
+                if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
                     raise ValueError(
                         'psf.aberrations.segment_hexikes mode indices must be 1-based Noll integers (>= 1)'
                     )
-                if not isinstance(coeff_nm, (int, float)):
-                    raise ValueError(
-                        f'psf.aberrations.segment_hexikes[{seg_idx}][{mode_noll}] must be numeric (nm RMS)'
-                    )
+                _require_finite_number(
+                    coeff_nm,
+                    f'psf.aberrations.segment_hexikes[{seg_idx}][{mode_noll}]'
+                )
     if aberr['enable_global_zernikes']:
-        _require_type(_require(aberr, 'global_zernikes', 'psf.aberrations'), dict, 'psf.aberrations.global_zernikes')
+        global_zernikes = _require_nonempty_dict(
+            _require(aberr, 'global_zernikes', 'psf.aberrations'),
+            'psf.aberrations.global_zernikes'
+        )
+        for mode_noll, coeff_nm in global_zernikes.items():
+            if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
+                raise ValueError(
+                    'psf.aberrations.global_zernikes mode indices must be 1-based Noll integers (>= 1)'
+                )
+            _require_finite_number(coeff_nm, f'psf.aberrations.global_zernikes[{mode_noll}]')
 
 
 def validate_observation_config(observation: Dict[str, Any]) -> None:
     exposure_time = _require(observation, 'exposure_time', 'observation')
-    if not isinstance(exposure_time, (int, float)) or exposure_time <= 0:
-        raise ValueError("observation.exposure_time must be positive")
+    _require_positive_finite_number(exposure_time, 'observation.exposure_time')
 
     detector = _require(observation, 'detector', 'observation')
     _require_type(detector, dict, 'observation.detector')
-    for k in ('gain', 'read_noise', 'dark_current', 'sky_background'):
+    gain = _require(detector, 'gain', 'observation.detector')
+    _require_positive_finite_number(gain, 'observation.detector.gain')
+
+    for k in ('read_noise', 'dark_current', 'sky_background'):
         v = _require(detector, k, 'observation.detector')
-        if not isinstance(v, (int, float)):
-            raise ValueError(f"observation.detector.{k} must be numeric")
+        _require_nonnegative_finite_number(v, f'observation.detector.{k}')
+
+    if 'output_format' in observation:
+        output_format = observation['output_format']
+        if output_format != 'pyautolens_ready':
+            raise ValueError("observation.output_format must be 'pyautolens_ready'")
 
 
 def validate_modeling_config(modeling: Dict[str, Any]) -> None:
-    # modeling.enabled already checked at top-level; if True, require thresholds
-    if modeling['enabled']:
-        snr_threshold = _require(modeling, 'snr_threshold', 'modeling')
-        if not isinstance(snr_threshold, (int, float)) or snr_threshold <= 0:
-            raise ValueError("modeling.snr_threshold must be a positive number")
-        levels = _require(modeling, 'significance_levels', 'modeling')
-        if not isinstance(levels, list) or not all(isinstance(x, (int, float)) and x > 0 for x in levels):
-            raise ValueError("modeling.significance_levels must be a list of positive numbers (p-values)")
+    # modeling.enabled already checked at top-level
+    if not modeling['enabled']:
+        return
+
+    detection = _require(modeling, 'detection', 'modeling')
+    _require_type(detection, str, 'modeling.detection')
+    detection = detection.lower()
+    if detection != 'fisher':
+        raise ValueError("modeling.detection must be 'fisher'")
+
+    fisher = _require(modeling, 'fisher', 'modeling')
+    _require_type(fisher, dict, 'modeling.fisher')
+    mode = _require(fisher, 'mode', 'modeling.fisher')
+    _require_type(mode, str, 'modeling.fisher.mode')
+    if mode.lower() not in {'local', 'map', 'both'}:
+        raise ValueError("modeling.fisher.mode must be one of: 'local', 'map', 'both'")
+
+    snr_threshold = _require(fisher, 'snr_threshold', 'modeling.fisher')
+    _require_positive_finite_number(snr_threshold, "modeling.fisher.snr_threshold")
+
+    include_background_offset = _require(
+        fisher, 'include_background_offset', 'modeling.fisher'
+    )
+    _require_type(include_background_offset, bool, 'modeling.fisher.include_background_offset')
+
+    finite_diff = _require(fisher, 'finite_diff', 'modeling.fisher')
+    _require_type(finite_diff, dict, 'modeling.fisher.finite_diff')
+    for key in (
+        'centre_arcsec',
+        'einstein_radius_arcsec',
+        'ell_comp',
+        'source_intensity_frac',
+        'source_reff_frac',
+    ):
+        _require_positive_finite_number(
+            _require(finite_diff, key, 'modeling.fisher.finite_diff'),
+            f"modeling.fisher.finite_diff.{key}",
+        )
+
+    map_cfg = _require(fisher, 'map', 'modeling.fisher')
+    _require_type(map_cfg, dict, 'modeling.fisher.map')
+    num_angles = _require(map_cfg, 'num_angles', 'modeling.fisher.map')
+    if isinstance(num_angles, bool) or not isinstance(num_angles, int) or num_angles <= 0:
+        raise ValueError("modeling.fisher.map.num_angles must be a positive integer")
+    offset_pixels = _require(map_cfg, 'offset_pixels', 'modeling.fisher.map')
+    if isinstance(offset_pixels, bool) or not isinstance(offset_pixels, (int, float)):
+        raise ValueError("modeling.fisher.map.offset_pixels must be numeric")
+    if not math.isfinite(float(offset_pixels)):
+        raise ValueError("modeling.fisher.map.offset_pixels must be finite")
+
+    explicit_positions = map_cfg.get('explicit_positions_yx')
+    if explicit_positions is not None:
+        if not isinstance(explicit_positions, list):
+            raise ValueError("modeling.fisher.map.explicit_positions_yx must be a list when provided")
+        for idx, pair in enumerate(explicit_positions):
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError(
+                    "modeling.fisher.map.explicit_positions_yx entries must be [y, x] pairs"
+                )
+            for jdx, value in enumerate(pair):
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise ValueError(
+                        "modeling.fisher.map.explicit_positions_yx entries must be numeric"
+                    )
+                if not math.isfinite(float(value)):
+                    raise ValueError(
+                        "modeling.fisher.map.explicit_positions_yx entries must be finite"
+                    )
+
+    supported_fisher_keys = {
+        'enable',
+        'mode',
+        'snr_threshold',
+        'include_background_offset',
+        'covariance_path',
+        'finite_diff',
+        'map',
+        'mask_mode',
+        'include_psf_nuisance',
+        'compute_psf_mode_scan',
+        'mode_scan_z_tolerance',
+        'prior_sigmas',
+        'psf_mode_steps',
+        'psf_mode_prior_sigmas',
+        'psf_mode_selection',
+        'psf_basis',
+        'fit_psf_mode_selection',
+        'scan_psf_mode_selection',
+    }
+    unsupported_fisher_keys = sorted(set(fisher) - supported_fisher_keys)
+    if unsupported_fisher_keys:
+        raise ValueError(
+            "modeling.fisher contains unsupported keys: "
+            + ", ".join(unsupported_fisher_keys)
+        )
+
+    mask_mode = fisher.get('mask_mode', 'source_snr')
+    _require_type(mask_mode, str, 'modeling.fisher.mask_mode')
+    if mask_mode.lower() not in {'source_snr', 'all_pixels'}:
+        raise ValueError(
+            "modeling.fisher.mask_mode must be one of: 'source_snr', 'all_pixels'"
+        )
+
+    include_psf_nuisance = fisher.get('include_psf_nuisance', False)
+    _require_type(include_psf_nuisance, bool, 'modeling.fisher.include_psf_nuisance')
+    compute_psf_mode_scan = fisher.get('compute_psf_mode_scan', False)
+    _require_type(compute_psf_mode_scan, bool, 'modeling.fisher.compute_psf_mode_scan')
+
+    mode_scan_z_tolerance = fisher.get('mode_scan_z_tolerance')
+    if mode_scan_z_tolerance is not None:
+        _require_positive_finite_number(
+            mode_scan_z_tolerance,
+            'modeling.fisher.mode_scan_z_tolerance',
+        )
+
+    covariance_path = fisher.get('covariance_path')
+    if covariance_path is not None:
+        _require_type(covariance_path, str, 'modeling.fisher.covariance_path')
+
+    prior_sigmas = fisher.get('prior_sigmas')
+    if prior_sigmas is not None:
+        _require_type(prior_sigmas, dict, 'modeling.fisher.prior_sigmas')
+        for key, value in prior_sigmas.items():
+            _require_positive_finite_number(value, f"modeling.fisher.prior_sigmas[{key}]")
+
+    psf_mode_steps = fisher.get('psf_mode_steps')
+    if psf_mode_steps is not None:
+        _require_type(psf_mode_steps, dict, 'modeling.fisher.psf_mode_steps')
+        for key, value in psf_mode_steps.items():
+            _require_positive_finite_number(value, f"modeling.fisher.psf_mode_steps[{key}]")
+
+    psf_mode_prior_sigmas = fisher.get('psf_mode_prior_sigmas')
+    if psf_mode_prior_sigmas is not None:
+        _require_type(psf_mode_prior_sigmas, dict, 'modeling.fisher.psf_mode_prior_sigmas')
+        for key, value in psf_mode_prior_sigmas.items():
+            _require_positive_finite_number(
+                value,
+                f"modeling.fisher.psf_mode_prior_sigmas[{key}]",
+            )
+
+    def _validate_segment_selection_block(value, path_name):
+        if value is None:
+            return
+        if isinstance(value, str):
+            if value.lower() != 'all':
+                raise ValueError(f"{path_name} must be 'all', a list of segment ids, or a dict with a 'segments' field")
+            return
+        if isinstance(value, dict):
+            segments = value.get('segments')
+            if segments is None:
+                raise ValueError(f"{path_name} dict form must contain a 'segments' field")
+            _validate_segment_selection_block(segments, f"{path_name}.segments")
+            return
+        if not isinstance(value, (list, tuple)):
+            raise ValueError(f"{path_name} must be 'all', a list of segment ids, or a dict with a 'segments' field")
+        for idx, seg_id in enumerate(value):
+            if isinstance(seg_id, bool) or not isinstance(seg_id, int) or seg_id < 0:
+                raise ValueError(f"{path_name}[{idx}] must be a non-negative integer segment id")
+
+    def _validate_global_mode_block(value, path_name):
+        if value is None:
+            return
+        modes = value.get('mode_nolls') if isinstance(value, dict) else value
+        if not isinstance(modes, (list, tuple)):
+            raise ValueError(f"{path_name} must be a list of 1-based Noll mode indices or a dict with mode_nolls")
+        for idx, mode_idx in enumerate(modes):
+            if isinstance(mode_idx, bool) or not isinstance(mode_idx, int) or mode_idx < 1:
+                raise ValueError(f"{path_name}[{idx}] must be a 1-based integer Noll index")
+
+    def _validate_segment_hexike_block(value, path_name):
+        if value is None:
+            return
+        if isinstance(value, dict) and ('segments' in value or 'mode_nolls' in value):
+            if 'segments' not in value or 'mode_nolls' not in value:
+                raise ValueError(f"{path_name} cross-product form must contain both 'segments' and 'mode_nolls'")
+            _validate_segment_selection_block(value['segments'], f"{path_name}.segments")
+            _validate_global_mode_block(value['mode_nolls'], f"{path_name}.mode_nolls")
+            return
+        if isinstance(value, dict):
+            for seg_id, mode_list in value.items():
+                if isinstance(seg_id, bool) or not isinstance(seg_id, int) or seg_id < 0:
+                    raise ValueError(f"{path_name} segment keys must be non-negative integers")
+                _validate_global_mode_block(mode_list, f"{path_name}[{seg_id}]")
+            return
+        if not isinstance(value, (list, tuple)):
+            raise ValueError(
+                f"{path_name} must be either {{segments, mode_nolls}}, a mapping seg->modes, or a list of (seg, mode) pairs"
+            )
+        for idx, pair in enumerate(value):
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError(f"{path_name}[{idx}] must be a (segment, mode_noll) pair")
+            seg_id, mode_idx = pair
+            if isinstance(seg_id, bool) or not isinstance(seg_id, int) or seg_id < 0:
+                raise ValueError(f"{path_name}[{idx}][0] must be a non-negative integer segment id")
+            if isinstance(mode_idx, bool) or not isinstance(mode_idx, int) or mode_idx < 1:
+                raise ValueError(f"{path_name}[{idx}][1] must be a 1-based integer Noll index")
+
+    def _validate_psf_basis(value, path_name):
+        if value is None:
+            return
+        _require_type(value, dict, path_name)
+        for key, block in value.items():
+            if key == 'segment_pistons':
+                _validate_segment_selection_block(block, f"{path_name}.segment_pistons")
+            elif key == 'segment_tiptilts':
+                _validate_segment_selection_block(block, f"{path_name}.segment_tiptilts")
+            elif key == 'segment_hexikes':
+                _validate_segment_hexike_block(block, f"{path_name}.segment_hexikes")
+            elif key == 'global_zernikes':
+                _validate_global_mode_block(block, f"{path_name}.global_zernikes")
+            else:
+                raise ValueError(
+                    f"{path_name} contains unsupported PSF family '{key}'. Supported families are: segment_pistons, segment_tiptilts, segment_hexikes, global_zernikes"
+                )
+
+    if 'psf_mode_selection' in fisher:
+        raise ValueError(
+            "modeling.fisher.psf_mode_selection is not supported; use modeling.fisher.psf_basis"
+        )
+
+    psf_basis = fisher.get('psf_basis')
+    fit_psf_mode_selection = fisher.get('fit_psf_mode_selection')
+    scan_psf_mode_selection = fisher.get('scan_psf_mode_selection')
+
+    _validate_psf_basis(psf_basis, 'modeling.fisher.psf_basis')
+    _validate_psf_basis(fit_psf_mode_selection, 'modeling.fisher.fit_psf_mode_selection')
+    _validate_psf_basis(scan_psf_mode_selection, 'modeling.fisher.scan_psf_mode_selection')
+
+    if (include_psf_nuisance or compute_psf_mode_scan) and psf_basis is None:
+        raise ValueError(
+            'modeling.fisher.psf_basis is required when PSF nuisance fitting or PSF mode scanning is enabled'
+        )
+
+    if compute_psf_mode_scan and scan_psf_mode_selection is None:
+        raise ValueError(
+            'modeling.fisher.scan_psf_mode_selection is required when compute_psf_mode_scan is true'
+        )
+    return
 
 
 def validate_or_raise(config: Dict[str, Any]) -> None:

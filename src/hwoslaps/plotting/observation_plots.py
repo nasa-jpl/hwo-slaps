@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 from pathlib import Path
 
 from ..lensing.utils import LensingData
-from ..psf.utils import PSFData
+from ..psf.utils import PSFData, pyauto_kernel_native
 from ..observation.utils import ObservationData
 from .registry import plot_function
 
@@ -60,7 +60,7 @@ def plot_observation_comparison(
     plt.colorbar(im1, ax=axes[0, 0], fraction=0.046)
     
     # 2. PSF (log scale)
-    psf_log = np.log10(psf_data.kernel.native + 1e-10)
+    psf_log = np.log10(pyauto_kernel_native(psf_data.kernel) + 1e-10)
     im2 = axes[0, 1].imshow(
         psf_log,
         origin='lower',
