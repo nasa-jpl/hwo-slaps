@@ -212,15 +212,16 @@ def subhalo_model_spec_from_trial(
     else:
         raise ValueError(f"Unsupported subhalo profile class: {trial.profile_class}")
 
-    galaxies["subhalo"] = GalaxySpec(
-        name="subhalo",
-        redshift=fixed(float(trial.lens_redshift)),
-        components={
-            "mass": ProfileSpec(
-                class_name=trial.profile_class,
-                parameters=parameters,
-            )
-        },
+    lens_galaxy = galaxies["lens"]
+    lens_components = dict(lens_galaxy.components)
+    lens_components["subhalo"] = ProfileSpec(
+        class_name=trial.profile_class,
+        parameters=parameters,
+    )
+    galaxies["lens"] = GalaxySpec(
+        name=lens_galaxy.name,
+        redshift=lens_galaxy.redshift,
+        components=lens_components,
     )
 
     return ModelSpec(

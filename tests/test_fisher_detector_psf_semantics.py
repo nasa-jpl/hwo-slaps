@@ -201,6 +201,31 @@ def test_science_fiducial_ignores_placeholder_coefficients_in_disabled_family():
     assert detector._science_psf_base_value(spec) == 0.0
 
 
+def test_segment_hexike_derivative_assignment_preserves_dict_shape_for_perfect_psf():
+    module, detector = _make_detector_stub()
+    config = {
+        "psf": {
+            "aberrations": {
+                "enable_segment_hexikes": False,
+                "segment_hexikes": {},
+            }
+        }
+    }
+    spec = module._PsfModeSpec(
+        name="psf.segment_hexikes[0][2]",
+        family="segment_hexikes",
+        path=("psf", "aberrations", "segment_hexikes", 0, 2),
+        enable_flag_path=("psf", "aberrations", "enable_segment_hexikes"),
+        step=1.0,
+        prior_sigma=None,
+    )
+
+    detector._ensure_psf_derivative_container(config, spec)
+    detector._set_path_value_create(config, spec.path, 1.0)
+
+    assert config["psf"]["aberrations"]["segment_hexikes"] == {0: {2: 1.0}}
+
+
 def test_explicit_psf_basis_is_independent_of_yaml_occupancy():
     module, detector = _make_detector_stub()
     detector.full_config = {

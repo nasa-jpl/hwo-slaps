@@ -1,0 +1,121 @@
+# Canonical SCDD/SPIE Stage 0 baseline for HWO-SLAPS.
+#
+# This config is intentionally separate from configs/master_config.yaml. Study
+# runners may override run_name, mass, PSF aberration amplitude, and Fisher mode
+# for individual sweep points.
+
+run_name: stage0_scdd_spie_baseline
+global_seed: 11
+
+plotting:
+  enabled: true
+  output_dir: outputs/stage0_internal_review
+
+lensing:
+  grid:
+    shape: [500, 500]
+    pixel_scale: 0.00716
+
+  lens_galaxy:
+    redshift: 0.2
+    mass:
+      type: Isothermal
+      einstein_radius: 1.0
+      centre: [0.0, 0.0]
+      ell_comps: [0.1, 0.0]
+
+  source_galaxy:
+    redshift: 0.6
+    light:
+      type: Exponential
+      centre: [-0.03, 0.08]
+      ell_comps: [0.14516129, 0.25142673]
+      intensity: 2.0
+      effective_radius: 0.11
+
+  subhalo:
+    enabled: true
+    mass: 1.0e7
+    model: NFW
+    concentration:
+      model: moline2017_eq7
+      x_sub: 1.0
+      h: null
+    position:
+      type: angle
+      angle: 90.0
+      offset_pixels: 0.0
+
+  cosmology: Planck15
+
+psf:
+  telescope:
+    gap_size: 0.006
+    segment_point_to_point: 1.65
+    pupil_diameter: 7.225765
+    num_rings: 2
+    focal_length: 144.0
+    supersampling_factor: 4
+
+  hres_psf:
+    num_pix: 512
+    wavelength: 5.0e-7
+    num_airy: 12
+    sampling: 5
+    save_highres_psf_npy: false
+
+  kernel:
+    shape_native: [51, 51]
+
+  aberrations:
+    enable_segment_pistons: false
+    enable_segment_tiptilts: false
+    enable_segment_hexikes: false
+    enable_global_zernikes: false
+    segment_pistons: {}
+    segment_tiptilts: {}
+    segment_hexikes: {}
+    global_zernikes: {}
+
+observation:
+  exposure_time: 900.0
+  output_format: pyautolens_ready
+  detector:
+    gain: 1.0
+    read_noise: 0.2
+    dark_current: 0.002
+    sky_background: 1.0
+
+modeling:
+  enabled: true
+  detection: fisher
+  fisher:
+    mode: local
+    snr_threshold: 3.0
+    include_background_offset: true
+    finite_diff:
+      centre_arcsec: 1.0e-3
+      einstein_radius_arcsec: 1.0e-3
+      ell_comp: 1.0e-3
+      source_intensity_frac: 1.0e-2
+      source_reff_frac: 1.0e-2
+    mask_mode: source_snr
+    include_psf_nuisance: false
+    compute_psf_mode_scan: false
+    mode_scan_z_tolerance: 1.0
+    psf_mode_steps:
+      segment_hexikes: 1.0
+    psf_mode_prior_sigmas:
+      segment_hexikes: 5.0
+    psf_basis:
+      segment_hexikes:
+        segments: [0]
+        mode_nolls: [2]
+    scan_psf_mode_selection:
+      segment_hexikes:
+        segments: [0]
+        mode_nolls: [2]
+    map:
+      num_angles: 24
+      offset_pixels: 0.0
+      explicit_positions_yx: null

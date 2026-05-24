@@ -185,6 +185,50 @@ def _filter_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _patch_analysis_imaging_adapt_images_compat(al: Any) -> None:
+    """Patch PyAutoLens fit_from for installed AutoGalaxy adapt-image API.
+
+    PyAutoLens 2026.5.14.2 can call ``adapt_images_via_instance_from`` with a
+    ``dataset_model`` keyword, while the paired AutoGalaxy method in this
+    environment accepts only ``instance`` and ``galaxies``. The mismatch occurs
+    before any science likelihood is evaluated, including on the JAX path.
+    """
+    analysis_cls = al.AnalysisImaging
+    if getattr(analysis_cls, "_hwoslaps_adapt_images_compat", False):
+        return
+    try:
+        signature = inspect.signature(analysis_cls.adapt_images_via_instance_from)
+    except (AttributeError, ValueError, TypeError):
+        return
+    if "dataset_model" in signature.parameters:
+        return
+
+    def fit_from_compat(self, instance):
+        if self._use_jax:
+            self._register_fit_imaging_pytrees()
+
+        tracer = self.tracer_via_instance_from(instance=instance)
+        dataset_model = self.dataset_model_via_instance_from(instance=instance)
+        adapt_images = self.adapt_images_via_instance_from(
+            instance=instance,
+            galaxies=tracer.galaxies,
+        )
+
+        from autolens.imaging.fit_imaging import FitImaging
+
+        return FitImaging(
+            dataset=self.dataset,
+            tracer=tracer,
+            dataset_model=dataset_model,
+            adapt_images=adapt_images,
+            settings=self.settings,
+            xp=self._xp,
+        )
+
+    analysis_cls.fit_from = fit_from_compat
+    analysis_cls._hwoslaps_adapt_images_compat = True
+
+
 class AutoLensFitRunner:
     """Run PyAutoLens validation fits and summarize their outputs."""
 
@@ -207,6 +251,7 @@ class AutoLensFitRunner:
         """
         import autolens as al
 
+        _patch_analysis_imaging_adapt_images_compat(al)
         try:
             return al.AnalysisImaging(dataset=dataset, use_jax=self.settings.use_jax)
         except TypeError:
