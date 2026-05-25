@@ -58,12 +58,12 @@ Produce a credible internal-review poster package quickly without trying to comp
 
 Minimum internal-review deliverables:
 
-- [ ] One canonical SCDD-like baseline scene.
-- [ ] One perfect-PSF mass sweep.
-- [ ] One PSF perturbation family with an amplitude ladder.
-- [ ] One ring-map / detectable-ring-fraction demonstration.
-- [ ] One clear table of metric definitions: `q_F`, `Z_F`, `Delta log L_F,equiv`, and threshold pass/fail.
-- [ ] One limitations box that says the SPIE version is a first forecast, not final HWO engineering requirements.
+- [x] One canonical SCDD-like baseline scene.
+- [x] One perfect-PSF mass sweep.
+- [x] One PSF perturbation family with an amplitude ladder.
+- [x] One ring-map / detectable-ring-fraction demonstration.
+- [x] One clear table of metric definitions: `q_F`, `Z_F`, `Delta log L_F,equiv`, and threshold pass/fail.
+- [x] One limitations box that says the SPIE version is a first forecast, not final HWO engineering requirements.
 
 Recommended poster logic:
 
@@ -81,22 +81,24 @@ Make the current pipeline produce repeatable proceedings-level results.
 
 Checklist:
 
-- [ ] Create a canonical SCDD/SPIE baseline config, separate from `configs/master_config.yaml`.
-- [ ] Use lens redshift `z_l = 0.2` and source redshift `z_s = 0.6` for the SCDD-anchored run, unless a different source redshift is explicitly justified in the manuscript.
-- [ ] Set the canonical grid, pixel scale, wavelength, aperture, exposure/noise convention, subhalo model, concentration model, and source morphology in one named config.
-- [ ] Use the SCDD anchor masses for the headline SPIE grid: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
-- [ ] Treat masses below `1e7 Msun` as exploratory extrapolation unless calibrated by nonlinear fits.
-- [ ] Define a perfect-PSF baseline.
-- [ ] Define one required PSF perturbation family for SPIE and one optional second family.
-- [ ] State the amplitude units unambiguously for every PSF family: OPD nm, mirror-surface nm, outgoing-beam microradians, or coefficient RMS.
-- [ ] Add a lightweight study manifest format in `scratch/study` or `analysis_manifests/`.
-- [ ] Add a lightweight study runner that expands the manifest into per-run configs and run directories.
-- [ ] Add cross-run aggregation to `results.csv` or `results.jsonl`.
-- [ ] Record at least: run name, config hash, git hash if available, mass, subhalo model, subhalo position, PSF family, PSF mode, PSF amplitude, seed, local `q_F`, local `Z_F`, `Delta log L_F,equiv`, threshold pass/fail, map median `Z_F`, map max `Z_F`, detectable-ring fraction, profiling degradation, nuisance count, and PSF quality metrics.
-- [ ] Store PSF diagnostics: Strehl, raw peak ratio before clipping, WFE/OPD RMS if available, kernel shape, kernel sum, and a simple kernel-difference norm relative to the perfect PSF.
-- [ ] Add SPIE plotting scripts for required figures.
-- [ ] Add provenance beyond `config_used.yaml`: git hash, config hash, package versions, Python version, and command line.
-- [ ] Make the output path portable. Avoid absolute user-specific paths in canonical configs.
+- [x] Create a canonical SCDD/SPIE baseline config, separate from `configs/master_config.yaml`.
+- [x] Use lens redshift `z_l = 0.2` and source redshift `z_s = 0.6` for the SCDD-anchored run, unless a different source redshift is explicitly justified in the manuscript.
+- [x] Set the canonical grid, pixel scale, wavelength, aperture, exposure/noise convention, subhalo model, concentration model, and source morphology in one named config.
+- [x] Use the SCDD anchor masses for the headline SPIE grid: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
+- [x] Treat masses below `1e7 Msun` as exploratory extrapolation unless calibrated by nonlinear fits.
+- [x] Define a perfect-PSF baseline.
+- [x] Define one required PSF perturbation family for SPIE.
+- [ ] Define one optional second PSF perturbation family for SPIE.
+- [x] State the amplitude units unambiguously for the Stage 0 PSF family: OPD nm, mirror-surface nm, outgoing-beam microradians, or coefficient RMS.
+- [x] Add a lightweight study manifest format in `scratch/study` or `analysis_manifests/`.
+- [x] Add a lightweight study runner that expands the manifest into per-run configs and run directories.
+- [x] Add cross-run aggregation to `results.csv` or `results.jsonl`.
+- [x] Record at least: run name, config hash, git hash if available, mass, subhalo model, subhalo position, PSF family, PSF mode, PSF amplitude, seed, local `q_F`, local `Z_F`, `Delta log L_F,equiv`, threshold pass/fail, map median `Z_F`, map max `Z_F`, detectable-ring fraction, profiling degradation, nuisance count, and PSF quality metrics.
+- [x] Store SPIE-needed PSF diagnostics: Strehl, WFE/OPD RMS if available, kernel shape, kernel sum, kernel peak, and FWHM.
+- [ ] Add remaining diagnostic extras: raw peak ratio before clipping and a simple kernel-difference norm relative to the perfect PSF.
+- [x] Add SPIE plotting scripts for required figures.
+- [x] Add provenance beyond `config_used.yaml`: git hash, config hash, package versions, Python version, and command line.
+- [x] Make the output path portable. Avoid absolute user-specific paths in canonical configs.
 
 Minimum SPIE code outputs:
 
@@ -158,29 +160,29 @@ Do not call the Fisher value a nonlinear likelihood ratio. Call it a Fisher-equi
 
 ## SPIE study questions
 
-- [ ] Does detectability improve monotonically with subhalo mass in the perfect-PSF baseline?
-- [ ] Does the perfect-PSF mass floor qualitatively match the SCDD expectation near `10^7` to `10^7.25 Msun` for an HWO-like high-resolution setup?
+- [x] Does detectability improve monotonically with subhalo mass in the perfect-PSF baseline?
+- [x] Does the perfect-PSF mass floor qualitatively match the SCDD expectation near `10^7` to `10^7.25 Msun` for an HWO-like high-resolution setup?
 - [ ] Which selected PSF modes couple most strongly to subhalo-like residuals?
-- [ ] At what approximate PSF amplitude does the local detection statistic or detectable-ring fraction degrade materially?
-- [ ] What fraction of the sampled Einstein ring remains above the SCDD threshold?
-- [ ] Does `q_F` track `q_fit` for the sparse nonlinear validation subset, if that subset is completed?
-- [ ] Can HWO-SLAPS produce requirement-style curves from optics perturbations to subhalo detectability?
+- [x] At what approximate PSF amplitude does the local detection statistic or detectable-ring fraction degrade materially?
+- [x] What fraction of the sampled Einstein ring remains above the SCDD threshold?
+- [x] Does `q_F` track `q_fit` for the sparse nonlinear validation subset, if that subset is completed?
+- [x] Can HWO-SLAPS produce preliminary requirement-style curves from optics perturbations to subhalo detectability?
 
 ## SPIE study figures
 
 Required:
 
-- [ ] Example lensing scene and subhalo residual.
-- [ ] Example perfect and perturbed PSF diagnostic.
-- [ ] Detection statistic versus subhalo mass.
-- [ ] Detection degradation or detectable-ring fraction versus PSF amplitude.
-- [ ] PSF-mode coupling or tolerance-style plot.
-- [ ] Fisher ring-map or detectable-ring-fraction figure.
+- [x] Example lensing scene and subhalo residual.
+- [x] Example perfect and perturbed PSF diagnostic.
+- [x] Detection statistic versus subhalo mass.
+- [x] Detection degradation or detectable-ring fraction versus PSF amplitude.
+- [x] PSF-mode coupling or tolerance-style plot.
+- [x] Fisher ring-map or detectable-ring-fraction figure.
 
 Recommended if time permits:
 
-- [ ] Fisher-versus-nonlinear calibration plot showing `q_F` against `q_fit`, with the SCDD threshold `q=10`.
-- [ ] No-subhalo plus PSF-mismatch false-positive diagnostic.
+- [x] Fisher-versus-nonlinear calibration plot showing `q_F` against `q_fit`, with the SCDD threshold `q=10`.
+- [x] No-subhalo plus PSF-mismatch false-positive diagnostic.
 
 ## SPIE claim boundary
 
@@ -234,13 +236,13 @@ or a monotonic mapping with uncertainty.
 
 ## Acceptance checks before using SPIE plots
 
-- [ ] Perfect-PSF `q_F` increases with subhalo mass for the same position and setup.
+- [x] Perfect-PSF `q_F` increases with subhalo mass for the same position and setup.
 - [ ] The chosen detection threshold is shown on every relevant plot.
-- [ ] `Delta log L_F,equiv = q_F / 2` is computed consistently.
-- [ ] A zero-aberration PSF run is reproducible.
+- [x] `Delta log L_F,equiv = q_F / 2` is computed consistently.
+- [x] A zero-aberration PSF run is reproducible.
 - [ ] PSF amplitude units are stated in the figure captions.
-- [ ] The code records enough provenance to rerun every plotted point.
-- [ ] No-subhalo PSF-mismatch case does not produce unexplained threshold-level detections, or the issue is highlighted as a result rather than hidden.
+- [x] The code records enough provenance to rerun every plotted point.
+- [x] No-subhalo PSF-mismatch case does not produce unexplained threshold-level detections, or the issue is highlighted as a result rather than hidden.
 
 ## Stage 3: SPIE manuscript and poster
 

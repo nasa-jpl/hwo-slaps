@@ -161,7 +161,7 @@ Candidate validation cases:
 - [x] Perfect PSF at `10^7.25 Msun`, one position.
 - [x] Perfect PSF at `10^7.75 Msun`, one position.
 - [x] One perturbed-PSF case at the same position.
-- [ ] Optional no-subhalo PSF-mismatch false-positive case.
+- [x] Optional no-subhalo PSF-mismatch false-positive case.
 
 Pilot run notes:
 
@@ -306,7 +306,7 @@ Required figure/status tracker:
 - [x] Detection degradation or detectable-ring fraction versus PSF amplitude.
 - [x] PSF-mode coupling or tolerance-style plot.
 - [x] Fisher ring-map or detectable-ring-fraction figure.
-- [ ] Optional Fisher-versus-nonlinear calibration plot.
+- [x] Optional Fisher-versus-nonlinear calibration plot.
 - [x] SPIE-plus Fisher-versus-local-optimizer validation plot.
 
 Manuscript/poster notes:
@@ -353,8 +353,7 @@ Deferred items:
 
 ## Open questions
 
-1. Should SPIE nonlinear validation be minimum, nominal, or stretch?
-2. Which Stage 0 figures should be promoted into a poster/manuscript figure
+1. Which Stage 0 figures should be promoted into a poster/manuscript figure
    script with final styling?
-3. Should the next sweep vary segment IDs/modes, or first add a second PSF
+2. Should the next sweep vary segment IDs/modes, or first add a second PSF
    family such as global Zernikes?
