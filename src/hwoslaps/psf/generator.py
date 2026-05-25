@@ -272,14 +272,33 @@ def generate_psf_system(config, full_config=None):
     detector_input_grid = make_supersampled_grid(detector_grid_m, subsampling_factor)
     prop_det = FraunhoferPropagator(telescope_data['pupil_grid'], detector_input_grid, focal_length)
     wf_psf_supersampled = prop_det(wf_pupil)
+    wf_psf_perfect_supersampled = prop_det(wf_pupil_perfect)
 
     # Downsample supersampled PSF power by summation to conserve flux.
     psf_downsampled = subsample_field(
         wf_psf_supersampled.power, subsampling=subsampling_factor, new_grid=detector_grid_m, statistic='sum'
     )
+    psf_perfect_downsampled = subsample_field(
+        wf_psf_perfect_supersampled.power,
+        subsampling=subsampling_factor,
+        new_grid=detector_grid_m,
+        statistic='sum',
+    )
     
     # Normalize psf_downsampled to sum to 1.
     psf_downsampled_normalized = psf_downsampled / np.sum(psf_downsampled)
+    psf_perfect_downsampled_normalized = psf_perfect_downsampled / np.sum(psf_perfect_downsampled)
+    kernel_diff = (
+        np.asarray(psf_downsampled_normalized.shaped, dtype=float)
+        - np.asarray(psf_perfect_downsampled_normalized.shaped, dtype=float)
+    )
+    kernel_diff_l2_norm = float(np.linalg.norm(kernel_diff))
+    perfect_kernel_l2_norm = float(np.linalg.norm(psf_perfect_downsampled_normalized.shaped))
+    kernel_diff_l2_rel = (
+        kernel_diff_l2_norm / perfect_kernel_l2_norm
+        if perfect_kernel_l2_norm > 0.0
+        else None
+    )
     
     # Create the detector-sampled PyAuto kernel array.
     kernel = make_pyauto_kernel(
@@ -378,8 +397,11 @@ def generate_psf_system(config, full_config=None):
         fwhm_arcsec=quality_metrics['fwhm_arcsec'] if 'fwhm_arcsec' in quality_metrics else None,
         fwhm_mas=(quality_metrics['fwhm_arcsec'] * 1000) if 'fwhm_arcsec' in quality_metrics else None,
         strehl_ratio=quality_metrics['strehl_ratio'] if 'strehl_ratio' in quality_metrics else None,
+        raw_peak_ratio_before_clipping=quality_metrics.get('raw_peak_ratio_before_clipping'),
         peak_intensity=quality_metrics['peak_intensity'],
         total_flux=quality_metrics['total_flux'],
+        kernel_diff_l2_norm=kernel_diff_l2_norm,
+        kernel_diff_l2_rel=kernel_diff_l2_rel,
         
         # Aberration summary.
         total_rms_nm=total_rms_nm,

@@ -105,16 +105,22 @@ modeling:
     mode_scan_z_tolerance: 1.0
     psf_mode_steps:
       segment_hexikes: 1.0
+      global_zernikes: 1.0
     psf_mode_prior_sigmas:
       segment_hexikes: 5.0
+      global_zernikes: 5.0
     psf_basis:
       segment_hexikes:
         segments: [0]
         mode_nolls: [2]
+      global_zernikes:
+        mode_nolls: [4, 5, 6]
     scan_psf_mode_selection:
       segment_hexikes:
         segments: [0]
         mode_nolls: [2]
+      global_zernikes:
+        mode_nolls: [4, 5, 6]
     map:
       num_angles: 24
       offset_pixels: 0.0

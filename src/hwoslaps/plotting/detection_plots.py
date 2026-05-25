@@ -11,6 +11,9 @@ from typing import Dict, Any
 from ..modeling.utils_fisher import FisherDetectionData
 from .registry import plot_function
 
+SCDD_Q_THRESHOLD = 10.0
+SCDD_Z_THRESHOLD = np.sqrt(SCDD_Q_THRESHOLD)
+
 
 def _modeling_output_dir(plot_config: Dict[str, Any], run_name: str | None) -> Path:
     if run_name is None:
@@ -69,6 +72,7 @@ def plot_fisher_local_summary(
         ("Condition number", f"{detection_data.gram_condition_number:.3e}"),
         ("SNR mask threshold", f"{detection_data.snr_threshold:.3f}"),
         ("SNR_asimov", f"{local.snr_asimov:.4f}"),
+        ("SCDD threshold", f"q_F > {SCDD_Q_THRESHOLD:.1f}; Z_F > sqrt(10)"),
         ("DeltaChi2 raw", f"{local.delta_chi2_raw:.4f}"),
         ("DeltaChi2 profiled", f"{local.delta_chi2_profiled:.4f}"),
         ("Profiling degradation", f"{local.degradation:.4f}"),
@@ -196,12 +200,21 @@ def plot_fisher_psf_mode_scan(
         axes[2].barh(ypos[finite_tol], tolerance[finite_tol], color="#5a8f29")
     axes[2].set_title("Tolerance for z budget")
     axes[2].set_xlabel("Mode amplitude")
+    if mode_scan.z_tolerance is not None:
+        axes[2].axvline(0.0, color="black", linewidth=0.8)
 
     title = "Fisher PSF Mode Scan"
     if mode_scan.z_tolerance is not None:
         title += f" (z_max={mode_scan.z_tolerance:.3g})"
     fig.suptitle(title, fontsize=12)
-    plt.tight_layout()
+    fig.text(
+        0.5,
+        0.01,
+        "Mode amplitudes use the units configured for each PSF family; tolerance is the amplitude for the stated z budget.",
+        ha="center",
+        fontsize=8.5,
+    )
+    plt.tight_layout(rect=(0.0, 0.03, 1.0, 0.98))
 
     save_path = output_dir / "fisher_psf_mode_scan.png"
     plt.savefig(save_path, dpi=160, bbox_inches="tight")
@@ -254,11 +267,13 @@ def plot_fisher_detection_map_summary(
 
     ax = axes[1]
     ax.plot(angles[order], snr[order], marker='o', linestyle='-', linewidth=1.5, markersize=4)
+    ax.axhline(SCDD_Z_THRESHOLD, color="#9d2f2f", linestyle="--", linewidth=1.2, label="SCDD sqrt(10)")
     ax.set_xlabel('Ring angle (deg)')
     ax.set_ylabel('SNR_asimov')
     ax.set_title('Fisher Map: SNR vs Angle')
     ax.set_xlim(0.0, 360.0)
     ax.grid(alpha=0.3)
+    ax.legend()
 
     fig.suptitle(
         "Fisher Map Summary: "
@@ -267,7 +282,14 @@ def plot_fisher_detection_map_summary(
         f"p75={map_data.p75_snr_asimov:.3f}",
         fontsize=10,
     )
-    plt.tight_layout()
+    fig.text(
+        0.5,
+        0.01,
+        r"Detection threshold shown as $Z_F=\sqrt{10}$, equivalent to $q_F=10$.",
+        ha="center",
+        fontsize=8.5,
+    )
+    plt.tight_layout(rect=(0.0, 0.04, 1.0, 0.96))
 
     save_path = output_dir / 'fisher_map_summary.png'
     plt.savefig(save_path, dpi=150, bbox_inches='tight')

@@ -190,14 +190,16 @@ def calculate_strehl_ratio(aberrated_psf, perfect_psf):
     and are properly centered. The returned value is capped at 1.0 as
     physically the Strehl ratio cannot exceed unity.
     """
-    # Get peak intensities
-    aberrated_peak = float(np.max(aberrated_psf.intensity))
-    perfect_peak = float(np.max(perfect_psf.intensity))
-
-    # Strehl ratio is the ratio of peaks
-    strehl_ratio = aberrated_peak / perfect_peak
+    strehl_ratio = calculate_raw_peak_ratio(aberrated_psf, perfect_psf)
 
     return min(strehl_ratio, 1.0)
+
+
+def calculate_raw_peak_ratio(aberrated_psf, perfect_psf):
+    """Return the unclipped aberrated/perfect PSF peak ratio."""
+    aberrated_peak = float(np.max(aberrated_psf.intensity))
+    perfect_peak = float(np.max(perfect_psf.intensity))
+    return aberrated_peak / perfect_peak
 
 
 def calculate_psf_pixel_scale(wavelength, pupil_diameter, sampling):
@@ -295,6 +297,7 @@ def analyze_psf_quality(psf_field, perfect_psf=None, wavelength=None, pupil_diam
     # Calculate Strehl ratio if perfect PSF provided
     if perfect_psf is not None:
         try:
+            results['raw_peak_ratio_before_clipping'] = calculate_raw_peak_ratio(psf_field, perfect_psf)
             strehl = calculate_strehl_ratio(psf_field, perfect_psf)
             results['strehl_ratio'] = strehl
         except Exception as e:

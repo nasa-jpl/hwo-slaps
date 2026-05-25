@@ -71,12 +71,22 @@ CSV_COLUMNS = (
     "map_max_q_f",
     "map_detectable_ring_fraction",
     "psf_strehl",
+    "psf_raw_peak_ratio",
     "psf_total_rms_nm",
     "psf_segment_hexike_present",
+    "psf_global_zernike_present",
     "psf_kernel_shape",
     "psf_kernel_sum",
     "psf_kernel_peak",
+    "psf_kernel_diff_l2_norm",
+    "psf_kernel_diff_l2_rel",
     "psf_fwhm_mas",
+    "mode_scan_num_modes",
+    "mode_scan_leading_mode",
+    "mode_scan_leading_z_per_unit",
+    "mode_scan_leading_one_sigma_z",
+    "mode_scan_leading_tolerance",
+    "mode_scan_top_modes",
 )
 
 
@@ -194,6 +204,83 @@ def _set_segment_hexike(config: Dict[str, Any], *, segment: int, mode_noll: int,
     aberr["segment_hexikes"] = {int(segment): {int(mode_noll): float(amplitude_nm)}}
 
 
+def _set_global_zernike(config: Dict[str, Any], *, mode_noll: int, amplitude_nm: float) -> None:
+    _set_perfect_psf(config)
+    if float(amplitude_nm) == 0.0:
+        return
+    aberr = config["psf"]["aberrations"]
+    aberr["enable_global_zernikes"] = True
+    aberr["global_zernikes"] = {int(mode_noll): float(amplitude_nm)}
+
+
+def _amplitude_label(amplitude: float) -> str:
+    return str(float(amplitude)).replace(".", "p").replace("-", "m")
+
+
+def _append_psf_sweep_runs(
+    *,
+    runs: List[Dict[str, Any]],
+    manifest: Dict[str, Any],
+    baseline: Dict[str, Any],
+    study_name: str,
+    psf_sweep: Dict[str, Any],
+) -> None:
+    if not psf_sweep.get("enabled", False):
+        return
+
+    pivot_mass = psf_sweep["pivot_mass"]
+    family = str(psf_sweep["family"])
+    map_amplitudes = {float(val) for val in psf_sweep.get("map_amplitudes", [])}
+    scan_amplitudes = {float(val) for val in psf_sweep.get("mode_scan_amplitudes", [])}
+
+    for amplitude in psf_sweep["amplitudes"]:
+        amp = float(amplitude)
+        amp_label = _amplitude_label(amp)
+        config = deepcopy(baseline)
+        config["plotting"]["output_dir"] = str(manifest["output_root"])
+        config["lensing"]["subhalo"]["mass"] = float(pivot_mass["value"])
+
+        if family == "segment_hexikes":
+            segment = int(psf_sweep["segment"])
+            mode_noll = int(psf_sweep["mode_noll"])
+            run_name = f"{study_name}_hexike_s{segment}_n{mode_noll}_a{amp_label}nm_{pivot_mass['label']}"
+            sweep_name = "segment_hexike_amplitude"
+            psf_case = "perfect" if amp == 0.0 else "segment_hexike"
+            psf_mode = f"segment_{segment}_noll_{mode_noll}"
+            _set_segment_hexike(config, segment=segment, mode_noll=mode_noll, amplitude_nm=amp)
+        elif family == "global_zernikes":
+            mode_noll = int(psf_sweep["mode_noll"])
+            run_name = f"{study_name}_global_zernike_n{mode_noll}_a{amp_label}nm_{pivot_mass['label']}"
+            sweep_name = "global_zernike_amplitude"
+            psf_case = "perfect" if amp == 0.0 else "global_zernike"
+            psf_mode = f"global_zernike_noll_{mode_noll}"
+            _set_global_zernike(config, mode_noll=mode_noll, amplitude_nm=amp)
+        else:
+            raise ValueError(f"Unsupported Stage 0 PSF sweep family: {family}")
+
+        config["run_name"] = run_name
+        _set_fisher_common(
+            config,
+            mode="local",
+            run_map=amp in map_amplitudes,
+            mode_scan=amp in scan_amplitudes,
+            manifest=manifest,
+        )
+        runs.append(
+            {
+                "sweep": sweep_name,
+                "run_name": run_name,
+                "config": config,
+                "mass_msun": float(pivot_mass["value"]),
+                "psf_case": psf_case,
+                "psf_family": family,
+                "psf_mode": psf_mode,
+                "psf_amplitude": amp,
+                "psf_units": str(psf_sweep["units"]),
+            }
+        )
+
+
 def _expanded_runs(manifest: Dict[str, Any], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
     study_name = str(manifest["study_name"])
     runs: List[Dict[str, Any]] = []
@@ -228,42 +315,21 @@ def _expanded_runs(manifest: Dict[str, Any], baseline: Dict[str, Any]) -> List[D
                 }
             )
 
-    psf_sweep = manifest.get("psf_sweep", {})
-    if psf_sweep.get("enabled", False):
-        pivot_mass = psf_sweep["pivot_mass"]
-        segment = int(psf_sweep["segment"])
-        mode_noll = int(psf_sweep["mode_noll"])
-        map_amplitudes = {float(val) for val in psf_sweep.get("map_amplitudes", [])}
-        scan_amplitudes = {float(val) for val in psf_sweep.get("mode_scan_amplitudes", [])}
-        for amplitude in psf_sweep["amplitudes"]:
-            amp = float(amplitude)
-            amp_label = str(amp).replace(".", "p").replace("-", "m")
-            run_name = f"{study_name}_hexike_s{segment}_n{mode_noll}_a{amp_label}nm_{pivot_mass['label']}"
-            config = deepcopy(baseline)
-            config["run_name"] = run_name
-            config["plotting"]["output_dir"] = str(manifest["output_root"])
-            config["lensing"]["subhalo"]["mass"] = float(pivot_mass["value"])
-            _set_segment_hexike(config, segment=segment, mode_noll=mode_noll, amplitude_nm=amp)
-            _set_fisher_common(
-                config,
-                mode="local",
-                run_map=amp in map_amplitudes,
-                mode_scan=amp in scan_amplitudes,
-                manifest=manifest,
-            )
-            runs.append(
-                {
-                    "sweep": "segment_hexike_amplitude",
-                    "run_name": run_name,
-                    "config": config,
-                    "mass_msun": float(pivot_mass["value"]),
-                    "psf_case": "perfect" if amp == 0.0 else "segment_hexike",
-                    "psf_family": str(psf_sweep["family"]),
-                    "psf_mode": f"segment_{segment}_noll_{mode_noll}",
-                    "psf_amplitude": amp,
-                    "psf_units": str(psf_sweep["units"]),
-                }
-            )
+    _append_psf_sweep_runs(
+        runs=runs,
+        manifest=manifest,
+        baseline=baseline,
+        study_name=study_name,
+        psf_sweep=manifest.get("psf_sweep", {}),
+    )
+    for psf_sweep in manifest.get("optional_psf_sweeps", []):
+        _append_psf_sweep_runs(
+            runs=runs,
+            manifest=manifest,
+            baseline=baseline,
+            study_name=study_name,
+            psf_sweep=psf_sweep,
+        )
 
     return runs
 
@@ -387,6 +453,34 @@ def _extract_row(
             row["local_degradation"] = local.degradation
             row["local_absorbed_fraction"] = local.absorbed_fraction
             row["sigma_amplitude_profiled"] = local.sigma_amplitude_profiled
+            mode_scan = local.psf_mode_scan
+            if mode_scan is not None and mode_scan.couplings:
+                couplings = sorted(
+                    list(mode_scan.couplings),
+                    key=lambda item: abs(item.one_sigma_z) if item.one_sigma_z is not None else abs(item.z_per_unit),
+                    reverse=True,
+                )
+                leading = couplings[0]
+                row["mode_scan_num_modes"] = len(couplings)
+                row["mode_scan_leading_mode"] = leading.mode_name
+                row["mode_scan_leading_z_per_unit"] = float(leading.z_per_unit)
+                row["mode_scan_leading_one_sigma_z"] = (
+                    None if leading.one_sigma_z is None else float(leading.one_sigma_z)
+                )
+                row["mode_scan_leading_tolerance"] = (
+                    None
+                    if leading.tolerance_for_zmax is None
+                    else float(leading.tolerance_for_zmax)
+                )
+                row["mode_scan_top_modes"] = "; ".join(
+                    (
+                        f"{item.mode_name}:"
+                        f"z_per_unit={float(item.z_per_unit):.6g},"
+                        f"z_1sigma={'' if item.one_sigma_z is None else f'{float(item.one_sigma_z):.6g}'},"
+                        f"tol={'' if item.tolerance_for_zmax is None else f'{float(item.tolerance_for_zmax):.6g}'}"
+                    )
+                    for item in couplings[:8]
+                )
         fmap = fisher_data.map
         if fmap is not None:
             q_values = (
@@ -406,11 +500,15 @@ def _extract_row(
 
         kernel = pyauto_kernel_native(psf_data.kernel)
         row["psf_strehl"] = psf_data.strehl_ratio
+        row["psf_raw_peak_ratio"] = psf_data.raw_peak_ratio_before_clipping
         row["psf_total_rms_nm"] = float(psf_data.total_rms_nm)
         row["psf_segment_hexike_present"] = bool(psf_data.has_segment_hexikes)
+        row["psf_global_zernike_present"] = bool(psf_data.has_global_zernikes)
         row["psf_kernel_shape"] = "x".join(str(dim) for dim in kernel.shape)
         row["psf_kernel_sum"] = float(np.sum(kernel))
         row["psf_kernel_peak"] = float(np.max(kernel))
+        row["psf_kernel_diff_l2_norm"] = psf_data.kernel_diff_l2_norm
+        row["psf_kernel_diff_l2_rel"] = psf_data.kernel_diff_l2_rel
         row["psf_fwhm_mas"] = psf_data.fwhm_mas
 
     return row
