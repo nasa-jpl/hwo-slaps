@@ -47,7 +47,7 @@ The missing layer is not the core physics module layer. The missing layer is the
 - publication figures,
 - detectable-area or detectable-ring summaries,
 - reproducibility metadata,
-- sparse nonlinear validation for SPIE,
+- local nonlinear validation for SPIE,
 - broader nonlinear validation for RASTI.
 
 ## Stage 0: one-week internal-review priority
@@ -88,14 +88,14 @@ Checklist:
 - [x] Treat masses below `1e7 Msun` as exploratory extrapolation unless calibrated by nonlinear fits.
 - [x] Define a perfect-PSF baseline.
 - [x] Define one required PSF perturbation family for SPIE.
-- [ ] Define one optional second PSF perturbation family for SPIE.
+- [x] Define one optional second PSF perturbation family for SPIE.
 - [x] State the amplitude units unambiguously for the Stage 0 PSF family: OPD nm, mirror-surface nm, outgoing-beam microradians, or coefficient RMS.
 - [x] Add a lightweight study manifest format in `scratch/study` or `analysis_manifests/`.
 - [x] Add a lightweight study runner that expands the manifest into per-run configs and run directories.
 - [x] Add cross-run aggregation to `results.csv` or `results.jsonl`.
 - [x] Record at least: run name, config hash, git hash if available, mass, subhalo model, subhalo position, PSF family, PSF mode, PSF amplitude, seed, local `q_F`, local `Z_F`, `Delta log L_F,equiv`, threshold pass/fail, map median `Z_F`, map max `Z_F`, detectable-ring fraction, profiling degradation, nuisance count, and PSF quality metrics.
 - [x] Store SPIE-needed PSF diagnostics: Strehl, WFE/OPD RMS if available, kernel shape, kernel sum, kernel peak, and FWHM.
-- [ ] Add remaining diagnostic extras: raw peak ratio before clipping and a simple kernel-difference norm relative to the perfect PSF.
+- [x] Add remaining diagnostic extras: raw peak ratio before clipping and a simple kernel-difference norm relative to the perfect PSF.
 - [x] Add SPIE plotting scripts for required figures.
 - [x] Add provenance beyond `config_used.yaml`: git hash, config hash, package versions, Python version, and command line.
 - [x] Make the output path portable. Avoid absolute user-specific paths in canonical configs.
@@ -136,7 +136,7 @@ Run a bounded study that supports the SPIE abstract without overclaiming final H
   - low-order global Zernikes.
 - One amplitude ladder per PSF family.
 - Fisher/Asimov forecasts for the headline sweep.
-- Sparse PyAutoLens-JAX nonlinear validation if time permits.
+- Local PyAutoLens-JAX nonlinear validation if time permits.
 - One no-subhalo plus PSF-mismatch false-positive demonstration if time permits.
 
 ### Stretch scope only if the above is already working
@@ -162,10 +162,10 @@ Do not call the Fisher value a nonlinear likelihood ratio. Call it a Fisher-equi
 
 - [x] Does detectability improve monotonically with subhalo mass in the perfect-PSF baseline?
 - [x] Does the perfect-PSF mass floor qualitatively match the SCDD expectation near `10^7` to `10^7.25 Msun` for an HWO-like high-resolution setup?
-- [ ] Which selected PSF modes couple most strongly to subhalo-like residuals?
+- [x] Which selected PSF modes couple most strongly to subhalo-like residuals?
 - [x] At what approximate PSF amplitude does the local detection statistic or detectable-ring fraction degrade materially?
 - [x] What fraction of the sampled Einstein ring remains above the SCDD threshold?
-- [x] Does `q_F` track `q_fit` for the sparse nonlinear validation subset, if that subset is completed?
+- [x] Does `q_F` track `q_fit` for the local nonlinear validation set?
 - [x] Can HWO-SLAPS produce preliminary requirement-style curves from optics perturbations to subhalo detectability?
 
 ## SPIE study figures
@@ -188,7 +188,7 @@ Recommended if time permits:
 
 Use:
 
-> We present HWO-SLAPS, an end-to-end framework that converts HWO-like PSF perturbations into preliminary low-mass subhalo detectability forecasts. We show first mass-reach and PSF-mode degradation curves, with sparse nonlinear validation planned or demonstrated for selected cases.
+> We present HWO-SLAPS, an end-to-end framework that converts HWO-like PSF perturbations into preliminary low-mass subhalo detectability forecasts. We show first mass-reach and PSF-mode degradation curves, with local nonlinear validation across the bounded SPIE grid.
 
 Avoid:
 
@@ -202,9 +202,9 @@ Avoid unless the validation is actually complete:
 
 ### SPIE recommendation
 
-PyAutoLens nonlinear modeling is in scope for SPIE only as a **small validation subset**. It should not block the poster or proceedings if the Fisher study is already producing coherent results.
+PyAutoLens nonlinear modeling is in scope for SPIE as a **local validation layer**. It should not block the poster or proceedings if the Fisher study is already producing coherent results.
 
-Suggested SPIE subset:
+Minimum SPIE subset:
 
 - perfect PSF at `10^7.25` and `10^7.75 Msun`, one position;
 - one perturbed-PSF case at the same position;
@@ -237,10 +237,10 @@ or a monotonic mapping with uncertainty.
 ## Acceptance checks before using SPIE plots
 
 - [x] Perfect-PSF `q_F` increases with subhalo mass for the same position and setup.
-- [ ] The chosen detection threshold is shown on every relevant plot.
+- [x] The chosen detection threshold is shown on every relevant plot.
 - [x] `Delta log L_F,equiv = q_F / 2` is computed consistently.
 - [x] A zero-aberration PSF run is reproducible.
-- [ ] PSF amplitude units are stated in the figure captions.
+- [x] PSF amplitude units are stated in the figure captions.
 - [x] The code records enough provenance to rerun every plotted point.
 - [x] No-subhalo PSF-mismatch case does not produce unexplained threshold-level detections, or the issue is highlighted as a result rather than hidden.
 

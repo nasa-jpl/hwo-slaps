@@ -6,21 +6,23 @@ is the live progress log and result index.
 
 ## Status summary
 
-Current phase: Stage 0 complete; ready for SPIE hardening and follow-on study
-expansion.
+Current phase: Stage 1 and Stage 2 complete; ready for SPIE manuscript/poster
+assembly.
 
 Overall state:
 
 - [x] Canonical SCDD/SPIE baseline config locked.
 - [x] Perfect-PSF mass sweep completed.
 - [x] First PSF perturbation-family sweep completed.
+- [x] Optional second PSF perturbation-family sweep completed.
 - [x] Ring-map / detectable-ring-fraction demonstration completed.
 - [x] Aggregate results table produced.
 - [x] Initial Stage 0 figures produced.
+- [x] PSF-mode coupling ranking produced for the selected SPIE scan basis.
 - [x] Sparse nonlinear validation subset selected.
 - [x] Sparse nonlinear validation pilot completed.
-- [x] Sparse local nonlinear verification accepted for SPIE-plus; full Bayesian
-  evidence / broad nonlinear calibration remains deferred to RASTI.
+- [x] Full Stage 2 local nonlinear/profile validation completed on CPU; full
+  Bayesian evidence / broad sampler calibration remains deferred to RASTI.
 
 ## Metric convention
 
@@ -47,6 +49,8 @@ validated against nonlinear fits.
 | 2026-05-24 | Degradation metric for first plot | Use local `q_F`, `Z_F`, profiling degradation, Strehl, and endpoint detectable-ring fraction. | Done |
 | 2026-05-24 | SPIE nonlinear validation scope | Four-case fixed-template GPU pilot: `1e7`, `10^7.25`, `10^7.75`, and `1e7` with 100 nm segment hexike. | Done |
 | 2026-05-24 | SPIE-plus verification scope | Four injected-subhalo local nonlinear profile fits plus one no-subhalo PSF-mismatch false-positive case. | Done |
+| 2026-05-25 | Optional second SPIE PSF family | Add a global Zernike Noll 4 amplitude ladder and include global Zernikes Noll 4-6 in the selected mode-coupling scan basis. | Done |
+| 2026-05-25 | Full CPU nonlinear validation | Validate all `21` Stage 2 injected cases with local nonlinear/profile checks, plus segment-hexike and global-Zernike false-positive controls. | Done |
 
 ## Stage 0: internal-review priority
 
@@ -64,24 +68,31 @@ Required artifacts:
 Progress notes:
 
 - Stage 0 ran on 2026-05-24 with `13` independent Fisher cases.
-- Runtime was parallelized with `13` workers and `14` thread cap per worker.
-- All `13` cases completed successfully after fixing a perfect-PSF segment-hexike
-  derivative config edge case.
+- Stage 1/2 completion reran on 2026-05-25 with `21` independent Fisher cases:
+  five perfect-PSF mass points, eight segment-hexike amplitude points, and
+  eight global-Zernike amplitude points.
+- The 2026-05-25 run was parallelized with `14` workers and an `8` thread cap
+  per worker. All `21` cases completed successfully.
+- The original `13`-case run completed after fixing a perfect-PSF
+  segment-hexike derivative config edge case.
 - The pivot mass `1e7 Msun` is above the SCDD threshold in the perfect-PSF
   local metric: `q_F = 17.6703`, `Z_F = 4.2036`.
 - The selected segment-hexike mode produces modest local degradation across
   `0-100 nm RMS`: `q_F` changes from `17.6703` to `16.8690`.
+- The optional global-Zernike Noll 4 sweep produces stronger but still
+  above-threshold local degradation across `0-100 nm RMS`: `q_F` changes from
+  `17.6703` to `14.7227`.
 
 Results:
 
 | Artifact | Path | Notes |
 |---|---|---|
 | Baseline config | `configs/study/scdd_spie_baseline.yaml` | Canonical Stage 0 SCDD/SPIE baseline. |
-| Manifest | `scratch/study/stage0_manifest.yaml` | Expands the mass and segment-hexike sweeps. |
+| Manifest | `scratch/study/stage0_manifest.yaml` | Expands the mass, segment-hexike, and optional global-Zernike sweeps. |
 | Study runner | `scripts/run_stage0_study.py` | Supports process-level parallel execution via `--workers`. |
 | Aggregate results table | `outputs/stage0_internal_review/results.csv` | Contains local Fisher metrics, map summaries, PSF diagnostics, provenance fields. |
 | Reproducibility summary | `outputs/stage0_internal_review/study_provenance.json` | Includes git hash, command line, Python, and package versions. |
-| Aggregate figures | `outputs/stage0_internal_review/figures/` | Mass sweep, hexike degradation, and detectable-ring fraction summaries. |
+| Aggregate figures | `outputs/stage0_internal_review/figures/` | Mass sweep, segment-hexike, global-Zernike, and detectable-ring fraction summaries. |
 
 ## Stage 1: SPIE-level codebase hardening
 
@@ -98,6 +109,8 @@ Progress:
 - [x] Store PSF diagnostics.
 - [x] Add initial Stage 0 plotting scripts.
 - [x] Make canonical output paths portable.
+- [x] Define optional global-Zernike PSF family for SPIE.
+- [x] Add raw peak-ratio and perfect-kernel difference diagnostics.
 
 Open implementation notes:
 
@@ -105,6 +118,10 @@ Open implementation notes:
   config is `configs/study/scdd_spie_baseline.yaml`.
 - The maintained modeling route is Fisher/Asimov; nonlinear validation should
   be treated as a sparse calibration layer.
+- The selected Stage 2 PSF scan basis is segment hexike `segment 0, Noll 2`
+  plus global Zernikes `Noll 4-6`. The required amplitude ladder remains
+  segment hexike `segment 0, Noll 2`; the optional second amplitude ladder is
+  global Zernike `Noll 4`.
 
 ## Stage 2: SPIE-level study
 
@@ -143,6 +160,19 @@ PSF perturbation sweep results:
 | `stage0_internal_review_hexike_s0_n2_a50p0nm_m1e7` | segment hexike | segment 0, Noll 2 | `50` | nm RMS | `1.0e7` | `17.4293` | `4.1748` | `0.3190` |  | Local only. |
 | `stage0_internal_review_hexike_s0_n2_a100p0nm_m1e7` | segment hexike | segment 0, Noll 2 | `100` | nm RMS | `1.0e7` | `16.8690` | `4.1072` | `0.3161` | `0.875` | High-amplitude endpoint, mode scan enabled. |
 
+Optional global-Zernike sweep results:
+
+| Run | PSF family | Mode | Amplitude | Units | Mass Msun | q_F | Z_F | Degradation | Detectable-ring fraction | Notes |
+|---|---|---|---:|---|---:|---:|---:|---:|---:|---|
+| `stage0_internal_review_global_zernike_n4_a0p0nm_m1e7` | global Zernike | Noll 4 | `0` | nm RMS | `1.0e7` | `17.6703` | `4.2036` | `0.3202` | `0.875` | Perfect endpoint, mode scan enabled. |
+| `stage0_internal_review_global_zernike_n4_a1p0nm_m1e7` | global Zernike | Noll 4 | `1` | nm RMS | `1.0e7` | `17.6699` | `4.2036` | `0.3202` |  | Local only. |
+| `stage0_internal_review_global_zernike_n4_a2p0nm_m1e7` | global Zernike | Noll 4 | `2` | nm RMS | `1.0e7` | `17.6687` | `4.2034` | `0.3202` |  | Local only. |
+| `stage0_internal_review_global_zernike_n4_a5p0nm_m1e7` | global Zernike | Noll 4 | `5` | nm RMS | `1.0e7` | `17.6601` | `4.2024` | `0.3201` |  | Local only. |
+| `stage0_internal_review_global_zernike_n4_a10p0nm_m1e7` | global Zernike | Noll 4 | `10` | nm RMS | `1.0e7` | `17.6296` | `4.1988` | `0.3199` |  | Local only. |
+| `stage0_internal_review_global_zernike_n4_a20p0nm_m1e7` | global Zernike | Noll 4 | `20` | nm RMS | `1.0e7` | `17.5091` | `4.1844` | `0.3191` |  | Local only. |
+| `stage0_internal_review_global_zernike_n4_a50p0nm_m1e7` | global Zernike | Noll 4 | `50` | nm RMS | `1.0e7` | `16.7372` | `4.0911` | `0.3139` |  | Local only. |
+| `stage0_internal_review_global_zernike_n4_a100p0nm_m1e7` | global Zernike | Noll 4 | `100` | nm RMS | `1.0e7` | `14.7227` | `3.8370` | `0.2995` | `0.875` | High-amplitude endpoint, mode scan enabled. |
+
 Ring-map summary:
 
 | Run | Mass Msun | PSF case | Positions | Median Z_F | Max Z_F | Detectable-ring fraction | Notes |
@@ -150,6 +180,21 @@ Ring-map summary:
 | `stage0_internal_review_mass_m1e7_perfect` | `1.0e7` | perfect | `24` | `4.2638` | `4.9372` | `0.875` | Perfect-PSF ring-map demonstration. |
 | `stage0_internal_review_hexike_s0_n2_a0p0nm_m1e7` | `1.0e7` | perfect | `24` | `4.2638` | `4.9372` | `0.875` | Duplicate perfect endpoint for PSF sweep. |
 | `stage0_internal_review_hexike_s0_n2_a100p0nm_m1e7` | `1.0e7` | segment hexike | `24` | `4.1782` | `4.8622` | `0.875` | High-amplitude endpoint. |
+| `stage0_internal_review_global_zernike_n4_a0p0nm_m1e7` | `1.0e7` | perfect | `24` | `4.2638` | `4.9372` | `0.875` | Duplicate perfect endpoint for optional global-Zernike sweep. |
+| `stage0_internal_review_global_zernike_n4_a100p0nm_m1e7` | `1.0e7` | global Zernike | `24` | `3.9926` | `4.7604` | `0.875` | High-amplitude optional global-Zernike endpoint. |
+
+PSF-mode coupling scan summary:
+
+Mode scan source: `outputs/stage0_internal_review/results.csv`, columns
+`mode_scan_*`. The selected scan basis is `psf.segment_hexikes[0][2]` and
+`psf.global_zernikes[4-6]`, with `5 nm RMS` one-sigma amplitudes for the
+selected coefficient families.
+
+| Run | Leading mode | z per unit | z at 1 sigma | Tolerance for z=1 | Notes |
+|---|---|---:|---:|---:|---|
+| `stage0_internal_review_hexike_s0_n2_a0p0nm_m1e7` | `psf.segment_hexikes[0][2]` | `0.000848` | `0.00424` | `1179.42` | Perfect endpoint; global modes have negligible coupling. |
+| `stage0_internal_review_hexike_s0_n2_a100p0nm_m1e7` | `psf.segment_hexikes[0][2]` | `0.07989` | `0.39945` | `12.52` | Segment-hexike endpoint; injected family remains dominant. |
+| `stage0_internal_review_global_zernike_n4_a100p0nm_m1e7` | `psf.global_zernikes[5]` | `0.65456` | `3.27282` | `1.53` | Global-Zernike endpoint; Noll 5 is the strongest selected coupling, followed by Noll 4. |
 
 ## Nonlinear validation
 
@@ -191,6 +236,7 @@ Rejected sampler-pilot results:
 Accepted local-profile calibration:
 
 Run source: `outputs/stage0_profile_calibration/results.csv`.
+Full Stage 2 run source: `outputs/stage0_profile_calibration_full/results.csv`.
 
 Definition: evaluate the full nonlinear HWO-SLAPS forward model at the smooth
 model nuisance point selected by the Fisher profile solution, then compare the
@@ -204,9 +250,21 @@ separating it from global-sampler search failures.
 | `perfect_m10p7p75_high` | perfect | `165.9551` | `165.7874` | `0.9990` | `0.1011%` | Accepted | High-mass anchor. |
 | `hexike100_m1e7_endpoint` | segment hexike | `16.8690` | `16.8635` | `0.9997` | `0.0325%` | Accepted | 100 nm RMS segment-hexike endpoint. |
 
+Full CPU profile-calibration sweep:
+
+- Completed on 2026-05-25 for all `21` Stage 2 cases in
+  `outputs/stage0_internal_review/results.csv`.
+- Result: `0 / 21` status failures and `0 / 21` alignment failures.
+- Nonlinear-profile-to-Fisher ratio range:
+  `0.9987277594-0.9996937663`.
+- Maximum relative `q` difference: `0.127224%`.
+- Maximum absolute `q` difference: `0.421890`.
+
 SPIE-plus local nonlinear optimization verification:
 
 Run source: `outputs/stage0_spie_plus_validation/results.csv`.
+Full Stage 2 run source:
+`outputs/stage0_spie_plus_validation_full/results.csv`.
 
 Definition: locally optimize the full nonlinear forward model nuisance
 parameters for the smooth and fixed-subhalo hypotheses, then compute
@@ -222,6 +280,22 @@ and fits it with a perfect-PSF model.
 | `perfect_m10p7p75_high` | perfect | perfect | Yes | `165.9551` | `165.7833` | `0.9990` | Accepted | Threshold agreement: both pass `q > 10`. |
 | `hexike100_m1e7_endpoint` | segment hexike | segment hexike | Yes | `16.8690` | `16.8635` | `0.9997` | Accepted | Endpoint PSF case. |
 | `false_positive_hexike100_fit_perfect` | segment hexike | perfect | No |  | `0.0000` |  | Accepted | No unexplained threshold-level false positive. |
+
+Full CPU SPIE-plus sweep:
+
+- Completed on 2026-05-25 for all `21` injected Stage 2 cases plus `2`
+  no-subhalo PSF-mismatch false-positive controls.
+- Result: `0 / 23` SPIE-plus failures.
+- Injected-subhalo `q_fit / q_F` range:
+  `0.9986564700-0.9996927562`.
+- Injected-subhalo `q_fit` range: `14.7181269588-331.1663649054`;
+  all injected cases agree with Fisher on the `q > 10` threshold.
+- False-positive controls:
+  `stage0_spie_plus_false_positive_hexike100_truth_fit_perfect` and
+  `stage0_spie_plus_false_positive_global_zernike100_truth_fit_perfect` both
+  give `q_fit = 0.0 < 10`.
+- Full-run validation plot:
+  `outputs/stage0_spie_plus_validation_full/q_f_vs_q_fit.png`.
 
 Forecast robustness checks:
 
@@ -273,27 +347,28 @@ Deterministic truth-tracer checks:
 Calibration summary:
 
 - Calibration relation: accepted for the local profiled likelihood metric over
-  the four-case Stage 0 subset. The nonlinear forward-model profile statistic
-  agrees with `q_F` to better than `0.11%` in every accepted case.
+  all `21` Stage 2 cases. The nonlinear forward-model profile statistic agrees
+  with `q_F` to better than `0.13%` in every accepted case.
 - Bounded Nautilus fixed-template pilot remains rejected as a calibration
   source because the search did not reliably find the intended likelihood
   basins.
 - Median `q_truth / q_F`: `3.3666` for deterministic truth-tracer checks.
-- Threshold-confusion summary: all accepted local-profile calibration cases pass
-  both Fisher and nonlinear-profile `q > 10`.
-- SPIE-plus optimization summary: all four injected-subhalo local optimizer
-  cases satisfy `0.8 <= q_fit/q_F <= 1.2`, and the no-subhalo PSF-mismatch case
-  has `q_fit = 0 < 10`.
+- Threshold-confusion summary: all `21` full-sweep local-profile calibration
+  cases pass both Fisher and nonlinear-profile `q > 10`.
+- SPIE-plus optimization summary: all `21` injected-subhalo local optimizer
+  cases satisfy `0.8 <= q_fit/q_F <= 1.2`, and both no-subhalo PSF-mismatch
+  cases have `q_fit = 0 < 10`.
 - Forecast robustness summary: the near-threshold `1e7 Msun` case has noisy
   median `q = 14.9248` with `60%` of five noisy seeds above threshold; the
   `10^7.25 Msun` case has noisy median `q = 34.0907` with `100%` above
   threshold; all three deterministic no-subhalo controls stay below threshold;
   and all eight ring-position forward checks match `q_F` to better than `0.1%`.
 - Current claim boundary: calibrated local Fisher/Asimov forecast with
-  deterministic PyAutoLens truth-likelihood sanity checks and sparse local
-  nonlinear optimization verification, plus lightweight noisy, false-positive,
-  and position-variation forecast checks. Full Bayesian evidence / broad
-  nonlinear search remains a separate sampler-engineering problem.
+  deterministic PyAutoLens truth-likelihood sanity checks and full Stage 2
+  local nonlinear optimization verification, plus lightweight noisy,
+  false-positive, and position-variation forecast checks. Full Bayesian
+  evidence / broad sampler calibration remains a separate sampler-engineering
+  problem.
 
 ## Stage 3: SPIE manuscript and poster
 
@@ -314,8 +389,8 @@ Manuscript/poster notes:
 - Use preliminary framework language.
 - Avoid final engineering requirement claims.
 - State Fisher/Asimov limitations clearly.
-- State that sparse local nonlinear optimization verifies selected cases, while
-  full Bayesian evidence / broad nonlinear calibration is deferred to RASTI.
+- State that local nonlinear optimization verifies the full Stage 2 grid, while
+  full Bayesian evidence / broad sampler calibration is deferred to RASTI.
 - State that the current noisy ensemble is a small profiled-Fisher ensemble, not
   a full noisy nonlinear recovery campaign.
 - State PSF amplitude units in every relevant figure caption.
@@ -342,18 +417,21 @@ Deferred items:
 | Canonical config | `configs/study/scdd_spie_baseline.yaml` | Yes | Stage 0 SCDD/SPIE baseline. |
 | Manifest | `scratch/study/stage0_manifest.yaml` | Yes | Stage 0 mass and PSF sweeps. |
 | Generated run configs | `outputs/stage0_internal_review/generated_configs/` | Yes | One config per run. |
-| Aggregate results CSV | `outputs/stage0_internal_review/results.csv` | Yes | `13` successful rows. |
+| Aggregate results CSV | `outputs/stage0_internal_review/results.csv` | Yes | `21` successful rows. |
 | Aggregate nonlinear CSV | `outputs/stage0_nonlinear_validation/results.csv` | Yes | Four-case bounded GPU pilot; not accepted as calibration. |
 | Nonlinear truth diagnostics | `outputs/stage0_nonlinear_validation/truth_diagnostics_after_unitfix.csv` | Yes | Deterministic PyAutoLens truth-tracer checks. |
 | SPIE-plus validation CSV | `outputs/stage0_spie_plus_validation/results.csv` | Yes | Local nonlinear optimizer verification plus false-positive case. |
 | SPIE-plus validation plot | `outputs/stage0_spie_plus_validation/q_f_vs_q_fit.png` | Yes | Fisher versus local optimizer statistic for injected-subhalo cases. |
+| Full profile calibration CSV | `outputs/stage0_profile_calibration_full/results.csv` | Yes | Full `21`-case local-profile calibration; `0 / 21` failures. |
+| Full SPIE-plus validation CSV | `outputs/stage0_spie_plus_validation_full/results.csv` | Yes | Full `21` injected cases plus `2` false-positive controls; `0 / 23` failures. |
+| Full SPIE-plus validation plot | `outputs/stage0_spie_plus_validation_full/q_f_vs_q_fit.png` | Yes | Fisher versus local optimizer statistic for all injected Stage 2 cases. |
 | Forecast robustness outputs | `outputs/stage0_forecast_robustness/` | Yes | Noisy ensembles, false-positive controls, and ring-position variation checks. |
-| Figures | `outputs/stage0_internal_review/figures/` | Yes | Aggregate Stage 0 figures. |
+| Figures | `outputs/stage0_internal_review/figures/` | Yes | Aggregate Stage 0 figures, including segment-hexike and global-Zernike sweeps. |
 | Reproducibility summary | `outputs/stage0_internal_review/study_provenance.json` | Yes | Includes command, git hash, Python, package versions. |
 
 ## Open questions
 
 1. Which Stage 0 figures should be promoted into a poster/manuscript figure
    script with final styling?
-2. Should the next sweep vary segment IDs/modes, or first add a second PSF
-   family such as global Zernikes?
+2. Should the next sweep vary segment IDs/modes, or promote global-Zernike
+   variants beyond Noll 4 into full amplitude ladders?
