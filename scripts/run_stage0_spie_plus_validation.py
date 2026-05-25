@@ -46,6 +46,16 @@ DEFAULT_INJECTED_CASES = (
 )
 FALSE_POSITIVE_CASE = "stage0_spie_plus_false_positive_hexike100_truth_fit_perfect"
 FALSE_POSITIVE_TEMPLATE = "stage0_internal_review_hexike_s0_n2_a100p0nm_m1e7"
+GLOBAL_FALSE_POSITIVE_CASE = "stage0_spie_plus_false_positive_global_zernike100_truth_fit_perfect"
+GLOBAL_FALSE_POSITIVE_TEMPLATE = "stage0_internal_review_global_zernike_n4_a100p0nm_m1e7"
+DEFAULT_FALSE_POSITIVE_TEMPLATES = (
+    FALSE_POSITIVE_TEMPLATE,
+    GLOBAL_FALSE_POSITIVE_TEMPLATE,
+)
+FALSE_POSITIVE_CASE_IDS = {
+    FALSE_POSITIVE_TEMPLATE: FALSE_POSITIVE_CASE,
+    GLOBAL_FALSE_POSITIVE_TEMPLATE: GLOBAL_FALSE_POSITIVE_CASE,
+}
 
 CSV_COLUMNS = (
     "case_id",
@@ -435,13 +445,15 @@ def run_injected_case(
 def run_false_positive_case(
     *,
     stage0_row: Dict[str, str],
+    template_run_name: str,
+    case_id: str,
     config_dir: Path,
     output_dir: Path,
     max_nfev: int,
 ) -> Dict[str, Any]:
     start = time.perf_counter()
     try:
-        config = profile_cal._load_config(config_dir / f"{FALSE_POSITIVE_TEMPLATE}.yaml")
+        config = profile_cal._load_config(config_dir / f"{template_run_name}.yaml")
         detector, fit_config, _observation_truth, _psf_fit, data_mu = _build_false_positive_inputs(config)
         zero = _zero_coefficients(detector)
         jitter = _jitter_coefficients(detector, fit_config, fraction=0.25)
@@ -472,27 +484,28 @@ def run_false_positive_case(
             subhalo_chi2_min=subhalo_fit.chi2_min,
         )
         false_positive_pass = bool(q_fit < 10.0)
+        truth_psf_case = str(stage0_row["psf_case"])
         detail = {
-            "case_id": FALSE_POSITIVE_CASE,
-            "template_run": FALSE_POSITIVE_TEMPLATE,
+            "case_id": case_id,
+            "template_run": template_run_name,
             "smooth_fit": smooth_fit.to_dict(),
             "subhalo_fit": subhalo_fit.to_dict(),
             "q_fit": q_fit,
             "false_positive_pass": false_positive_pass,
-            "truth_psf_case": "segment_hexike",
+            "truth_psf_case": truth_psf_case,
             "fit_psf_case": "perfect",
         }
-        _write_json(output_dir / f"{FALSE_POSITIVE_CASE}.json", detail)
+        _write_json(output_dir / f"{case_id}.json", detail)
 
         return _row(
-            case_id=FALSE_POSITIVE_CASE,
-            run_name=FALSE_POSITIVE_TEMPLATE,
+            case_id=case_id,
+            run_name=template_run_name,
             case_kind="false_positive_psf_mismatch",
             status="success",
             error=None,
             runtime_s=time.perf_counter() - start,
             mass_msun=float(stage0_row["mass_msun"]),
-            truth_psf_case="segment_hexike",
+            truth_psf_case=truth_psf_case,
             fit_psf_case="perfect",
             psf_amplitude=float(stage0_row["psf_amplitude"]),
             has_injected_subhalo=False,
@@ -510,8 +523,8 @@ def run_false_positive_case(
         )
     except Exception as exc:  # pragma: no cover - runtime diagnostics.
         return _error_row(
-            case_id=FALSE_POSITIVE_CASE,
-            run_name=FALSE_POSITIVE_TEMPLATE,
+            case_id=case_id,
+            run_name=template_run_name,
             case_kind="false_positive_psf_mismatch",
             error=repr(exc),
             runtime_s=time.perf_counter() - start,
@@ -650,13 +663,14 @@ def _run_cases(
     output_dir: Path,
     cases: Sequence[str],
     include_false_positive: bool,
+    false_positive_templates: Sequence[str],
     max_nfev: int,
     ratio_tolerance: float,
     workers: int,
 ) -> List[Dict[str, Any]]:
     tasks = [("injected", run_name) for run_name in cases]
     if include_false_positive:
-        tasks.append(("false_positive", FALSE_POSITIVE_CASE))
+        tasks.extend(("false_positive", template) for template in false_positive_templates)
 
     if workers <= 1:
         rows = []
@@ -673,9 +687,15 @@ def _run_cases(
                     )
                 )
             else:
+                case_id = FALSE_POSITIVE_CASE_IDS.get(
+                    run_name,
+                    f"stage0_spie_plus_false_positive_{run_name}_truth_fit_perfect",
+                )
                 rows.append(
                     run_false_positive_case(
-                        stage0_row=stage0_rows[FALSE_POSITIVE_TEMPLATE],
+                        stage0_row=stage0_rows[run_name],
+                        template_run_name=run_name,
+                        case_id=case_id,
                         config_dir=config_dir,
                         output_dir=output_dir,
                         max_nfev=max_nfev,
@@ -698,9 +718,15 @@ def _run_cases(
                     ratio_tolerance=ratio_tolerance,
                 )
             else:
+                case_id = FALSE_POSITIVE_CASE_IDS.get(
+                    run_name,
+                    f"stage0_spie_plus_false_positive_{run_name}_truth_fit_perfect",
+                )
                 future = executor.submit(
                     run_false_positive_case,
-                    stage0_row=stage0_rows[FALSE_POSITIVE_TEMPLATE],
+                    stage0_row=stage0_rows[run_name],
+                    template_run_name=run_name,
+                    case_id=case_id,
                     config_dir=config_dir,
                     output_dir=output_dir,
                     max_nfev=max_nfev,
@@ -721,6 +747,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cases", nargs="*", default=list(DEFAULT_INJECTED_CASES))
     parser.add_argument("--include-false-positive", action="store_true", default=True)
     parser.add_argument("--no-false-positive", dest="include_false_positive", action="store_false")
+    parser.add_argument("--false-positive-cases", nargs="*", default=list(DEFAULT_FALSE_POSITIVE_TEMPLATES))
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--max-nfev", type=int, default=12)
     parser.add_argument("--ratio-tolerance", type=float, default=0.2)
@@ -732,8 +759,8 @@ def main() -> int:
     args = parse_args()
     stage0_rows = profile_cal._read_stage0_rows(Path(args.stage0_results).resolve())
     missing = [case for case in args.cases if case not in stage0_rows]
-    if args.include_false_positive and FALSE_POSITIVE_TEMPLATE not in stage0_rows:
-        missing.append(FALSE_POSITIVE_TEMPLATE)
+    if args.include_false_positive:
+        missing.extend(case for case in args.false_positive_cases if case not in stage0_rows)
     if missing:
         raise KeyError(f"Cases missing from Stage 0 results: {missing}")
 
@@ -744,6 +771,7 @@ def main() -> int:
         output_dir=output_dir,
         cases=args.cases,
         include_false_positive=bool(args.include_false_positive),
+        false_positive_templates=list(args.false_positive_cases),
         max_nfev=max(1, int(args.max_nfev)),
         ratio_tolerance=float(args.ratio_tolerance),
         workers=max(1, int(args.workers)),
