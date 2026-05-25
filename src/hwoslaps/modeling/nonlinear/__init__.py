@@ -16,6 +16,12 @@ from .likelihood_metrics import (
     q_from_delta_log_l,
     z_from_q,
 )
+from .local_profile import (
+    LocalFitAttempt,
+    LocalProfileFitResult,
+    fit_local_least_squares_profile,
+    profile_likelihood_q,
+)
 from .output_schema import (
     NonlinearCaseResult,
     NonlinearDetectionData,
@@ -29,6 +35,8 @@ __all__ = [
     "CalibrationPair",
     "FisherNonlinearCalibration",
     "LikelihoodRatioMetric",
+    "LocalFitAttempt",
+    "LocalProfileFitResult",
     "NonlinearCaseResult",
     "NonlinearDetectionData",
     "NonlinearFitSummary",
@@ -39,8 +47,10 @@ __all__ = [
     "SubhaloTrial",
     "delta_log_l_from_q",
     "fit_q_calibration",
+    "fit_local_least_squares_profile",
     "pair_fisher_and_nonlinear",
     "profile_likelihood_ratio",
+    "profile_likelihood_q",
     "q_from_delta_log_l",
     "trial_from_lensing_truth",
     "z_from_q",
