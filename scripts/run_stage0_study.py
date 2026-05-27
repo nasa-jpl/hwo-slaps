@@ -213,8 +213,99 @@ def _set_global_zernike(config: Dict[str, Any], *, mode_noll: int, amplitude_nm:
     aberr["global_zernikes"] = {int(mode_noll): float(amplitude_nm)}
 
 
+def _set_segment_hexike_ensemble(
+    config: Dict[str, Any],
+    *,
+    coefficients: Dict[int, Dict[int, float]],
+) -> None:
+    aberr = config["psf"]["aberrations"]
+    aberr["enable_segment_hexikes"] = bool(coefficients)
+    aberr["segment_hexikes"] = coefficients
+
+
+def _set_global_zernike_ensemble(
+    config: Dict[str, Any],
+    *,
+    coefficients: Dict[int, float],
+) -> None:
+    aberr = config["psf"]["aberrations"]
+    aberr["enable_global_zernikes"] = bool(coefficients)
+    aberr["global_zernikes"] = coefficients
+
+
 def _amplitude_label(amplitude: float) -> str:
     return str(float(amplitude)).replace(".", "p").replace("-", "m")
+
+
+def _num_segments_from_rings(num_rings: int) -> int:
+    rings = int(num_rings)
+    if rings < 0:
+        raise ValueError("num_rings must be non-negative")
+    return 1 + 3 * rings * (rings + 1)
+
+
+def _parse_mode_range(raw_modes: Any) -> List[int]:
+    if isinstance(raw_modes, str):
+        if "-" in raw_modes:
+            start, stop = raw_modes.split("-", 1)
+            return list(range(int(start), int(stop) + 1))
+        return [int(raw_modes)]
+    return [int(mode) for mode in raw_modes]
+
+
+def _normalize_vector(values: np.ndarray, target_norm: float) -> np.ndarray:
+    norm = float(np.linalg.norm(values))
+    if target_norm == 0.0:
+        return np.zeros_like(values, dtype=float)
+    if norm == 0.0:
+        raise ValueError("Cannot normalize a zero random PSF coefficient vector")
+    return np.asarray(values, dtype=float) * (float(target_norm) / norm)
+
+
+def _random_segment_hexikes(
+    *,
+    rng: np.random.Generator,
+    segments: List[int],
+    modes: List[int],
+    target_aperture_rms_nm: float,
+) -> Dict[int, Dict[int, float]]:
+    if float(target_aperture_rms_nm) == 0.0:
+        return {}
+
+    raw = rng.standard_normal((len(segments), len(modes)))
+    # For equal-area segment modes, aperture RMS is approximately
+    # sqrt(sum(coeff^2) / n_segments), so scale the coefficient vector by
+    # sqrt(n_segments). The generated PSF records the measured pupil RMS.
+    scaled = _normalize_vector(raw.ravel(), float(target_aperture_rms_nm) * np.sqrt(len(segments)))
+    matrix = scaled.reshape((len(segments), len(modes)))
+    return {
+        int(segment): {
+            int(mode): float(matrix[seg_idx, mode_idx])
+            for mode_idx, mode in enumerate(modes)
+        }
+        for seg_idx, segment in enumerate(segments)
+    }
+
+
+def _random_global_zernikes(
+    *,
+    rng: np.random.Generator,
+    modes: List[int],
+    target_rms_nm: float,
+) -> Dict[int, float]:
+    if float(target_rms_nm) == 0.0:
+        return {}
+
+    coeffs = _normalize_vector(rng.standard_normal(len(modes)), float(target_rms_nm))
+    return {int(mode): float(coeffs[idx]) for idx, mode in enumerate(modes)}
+
+
+def _psf_ensemble_pivot_masses(ensemble: Dict[str, Any]) -> List[Dict[str, Any]]:
+    if "pivot_masses" in ensemble:
+        return list(ensemble["pivot_masses"])
+    if "masses" in ensemble:
+        return list(ensemble["masses"])
+    return [ensemble["pivot_mass"]]
 
 
 def _append_psf_sweep_runs(
@@ -281,6 +372,146 @@ def _append_psf_sweep_runs(
         )
 
 
+def _append_psf_ensemble_runs(
+    *,
+    runs: List[Dict[str, Any]],
+    manifest: Dict[str, Any],
+    baseline: Dict[str, Any],
+    study_name: str,
+) -> None:
+    ensemble = manifest.get("psf_ensemble_sweep", {})
+    if not ensemble.get("enabled", False):
+        return
+
+    pivot_masses = _psf_ensemble_pivot_masses(ensemble)
+    amplitudes = [float(value) for value in ensemble["amplitudes"]]
+    draws = int(ensemble["draws_per_amplitude"])
+    base_seed = int(ensemble.get("seed", baseline.get("global_seed", 0)))
+    units = str(ensemble.get("units", "nm RMS"))
+    split_mode = str(ensemble.get("combined_rms_split", "equal_variance"))
+
+    segment_block = ensemble.get("segment_hexikes", {})
+    global_block = ensemble.get("global_zernikes", {})
+    telescope = baseline["psf"]["telescope"]
+    num_segments = _num_segments_from_rings(int(telescope["num_rings"]))
+    segments = segment_block.get("segments", "all")
+    if segments == "all":
+        segment_ids = list(range(num_segments))
+    else:
+        segment_ids = [int(segment) for segment in segments]
+    segment_modes = _parse_mode_range(segment_block.get("mode_nolls", []))
+    global_modes = _parse_mode_range(global_block.get("mode_nolls", []))
+
+    families = [str(family) for family in ensemble.get("families", [])]
+    for pivot_mass in pivot_masses:
+        if any(amplitude == 0.0 for amplitude in amplitudes):
+            config = deepcopy(baseline)
+            config["plotting"]["output_dir"] = str(manifest["output_root"])
+            config["lensing"]["subhalo"]["mass"] = float(pivot_mass["value"])
+            config["global_seed"] = base_seed
+            _set_perfect_psf(config)
+            run_name = f"{study_name}_perfect_reference_{pivot_mass['label']}"
+            config["run_name"] = run_name
+            _set_fisher_common(
+                config,
+                mode="local",
+                run_map=False,
+                mode_scan=False,
+                manifest=manifest,
+            )
+            runs.append(
+                {
+                    "sweep": "psf_ensemble_perfect_reference",
+                    "run_name": run_name,
+                    "config": config,
+                    "mass_msun": float(pivot_mass["value"]),
+                    "psf_case": "perfect",
+                    "psf_family": "none",
+                    "psf_mode": "none",
+                    "psf_amplitude": 0.0,
+                    "psf_units": units,
+                }
+            )
+
+        for family in families:
+            if family not in {"segment_only", "global_only", "combined"}:
+                raise ValueError(f"Unsupported PSF ensemble family: {family}")
+
+            for amplitude in amplitudes:
+                if amplitude == 0.0:
+                    continue
+                amp_label = _amplitude_label(amplitude)
+                for draw_idx in range(draws):
+                    seed = base_seed + len(runs) + 1
+                    rng = np.random.default_rng(seed)
+                    config = deepcopy(baseline)
+                    config["plotting"]["output_dir"] = str(manifest["output_root"])
+                    config["lensing"]["subhalo"]["mass"] = float(pivot_mass["value"])
+                    config["global_seed"] = seed
+                    _set_perfect_psf(config)
+
+                    segment_budget = amplitude
+                    global_budget = amplitude
+                    if family == "combined" and split_mode == "equal_variance":
+                        segment_budget = amplitude / np.sqrt(2.0)
+                        global_budget = amplitude / np.sqrt(2.0)
+
+                    if family in {"segment_only", "combined"}:
+                        _set_segment_hexike_ensemble(
+                            config,
+                            coefficients=_random_segment_hexikes(
+                                rng=rng,
+                                segments=segment_ids,
+                                modes=segment_modes,
+                                target_aperture_rms_nm=segment_budget,
+                            ),
+                        )
+                    if family in {"global_only", "combined"}:
+                        _set_global_zernike_ensemble(
+                            config,
+                            coefficients=_random_global_zernikes(
+                                rng=rng,
+                                modes=global_modes,
+                                target_rms_nm=global_budget,
+                            ),
+                        )
+
+                    run_name = (
+                        f"{study_name}_{family}_a{amp_label}nm_"
+                        f"d{draw_idx:03d}_{pivot_mass['label']}"
+                    )
+                    config["run_name"] = run_name
+                    _set_fisher_common(
+                        config,
+                        mode="local",
+                        run_map=False,
+                        mode_scan=False,
+                        manifest=manifest,
+                    )
+                    runs.append(
+                        {
+                            "sweep": f"psf_ensemble_{family}",
+                            "run_name": run_name,
+                            "config": config,
+                            "mass_msun": float(pivot_mass["value"]),
+                            "psf_case": family if amplitude != 0.0 else "perfect",
+                            "psf_family": family,
+                            "psf_mode": (
+                                f"segment_hexike_noll_{segment_modes[0]}-{segment_modes[-1]}"
+                                f"+global_zernike_noll_{global_modes[0]}-{global_modes[-1]}"
+                                if family == "combined"
+                                else (
+                                    f"segment_hexike_noll_{segment_modes[0]}-{segment_modes[-1]}"
+                                    if family == "segment_only"
+                                    else f"global_zernike_noll_{global_modes[0]}-{global_modes[-1]}"
+                                )
+                            ),
+                            "psf_amplitude": amplitude,
+                            "psf_units": units,
+                        }
+                    )
+
+
 def _expanded_runs(manifest: Dict[str, Any], baseline: Dict[str, Any]) -> List[Dict[str, Any]]:
     study_name = str(manifest["study_name"])
     runs: List[Dict[str, Any]] = []
@@ -330,6 +561,13 @@ def _expanded_runs(manifest: Dict[str, Any], baseline: Dict[str, Any]) -> List[D
             study_name=study_name,
             psf_sweep=psf_sweep,
         )
+
+    _append_psf_ensemble_runs(
+        runs=runs,
+        manifest=manifest,
+        baseline=baseline,
+        study_name=study_name,
+    )
 
     return runs
 

@@ -1,0 +1,45 @@
+study_name: stage0_rasti_overnight_main
+description: RASTI-oriented overnight Fisher mass x random PSF WFE ensemble.
+baseline_config: configs/study/scdd_spie_baseline.yaml
+output_root: outputs/stage0_rasti_overnight_main
+
+thresholds:
+  q_scdd: 10.0
+
+map:
+  num_angles: 24
+  offset_pixels: 0.0
+
+mass_sweep:
+  enabled: false
+
+psf_sweep:
+  enabled: false
+
+optional_psf_sweeps: []
+
+psf_ensemble_sweep:
+  enabled: true
+  pivot_masses:
+    - {label: m1e6, value: 1.0e6}
+    - {label: m10p6p5, value: 3.162277660168379e6}
+    - {label: m10p6p75, value: 5.623413251903491e6}
+    - {label: m1e7, value: 1.0e7}
+    - {label: m10p7p25, value: 1.7782794100389228e7}
+    - {label: m10p7p5, value: 3.162277660168379e7}
+    - {label: m10p7p75, value: 5.623413251903491e7}
+    - {label: m1e8, value: 1.0e8}
+  seed: 2026052801
+  units: nm RMS
+  families:
+    - segment_only
+    - global_only
+    - combined
+  amplitudes: [0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0]
+  draws_per_amplitude: 20
+  combined_rms_split: equal_variance
+  segment_hexikes:
+    segments: all
+    mode_nolls: [2, 3, 4, 5, 6]
+  global_zernikes:
+    mode_nolls: [4, 5, 6, 7, 8, 9, 10, 11]
