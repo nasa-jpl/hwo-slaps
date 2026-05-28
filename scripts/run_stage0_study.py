@@ -386,6 +386,7 @@ def _append_psf_ensemble_runs(
     pivot_masses = _psf_ensemble_pivot_masses(ensemble)
     amplitudes = [float(value) for value in ensemble["amplitudes"]]
     draws = int(ensemble["draws_per_amplitude"])
+    draw_index_offset = int(ensemble.get("draw_index_offset", 0))
     base_seed = int(ensemble.get("seed", baseline.get("global_seed", 0)))
     units = str(ensemble.get("units", "nm RMS"))
     split_mode = str(ensemble.get("combined_rms_split", "equal_variance"))
@@ -442,6 +443,7 @@ def _append_psf_ensemble_runs(
                     continue
                 amp_label = _amplitude_label(amplitude)
                 for draw_idx in range(draws):
+                    draw_label = draw_index_offset + draw_idx
                     seed = base_seed + len(runs) + 1
                     rng = np.random.default_rng(seed)
                     config = deepcopy(baseline)
@@ -478,7 +480,7 @@ def _append_psf_ensemble_runs(
 
                     run_name = (
                         f"{study_name}_{family}_a{amp_label}nm_"
-                        f"d{draw_idx:03d}_{pivot_mass['label']}"
+                        f"d{draw_label:03d}_{pivot_mass['label']}"
                     )
                     config["run_name"] = run_name
                     _set_fisher_common(
