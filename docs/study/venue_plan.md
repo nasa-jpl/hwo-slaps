@@ -39,8 +39,8 @@ HWO-SLAPS fits this call well because it is a science-engineering interface tool
 | Scene count | One canonical SCDD-like scene | Multiple scenes or source/lens stress tests |
 | Subhalo positions | Local plus Einstein-ring map | Full 2D sensitivity maps |
 | PSF modes | One required family, optional second family | Multiple segment/global mode families and combinations |
-| Validation | Sparse PyAutoLens-JAX subset if time permits | Mandatory nonlinear validation grid |
-| False positives | Optional demo | Required no-subhalo PSF-mismatch study |
+| Validation | Full PyAutoLens local-search evidence validation for the controlled SPIE grid | Broader nonlinear validation with scene/source/PSF-nuisance expansion |
+| False positives | Matched-PSF and wrong-PSF no-subhalo control grids | Larger no-subhalo PSF-mismatch and nuisance-marginalization study |
 | Source realism | Smooth source acceptable if caveated | Clumpy/cuspy source stress tests required |
 | Requirement language | Preliminary requirement-style curves | Calibrated requirement translation |
 
@@ -71,7 +71,9 @@ Recommended bounds:
 - One or two PSF mode families, such as segment piston/hexike and low-order global Zernikes.
 - One stability or amplitude axis.
 - One Fisher ring-map demonstration around the Einstein ring, reported as a detectable-ring fraction rather than full 2D detectable area.
-- Sparse PyAutoLens-JAX nonlinear-fit validation only if it can be completed without risking the main SPIE figures.
+- PyAutoLens local-search nonlinear evidence validation for the controlled SPIE grid.
+- Matched-PSF and wrong-PSF no-subhalo controls to isolate PSF-mismatch false positives.
+- A compact noisy PyAutoLens validation pilot as a robustness check.
 
 Recommended SPIE figures:
 
@@ -81,19 +83,22 @@ Recommended SPIE figures:
 - Detection metric versus subhalo mass.
 - Detection degradation or detectable-ring fraction versus PSF amplitude.
 - PSF-mode coupling or tolerance-style figure.
-- Optional Fisher-versus-nonlinear validation figure.
+- Fisher-versus-PyAutoLens nonlinear validation figure.
+- Matched versus wrong-PSF false-positive control figure.
 
 Tone:
 
 - “We present a framework and first forecasts.”
 - “We translate PSF perturbations into preliminary subhalo-detection sensitivity curves.”
-- “We provide sparse nonlinear validation where available.”
+- “We validate the Fisher forecast against PyAutoLens nonlinear evidence in the controlled SPIE grid.”
+- “Correct PSF modeling produces clean no-subhalo controls, while wrong-PSF modeling can mimic subhalo evidence.”
 
 Avoid:
 
 - “We derive final HWO engineering requirements.”
 - “HWO must meet this exact wavefront stability number.”
-- “The Fisher metric is fully calibrated,” unless the PyAutoLens validation grid is actually complete.
+- “These are final HWO PSF requirements.”
+- “All PSF nuisance parameters have been marginalized.”
 
 ## RASTI HWO Special Issue
 
@@ -104,11 +109,11 @@ Submit the full archival science study to the RASTI Habitable World Observatory 
 Core scope:
 
 - Expand the SPIE framework into a calibrated, publishable study.
-- Expand sparse SPIE nonlinear checks into a Fisher-versus-fit validation grid.
+- Expand the SPIE nonlinear validation into a broader archival validation suite.
 - Run a full PSF-mode sweep.
 - Run the full subhalo mass-reach sweep.
 - Produce full 2D sensitivity maps, detectable-area curves, and mass-threshold summaries.
-- Test false positives from PSF mismatch.
+- Extend false-positive tests to PSF nuisance fitting, source realism, lens-light residuals, and multiple scenes.
 - Translate PSF errors into HWO-relevant requirement language.
 
 Recommended expanded content:
@@ -120,7 +125,7 @@ Recommended expanded content:
 - More subhalo masses.
 - Better source realism, especially clumpy or cuspy sources motivated by the SCDD.
 - Perfect-PSF and perturbed-PSF comparison grids.
-- Fisher-versus-fit calibration across masses, positions, PSF states, and false-positive cases.
+- Fisher-versus-PyAutoLens calibration across broader masses, positions, PSF states, source models, and false-positive cases.
 - Lens-light and subtraction-residual stress tests.
 - Reproducible configs, run manifests, analysis tables, and figure-generation scripts.
 
@@ -142,9 +147,9 @@ RASTI deliverables:
 
 ## PyAutoLens validation placement
 
-For SPIE, PyAutoLens nonlinear modeling is best treated as a small validation subset or planned validation. The SPIE story should not depend on completing a large nonlinear grid in one week.
+For SPIE, PyAutoLens nonlinear modeling is now part of the core result. The controlled grid includes full local-search evidence validation, matched-PSF controls, wrong-PSF controls, `n_live=800` convergence checks, and a compact noisy pilot.
 
-For RASTI, nonlinear validation should be a central requirement. The RASTI claim that PSF stability requirements are calibrated depends on showing how the Fisher/Asimov statistic maps to direct smooth-versus-subhalo nonlinear fits.
+For RASTI, nonlinear validation should become broader rather than merely first-pass. The RASTI claim that PSF stability requirements are calibrated depends on extending the SPIE validation to multiple scenes, source morphologies, full 2D maps, noisy ensembles, and PSF-nuisance marginalization.
 
 ## Bottom line
 

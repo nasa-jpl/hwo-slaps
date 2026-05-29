@@ -19,10 +19,11 @@ Overall state:
 - [x] Aggregate results table produced.
 - [x] Initial Stage 0 figures produced.
 - [x] PSF-mode coupling ranking produced for the selected SPIE scan basis.
-- [x] Sparse nonlinear validation subset selected.
-- [x] Sparse nonlinear validation pilot completed.
-- [x] Full Stage 2 local nonlinear/profile validation completed on CPU; full
-  Bayesian evidence / broad sampler calibration remains deferred to RASTI.
+- [x] Full PyAutoLens local-search nonlinear evidence validation completed for
+  the controlled SPIE grid.
+- [x] Matched-PSF and wrong-PSF no-subhalo control grids completed.
+- [x] `n_live=800` convergence subset completed.
+- [x] Compact noisy PyAutoLens local-search pilot completed.
 
 ## Metric convention
 
@@ -47,10 +48,9 @@ validated against nonlinear fits.
 | 2026-05-24 | First PSF perturbation family | Segment hexikes are HWO-segment-specific and already implemented. | Done |
 | 2026-05-24 | PSF amplitude ladder | Wide `0, 1, 2, 5, 10, 20, 50, 100 nm RMS` ladder at `1e7 Msun`. | Done |
 | 2026-05-24 | Degradation metric for first plot | Use local `q_F`, `Z_F`, profiling degradation, Strehl, and endpoint detectable-ring fraction. | Done |
-| 2026-05-24 | SPIE nonlinear validation scope | Four-case fixed-template GPU pilot: `1e7`, `10^7.25`, `10^7.75`, and `1e7` with 100 nm segment hexike. | Done |
-| 2026-05-24 | SPIE-plus verification scope | Four injected-subhalo local nonlinear profile fits plus one no-subhalo PSF-mismatch false-positive case. | Done |
+| 2026-05-24 | SPIE nonlinear validation scope | Initial four-case fixed-template GPU pilot used to debug units/model setup; superseded by full PyAutoLens local-search evidence validation. | Superseded |
 | 2026-05-25 | Optional second SPIE PSF family | Add a global Zernike Noll 4 amplitude ladder and include global Zernikes Noll 4-6 in the selected mode-coupling scan basis. | Done |
-| 2026-05-25 | Full CPU nonlinear validation | Validate all `21` Stage 2 injected cases with local nonlinear/profile checks, plus segment-hexike and global-Zernike false-positive controls. | Done |
+| 2026-05-29 | Full PyAutoLens local-search evidence validation | Completed full matched-PSF grid, full wrong-PSF controls, `n_live=800` convergence subset, and compact noisy pilot. | Done |
 
 ## Stage 0: internal-review priority
 
@@ -116,8 +116,9 @@ Open implementation notes:
 
 - `configs/master_config.yaml` remains a runnable example; the locked Stage 0
   config is `configs/study/scdd_spie_baseline.yaml`.
-- The maintained modeling route is Fisher/Asimov; nonlinear validation should
-  be treated as a sparse calibration layer.
+- The maintained SPIE modeling route is Fisher/Asimov screening calibrated by
+  PyAutoLens local-search nonlinear evidence for the controlled validation
+  grid.
 - The selected Stage 2 PSF scan basis is segment hexike `segment 0, Noll 2`
   plus global Zernikes `Noll 4-6`. The required amplitude ladder remains
   segment hexike `segment 0, Noll 2`; the optional second amplitude ladder is
@@ -198,114 +199,122 @@ selected coefficient families.
 
 ## Nonlinear validation
 
-SPIE scope: sparse validation only, if it does not block the Fisher study.
+PyAutoLens nonlinear evidence validation:
 
-Candidate validation cases:
+Run package: `outputs/spie_draft_results/`.
+Alias: `outputs/spie_draft_study/`.
 
-- [x] Perfect PSF at `1e7 Msun`, one near-threshold anchor position.
-- [x] Perfect PSF at `10^7.25 Msun`, one position.
-- [x] Perfect PSF at `10^7.75 Msun`, one position.
-- [x] One perturbed-PSF case at the same position.
-- [x] Optional no-subhalo PSF-mismatch false-positive case.
+Definition: compare smooth-lens and subhalo-lens PyAutoLens models with
+Nautilus evidence and maximum-likelihood summaries. The current accepted SPIE
+validation uses `fit_mode = local_search`, where the subhalo center has a local
+prior window around the forecast position. This supersedes the earlier
+fixed-template and local-optimizer validation notes for poster/manuscript
+purposes.
 
-Pilot run notes:
+Core run settings:
 
-- Ran on 2026-05-24 using PyAutoLens JAX mode on GPUs `0,1,2,3`.
-- Settings: fixed-template fits, Asimov datasets, correct PSF supplied to the
-  fit, `n_live_smooth=100`, `n_live_subhalo=100`, `maxcall=1000`.
-- All four workers completed successfully, but the resulting likelihood-ratio
-  values are not internally consistent enough to use as a Fisher calibration.
-- Follow-up debugging found two setup issues and one remaining search issue:
-  nonlinear validation data must be in PyAutoLens rate units, not
-  exposure-integrated ADU; the subhalo model should be attached as a lens-galaxy
-  component to match the forward generator; and the bounded Nautilus search is
-  still not reliable enough as a calibration optimizer.
-- Deterministic PyAutoLens truth-tracer fits now agree with direct chi-squared
-  diagnostics and track the Fisher raw statistic. The lower reported Stage 0
-  `q_F` is expected because it is profiled over lens/source nuisance directions.
+- `dataset_kind = asimov` for the full validation grid.
+- `n_live_smooth = 400`, `n_live_subhalo = 400` for the full grid.
+- `n_live_smooth = 800`, `n_live_subhalo = 800` for the convergence subset.
+- `use_jax = true`.
+- `fast_output = true`.
+- GPU 0.
 
-Rejected sampler-pilot results:
+Full matched-PSF local-search validation:
 
-| Case | Fit mode | PSF case | q_F | q_fit | q_fit / q_F | Fisher pass | Fit pass | Status | Notes |
-|---|---|---|---:|---:|---:|---|---|---|---|
-| `perfect_m1e7_near_threshold` | fixed_template | perfect | `17.6703` | `13176.5261` | `745.6862` | Yes | Yes | Pilot only | Positive but implausibly high relative to Fisher. |
-| `perfect_m10p7p25_moderate` | fixed_template | perfect | `38.2564` | `16180.1275` | `422.9396` | Yes | Yes | Pilot only | Positive but implausibly high relative to Fisher. |
-| `perfect_m10p7p75_high` | fixed_template | perfect | `165.9551` | `0.0000` | `0.0000` | Yes | No | Pilot only | Subhalo search maximum landed below smooth maximum. |
-| `hexike100_m1e7_endpoint` | fixed_template | segment hexike | `16.8690` | `0.0000` | `0.0000` | Yes | No | Pilot only | Subhalo search maximum landed below smooth maximum. |
+| Set | N | Success | Injected N | Injected detections | Matched-control N | Matched false positives |
+|---|---:|---:|---:|---:|---:|---:|
+| Full matched-PSF PyAutoLens local search | `433` | `433` | `370` | `211` | `63` | `0` |
 
-Accepted local-profile calibration:
+Injected-subhalo family calibration:
 
-Run source: `outputs/stage0_profile_calibration/results.csv`.
-Full Stage 2 run source: `outputs/stage0_profile_calibration_full/results.csv`.
+| Family | N | Nonlinear detections | Fisher detections | Median `q_fit` | Median `q_F` |
+|---|---:|---:|---:|---:|---:|
+| Combined | `120` | `69` | `72` | `14.36` | `14.91` |
+| Global-only | `118` | `70` | `70` | `16.14` | `16.64` |
+| Perfect | `8` | `5` | `5` | `27.55` | `27.96` |
+| Segment-only | `124` | `67` | `68` | `11.70` | `12.16` |
 
-Definition: evaluate the full nonlinear HWO-SLAPS forward model at the smooth
-model nuisance point selected by the Fisher profile solution, then compare the
-resulting profile chi-squared to `q_F`. This tests the metric calibration while
-separating it from global-sampler search failures.
+Interpretation:
 
-| Case | PSF case | q_F | q_profile,nonlinear | q_profile / q_F | Relative diff | Status | Notes |
-|---|---|---:|---:|---:|---:|---|---|
-| `perfect_m1e7_near_threshold` | perfect | `17.6703` | `17.6645` | `0.9997` | `0.0328%` | Accepted | Near-threshold anchor. |
-| `perfect_m10p7p25_moderate` | perfect | `38.2564` | `38.2375` | `0.9995` | `0.0494%` | Accepted | Moderate-mass anchor. |
-| `perfect_m10p7p75_high` | perfect | `165.9551` | `165.7874` | `0.9990` | `0.1011%` | Accepted | High-mass anchor. |
-| `hexike100_m1e7_endpoint` | segment hexike | `16.8690` | `16.8635` | `0.9997` | `0.0325%` | Accepted | 100 nm RMS segment-hexike endpoint. |
+- Fisher and PyAutoLens local-search detection counts agree closely by PSF
+  family in the controlled matched-PSF validation grid.
+- Matched no-subhalo controls produce `0/63` false positives.
+- This supports using `q_F` as a calibrated screening forecast in the controlled
+  matched-PSF SPIE setup.
 
-Full CPU profile-calibration sweep:
+Wrong-PSF no-subhalo controls:
 
-- Completed on 2026-05-25 for all `21` Stage 2 cases in
-  `outputs/stage0_internal_review/results.csv`.
-- Result: `0 / 21` status failures and `0 / 21` alignment failures.
-- Nonlinear-profile-to-Fisher ratio range:
-  `0.9987277594-0.9996937663`.
-- Maximum relative `q` difference: `0.127224%`.
-- Maximum absolute `q` difference: `0.421890`.
+| Set | N | Success | `q_fit >= 10` false positives | `Delta logZ > 5` false positives |
+|---|---:|---:|---:|---:|
+| Wrong/perfect-PSF local-search controls | `63` | `63` | `49` | `47` |
 
-SPIE-plus local nonlinear optimization verification:
+Wrong-PSF family breakdown by `q_fit >= 10`:
 
-Run source: `outputs/stage0_spie_plus_validation/results.csv`.
-Full Stage 2 run source:
-`outputs/stage0_spie_plus_validation_full/results.csv`.
+| Truth PSF family | N | False positives | Rate |
+|---|---:|---:|---:|
+| Combined | `21` | `16` | `76.2%` |
+| Global-only | `21` | `14` | `66.7%` |
+| Segment-only | `21` | `19` | `90.5%` |
 
-Definition: locally optimize the full nonlinear forward model nuisance
-parameters for the smooth and fixed-subhalo hypotheses, then compute
-`q_fit = chi2_smooth,min - chi2_subhalo,min`. Injected-subhalo cases use the
-same PSF, mask, noise convention, and scalar nuisance set as Fisher. The
-false-positive case generates no-subhalo data with the 100 nm segment-hexike PSF
-and fits it with a perfect-PSF model.
+Interpretation:
 
-| Case | Truth PSF | Fit PSF | Injected subhalo | q_F | q_fit | q_fit / q_F | Status | Notes |
-|---|---|---|---|---:|---:|---:|---|---|
-| `perfect_m1e7_near_threshold` | perfect | perfect | Yes | `17.6703` | `17.6645` | `0.9997` | Accepted | Two smooth starts converge to the same profile value. |
-| `perfect_m10p7p25_moderate` | perfect | perfect | Yes | `38.2564` | `38.2374` | `0.9995` | Accepted | Threshold agreement: both pass `q > 10`. |
-| `perfect_m10p7p75_high` | perfect | perfect | Yes | `165.9551` | `165.7833` | `0.9990` | Accepted | Threshold agreement: both pass `q > 10`. |
-| `hexike100_m1e7_endpoint` | segment hexike | segment hexike | Yes | `16.8690` | `16.8635` | `0.9997` | Accepted | Endpoint PSF case. |
-| `false_positive_hexike100_fit_perfect` | segment hexike | perfect | No |  | `0.0000` |  | Accepted | No unexplained threshold-level false positive. |
+- PSF mismatch is the dominant nonlinear false-positive pathway in the current
+  validation.
+- The matched/wrong contrast isolates the failure mode: the same no-subhalo
+  cases stay clean when the PSF is modeled correctly and become false positives
+  when the fit assumes a perfect PSF.
 
-Full CPU SPIE-plus sweep:
+Convergence subset:
 
-- Completed on 2026-05-25 for all `21` injected Stage 2 cases plus `2`
-  no-subhalo PSF-mismatch false-positive controls.
-- Result: `0 / 23` SPIE-plus failures.
-- Injected-subhalo `q_fit / q_F` range:
-  `0.9986564700-0.9996927562`.
-- Injected-subhalo `q_fit` range: `14.7181269588-331.1663649054`;
-  all injected cases agree with Fisher on the `q > 10` threshold.
-- False-positive controls:
-  `stage0_spie_plus_false_positive_hexike100_truth_fit_perfect` and
-  `stage0_spie_plus_false_positive_global_zernike100_truth_fit_perfect` both
-  give `q_fit = 0.0 < 10`.
-- Full-run validation plot:
-  `outputs/stage0_spie_plus_validation_full/q_f_vs_q_fit.png`.
+| Set | N | Result |
+|---|---:|---|
+| Matched `n_live=800` controls | `2` | `0/2` false positives |
+| Wrong-PSF `n_live=800` controls | `2` | `2/2` false positives |
+| Matched `n_live=800` injected cases | `4` | `2/4` detected |
 
-Forecast robustness checks:
+The convergence subset preserves the same matched-clean / wrong-PSF-false-positive
+contrast as the `n_live=400` grid.
+
+Noisy PyAutoLens pilot:
+
+| Pilot set | Fit PSF | Case type | N | Main result |
+|---|---|---|---:|---|
+| Original representative | Matched/truth PSF | Injected subhalos | `4` | `3/4` recovered, matching Fisher's `3/4`. |
+| Original representative | Matched/truth PSF | No-subhalo controls | `2` | `0/2` false positives. |
+| Original representative | Wrong/perfect PSF | No-subhalo controls | `2` | `2/2` false positives. |
+| Refined 75 nm controls | Matched/truth PSF | No-subhalo controls | `6` | `0/6` false positives. |
+| Refined 75 nm controls | Wrong/perfect PSF | No-subhalo controls | `6` | `3/6` false positives. |
+
+The noisy pilot is not a full noisy nonlinear ensemble, but it shows that the
+central matched-clean / wrong-PSF-false-positive result is not purely an Asimov
+artifact.
+
+Primary validation artifacts:
+
+| Artifact | Path | Notes |
+|---|---|---|
+| Study package | `outputs/spie_draft_results/README.md` | Full written synthesis and conclusion set. |
+| Study package alias | `outputs/spie_draft_study/` | Symlink to `outputs/spie_draft_results/`. |
+| Full local-search cases | `outputs/spie_draft_results/csv/overnight_local_search_all_cases.csv` | `504` rows including A/B/C. |
+| Full local-search phase summary | `outputs/spie_draft_results/csv/overnight_local_search_phase_summary.csv` | Matched, wrong-PSF, and convergence summaries. |
+| Full local-search family summary | `outputs/spie_draft_results/csv/overnight_local_search_family_summary.csv` | Family-level Fisher/PyAutoLens comparison. |
+| Full false-positive summary | `outputs/spie_draft_results/csv/overnight_local_search_false_positive_summary.csv` | Matched versus wrong-PSF controls. |
+| Noisy pilot cases | `outputs/spie_draft_results/csv/noisy_pyautolens_local_search_pilot_all_cases.csv` | `20/20` successful noisy fits. |
+| Noisy pilot summary | `outputs/spie_draft_results/csv/noisy_pyautolens_local_search_pilot_summary.csv` | Matched/wrong noisy control summary. |
+| Fisher/PyAutoLens plot | `outputs/spie_draft_results/plots/overnight_local_search_fisher_vs_qfit.png` | Full matched-PSF injected calibration. |
+| False-positive rates plot | `outputs/spie_draft_results/plots/overnight_local_search_false_positive_rates.png` | Matched versus wrong-PSF controls. |
+| Noisy control rates plot | `outputs/spie_draft_results/plots/noisy_pyautolens_local_search_control_rates.png` | Noisy pilot false-positive rates. |
+
+Legacy forecast robustness checks:
 
 Run source: `outputs/stage0_forecast_robustness/`.
 
-Scope: lightweight forecast checks added to reduce dependence on one clean
-Asimov demonstration. The noisy-ensemble check uses the profiled linear Fisher
-likelihood on noisy data, not a full nonlinear noisy search. The position
-variation check evaluates the full nonlinear forward model at the
-Fisher-profiled smooth solution for multiple ring positions.
+Scope: lightweight pre-evidence forecast checks added before the full
+PyAutoLens validation grid was available. These are retained as historical
+supporting diagnostics, but they are no longer the main validation basis. The
+current validation basis is the PyAutoLens local-search evidence grid described
+above, including the compact noisy PyAutoLens pilot.
 
 Noisy ensemble summary:
 
@@ -335,7 +344,7 @@ Position variation at `1e7 Msun`, perfect PSF:
 | `270` | `7.7433` | `7.7464` | `1.0004` | No |
 | `315` | `16.8871` | `16.8923` | `1.0003` | Yes |
 
-Deterministic truth-tracer checks:
+Legacy deterministic truth-tracer checks:
 
 | Case | PSF case | q_F profiled | q_truth PyAutoLens | q_truth / q_F | Status | Notes |
 |---|---|---:|---:|---:|---|---|
@@ -344,31 +353,23 @@ Deterministic truth-tracer checks:
 | `perfect_m10p7p75_high` | perfect | `165.9551` | `819.1794` | `4.9362` | Diagnostic pass | Truth model beats smooth model at fixed parameters. |
 | `hexike100_m1e7_endpoint` | segment hexike | `16.8690` | `53.3598` | `3.1632` | Diagnostic pass | Truth model beats smooth model at fixed parameters. |
 
-Calibration summary:
+Current calibration summary:
 
-- Calibration relation: accepted for the local profiled likelihood metric over
-  all `21` Stage 2 cases. The nonlinear forward-model profile statistic agrees
-  with `q_F` to better than `0.13%` in every accepted case.
-- Bounded Nautilus fixed-template pilot remains rejected as a calibration
-  source because the search did not reliably find the intended likelihood
-  basins.
-- Median `q_truth / q_F`: `3.3666` for deterministic truth-tracer checks.
-- Threshold-confusion summary: all `21` full-sweep local-profile calibration
-  cases pass both Fisher and nonlinear-profile `q > 10`.
-- SPIE-plus optimization summary: all `21` injected-subhalo local optimizer
-  cases satisfy `0.8 <= q_fit/q_F <= 1.2`, and both no-subhalo PSF-mismatch
-  cases have `q_fit = 0 < 10`.
-- Forecast robustness summary: the near-threshold `1e7 Msun` case has noisy
-  median `q = 14.9248` with `60%` of five noisy seeds above threshold; the
-  `10^7.25 Msun` case has noisy median `q = 34.0907` with `100%` above
-  threshold; all three deterministic no-subhalo controls stay below threshold;
-  and all eight ring-position forward checks match `q_F` to better than `0.1%`.
-- Current claim boundary: calibrated local Fisher/Asimov forecast with
-  deterministic PyAutoLens truth-likelihood sanity checks and full Stage 2
-  local nonlinear optimization verification, plus lightweight noisy,
-  false-positive, and position-variation forecast checks. Full Bayesian
-  evidence / broad sampler calibration remains a separate sampler-engineering
-  problem.
+- Current accepted calibration basis: PyAutoLens local-search nonlinear
+  evidence for the controlled SPIE grid.
+- Full matched-PSF injected validation: `211/370` nonlinear detections, with
+  family-level detection counts closely matching Fisher counts.
+- Full matched-PSF no-subhalo controls: `0/63` false positives.
+- Full wrong-PSF no-subhalo controls: `49/63` false positives by `q_fit >= 10`,
+  with `47/63` also exceeding `Delta logZ > 5`.
+- `n_live=800` convergence subset: matched controls remain clean (`0/2`) and
+  wrong-PSF controls remain false positives (`2/2`).
+- Noisy PyAutoLens pilot: matched noisy controls remain clean (`0/8`) and
+  wrong-PSF noisy controls produce false positives (`5/8`).
+- Current claim boundary: Fisher/Asimov is calibrated as a screening forecast
+  for the controlled matched-PSF SPIE setup. PSF mismatch can mimic subhalo
+  evidence. Final requirement language still requires broader scenes, source
+  realism, full 2D maps, noisy ensembles, and PSF-nuisance marginalization.
 
 ## Stage 3: SPIE manuscript and poster
 
@@ -382,17 +383,20 @@ Required figure/status tracker:
 - [x] PSF-mode coupling or tolerance-style plot.
 - [x] Fisher ring-map or detectable-ring-fraction figure.
 - [x] Optional Fisher-versus-nonlinear calibration plot.
-- [x] SPIE-plus Fisher-versus-local-optimizer validation plot.
+- [x] PyAutoLens Fisher-versus-nonlinear evidence validation plot.
+- [x] Matched versus wrong-PSF false-positive plot.
+- [x] Noisy PyAutoLens pilot plot.
 
 Manuscript/poster notes:
 
 - Use preliminary framework language.
 - Avoid final engineering requirement claims.
 - State Fisher/Asimov limitations clearly.
-- State that local nonlinear optimization verifies the full Stage 2 grid, while
-  full Bayesian evidence / broad sampler calibration is deferred to RASTI.
-- State that the current noisy ensemble is a small profiled-Fisher ensemble, not
-  a full noisy nonlinear recovery campaign.
+- State that full PyAutoLens local-search evidence validates the controlled
+  matched-PSF SPIE grid and isolates PSF mismatch as the dominant false-positive
+  pathway.
+- State that the noisy PyAutoLens pilot is a compact robustness check, not a
+  full noisy nonlinear recovery campaign.
 - State PSF amplitude units in every relevant figure caption.
 
 ## Stage 4-6: RASTI expansion
@@ -405,8 +409,9 @@ Deferred items:
 - [ ] Full study manifest and aggregator.
 - [ ] Full 2D detectable-area maps.
 - [ ] Requirement-curve generation.
-- [ ] Mandatory nonlinear calibration grid.
-- [ ] False-positive PSF-mismatch study.
+- [ ] Broader nonlinear calibration grid across scenes, sources, positions, and
+  PSF states.
+- [ ] PSF-nuisance marginalized false-positive study.
 - [ ] Source-realism stress tests.
 - [ ] Lens-light and subtraction-residual stress tests.
 
@@ -418,20 +423,27 @@ Deferred items:
 | Manifest | `scratch/study/stage0_manifest.yaml` | Yes | Stage 0 mass and PSF sweeps. |
 | Generated run configs | `outputs/stage0_internal_review/generated_configs/` | Yes | One config per run. |
 | Aggregate results CSV | `outputs/stage0_internal_review/results.csv` | Yes | `21` successful rows. |
-| Aggregate nonlinear CSV | `outputs/stage0_nonlinear_validation/results.csv` | Yes | Four-case bounded GPU pilot; not accepted as calibration. |
-| Nonlinear truth diagnostics | `outputs/stage0_nonlinear_validation/truth_diagnostics_after_unitfix.csv` | Yes | Deterministic PyAutoLens truth-tracer checks. |
-| SPIE-plus validation CSV | `outputs/stage0_spie_plus_validation/results.csv` | Yes | Local nonlinear optimizer verification plus false-positive case. |
-| SPIE-plus validation plot | `outputs/stage0_spie_plus_validation/q_f_vs_q_fit.png` | Yes | Fisher versus local optimizer statistic for injected-subhalo cases. |
-| Full profile calibration CSV | `outputs/stage0_profile_calibration_full/results.csv` | Yes | Full `21`-case local-profile calibration; `0 / 21` failures. |
-| Full SPIE-plus validation CSV | `outputs/stage0_spie_plus_validation_full/results.csv` | Yes | Full `21` injected cases plus `2` false-positive controls; `0 / 23` failures. |
-| Full SPIE-plus validation plot | `outputs/stage0_spie_plus_validation_full/q_f_vs_q_fit.png` | Yes | Fisher versus local optimizer statistic for all injected Stage 2 cases. |
+| SPIE draft study package | `outputs/spie_draft_results/` | Yes | Current aggregate study package with Fisher, PyAutoLens evidence, false-positive, convergence, and noisy-pilot summaries. |
+| SPIE draft study alias | `outputs/spie_draft_study/` | Yes | Symlink to `outputs/spie_draft_results/`. |
+| Full PyAutoLens local-search CSV | `outputs/spie_draft_results/csv/overnight_local_search_all_cases.csv` | Yes | `504` successful A/B/C validation rows. |
+| PyAutoLens phase summary | `outputs/spie_draft_results/csv/overnight_local_search_phase_summary.csv` | Yes | Matched full grid, wrong-PSF controls, and `n_live=800` convergence subset. |
+| PyAutoLens family summary | `outputs/spie_draft_results/csv/overnight_local_search_family_summary.csv` | Yes | Family-level Fisher/PyAutoLens detection agreement. |
+| PyAutoLens false-positive summary | `outputs/spie_draft_results/csv/overnight_local_search_false_positive_summary.csv` | Yes | Matched controls `0/63`; wrong-PSF controls `49/63`. |
+| Noisy PyAutoLens pilot CSV | `outputs/spie_draft_results/csv/noisy_pyautolens_local_search_pilot_all_cases.csv` | Yes | `20/20` successful noisy local-search fits. |
+| Full PyAutoLens calibration plot | `outputs/spie_draft_results/plots/overnight_local_search_fisher_vs_qfit.png` | Yes | Fisher versus PyAutoLens `q_fit` for full matched injected grid. |
+| Full false-positive plot | `outputs/spie_draft_results/plots/overnight_local_search_false_positive_rates.png` | Yes | Matched versus wrong-PSF false-positive rates. |
+| Noisy PyAutoLens plot | `outputs/spie_draft_results/plots/noisy_pyautolens_local_search_control_rates.png` | Yes | Noisy matched/wrong control rates. |
 | Forecast robustness outputs | `outputs/stage0_forecast_robustness/` | Yes | Noisy ensembles, false-positive controls, and ring-position variation checks. |
 | Figures | `outputs/stage0_internal_review/figures/` | Yes | Aggregate Stage 0 figures, including segment-hexike and global-Zernike sweeps. |
 | Reproducibility summary | `outputs/stage0_internal_review/study_provenance.json` | Yes | Includes command, git hash, Python, package versions. |
 
 ## Open questions
 
-1. Which Stage 0 figures should be promoted into a poster/manuscript figure
-   script with final styling?
-2. Should the next sweep vary segment IDs/modes, or promote global-Zernike
-   variants beyond Noll 4 into full amplitude ladders?
+1. Which PyAutoLens validation plots should be on the poster versus backup
+   material?
+2. Should the poster lead with the matched/wrong-PSF false-positive result or
+   the Fisher PSF-degradation curve?
+3. Should the main PSF-degradation x-axis be nominal amplitude, measured WFE,
+   or a paired presentation?
+4. Which RASTI expansion comes first: PSF nuisance fitting, full 2D sensitivity
+   maps, or source-realism stress tests?
