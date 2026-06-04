@@ -39,7 +39,9 @@ The four core HWO-SLAPS modules are in a good position for a bounded SPIE study:
 - **Observation:** PSF convolution and detector-noise simulation.
 - **Modeling:** Fisher/Asimov subhalo detectability with local and Einstein-ring map modes.
 
-The missing layer is not the core physics module layer. The missing layer is the **study layer**:
+The missing layer is not the core physics module layer. For SPIE, the first
+study layer now exists; for RASTI, that layer still needs to be promoted from
+scripts and packaged outputs into supported, journal-grade analysis tooling:
 
 - canonical SPIE/SCDD configs,
 - sweep manifests,
@@ -48,6 +50,7 @@ The missing layer is not the core physics module layer. The missing layer is the
 - detectable-area or detectable-ring summaries,
 - reproducibility metadata,
 - PyAutoLens nonlinear evidence validation for SPIE,
+- discrete PSF-bank marginalized nonlinear validation,
 - broader scene/source/PSF-nuisance validation for RASTI.
 
 ## Stage 0: one-week internal-review priority
@@ -71,7 +74,8 @@ Recommended poster logic:
 2. HWO-SLAPS maps optics perturbations into a lensing detection statistic.
 3. Perfect-PSF simulations define mass reach.
 4. Perturbed-PSF simulations show how mass reach or detectable-ring fraction degrades.
-5. The RASTI study will expand this into calibrated requirement curves.
+5. PyAutoLens nonlinear validation calibrates the controlled SPIE forecast.
+6. The RASTI study will expand this into calibrated requirement curves.
 
 ## Stage 1: SPIE-level codebase hardening
 
@@ -85,7 +89,7 @@ Checklist:
 - [x] Use lens redshift `z_l = 0.2` and source redshift `z_s = 0.6` for the SCDD-anchored run, unless a different source redshift is explicitly justified in the manuscript.
 - [x] Set the canonical grid, pixel scale, wavelength, aperture, exposure/noise convention, subhalo model, concentration model, and source morphology in one named config.
 - [x] Use the SCDD anchor masses for the headline SPIE grid: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
-- [x] Treat masses below `1e7 Msun` as exploratory extrapolation unless calibrated by nonlinear fits.
+- [x] Treat masses below `1e7 Msun` as exploratory unless calibrated by nonlinear fits. The canonical-scene `10^6.5` and `10^6.75 Msun` points now have PSF-bank marginalized nonlinear validation and should be described as calibrated for that setup, not as final HWO requirements.
 - [x] Define a perfect-PSF baseline.
 - [x] Define one required PSF perturbation family for SPIE.
 - [x] Define one optional second PSF perturbation family for SPIE.
@@ -129,7 +133,7 @@ Run a bounded study that supports the SPIE abstract without overclaiming final H
 
 - One canonical strong-lens scene.
 - Masses: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun` as the SCDD-anchored mass ladder.
-- Optional exploratory masses: `1e6`, `10^6.5`, and `10^6.75 Msun`, clearly labeled as extrapolations.
+- Optional low masses: `10^6.5` and `10^6.75 Msun` now have canonical-scene PSF-bank marginalized nonlinear validation; `1e6 Msun` remains exploratory unless separately validated.
 - Perfect-PSF baseline.
 - One or two PSF families:
   - segment piston or selected segment hexike modes,
@@ -138,7 +142,11 @@ Run a bounded study that supports the SPIE abstract without overclaiming final H
 - Fisher/Asimov forecasts for the headline sweep.
 - PyAutoLens local-search nonlinear evidence validation.
 - Matched-PSF and wrong-PSF no-subhalo control grids.
-- Compact noisy PyAutoLens validation pilot.
+- Full noisy PyAutoLens local-search validation.
+- High-`n_live` noisy threshold-disagreement checks.
+- Discrete PSF-bank marginalized nonlinear validation.
+- PSF-bank marginalized mass-completeness curve for `10^6.5`,
+  `10^6.75`, `10^7`, `10^7.25`, and `10^7.5 Msun`.
 
 ### Stretch scope only if the above is already working
 
@@ -167,6 +175,8 @@ Do not call the Fisher value a nonlinear likelihood ratio. Call it a Fisher-equi
 - [x] At what approximate PSF amplitude does the local detection statistic or detectable-ring fraction degrade materially?
 - [x] What fraction of the sampled Einstein ring remains above the SCDD threshold?
 - [x] Does `q_F` track `q_fit` for the PyAutoLens local-search validation grid?
+- [x] Does the nonlinear PSF-bank marginalized evidence produce a coherent
+      mass-completeness curve?
 - [x] Can HWO-SLAPS produce preliminary requirement-style curves from optics perturbations to subhalo detectability?
 
 ## SPIE study figures
@@ -185,12 +195,21 @@ Validation figures:
 - [x] Fisher-versus-nonlinear calibration plot showing `q_F` against `q_fit`, with the SCDD threshold `q=10`.
 - [x] No-subhalo plus PSF-mismatch false-positive diagnostic.
 - [x] Noisy PyAutoLens pilot diagnostic.
+- [x] Full noisy Fisher-versus-nonlinear validation diagnostic.
+- [x] PSF-bank marginalized mass-completeness curve.
 
 ## SPIE claim boundary
 
 Use:
 
 > We present HWO-SLAPS, an end-to-end framework that converts HWO-like PSF perturbations into preliminary low-mass subhalo detectability forecasts. We show first mass-reach and PSF-mode degradation curves, calibrated against PyAutoLens nonlinear evidence for the controlled SPIE grid.
+
+Also supported for SPIE:
+
+> In the canonical scene, discrete PSF-bank marginalized PyAutoLens evidence
+> gives a steep nonlinear mass-completeness curve: `3e6 Msun` subhalos are
+> generally not recovered, `5-10e6 Msun` spans the transition region, and
+> `>= 1.8e7 Msun` is recovered at near-saturated completeness.
 
 Avoid:
 
@@ -211,7 +230,12 @@ than a stretch goal. The controlled SPIE study has:
 - full matched-PSF no-subhalo controls,
 - full wrong-PSF no-subhalo controls,
 - `n_live=800` convergence checks,
-- a compact noisy PyAutoLens pilot.
+- a compact noisy PyAutoLens pilot,
+- full noisy injected-subhalo and no-subhalo control grids,
+- high-`n_live` noisy threshold-disagreement reruns,
+- discrete PSF-bank marginalized model comparison,
+- amplitude-matched `1e7 Msun` PSF-bank no-subhalo controls,
+- a five-point PSF-bank marginalized mass-completeness curve.
 
 Minimum validation output:
 
@@ -219,15 +243,35 @@ Minimum validation output:
 - matched-PSF false-positive control summary,
 - wrong-PSF false-positive control summary,
 - noisy-pilot robustness summary,
+- full noisy-validation summary,
+- PSF-bank marginalized control summary,
+- PSF-bank marginalized mass-completeness summary,
 - statement that the Fisher metric is calibrated as a screening forecast for
   the controlled matched-PSF setup.
+
+Current SPIE validation anchors:
+
+- Asimov matched-PSF local search: `211/370` injected detections and `0/63`
+  matched-control false positives.
+- Asimov wrong-PSF controls: `49/63` false positives by `q_fit >= 10`, with
+  `47/63` also passing `Delta logZ > 5`.
+- Full noisy local search: `217/370` injected detections versus `215/370`
+  Fisher-threshold forecasts, with `0/63` matched-control false positives and
+  `48/63` wrong-PSF false positives by `q_fit >= 10`.
+- PSF-bank `1e7 Msun` ensemble: paired injected detections `222/289` by
+  `q_fit_psf_profile >= 10` and `209/289` by `Delta logZ_psf_marg > 5`, with
+  matched no-subhalo controls `0/289`.
+- PSF-bank mass completeness by `Delta logZ_psf_marg > 5`: `2.8%` at
+  `3.16e6 Msun`, `30.1%` at `5.62e6 Msun`, `72.3%` at `1e7 Msun`, `97.2%`
+  at `1.78e7 Msun`, and `100.0%` at `3.16e7 Msun`.
 
 ### RASTI recommendation
 
 PyAutoLens nonlinear validation remains mandatory for RASTI, but the RASTI task
 is now expansion rather than first validation. It should span additional scenes,
 positions, PSF states, source morphologies, and no-subhalo false-positive cases,
-and should fit or bound a calibration relation such as
+replace or extend the discrete PSF bank with a broader nuisance treatment where
+feasible, and fit or bound a calibration relation such as
 
 $$
 q_{\mathrm{fit}} \simeq \alpha q_F
@@ -242,8 +286,10 @@ or a monotonic mapping with uncertainty.
 - Lens-plane subhalos are modeled first; line-of-sight halos are deferred or treated as a caveat.
 - Lens galaxy light and lens-light subtraction residuals are not yet part of the controlled SPIE forecast unless specifically added.
 - Fisher/Asimov statistics are local forecasts. The controlled SPIE validation
-  supports them as screening metrics, but final requirement claims require
-  broader nonlinear validation and PSF-nuisance treatment.
+  supports them as screening metrics, and the discrete PSF-bank validation gives
+  the current strongest canonical-scene nonlinear mass reach. Final requirement
+  claims still require broader nonlinear validation, source-scene variation,
+  full 2D maps, and expanded PSF-nuisance treatment.
 
 ## Acceptance checks before using SPIE plots
 
@@ -254,6 +300,8 @@ or a monotonic mapping with uncertainty.
 - [x] PSF amplitude units are stated in the figure captions.
 - [x] The code records enough provenance to rerun every plotted point.
 - [x] No-subhalo PSF-mismatch case does not produce unexplained threshold-level detections, or the issue is highlighted as a result rather than hidden.
+- [x] PSF-bank marginalized controls remain clean for the canonical `1e7 Msun`
+      no-subhalo ensemble.
 
 ## Stage 3: SPIE manuscript and poster
 
@@ -270,6 +318,7 @@ Manuscript spine:
 - [ ] First mass-reach forecast.
 - [ ] First PSF-mode degradation forecast.
 - [ ] PyAutoLens nonlinear validation status.
+- [ ] PSF-bank marginalized nonlinear mass-completeness result.
 - [ ] Limitations and path to the RASTI study.
 
 Poster spine:
@@ -278,6 +327,7 @@ Poster spine:
 - [ ] Pipeline schematic.
 - [ ] Example lens + PSF + subhalo residual.
 - [ ] Detection significance versus mass.
+- [ ] PSF-bank marginalized mass-completeness curve.
 - [ ] PSF amplitude versus degradation or detectable-ring fraction.
 - [ ] Next-step validation box.
 
@@ -307,8 +357,8 @@ Checklist:
 - [ ] Fit or bound the calibration relation between `q_F` and `q_fit` with
       uncertainty across those broader conditions.
 - [ ] Add clumpy/cuspy source-realism stress tests.
-- [ ] Add PSF-nuisance marginalized false-positive tests beyond matched/wrong
-      fixed-PSF controls.
+- [ ] Add continuous or broader PSF-nuisance marginalized false-positive tests
+      beyond the current discrete PSF-bank canonical-scene validation.
 - [ ] Add lens-light and lens-subtraction residual stress tests.
 - [ ] Add line-of-sight halo approximation or caveat handling.
 - [ ] Add stronger provenance: code hash, config hash, dependency versions, manifest, and output validation checks.
@@ -332,7 +382,7 @@ Run the full science study and derive calibrated PSF-stability and mass-reach im
 
 Recommended scope:
 
-- Mass ladder: `1e6`, `10^6.5`, `10^6.75`, `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
+- Mass ladder: `1e6`, `10^6.5`, `10^6.75`, `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`. The canonical-scene PSF-bank curve already covers `10^6.5` through `10^7.5`; RASTI should broaden that result rather than merely repeat it.
 - Full 2D sensitivity maps over subhalo positions around the lensed arcs.
 - Multiple PSF mode families:
   - segment piston,
@@ -343,7 +393,7 @@ Recommended scope:
 - Multiple amplitudes per PSF family.
 - Perfect-PSF and perturbed-PSF comparisons.
 - Expanded Fisher-versus-PyAutoLens validation suite.
-- Expanded false-positive analysis with PSF nuisance and noisy ensembles.
+- Expanded false-positive analysis with broader PSF nuisance and noisy ensembles.
 - Detectable-area and mass-floor curves derived from thresholded 2D maps.
 - Source-morphology stress tests.
 - Lens-light and subtraction-residual stress tests.

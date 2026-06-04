@@ -24,6 +24,11 @@ Overall state:
 - [x] Matched-PSF and wrong-PSF no-subhalo control grids completed.
 - [x] `n_live=800` convergence subset completed.
 - [x] Compact noisy PyAutoLens local-search pilot completed.
+- [x] Full noisy PyAutoLens local-search validation completed.
+- [x] High-`n_live` noisy disagreement check completed.
+- [x] Discrete PSF-bank marginalized nonlinear validation completed.
+- [x] Amplitude-matched `1e7 Msun` PSF-bank no-subhalo controls completed.
+- [x] Five-point PSF-bank marginalized mass-completeness curve completed.
 
 ## Metric convention
 
@@ -51,6 +56,10 @@ validated against nonlinear fits.
 | 2026-05-24 | SPIE nonlinear validation scope | Initial four-case fixed-template GPU pilot used to debug units/model setup; superseded by full PyAutoLens local-search evidence validation. | Superseded |
 | 2026-05-25 | Optional second SPIE PSF family | Add a global Zernike Noll 4 amplitude ladder and include global Zernikes Noll 4-6 in the selected mode-coupling scan basis. | Done |
 | 2026-05-29 | Full PyAutoLens local-search evidence validation | Completed full matched-PSF grid, full wrong-PSF controls, `n_live=800` convergence subset, and compact noisy pilot. | Done |
+| 2026-05-29 | Literature-grade noisy PyAutoLens validation | Completed noisy injected-subhalo grid, noisy matched controls, noisy wrong-PSF controls, and high-`n_live` disagreement reruns. | Done |
+| 2026-05-30 | Discrete PSF-bank marginalized validation | Added Bayesian evidence marginalization over a four-member PSF bank for both smooth and subhalo hypotheses. | Done |
+| 2026-05-31 | Amplitude-matched `1e7 Msun` PSF-bank controls | Extended the PSF-bank marginalized `1e7 Msun` injected curve with `289` matched no-subhalo controls. | Done |
+| 2026-06-02 | PSF-bank marginalized mass-completeness curve | Extended PSF-bank marginalized nonlinear validation across `10^6.5`, `10^6.75`, `10^7`, `10^7.25`, and `10^7.5 Msun`. | Done |
 
 ## Stage 0: internal-review priority
 
@@ -290,6 +299,65 @@ The noisy pilot is not a full noisy nonlinear ensemble, but it shows that the
 central matched-clean / wrong-PSF-false-positive result is not purely an Asimov
 artifact.
 
+Full noisy PyAutoLens validation:
+
+| Set | N | Success | Main result |
+|---|---:|---:|---|
+| Noisy injected-subhalo local search | `370` | `370` | `217/370` detections by `q_fit >= 10`; Fisher predicted `215/370`; Spearman `rho(q_F, q_fit) = 0.918`. |
+| Noisy matched-PSF no-subhalo controls | `63` | `63` | `0/63` false positives by both `q_fit >= 10` and `Delta logZ > 5`. |
+| Noisy wrong/perfect-PSF no-subhalo controls | `63` | `63` | `48/63` false positives by `q_fit >= 10`; `47/63` by `Delta logZ > 5`. |
+| High-`n_live` noisy disagreement reruns | `24` | `24` | Largest Fisher/nonlinear threshold disagreements persisted; median absolute changes were `0.292` in `q_fit` and `0.030` in `Delta logZ`. |
+
+Interpretation:
+
+- The full noisy local-search ensemble preserves the central matched-clean /
+  wrong-PSF-false-positive result from the Asimov grid.
+- Fisher and noisy nonlinear detection counts agree at the ensemble level, but
+  individual near-threshold cases can scatter across the threshold.
+- The high-`n_live` reruns show that the largest threshold disagreements are not
+  explained by low-live-point search noise.
+
+PSF-bank marginalized validation:
+
+Definition: compare the smooth-lens and subhalo-lens PyAutoLens hypotheses
+after marginalizing each model evidence over a discrete PSF bank. The current
+bank uses PSF scale factors `0.0`, `0.5`, `1.0`, and `1.5` with equal weights.
+This is not a continuous PSF posterior, but it is the current most realistic
+poster-facing nonlinear nuisance treatment.
+
+| Set | N | Success | `q_fit_psf_profile >= 10` | `Delta logZ_psf_marg > 5` | Notes |
+|---|---:|---:|---:|---:|---|
+| Initial PSF-bank injected subset at `1e7 Msun` | `24` | `24` | `12/24` | `11/24` | Direct paired injected subset. |
+| Amplitude-matched `1e7 Msun` injected ensemble | `289` | `289` | `222/289` | `209/289` | One perfect reference plus `3` PSF families, `8` nonzero amplitudes, `12` draws. |
+| Amplitude-matched `1e7 Msun` no-subhalo controls | `289` | `289` | `0/289` | `0/289` | Largest control response remains sub-threshold: max `q_fit_psf_profile = 6.353`, max `Delta logZ_psf_marg = 2.322`. |
+
+PSF-bank marginalized mass-completeness validation:
+
+The 2026-06-02 run extended the PSF-bank marginalized injected-subhalo ensemble
+from the single `1e7 Msun` mass to a five-point mass-completeness curve. The new
+run added `1156/1156` successful fits across four additional masses, using the
+same `289`-state PSF ensemble structure per mass. Combined with the existing
+`1e7 Msun` ensemble:
+
+| Injected subhalo mass | Cases | `q_fit_psf_profile >= 10` | `Delta logZ_psf_marg > 5` |
+|---:|---:|---:|---:|
+| `3.16e6 Msun` | `289` | `15/289 = 5.2%` | `8/289 = 2.8%` |
+| `5.62e6 Msun` | `289` | `110/289 = 38.1%` | `87/289 = 30.1%` |
+| `1.00e7 Msun` | `289` | `222/289 = 76.8%` | `209/289 = 72.3%` |
+| `1.78e7 Msun` | `289` | `284/289 = 98.3%` | `281/289 = 97.2%` |
+| `3.16e7 Msun` | `289` | `289/289 = 100.0%` | `289/289 = 100.0%` |
+
+Interpretation:
+
+- In the canonical scene with discrete PSF-bank marginalization, `3e6 Msun`
+  subhalos are generally not recovered.
+- `5-10e6 Msun` spans the nonlinear transition region.
+- `1e7 Msun` is usually, but not universally, recovered under PSF uncertainty.
+- `>= 1.8e7 Msun` is near-saturated in this setup.
+- This is the current cleanest nonlinear detection-limit result, but remains
+  conditional on the current lens/source/noise setup and the discrete PSF-bank
+  nuisance model.
+
 Primary validation artifacts:
 
 | Artifact | Path | Notes |
@@ -302,9 +370,21 @@ Primary validation artifacts:
 | Full false-positive summary | `outputs/spie_draft_results/csv/overnight_local_search_false_positive_summary.csv` | Matched versus wrong-PSF controls. |
 | Noisy pilot cases | `outputs/spie_draft_results/csv/noisy_pyautolens_local_search_pilot_all_cases.csv` | `20/20` successful noisy fits. |
 | Noisy pilot summary | `outputs/spie_draft_results/csv/noisy_pyautolens_local_search_pilot_summary.csv` | Matched/wrong noisy control summary. |
+| Full noisy validation overview | `outputs/spie_draft_results/csv/literature_grade_noisy_validation_overview.csv` | Noisy injected, matched-control, wrong-PSF-control, and high-`n_live` summaries. |
+| Full noisy injected cases | `outputs/spie_draft_results/csv/litgrade_noisy_injected_all_cases.csv` | `370/370` successful noisy injected-subhalo local-search fits. |
+| Noisy control summary | `outputs/spie_draft_results/csv/litgrade_noisy_controls_phase_summary.csv` | Matched noisy controls clean; wrong-PSF noisy controls false-positive prone. |
+| High-`n_live` disagreement summary | `outputs/spie_draft_results/csv/litgrade_noisy_nlive800_disagreement_summary.csv` | Largest threshold disagreements rerun at `n_live=800`. |
+| PSF-bank mass-completeness cases | `outputs/spie_draft_results/csv/psf_marginalized_mass_completeness_all_cases.csv` | Five-mass PSF-bank marginalized injected-subhalo validation table. |
+| PSF-bank mass-completeness summary | `outputs/spie_draft_results/csv/psf_marginalized_mass_completeness_by_mass.csv` | Detection completeness by subhalo mass. |
+| PSF-bank mass-completeness family summary | `outputs/spie_draft_results/csv/psf_marginalized_mass_completeness_by_mass_family.csv` | Detection completeness split by mass and PSF family. |
+| PSF-bank mass-completeness metadata | `outputs/spie_draft_results/metadata/psf_marginalized_mass_completeness_summary.json` | Run summary and provenance for the mass-completeness package. |
 | Fisher/PyAutoLens plot | `outputs/spie_draft_results/plots/overnight_local_search_fisher_vs_qfit.png` | Full matched-PSF injected calibration. |
 | False-positive rates plot | `outputs/spie_draft_results/plots/overnight_local_search_false_positive_rates.png` | Matched versus wrong-PSF controls. |
 | Noisy control rates plot | `outputs/spie_draft_results/plots/noisy_pyautolens_local_search_control_rates.png` | Noisy pilot false-positive rates. |
+| Full noisy Fisher/PyAutoLens plot | `outputs/spie_draft_results/plots/litgrade_noisy_injected_fisher_vs_qfit.png` | Full noisy injected-subhalo Fisher versus nonlinear comparison. |
+| PSF-bank mass-completeness curve | `outputs/spie_draft_results/plots/psf_marginalized_mass_completeness_detection_curve.png` | Current strongest nonlinear mass-reach plot. |
+| PSF-bank mass-completeness statistics | `outputs/spie_draft_results/plots/psf_marginalized_mass_completeness_statistics.png` | Distribution summary by mass. |
+| PSF-bank mass-completeness by family | `outputs/spie_draft_results/plots/psf_marginalized_mass_completeness_by_family.png` | Completeness split by PSF family. |
 
 Legacy forecast robustness checks:
 
@@ -356,7 +436,8 @@ Legacy deterministic truth-tracer checks:
 Current calibration summary:
 
 - Current accepted calibration basis: PyAutoLens local-search nonlinear
-  evidence for the controlled SPIE grid.
+  evidence for the controlled SPIE grid, with the PSF-bank marginalized
+  evidence curve as the strongest current mass-reach validation.
 - Full matched-PSF injected validation: `211/370` nonlinear detections, with
   family-level detection counts closely matching Fisher counts.
 - Full matched-PSF no-subhalo controls: `0/63` false positives.
@@ -366,10 +447,21 @@ Current calibration summary:
   wrong-PSF controls remain false positives (`2/2`).
 - Noisy PyAutoLens pilot: matched noisy controls remain clean (`0/8`) and
   wrong-PSF noisy controls produce false positives (`5/8`).
+- Full noisy PyAutoLens local-search validation: noisy injected detections
+  `217/370` versus Fisher predictions `215/370`, matched noisy controls
+  `0/63`, and wrong-PSF noisy controls `48/63` false positives by `q_fit >= 10`.
+- PSF-bank marginalized `1e7 Msun` controls: matched no-subhalo controls
+  `0/289`, paired injected detections `222/289` by `q_fit_psf_profile >= 10`
+  and `209/289` by `Delta logZ_psf_marg > 5`.
+- PSF-bank marginalized mass completeness: `2.8%`, `30.1%`, `72.3%`, `97.2%`,
+  and `100.0%` strong-evidence completeness at `3.16e6`, `5.62e6`, `1.0e7`,
+  `1.78e7`, and `3.16e7 Msun`, respectively.
 - Current claim boundary: Fisher/Asimov is calibrated as a screening forecast
   for the controlled matched-PSF SPIE setup. PSF mismatch can mimic subhalo
-  evidence. Final requirement language still requires broader scenes, source
-  realism, full 2D maps, noisy ensembles, and PSF-nuisance marginalization.
+  evidence if not modeled. The current discrete PSF-bank marginalization is a
+  stronger nuisance treatment, but final requirement language still requires
+  broader scenes, source realism, full 2D maps, larger noisy ensembles, and
+  continuous or otherwise expanded PSF-nuisance treatment.
 
 ## Stage 3: SPIE manuscript and poster
 
@@ -386,6 +478,8 @@ Required figure/status tracker:
 - [x] PyAutoLens Fisher-versus-nonlinear evidence validation plot.
 - [x] Matched versus wrong-PSF false-positive plot.
 - [x] Noisy PyAutoLens pilot plot.
+- [x] Full noisy PyAutoLens validation plot.
+- [x] PSF-bank marginalized mass-completeness plot.
 
 Manuscript/poster notes:
 
@@ -397,6 +491,10 @@ Manuscript/poster notes:
   pathway.
 - State that the noisy PyAutoLens pilot is a compact robustness check, not a
   full noisy nonlinear recovery campaign.
+- State that the later full noisy PyAutoLens grid supersedes the pilot for the
+  main validation claim, while the pilot remains a historical/debugging check.
+- State that the PSF-bank marginalized mass-completeness curve is the strongest
+  current nonlinear mass-reach result for the canonical scene.
 - State PSF amplitude units in every relevant figure caption.
 
 ## Stage 4-6: RASTI expansion
@@ -411,7 +509,8 @@ Deferred items:
 - [ ] Requirement-curve generation.
 - [ ] Broader nonlinear calibration grid across scenes, sources, positions, and
   PSF states.
-- [ ] PSF-nuisance marginalized false-positive study.
+- [ ] Continuous or broader PSF-nuisance marginalized false-positive study
+  beyond the current discrete PSF-bank canonical-scene validation.
 - [ ] Source-realism stress tests.
 - [ ] Lens-light and subtraction-residual stress tests.
 
@@ -430,19 +529,22 @@ Deferred items:
 | PyAutoLens family summary | `outputs/spie_draft_results/csv/overnight_local_search_family_summary.csv` | Yes | Family-level Fisher/PyAutoLens detection agreement. |
 | PyAutoLens false-positive summary | `outputs/spie_draft_results/csv/overnight_local_search_false_positive_summary.csv` | Yes | Matched controls `0/63`; wrong-PSF controls `49/63`. |
 | Noisy PyAutoLens pilot CSV | `outputs/spie_draft_results/csv/noisy_pyautolens_local_search_pilot_all_cases.csv` | Yes | `20/20` successful noisy local-search fits. |
+| Literature-grade noisy validation CSVs | `outputs/spie_draft_results/csv/literature_grade_noisy_validation_overview.csv` | Yes | Full noisy injected, control, and high-`n_live` summaries. |
+| PSF-bank mass-completeness CSVs | `outputs/spie_draft_results/csv/psf_marginalized_mass_completeness_by_mass.csv` | Yes | Five-point nonlinear mass-completeness curve with discrete PSF-bank marginalization. |
 | Full PyAutoLens calibration plot | `outputs/spie_draft_results/plots/overnight_local_search_fisher_vs_qfit.png` | Yes | Fisher versus PyAutoLens `q_fit` for full matched injected grid. |
 | Full false-positive plot | `outputs/spie_draft_results/plots/overnight_local_search_false_positive_rates.png` | Yes | Matched versus wrong-PSF false-positive rates. |
 | Noisy PyAutoLens plot | `outputs/spie_draft_results/plots/noisy_pyautolens_local_search_control_rates.png` | Yes | Noisy matched/wrong control rates. |
+| PSF-bank mass-completeness plots | `outputs/spie_draft_results/plots/psf_marginalized_mass_completeness_detection_curve.png` | Yes | Current strongest nonlinear mass-reach plot. |
 | Forecast robustness outputs | `outputs/stage0_forecast_robustness/` | Yes | Noisy ensembles, false-positive controls, and ring-position variation checks. |
 | Figures | `outputs/stage0_internal_review/figures/` | Yes | Aggregate Stage 0 figures, including segment-hexike and global-Zernike sweeps. |
 | Reproducibility summary | `outputs/stage0_internal_review/study_provenance.json` | Yes | Includes command, git hash, Python, package versions. |
 
 ## Open questions
 
-1. Which PyAutoLens validation plots should be on the poster versus backup
-   material?
-2. Should the poster lead with the matched/wrong-PSF false-positive result or
-   the Fisher PSF-degradation curve?
+1. Which PSF-bank mass-completeness plot should be central in the manuscript
+   versus backup material?
+2. Should the poster/manuscript lead with the mass-completeness curve, the
+   matched/wrong-PSF false-positive result, or the Fisher PSF-degradation curve?
 3. Should the main PSF-degradation x-axis be nominal amplitude, measured WFE,
    or a paired presentation?
 4. Which RASTI expansion comes first: PSF nuisance fitting, full 2D sensitivity
