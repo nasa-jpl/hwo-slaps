@@ -481,6 +481,27 @@ Required figure/status tracker:
 - [x] Full noisy PyAutoLens validation plot.
 - [x] PSF-bank marginalized mass-completeness plot.
 
+### Final SPIE Poster Status
+
+Final poster files were supplied for review on 2026-06-12 as `SPIE_Poster_JPL_FINAL.pdf` and `SPIE_Poster_JPL_FINAL.pptx`. The final PPTX is `33.07 in x 46.85 in` (`84.0 cm x 119.0 cm`), matching the SPIE Europe poster template.
+
+Final poster structure:
+
+- Introduction: science motivation, science question, and SCDD-style detection convention.
+- Methods: HWO-SLAPS pipeline paragraph, segmented-pupil/hexike/PSF assumptions figure, canonical scene, validation suite, and noisy PyAutoLens validation.
+- Results: PSF-bank marginalized PyAutoLens mass completeness and PSF-model-error false-positive stress test.
+- Conclusions: PSF knowledge, not only raw wavefront quality, is the key poster message.
+
+Final poster figure set:
+
+1. Canonical `10^7 Msun` lensing scene and fractional residual.
+2. EAC-1 segmented pupil, segment-level hexike OPD, resulting PSF, and simulation assumptions.
+3. Noisy Fisher/Asimov versus PyAutoLens/Nautilus validation (`217/370` nonlinear detections, `215/370` Fisher-threshold forecasts, Spearman `rho = 0.918`).
+4. PSF-bank marginalized mass completeness (`1445` injected-subhalo cases; `289` PSF states per mass).
+5. PSF-model-error no-subhalo stress test (`0/63` matched-truth-PSF false detections; `49/63` over-idealized perfect-PSF false positives by `q_fit >= 10`; `47/63` by `Delta logZ > 5`).
+
+Final poster references include He et al. HWO25, Nightingale et al. 2023, Navarro-Frenk-White, PyAutoLens, Nautilus, Van Eylen et al. HRI assumptions, and Mahajan & Dai (2006) for hexikes.
+
 Manuscript/poster notes:
 
 - Use preliminary framework language.
@@ -541,11 +562,8 @@ Deferred items:
 
 ## Open questions
 
-1. Which PSF-bank mass-completeness plot should be central in the manuscript
-   versus backup material?
-2. Should the poster/manuscript lead with the mass-completeness curve, the
-   matched/wrong-PSF false-positive result, or the Fisher PSF-degradation curve?
-3. Should the main PSF-degradation x-axis be nominal amplitude, measured WFE,
-   or a paired presentation?
-4. Which RASTI expansion comes first: PSF nuisance fitting, full 2D sensitivity
-   maps, or source-realism stress tests?
+Poster-specific choices are now locked in `SPIE_Poster_JPL_FINAL`. Remaining open questions are manuscript and RASTI scope:
+
+1. Which final poster figures should become primary manuscript figures versus appendix/supporting figures?
+2. How much of the PSF-model-error false-positive stress test should be expanded before the SPIE manuscript deadline?
+3. Which RASTI expansion comes first: continuous PSF nuisance treatment, full 2D sensitivity maps, or source-realism stress tests?

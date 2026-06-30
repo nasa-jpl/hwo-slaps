@@ -321,19 +321,27 @@ Manuscript spine:
 - [ ] PSF-bank marginalized nonlinear mass-completeness result.
 - [ ] Limitations and path to the RASTI study.
 
-Poster spine:
+Poster status update, 2026-06-12:
 
-- [ ] One-sentence SCDD motivation.
-- [ ] Pipeline schematic.
-- [ ] Example lens + PSF + subhalo residual.
-- [ ] Detection significance versus mass.
-- [ ] PSF-bank marginalized mass-completeness curve.
-- [ ] PSF amplitude versus degradation or detectable-ring fraction.
-- [ ] Next-step validation box.
+The final poster is locked as `SPIE_Poster_JPL_FINAL.pdf` / `SPIE_Poster_JPL_FINAL.pptx`. It uses the final five-figure structure: canonical lensing scene, segmented-pupil/hexike PSF assumptions, noisy PyAutoLens validation, PSF-bank mass completeness, and PSF-model-error false-positive controls. The poster leads with PSF-bank marginalized mass completeness and the matched-versus-over-idealized-perfect-PSF false-positive stress test.
+
+Final poster spine:
+
+- [x] SCDD/HWO science motivation and science question.
+- [x] Pipeline overview paragraph.
+- [x] Example lensing scene, injected subhalo, and fractional residual.
+- [x] Segmented-pupil / hexike PSF assumptions figure.
+- [x] Fisher/Asimov, `q_fit`, and Bayesian-evidence detection convention.
+- [x] Noisy PyAutoLens/Nautilus validation plot.
+- [x] PSF-bank marginalized mass-completeness curve.
+- [x] PSF-model-error false-positive control plot.
+- [x] Conclusions and RASTI-scope next steps.
+
+Deferred from poster to manuscript/RASTI: standalone pipeline schematic, PSF-amplitude degradation curve, full detectable-ring/2D sensitivity map, and continuous PSF-nuisance false-positive study.
 
 SPIE deadline targets:
 
-- [ ] Poster PDF deadline: 10 June 2026.
+- [x] Poster PDF deadline: 10 June 2026.
 - [ ] Manuscript deadline: 17 June 2026.
 - [ ] Conference week: 5-10 July 2026.
 
