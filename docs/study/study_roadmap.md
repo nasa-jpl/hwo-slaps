@@ -327,19 +327,36 @@ or a monotonic mapping with uncertainty.
 
 Goal:
 
-Submit a real full-length SPIE proceedings manuscript and prepare the poster.
+Submit a real full-length SPIE proceedings manuscript and poster, then archive
+the exact submitted artifacts and supporting results outside the main repo.
+
+Status update, 2026-07-06:
+
+The SPIE paper and poster have been submitted. The submitted manuscript source,
+compiled PDF, final poster PDF/PPTX, manuscript figures, packaged result CSVs,
+plot products, provenance, and reproduction instructions are archived under
+`../spie/`. The main repo should treat those files as submitted study artifacts,
+not supported package APIs.
 
 Manuscript spine:
 
-- [ ] Motivation from the SCDD PSF-stability future-work case.
-- [ ] HWO-SLAPS pipeline overview.
-- [ ] Fisher/Asimov detection metric and SCDD threshold mapping.
-- [ ] Canonical experiment setup.
-- [ ] First mass-reach forecast.
-- [ ] First PSF-mode degradation forecast.
-- [ ] PyAutoLens nonlinear validation status.
-- [ ] PSF-bank marginalized nonlinear mass-completeness result.
-- [ ] Limitations and path to the RASTI study.
+- [x] Motivation from the SCDD PSF-stability future-work case.
+- [x] HWO-SLAPS pipeline overview.
+- [x] Fisher/Asimov detection metric and SCDD threshold mapping.
+- [x] Canonical experiment setup.
+- [x] First mass-reach forecast.
+- [x] First PSF-mode degradation forecast.
+- [x] PyAutoLens nonlinear validation status.
+- [x] PSF-bank marginalized nonlinear mass-completeness result.
+- [x] Limitations and path to the RASTI study.
+
+Submitted manuscript archive:
+
+- source and compiled PDF: `../spie/manuscript/main.tex` and
+  `../spie/manuscript/main.pdf`,
+- final manuscript figures: `../spie/manuscript/figures/`,
+- complete manuscript working copy:
+  `../spie/SPIE_Proceeding_HWO_SLAPS_Draft_work/`.
 
 Poster status update, 2026-06-12:
 
@@ -362,7 +379,7 @@ Deferred from poster to manuscript/RASTI: standalone pipeline schematic, PSF-amp
 SPIE deadline targets:
 
 - [x] Poster PDF deadline: 10 June 2026.
-- [ ] Manuscript deadline: 17 June 2026.
+- [x] Manuscript deadline: 17 June 2026.
 - [ ] Conference week: 5-10 July 2026.
 
 ## Stage 4: RASTI-level codebase
@@ -407,6 +424,72 @@ Minimum RASTI code outputs:
 Goal:
 
 Run the full science study and derive calibrated PSF-stability and mass-reach implications.
+
+Required science expansions:
+
+This is the minimum expansion from the submitted SPIE artifact toward a defensible
+RASTI paper. The goal is to show that the PSF-stability conclusion is not an
+artifact of one lensing scene, one monochromatic static PSF, one pixel scale, or
+one targeted nonlinear fit.
+
+Lensing scene upgrades:
+
+- Expand from the canonical SPIE scene to many lens/source/subhalo
+  configurations, including a mass and position ladder for subhalos.
+- Add source-morphology complexity beyond smooth elliptical profiles, including
+  clumpy or irregular source structure.
+- Add lens-model realism and stress tests for lens light, subtraction residuals,
+  external shear, and line-of-sight structure or an explicit caveat when those
+  effects remain out of scope.
+- Track which conclusions are population-level and which remain tied to a
+  canonical demonstration scene.
+
+PSF model upgrades:
+
+- Replace the static single-PSF assumption with time-varying or exposure-varying
+  PSFs when the observation model includes multiple visits or coadds.
+- Use the EAC1 pupil PSD or covariance model if it becomes available; otherwise,
+  use documented parametric priors on PSF mode coefficients.
+- Sweep a broad segmented and global mode basis, including segment piston,
+  segment tip/tilt, segment hexikes, global Zernikes, and selected mixed modes.
+- Treat the distribution or weight function over modes as a tunable study knob,
+  not only as independent one-mode perturbations.
+- Preserve perfect-PSF, perturbed-PSF, and posterior-marginalized PSF cases as
+  separate controls.
+
+Observation model upgrades:
+
+- Replace monochromatic draws with realistic bandpasses or a documented
+  approximation to bandpass-integrated images.
+- Add HWO observing assumptions for exposure time, visit cadence, roll angle or
+  sky orientation diversity, and coaddition when those are needed for a claim.
+- Sweep pixel scale because the high-resolution imager sampling is not fixed.
+- Keep detector noise, background, and throughput assumptions explicit enough
+  that requirement curves can be regenerated under changed architecture inputs.
+
+Detection and inference upgrades:
+
+- Move from targeted detection tests to a broader nonlinear search over subhalo
+  mass, position, and nuisance parameters.
+- Include PSF uncertainty in the nonlinear inference through PSF posterior
+  samples, coefficient priors, or controlled nuisance marginalization.
+- Validate Fisher predictions against nonlinear fits across more than one scene,
+  PSF family, mass scale, and signal-to-noise regime.
+- Quantify false positives where PSF mismatch, source complexity, or lens-model
+  mismatch can mimic substructure.
+- Report detectable-area maps and mass-floor curves rather than only
+  single-location detection statistics.
+
+Overall study and comparison upgrades:
+
+- Convert the one-scene SPIE proof of concept into a reproducible ensemble study
+  with manifests, provenance, aggregated tables, and regenerable figures.
+- Separate minimum RASTI requirements from stretch diagnostics so the paper does
+  not depend on every possible realism upgrade.
+- Include JWST/Webb and alternate HWO architecture comparisons, such as EAC2 or
+  later EAC concepts, where they are needed to support an HWO-specific claim.
+- State which architecture choices are frozen assumptions and which are swept as
+  design parameters.
 
 Recommended scope:
 
@@ -491,7 +574,11 @@ Reference date: 17 May 2026.
 
 ## Immediate next decisions
 
-1. Decide which PyAutoLens validation figures are central versus backup for the SPIE poster.
-2. Decide whether the PSF-degradation figure should use nominal amplitude, measured WFE, or both.
-3. Decide how prominently to feature the wrong-PSF false-positive result versus the Fisher degradation curves.
-4. Decide which limitations move into the poster itself and which are reserved for the proceedings manuscript.
+1. Decide which SPIE archive components should be promoted into supported RASTI
+   analysis tooling.
+2. Decide the first RASTI scene/source expansion beyond the canonical SPIE
+   setup.
+3. Decide how to replace or extend the discrete PSF-bank validation with a
+   broader PSF-nuisance treatment.
+4. Decide which SPIE figures should seed RASTI figures and which should remain
+   archived proceedings-only artifacts.
