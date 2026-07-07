@@ -39,9 +39,13 @@ The four core HWO-SLAPS modules are in a good position for a bounded SPIE study:
 - **Observation:** PSF convolution and detector-noise simulation.
 - **Modeling:** Fisher/Asimov subhalo detectability with local and Einstein-ring map modes.
 
-The missing layer is not the core physics module layer. For SPIE, the first
-study layer now exists; for RASTI, that layer still needs to be promoted from
-scripts and packaged outputs into supported, journal-grade analysis tooling:
+The missing layer is not the core physics module layer. The SPIE-specific
+study layer has been moved out of the main repo into the sibling personal
+archive `../spie/`. That archive keeps the canonical config, study manifests,
+study scripts, packaged results, run provenance, manuscript source, and poster
+source used for the SPIE submission. For RASTI, reusable pieces still need to
+be promoted from the archived scripts and packaged outputs into supported,
+journal-grade analysis tooling:
 
 - canonical SPIE/SCDD configs,
 - sweep manifests,
@@ -83,36 +87,49 @@ Goal:
 
 Make the current pipeline produce repeatable proceedings-level results.
 
+Status note: the checked-off study-runner and aggregation items below describe
+the submitted SPIE archive, not supported main-branch APIs retained in this
+merge branch.
+
 Checklist:
 
 - [x] Create a canonical SCDD/SPIE baseline config, separate from `configs/master_config.yaml`.
 - [x] Use lens redshift `z_l = 0.2` and source redshift `z_s = 0.6` for the SCDD-anchored run, unless a different source redshift is explicitly justified in the manuscript.
 - [x] Set the canonical grid, pixel scale, wavelength, aperture, exposure/noise convention, subhalo model, concentration model, and source morphology in one named config.
 - [x] Use the SCDD anchor masses for the headline SPIE grid: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
-- [x] Treat masses below `1e7 Msun` as exploratory unless calibrated by nonlinear fits. The canonical-scene `10^6.5` and `10^6.75 Msun` points now have PSF-bank marginalized nonlinear validation and should be described as calibrated for that setup, not as final HWO requirements.
+- [x] Treat masses below `1e7 Msun` as exploratory unless calibrated by
+      nonlinear fits. The archived canonical-scene `10^6.5` and
+      `10^6.75 Msun` points have PSF-bank marginalized nonlinear validation
+      and should be described as calibrated for that setup, not as final HWO
+      requirements.
 - [x] Define a perfect-PSF baseline.
 - [x] Define one required PSF perturbation family for SPIE.
 - [x] Define one optional second PSF perturbation family for SPIE.
 - [x] State the amplitude units unambiguously for the Stage 0 PSF family: OPD nm, mirror-surface nm, outgoing-beam microradians, or coefficient RMS.
-- [x] Add a lightweight study manifest format in `scratch/study` or `analysis_manifests/`.
-- [x] Add a lightweight study runner that expands the manifest into per-run configs and run directories.
-- [x] Add cross-run aggregation to `results.csv` or `results.jsonl`.
+- [x] Archive the SPIE manifest format in `../spie/study_scripts/spie_study/`.
+- [x] Archive the SPIE study-runner and validation workflow through `../spie/`
+      plus git history at the archived `spie` commit.
+- [x] Package cross-run aggregation in `../spie/data_package/spie_draft_results/`.
 - [x] Record at least: run name, config hash, git hash if available, mass, subhalo model, subhalo position, PSF family, PSF mode, PSF amplitude, seed, local `q_F`, local `Z_F`, `Delta log L_F,equiv`, threshold pass/fail, map median `Z_F`, map max `Z_F`, detectable-ring fraction, profiling degradation, nuisance count, and PSF quality metrics.
 - [x] Store SPIE-needed PSF diagnostics: Strehl, WFE/OPD RMS if available, kernel shape, kernel sum, kernel peak, and FWHM.
 - [x] Add remaining diagnostic extras: raw peak ratio before clipping and a simple kernel-difference norm relative to the perfect PSF.
-- [x] Add SPIE plotting scripts for required figures.
-- [x] Add provenance beyond `config_used.yaml`: git hash, config hash, package versions, Python version, and command line.
+- [x] Archive SPIE plotting scripts in `../spie/study_scripts/spie_study/` and
+      `../spie/manuscript/`.
+- [x] Archive provenance beyond `config_used.yaml`: git hash, config hash,
+      package versions, Python version, and command line.
 - [x] Make the output path portable. Avoid absolute user-specific paths in canonical configs.
 
 Minimum SPIE code outputs:
 
-- canonical config,
-- sweep manifest,
-- generated per-run configs,
-- per-run logs and config snapshots,
-- one aggregate results table,
-- one figure-generation command or script,
-- one reproducibility summary file.
+- canonical config archived at `../spie/configs/scdd_spie_baseline.yaml`,
+- sweep manifests archived at `../spie/study_scripts/spie_study/`,
+- generated per-run configs and run summaries archived under
+  `../spie/provenance/run_summaries/`,
+- aggregate results tables archived under
+  `../spie/data_package/spie_draft_results/csv/`,
+- figure-generation scripts archived in `../spie/study_scripts/spie_study/`
+  and `../spie/manuscript/`,
+- reproducibility metadata archived under `../spie/provenance/`.
 
 ## Stage 2: SPIE-level study
 
@@ -133,7 +150,9 @@ Run a bounded study that supports the SPIE abstract without overclaiming final H
 
 - One canonical strong-lens scene.
 - Masses: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun` as the SCDD-anchored mass ladder.
-- Optional low masses: `10^6.5` and `10^6.75 Msun` now have canonical-scene PSF-bank marginalized nonlinear validation; `1e6 Msun` remains exploratory unless separately validated.
+- Optional low masses: `10^6.5` and `10^6.75 Msun` have archived
+  canonical-scene PSF-bank marginalized nonlinear validation; `1e6 Msun`
+  remains exploratory unless separately validated.
 - Perfect-PSF baseline.
 - One or two PSF families:
   - segment piston or selected segment hexike modes,
@@ -223,8 +242,9 @@ Avoid overextending the validation:
 
 ### SPIE status
 
-PyAutoLens nonlinear modeling is now a **core SPIE validation layer** rather
-than a stretch goal. The controlled SPIE study has:
+PyAutoLens nonlinear modeling became a **core SPIE validation layer** rather
+than a stretch goal. The controlled SPIE study is archived in `../spie/` and
+has:
 
 - a full matched-PSF local-search evidence grid,
 - full matched-PSF no-subhalo controls,
@@ -286,10 +306,10 @@ or a monotonic mapping with uncertainty.
 - Lens-plane subhalos are modeled first; line-of-sight halos are deferred or treated as a caveat.
 - Lens galaxy light and lens-light subtraction residuals are not yet part of the controlled SPIE forecast unless specifically added.
 - Fisher/Asimov statistics are local forecasts. The controlled SPIE validation
-  supports them as screening metrics, and the discrete PSF-bank validation gives
-  the current strongest canonical-scene nonlinear mass reach. Final requirement
-  claims still require broader nonlinear validation, source-scene variation,
-  full 2D maps, and expanded PSF-nuisance treatment.
+  supports them as screening metrics, and the archived discrete PSF-bank
+  validation gives the strongest SPIE canonical-scene nonlinear mass reach.
+  Final requirement claims still require broader nonlinear validation,
+  source-scene variation, full 2D maps, and expanded PSF-nuisance treatment.
 
 ## Acceptance checks before using SPIE plots
 
@@ -366,7 +386,7 @@ Checklist:
       uncertainty across those broader conditions.
 - [ ] Add clumpy/cuspy source-realism stress tests.
 - [ ] Add continuous or broader PSF-nuisance marginalized false-positive tests
-      beyond the current discrete PSF-bank canonical-scene validation.
+      beyond the archived discrete PSF-bank canonical-scene validation.
 - [ ] Add lens-light and lens-subtraction residual stress tests.
 - [ ] Add line-of-sight halo approximation or caveat handling.
 - [ ] Add stronger provenance: code hash, config hash, dependency versions, manifest, and output validation checks.
@@ -390,7 +410,10 @@ Run the full science study and derive calibrated PSF-stability and mass-reach im
 
 Recommended scope:
 
-- Mass ladder: `1e6`, `10^6.5`, `10^6.75`, `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`. The canonical-scene PSF-bank curve already covers `10^6.5` through `10^7.5`; RASTI should broaden that result rather than merely repeat it.
+- Mass ladder: `1e6`, `10^6.5`, `10^6.75`, `1e7`, `10^7.25`,
+  `10^7.5`, `10^7.75`, and `1e8 Msun`. The archived canonical-scene
+  PSF-bank curve covers `10^6.5` through `10^7.5`; RASTI should broaden that
+  result rather than merely repeat it.
 - Full 2D sensitivity maps over subhalo positions around the lensed arcs.
 - Multiple PSF mode families:
   - segment piston,

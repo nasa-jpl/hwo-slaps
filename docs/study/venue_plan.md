@@ -11,6 +11,12 @@ The detection and PSF-stability questions are scientifically coupled: a PSF-requ
 
 This keeps the work coherent while making the RASTI manuscript meaningfully distinct from the SPIE proceedings.
 
+The submitted SPIE study artifacts have been moved out of the main repo into
+the sibling personal archive `../spie/`. That archive contains the SPIE
+configs, manifests, study scripts, packaged results, run provenance,
+manuscript source, and poster source. Main-branch development should treat
+those as archived study artifacts, not as supported package APIs.
+
 ## External constraints and venue context
 
 This plan is designed to satisfy the SPIE proceedings/poster requirements while preserving a stronger archival submission for RASTI.
@@ -147,7 +153,10 @@ RASTI deliverables:
 
 ## PyAutoLens validation placement
 
-For SPIE, PyAutoLens nonlinear modeling is now part of the core result. The controlled grid includes full local-search evidence validation, matched-PSF controls, wrong-PSF controls, `n_live=800` convergence checks, and a compact noisy pilot.
+For SPIE, PyAutoLens nonlinear modeling became part of the core archived
+result. The controlled grid in `../spie/` includes full local-search evidence
+validation, matched-PSF controls, wrong-PSF controls, `n_live=800` convergence
+checks, and a compact noisy pilot.
 
 For RASTI, nonlinear validation should become broader rather than merely first-pass. The RASTI claim that PSF stability requirements are calibrated depends on extending the SPIE validation to multiple scenes, source morphologies, full 2D maps, noisy ensembles, and PSF-nuisance marginalization.
 
