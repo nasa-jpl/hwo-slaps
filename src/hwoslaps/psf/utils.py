@@ -136,6 +136,10 @@ class PSFData:
         Detector-sampled PyAuto kernel array for lensing simulations.
     kernel_pixel_scale : `float`
         Pixel scale of the kernel if different from PSF pixel scale.
+    kernel_diff_l2_norm : `float`, optional
+        L2 norm of the detector kernel difference relative to the perfect PSF.
+    kernel_diff_l2_rel : `float`, optional
+        L2 norm divided by the perfect detector-kernel L2 norm.
     wavelength_nm : `float`
         Observation wavelength in nanometers.
     pupil_diameter_m : `float`
@@ -168,6 +172,8 @@ class PSFData:
         Full Width at Half Maximum in milliarcseconds.
     strehl_ratio : `float`, optional
         Strehl ratio (peak intensity relative to perfect PSF).
+    raw_peak_ratio_before_clipping : `float`, optional
+        Unclipped aberrated/perfect high-resolution PSF peak ratio.
     peak_intensity : `float`
         Peak intensity value of the PSF.
     total_flux : `float`
@@ -237,9 +243,12 @@ class PSFData:
     fwhm_arcsec: Optional[float] = None
     fwhm_mas: Optional[float] = None
     strehl_ratio: Optional[float] = None
+    raw_peak_ratio_before_clipping: Optional[float] = None
     peak_intensity: float = 0.0
     total_flux: float = 0.0
     encircled_energy_50_arcsec: Optional[float] = None
+    kernel_diff_l2_norm: Optional[float] = None
+    kernel_diff_l2_rel: Optional[float] = None
     
     # Aberration summary.
     total_rms_nm: float = 0.0

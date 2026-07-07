@@ -39,7 +39,13 @@ The four core HWO-SLAPS modules are in a good position for a bounded SPIE study:
 - **Observation:** PSF convolution and detector-noise simulation.
 - **Modeling:** Fisher/Asimov subhalo detectability with local and Einstein-ring map modes.
 
-The missing layer is not the core physics module layer. The missing layer is the **study layer**:
+The missing layer is not the core physics module layer. The SPIE-specific
+study layer has been moved out of the main repo into the sibling personal
+archive `../spie/`. That archive keeps the canonical config, study manifests,
+study scripts, packaged results, run provenance, manuscript source, and poster
+source used for the SPIE submission. For RASTI, reusable pieces still need to
+be promoted from the archived scripts and packaged outputs into supported,
+journal-grade analysis tooling:
 
 - canonical SPIE/SCDD configs,
 - sweep manifests,
@@ -47,8 +53,9 @@ The missing layer is not the core physics module layer. The missing layer is the
 - publication figures,
 - detectable-area or detectable-ring summaries,
 - reproducibility metadata,
-- sparse nonlinear validation for SPIE,
-- broader nonlinear validation for RASTI.
+- PyAutoLens nonlinear evidence validation for SPIE,
+- discrete PSF-bank marginalized nonlinear validation,
+- broader scene/source/PSF-nuisance validation for RASTI.
 
 ## Stage 0: one-week internal-review priority
 
@@ -58,12 +65,12 @@ Produce a credible internal-review poster package quickly without trying to comp
 
 Minimum internal-review deliverables:
 
-- [ ] One canonical SCDD-like baseline scene.
-- [ ] One perfect-PSF mass sweep.
-- [ ] One PSF perturbation family with an amplitude ladder.
-- [ ] One ring-map / detectable-ring-fraction demonstration.
-- [ ] One clear table of metric definitions: `q_F`, `Z_F`, `Delta log L_F,equiv`, and threshold pass/fail.
-- [ ] One limitations box that says the SPIE version is a first forecast, not final HWO engineering requirements.
+- [x] One canonical SCDD-like baseline scene.
+- [x] One perfect-PSF mass sweep.
+- [x] One PSF perturbation family with an amplitude ladder.
+- [x] One ring-map / detectable-ring-fraction demonstration.
+- [x] One clear table of metric definitions: `q_F`, `Z_F`, `Delta log L_F,equiv`, and threshold pass/fail.
+- [x] One limitations box that says the SPIE version is a first forecast, not final HWO engineering requirements.
 
 Recommended poster logic:
 
@@ -71,7 +78,8 @@ Recommended poster logic:
 2. HWO-SLAPS maps optics perturbations into a lensing detection statistic.
 3. Perfect-PSF simulations define mass reach.
 4. Perturbed-PSF simulations show how mass reach or detectable-ring fraction degrades.
-5. The RASTI study will expand this into calibrated requirement curves.
+5. PyAutoLens nonlinear validation calibrates the controlled SPIE forecast.
+6. The RASTI study will expand this into calibrated requirement curves.
 
 ## Stage 1: SPIE-level codebase hardening
 
@@ -79,34 +87,49 @@ Goal:
 
 Make the current pipeline produce repeatable proceedings-level results.
 
+Status note: the checked-off study-runner and aggregation items below describe
+the submitted SPIE archive, not supported main-branch APIs retained in this
+merge branch.
+
 Checklist:
 
-- [ ] Create a canonical SCDD/SPIE baseline config, separate from `configs/master_config.yaml`.
-- [ ] Use lens redshift `z_l = 0.2` and source redshift `z_s = 0.6` for the SCDD-anchored run, unless a different source redshift is explicitly justified in the manuscript.
-- [ ] Set the canonical grid, pixel scale, wavelength, aperture, exposure/noise convention, subhalo model, concentration model, and source morphology in one named config.
-- [ ] Use the SCDD anchor masses for the headline SPIE grid: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
-- [ ] Treat masses below `1e7 Msun` as exploratory extrapolation unless calibrated by nonlinear fits.
-- [ ] Define a perfect-PSF baseline.
-- [ ] Define one required PSF perturbation family for SPIE and one optional second family.
-- [ ] State the amplitude units unambiguously for every PSF family: OPD nm, mirror-surface nm, outgoing-beam microradians, or coefficient RMS.
-- [ ] Add a lightweight study manifest format in `scratch/study` or `analysis_manifests/`.
-- [ ] Add a lightweight study runner that expands the manifest into per-run configs and run directories.
-- [ ] Add cross-run aggregation to `results.csv` or `results.jsonl`.
-- [ ] Record at least: run name, config hash, git hash if available, mass, subhalo model, subhalo position, PSF family, PSF mode, PSF amplitude, seed, local `q_F`, local `Z_F`, `Delta log L_F,equiv`, threshold pass/fail, map median `Z_F`, map max `Z_F`, detectable-ring fraction, profiling degradation, nuisance count, and PSF quality metrics.
-- [ ] Store PSF diagnostics: Strehl, raw peak ratio before clipping, WFE/OPD RMS if available, kernel shape, kernel sum, and a simple kernel-difference norm relative to the perfect PSF.
-- [ ] Add SPIE plotting scripts for required figures.
-- [ ] Add provenance beyond `config_used.yaml`: git hash, config hash, package versions, Python version, and command line.
-- [ ] Make the output path portable. Avoid absolute user-specific paths in canonical configs.
+- [x] Create a canonical SCDD/SPIE baseline config, separate from `configs/master_config.yaml`.
+- [x] Use lens redshift `z_l = 0.2` and source redshift `z_s = 0.6` for the SCDD-anchored run, unless a different source redshift is explicitly justified in the manuscript.
+- [x] Set the canonical grid, pixel scale, wavelength, aperture, exposure/noise convention, subhalo model, concentration model, and source morphology in one named config.
+- [x] Use the SCDD anchor masses for the headline SPIE grid: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
+- [x] Treat masses below `1e7 Msun` as exploratory unless calibrated by
+      nonlinear fits. The archived canonical-scene `10^6.5` and
+      `10^6.75 Msun` points have PSF-bank marginalized nonlinear validation
+      and should be described as calibrated for that setup, not as final HWO
+      requirements.
+- [x] Define a perfect-PSF baseline.
+- [x] Define one required PSF perturbation family for SPIE.
+- [x] Define one optional second PSF perturbation family for SPIE.
+- [x] State the amplitude units unambiguously for the Stage 0 PSF family: OPD nm, mirror-surface nm, outgoing-beam microradians, or coefficient RMS.
+- [x] Archive the SPIE manifest format in `../spie/study_scripts/spie_study/`.
+- [x] Archive the SPIE study-runner and validation workflow through `../spie/`
+      plus git history at the archived `spie` commit.
+- [x] Package cross-run aggregation in `../spie/data_package/spie_draft_results/`.
+- [x] Record at least: run name, config hash, git hash if available, mass, subhalo model, subhalo position, PSF family, PSF mode, PSF amplitude, seed, local `q_F`, local `Z_F`, `Delta log L_F,equiv`, threshold pass/fail, map median `Z_F`, map max `Z_F`, detectable-ring fraction, profiling degradation, nuisance count, and PSF quality metrics.
+- [x] Store SPIE-needed PSF diagnostics: Strehl, WFE/OPD RMS if available, kernel shape, kernel sum, kernel peak, and FWHM.
+- [x] Add remaining diagnostic extras: raw peak ratio before clipping and a simple kernel-difference norm relative to the perfect PSF.
+- [x] Archive SPIE plotting scripts in `../spie/study_scripts/spie_study/` and
+      `../spie/manuscript/`.
+- [x] Archive provenance beyond `config_used.yaml`: git hash, config hash,
+      package versions, Python version, and command line.
+- [x] Make the output path portable. Avoid absolute user-specific paths in canonical configs.
 
 Minimum SPIE code outputs:
 
-- canonical config,
-- sweep manifest,
-- generated per-run configs,
-- per-run logs and config snapshots,
-- one aggregate results table,
-- one figure-generation command or script,
-- one reproducibility summary file.
+- canonical config archived at `../spie/configs/scdd_spie_baseline.yaml`,
+- sweep manifests archived at `../spie/study_scripts/spie_study/`,
+- generated per-run configs and run summaries archived under
+  `../spie/provenance/run_summaries/`,
+- aggregate results tables archived under
+  `../spie/data_package/spie_draft_results/csv/`,
+- figure-generation scripts archived in `../spie/study_scripts/spie_study/`
+  and `../spie/manuscript/`,
+- reproducibility metadata archived under `../spie/provenance/`.
 
 ## Stage 2: SPIE-level study
 
@@ -127,15 +150,22 @@ Run a bounded study that supports the SPIE abstract without overclaiming final H
 
 - One canonical strong-lens scene.
 - Masses: `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun` as the SCDD-anchored mass ladder.
-- Optional exploratory masses: `1e6`, `10^6.5`, and `10^6.75 Msun`, clearly labeled as extrapolations.
+- Optional low masses: `10^6.5` and `10^6.75 Msun` have archived
+  canonical-scene PSF-bank marginalized nonlinear validation; `1e6 Msun`
+  remains exploratory unless separately validated.
 - Perfect-PSF baseline.
 - One or two PSF families:
   - segment piston or selected segment hexike modes,
   - low-order global Zernikes.
 - One amplitude ladder per PSF family.
 - Fisher/Asimov forecasts for the headline sweep.
-- Sparse PyAutoLens-JAX nonlinear validation if time permits.
-- One no-subhalo plus PSF-mismatch false-positive demonstration if time permits.
+- PyAutoLens local-search nonlinear evidence validation.
+- Matched-PSF and wrong-PSF no-subhalo control grids.
+- Full noisy PyAutoLens local-search validation.
+- High-`n_live` noisy threshold-disagreement checks.
+- Discrete PSF-bank marginalized nonlinear validation.
+- PSF-bank marginalized mass-completeness curve for `10^6.5`,
+  `10^6.75`, `10^7`, `10^7.25`, and `10^7.5 Msun`.
 
 ### Stretch scope only if the above is already working
 
@@ -154,69 +184,114 @@ Use one notation consistently across plots, docs, and manuscript:
 - SCDD threshold: $\Delta \log \mathcal{L} > 5$, equivalent to $q_F > 10$ and $Z_F > \sqrt{10}$.
 - Nonlinear validation statistic: $q_{\mathrm{fit}} = 2(\log \mathcal{L}_{\mathrm{subhalo}} - \log \mathcal{L}_{\mathrm{smooth}})$.
 
-Do not call the Fisher value a nonlinear likelihood ratio. Call it a Fisher-equivalent or Asimov forecast until the PyAutoLens validation supports a calibration.
+Do not call the Fisher value a nonlinear likelihood ratio. Call it a Fisher-equivalent or Asimov forecast. The current PyAutoLens validation supports using it as a calibrated screening metric for the controlled matched-PSF SPIE study, not as a universal requirement metric.
 
 ## SPIE study questions
 
-- [ ] Does detectability improve monotonically with subhalo mass in the perfect-PSF baseline?
-- [ ] Does the perfect-PSF mass floor qualitatively match the SCDD expectation near `10^7` to `10^7.25 Msun` for an HWO-like high-resolution setup?
-- [ ] Which selected PSF modes couple most strongly to subhalo-like residuals?
-- [ ] At what approximate PSF amplitude does the local detection statistic or detectable-ring fraction degrade materially?
-- [ ] What fraction of the sampled Einstein ring remains above the SCDD threshold?
-- [ ] Does `q_F` track `q_fit` for the sparse nonlinear validation subset, if that subset is completed?
-- [ ] Can HWO-SLAPS produce requirement-style curves from optics perturbations to subhalo detectability?
+- [x] Does detectability improve monotonically with subhalo mass in the perfect-PSF baseline?
+- [x] Does the perfect-PSF mass floor qualitatively match the SCDD expectation near `10^7` to `10^7.25 Msun` for an HWO-like high-resolution setup?
+- [x] Which selected PSF modes couple most strongly to subhalo-like residuals?
+- [x] At what approximate PSF amplitude does the local detection statistic or detectable-ring fraction degrade materially?
+- [x] What fraction of the sampled Einstein ring remains above the SCDD threshold?
+- [x] Does `q_F` track `q_fit` for the PyAutoLens local-search validation grid?
+- [x] Does the nonlinear PSF-bank marginalized evidence produce a coherent
+      mass-completeness curve?
+- [x] Can HWO-SLAPS produce preliminary requirement-style curves from optics perturbations to subhalo detectability?
 
 ## SPIE study figures
 
 Required:
 
-- [ ] Example lensing scene and subhalo residual.
-- [ ] Example perfect and perturbed PSF diagnostic.
-- [ ] Detection statistic versus subhalo mass.
-- [ ] Detection degradation or detectable-ring fraction versus PSF amplitude.
-- [ ] PSF-mode coupling or tolerance-style plot.
-- [ ] Fisher ring-map or detectable-ring-fraction figure.
+- [x] Example lensing scene and subhalo residual.
+- [x] Example perfect and perturbed PSF diagnostic.
+- [x] Detection statistic versus subhalo mass.
+- [x] Detection degradation or detectable-ring fraction versus PSF amplitude.
+- [x] PSF-mode coupling or tolerance-style plot.
+- [x] Fisher ring-map or detectable-ring-fraction figure.
 
-Recommended if time permits:
+Validation figures:
 
-- [ ] Fisher-versus-nonlinear calibration plot showing `q_F` against `q_fit`, with the SCDD threshold `q=10`.
-- [ ] No-subhalo plus PSF-mismatch false-positive diagnostic.
+- [x] Fisher-versus-nonlinear calibration plot showing `q_F` against `q_fit`, with the SCDD threshold `q=10`.
+- [x] No-subhalo plus PSF-mismatch false-positive diagnostic.
+- [x] Noisy PyAutoLens pilot diagnostic.
+- [x] Full noisy Fisher-versus-nonlinear validation diagnostic.
+- [x] PSF-bank marginalized mass-completeness curve.
 
 ## SPIE claim boundary
 
 Use:
 
-> We present HWO-SLAPS, an end-to-end framework that converts HWO-like PSF perturbations into preliminary low-mass subhalo detectability forecasts. We show first mass-reach and PSF-mode degradation curves, with sparse nonlinear validation planned or demonstrated for selected cases.
+> We present HWO-SLAPS, an end-to-end framework that converts HWO-like PSF perturbations into preliminary low-mass subhalo detectability forecasts. We show first mass-reach and PSF-mode degradation curves, calibrated against PyAutoLens nonlinear evidence for the controlled SPIE grid.
+
+Also supported for SPIE:
+
+> In the canonical scene, discrete PSF-bank marginalized PyAutoLens evidence
+> gives a steep nonlinear mass-completeness curve: `3e6 Msun` subhalos are
+> generally not recovered, `5-10e6 Msun` spans the transition region, and
+> `>= 1.8e7 Msun` is recovered at near-saturated completeness.
 
 Avoid:
 
 > We derive final HWO engineering requirements.
 
-Avoid unless the validation is actually complete:
+Avoid overextending the validation:
 
-> The Fisher statistic is fully calibrated to nonlinear PyAutoLens evidence or likelihood-ratio recovery.
+> The Fisher statistic is universally calibrated across all scenes, source morphologies, PSF nuisance models, and noisy realizations.
 
 ## PyAutoLens validation scope
 
-### SPIE recommendation
+### SPIE status
 
-PyAutoLens nonlinear modeling is in scope for SPIE only as a **small validation subset**. It should not block the poster or proceedings if the Fisher study is already producing coherent results.
+PyAutoLens nonlinear modeling became a **core SPIE validation layer** rather
+than a stretch goal. The controlled SPIE study is archived in `../spie/` and
+has:
 
-Suggested SPIE subset:
-
-- perfect PSF at `10^7.25` and `10^7.75 Msun`, one position;
-- one perturbed-PSF case at the same position;
-- optional no-subhalo PSF-mismatch false-positive case.
+- a full matched-PSF local-search evidence grid,
+- full matched-PSF no-subhalo controls,
+- full wrong-PSF no-subhalo controls,
+- `n_live=800` convergence checks,
+- a compact noisy PyAutoLens pilot,
+- full noisy injected-subhalo and no-subhalo control grids,
+- high-`n_live` noisy threshold-disagreement reruns,
+- discrete PSF-bank marginalized model comparison,
+- amplitude-matched `1e7 Msun` PSF-bank no-subhalo controls,
+- a five-point PSF-bank marginalized mass-completeness curve.
 
 Minimum validation output:
 
-- table of `q_F`, `q_fit`, and pass/fail relative to `q=10`,
-- qualitative statement that the fast metric is a screening/forecast metric,
-- no claim of full calibration.
+- table of `q_F`, `q_fit`, evidence, and pass/fail relative to `q=10`,
+- matched-PSF false-positive control summary,
+- wrong-PSF false-positive control summary,
+- noisy-pilot robustness summary,
+- full noisy-validation summary,
+- PSF-bank marginalized control summary,
+- PSF-bank marginalized mass-completeness summary,
+- statement that the Fisher metric is calibrated as a screening forecast for
+  the controlled matched-PSF setup.
+
+Current SPIE validation anchors:
+
+- Asimov matched-PSF local search: `211/370` injected detections and `0/63`
+  matched-control false positives.
+- Asimov wrong-PSF controls: `49/63` false positives by `q_fit >= 10`, with
+  `47/63` also passing `Delta logZ > 5`.
+- Full noisy local search: `217/370` injected detections versus `215/370`
+  Fisher-threshold forecasts, with `0/63` matched-control false positives and
+  `48/63` wrong-PSF false positives by `q_fit >= 10`.
+- PSF-bank `1e7 Msun` ensemble: paired injected detections `222/289` by
+  `q_fit_psf_profile >= 10` and `209/289` by `Delta logZ_psf_marg > 5`, with
+  matched no-subhalo controls `0/289`.
+- PSF-bank mass completeness by `Delta logZ_psf_marg > 5`: `2.8%` at
+  `3.16e6 Msun`, `30.1%` at `5.62e6 Msun`, `72.3%` at `1e7 Msun`, `97.2%`
+  at `1.78e7 Msun`, and `100.0%` at `3.16e7 Msun`.
 
 ### RASTI recommendation
 
-PyAutoLens nonlinear validation is mandatory for RASTI. It should span masses, positions, PSF states, and no-subhalo false-positive cases, and should fit or bound a calibration relation such as
+PyAutoLens nonlinear validation remains mandatory for RASTI, but the RASTI task
+is now expansion rather than first validation. It should span additional scenes,
+positions, PSF states, source morphologies, and no-subhalo false-positive cases,
+replace or extend the discrete PSF bank with a broader nuisance treatment where
+feasible, and fit or bound a calibration relation such as
 
 $$
 q_{\mathrm{fit}} \simeq \alpha q_F
@@ -230,48 +305,81 @@ or a monotonic mapping with uncertainty.
 - Ring maps are a lightweight sensitivity-map surrogate, not a replacement for full 2D detectable-area maps.
 - Lens-plane subhalos are modeled first; line-of-sight halos are deferred or treated as a caveat.
 - Lens galaxy light and lens-light subtraction residuals are not yet part of the controlled SPIE forecast unless specifically added.
-- Fisher/Asimov statistics are local forecasts and require nonlinear validation before final requirement claims.
+- Fisher/Asimov statistics are local forecasts. The controlled SPIE validation
+  supports them as screening metrics, and the archived discrete PSF-bank
+  validation gives the strongest SPIE canonical-scene nonlinear mass reach.
+  Final requirement claims still require broader nonlinear validation,
+  source-scene variation, full 2D maps, and expanded PSF-nuisance treatment.
 
 ## Acceptance checks before using SPIE plots
 
-- [ ] Perfect-PSF `q_F` increases with subhalo mass for the same position and setup.
-- [ ] The chosen detection threshold is shown on every relevant plot.
-- [ ] `Delta log L_F,equiv = q_F / 2` is computed consistently.
-- [ ] A zero-aberration PSF run is reproducible.
-- [ ] PSF amplitude units are stated in the figure captions.
-- [ ] The code records enough provenance to rerun every plotted point.
-- [ ] No-subhalo PSF-mismatch case does not produce unexplained threshold-level detections, or the issue is highlighted as a result rather than hidden.
+- [x] Perfect-PSF `q_F` increases with subhalo mass for the same position and setup.
+- [x] The chosen detection threshold is shown on every relevant plot.
+- [x] `Delta log L_F,equiv = q_F / 2` is computed consistently.
+- [x] A zero-aberration PSF run is reproducible.
+- [x] PSF amplitude units are stated in the figure captions.
+- [x] The code records enough provenance to rerun every plotted point.
+- [x] No-subhalo PSF-mismatch case does not produce unexplained threshold-level detections, or the issue is highlighted as a result rather than hidden.
+- [x] PSF-bank marginalized controls remain clean for the canonical `1e7 Msun`
+      no-subhalo ensemble.
 
 ## Stage 3: SPIE manuscript and poster
 
 Goal:
 
-Submit a real full-length SPIE proceedings manuscript and prepare the poster.
+Submit a real full-length SPIE proceedings manuscript and poster, then archive
+the exact submitted artifacts and supporting results outside the main repo.
+
+Status update, 2026-07-06:
+
+The SPIE paper and poster have been submitted. The submitted manuscript source,
+compiled PDF, final poster PDF/PPTX, manuscript figures, packaged result CSVs,
+plot products, provenance, and reproduction instructions are archived under
+`../spie/`. The main repo should treat those files as submitted study artifacts,
+not supported package APIs.
 
 Manuscript spine:
 
-- [ ] Motivation from the SCDD PSF-stability future-work case.
-- [ ] HWO-SLAPS pipeline overview.
-- [ ] Fisher/Asimov detection metric and SCDD threshold mapping.
-- [ ] Canonical experiment setup.
-- [ ] First mass-reach forecast.
-- [ ] First PSF-mode degradation forecast.
-- [ ] Sparse validation status.
-- [ ] Limitations and path to the RASTI study.
+- [x] Motivation from the SCDD PSF-stability future-work case.
+- [x] HWO-SLAPS pipeline overview.
+- [x] Fisher/Asimov detection metric and SCDD threshold mapping.
+- [x] Canonical experiment setup.
+- [x] First mass-reach forecast.
+- [x] First PSF-mode degradation forecast.
+- [x] PyAutoLens nonlinear validation status.
+- [x] PSF-bank marginalized nonlinear mass-completeness result.
+- [x] Limitations and path to the RASTI study.
 
-Poster spine:
+Submitted manuscript archive:
 
-- [ ] One-sentence SCDD motivation.
-- [ ] Pipeline schematic.
-- [ ] Example lens + PSF + subhalo residual.
-- [ ] Detection significance versus mass.
-- [ ] PSF amplitude versus degradation or detectable-ring fraction.
-- [ ] Next-step validation box.
+- source and compiled PDF: `../spie/manuscript/main.tex` and
+  `../spie/manuscript/main.pdf`,
+- final manuscript figures: `../spie/manuscript/figures/`,
+- complete manuscript working copy:
+  `../spie/SPIE_Proceeding_HWO_SLAPS_Draft_work/`.
+
+Poster status update, 2026-06-12:
+
+The final poster is locked as `SPIE_Poster_JPL_FINAL.pdf` / `SPIE_Poster_JPL_FINAL.pptx`. It uses the final five-figure structure: canonical lensing scene, segmented-pupil/hexike PSF assumptions, noisy PyAutoLens validation, PSF-bank mass completeness, and PSF-model-error false-positive controls. The poster leads with PSF-bank marginalized mass completeness and the matched-versus-over-idealized-perfect-PSF false-positive stress test.
+
+Final poster spine:
+
+- [x] SCDD/HWO science motivation and science question.
+- [x] Pipeline overview paragraph.
+- [x] Example lensing scene, injected subhalo, and fractional residual.
+- [x] Segmented-pupil / hexike PSF assumptions figure.
+- [x] Fisher/Asimov, `q_fit`, and Bayesian-evidence detection convention.
+- [x] Noisy PyAutoLens/Nautilus validation plot.
+- [x] PSF-bank marginalized mass-completeness curve.
+- [x] PSF-model-error false-positive control plot.
+- [x] Conclusions and RASTI-scope next steps.
+
+Deferred from poster to manuscript/RASTI: standalone pipeline schematic, PSF-amplitude degradation curve, full detectable-ring/2D sensitivity map, and continuous PSF-nuisance false-positive study.
 
 SPIE deadline targets:
 
-- [ ] Poster PDF deadline: 10 June 2026.
-- [ ] Manuscript deadline: 17 June 2026.
+- [x] Poster PDF deadline: 10 June 2026.
+- [x] Manuscript deadline: 17 June 2026.
 - [ ] Conference week: 5-10 July 2026.
 
 ## Stage 4: RASTI-level codebase
@@ -289,10 +397,13 @@ Checklist:
 - [ ] Add publication figure-generation scripts.
 - [ ] Add full 2D detectable-area support, not only local injected-position or Einstein-ring significance.
 - [ ] Promote the SPIE metric convention into supported analysis outputs: `q_F`, `Z_F`, `Delta log L_F,equiv`, and SCDD-threshold pass/fail.
-- [ ] Add mandatory PyAutoLens-JAX nonlinear-fit calibration across masses, positions, PSF states, and false-positive cases.
-- [ ] Fit or bound the calibration relation between `q_F` and `q_fit`.
+- [ ] Extend PyAutoLens nonlinear calibration across more masses, positions,
+      PSF states, scenes, and false-positive cases.
+- [ ] Fit or bound the calibration relation between `q_F` and `q_fit` with
+      uncertainty across those broader conditions.
 - [ ] Add clumpy/cuspy source-realism stress tests.
-- [ ] Add no-subhalo plus PSF-mismatch false-positive tests.
+- [ ] Add continuous or broader PSF-nuisance marginalized false-positive tests
+      beyond the archived discrete PSF-bank canonical-scene validation.
 - [ ] Add lens-light and lens-subtraction residual stress tests.
 - [ ] Add line-of-sight halo approximation or caveat handling.
 - [ ] Add stronger provenance: code hash, config hash, dependency versions, manifest, and output validation checks.
@@ -314,9 +425,78 @@ Goal:
 
 Run the full science study and derive calibrated PSF-stability and mass-reach implications.
 
+Required science expansions:
+
+This is the minimum expansion from the submitted SPIE artifact toward a defensible
+RASTI paper. The goal is to show that the PSF-stability conclusion is not an
+artifact of one lensing scene, one monochromatic static PSF, one pixel scale, or
+one targeted nonlinear fit.
+
+Lensing scene upgrades:
+
+- Expand from the canonical SPIE scene to many lens/source/subhalo
+  configurations, including a mass and position ladder for subhalos.
+- Add source-morphology complexity beyond smooth elliptical profiles, including
+  clumpy or irregular source structure.
+- Add lens-model realism and stress tests for lens light, subtraction residuals,
+  external shear, and line-of-sight structure or an explicit caveat when those
+  effects remain out of scope.
+- Track which conclusions are population-level and which remain tied to a
+  canonical demonstration scene.
+
+PSF model upgrades:
+
+- Replace the static single-PSF assumption with time-varying or exposure-varying
+  PSFs when the observation model includes multiple visits or coadds.
+- Use the EAC1 pupil PSD or covariance model if it becomes available; otherwise,
+  use documented parametric priors on PSF mode coefficients.
+- Sweep a broad segmented and global mode basis, including segment piston,
+  segment tip/tilt, segment hexikes, global Zernikes, and selected mixed modes.
+- Treat the distribution or weight function over modes as a tunable study knob,
+  not only as independent one-mode perturbations.
+- Preserve perfect-PSF, perturbed-PSF, and posterior-marginalized PSF cases as
+  separate controls.
+
+Observation model upgrades:
+
+- Replace monochromatic draws with realistic bandpasses or a documented
+  approximation to bandpass-integrated images.
+- Add HWO observing assumptions for exposure time, visit cadence, roll angle or
+  sky orientation diversity, and coaddition when those are needed for a claim.
+- Sweep pixel scale because the high-resolution imager sampling is not fixed.
+- Keep detector noise, background, and throughput assumptions explicit enough
+  that requirement curves can be regenerated under changed architecture inputs.
+
+Detection and inference upgrades:
+
+- Move from targeted detection tests to a broader nonlinear search over subhalo
+  mass, position, and nuisance parameters.
+- Include PSF uncertainty in the nonlinear inference through PSF posterior
+  samples, coefficient priors, or controlled nuisance marginalization.
+- Validate Fisher predictions against nonlinear fits across more than one scene,
+  PSF family, mass scale, and signal-to-noise regime.
+- Quantify false positives where PSF mismatch, source complexity, or lens-model
+  mismatch can mimic substructure.
+- Report detectable-area maps and mass-floor curves rather than only
+  single-location detection statistics.
+
+Overall study and comparison upgrades:
+
+- Convert the one-scene SPIE proof of concept into a reproducible ensemble study
+  with manifests, provenance, aggregated tables, and regenerable figures.
+- Separate minimum RASTI requirements from stretch diagnostics so the paper does
+  not depend on every possible realism upgrade.
+- Include JWST/Webb and alternate HWO architecture comparisons, such as EAC2 or
+  later EAC concepts, where they are needed to support an HWO-specific claim.
+- State which architecture choices are frozen assumptions and which are swept as
+  design parameters.
+
 Recommended scope:
 
-- Mass ladder: `1e6`, `10^6.5`, `10^6.75`, `1e7`, `10^7.25`, `10^7.5`, `10^7.75`, and `1e8 Msun`.
+- Mass ladder: `1e6`, `10^6.5`, `10^6.75`, `1e7`, `10^7.25`,
+  `10^7.5`, `10^7.75`, and `1e8 Msun`. The archived canonical-scene
+  PSF-bank curve covers `10^6.5` through `10^7.5`; RASTI should broaden that
+  result rather than merely repeat it.
 - Full 2D sensitivity maps over subhalo positions around the lensed arcs.
 - Multiple PSF mode families:
   - segment piston,
@@ -326,8 +506,8 @@ Recommended scope:
   - selected combinations.
 - Multiple amplitudes per PSF family.
 - Perfect-PSF and perturbed-PSF comparisons.
-- Fisher-versus-fit validation subset.
-- False-positive analysis.
+- Expanded Fisher-versus-PyAutoLens validation suite.
+- Expanded false-positive analysis with broader PSF nuisance and noisy ensembles.
 - Detectable-area and mass-floor curves derived from thresholded 2D maps.
 - Source-morphology stress tests.
 - Lens-light and subtraction-residual stress tests.
@@ -342,7 +522,7 @@ RASTI study questions:
 - [ ] How robust are the conclusions to source morphology?
 - [ ] How robust are the conclusions to detection-threshold choice?
 - [ ] How often can PSF mismatch mimic a subhalo detection?
-- [ ] How does full nonlinear validation modify the Fisher requirement curves?
+- [ ] How does broader nonlinear validation modify the Fisher requirement curves?
 
 RASTI study figures:
 
@@ -394,7 +574,11 @@ Reference date: 17 May 2026.
 
 ## Immediate next decisions
 
-1. Pick the single PSF family for the first internal-review sweep.
-2. Lock the canonical SCDD baseline config.
-3. Decide whether SPIE PyAutoLens validation is minimum, nominal, or stretch.
-4. Decide the degradation budget to show on the first tolerance-style plot, for example fractional retained Fisher information, detectable-ring fraction, or mass-floor shift.
+1. Decide which SPIE archive components should be promoted into supported RASTI
+   analysis tooling.
+2. Decide the first RASTI scene/source expansion beyond the canonical SPIE
+   setup.
+3. Decide how to replace or extend the discrete PSF-bank validation with a
+   broader PSF-nuisance treatment.
+4. Decide which SPIE figures should seed RASTI figures and which should remain
+   archived proceedings-only artifacts.

@@ -42,6 +42,8 @@ def main():
 
     run_name = config.get('run_name', 'run')
     output_root = Path(config.get('plotting', {}).get('output_dir', 'outputs')).expanduser()
+    if not output_root.is_absolute():
+        output_root = Path(__file__).resolve().parent / output_root
     run_dir = output_root / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 

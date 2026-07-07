@@ -26,6 +26,7 @@ from hwoslaps.psf.aberration_models import (
     generate_random_segment_aberrations,
 )
 from hwoslaps.psf.generator import generate_psf_system
+from hwoslaps.psf.psf_metrics import calculate_raw_peak_ratio
 from hwoslaps.psf.telescope_models import create_hcipy_telescope
 
 
@@ -72,6 +73,15 @@ def compact_telescope(compact_config: dict) -> dict:
 def _quiet_generate(config: dict):
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         return generate_psf_system(config["psf"], full_config=config)
+
+
+def test_raw_peak_ratio_rejects_zero_perfect_peak():
+    """Raw peak diagnostics should fail clearly for invalid perfect PSFs."""
+    aberrated = type("PSF", (), {"intensity": np.array([[1.0]])})()
+    perfect = type("PSF", (), {"intensity": np.array([[0.0]])})()
+
+    with pytest.raises(ValueError, match="Perfect PSF peak intensity"):
+        calculate_raw_peak_ratio(aberrated, perfect)
 
 
 def test_global_zernike_config_keys_are_one_based_noll_indices(compact_telescope: dict):

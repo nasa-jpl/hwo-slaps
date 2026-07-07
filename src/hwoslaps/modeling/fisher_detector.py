@@ -22,7 +22,7 @@ Caveats
 This is still a local detector. Its statistical object is rigorous, explicit,
 and sweepable, but it remains a surrogate for the full nonlinear profile
 likelihood and therefore should be calibrated against sparse full fits before
-the final manuscript.
+making requirement-level claims.
 """
 
 from __future__ import annotations
@@ -1028,6 +1028,8 @@ class FisherDetector:
         base_value = self._science_psf_base_value(spec)
         self._set_path_value_create(plus_config, spec.enable_flag_path, True)
         self._set_path_value_create(minus_config, spec.enable_flag_path, True)
+        self._ensure_psf_derivative_container(plus_config, spec)
+        self._ensure_psf_derivative_container(minus_config, spec)
         self._set_path_value_create(plus_config, spec.path, base_value + spec.step)
         self._set_path_value_create(minus_config, spec.path, base_value - spec.step)
 
@@ -1045,6 +1047,32 @@ class FisherDetector:
             normalize=False,
         )
         return self._source_adu_from_kernel(derivative_kernel_obj)
+
+    @staticmethod
+    def _ensure_psf_derivative_container(config: Dict[str, Any], spec: _PsfModeSpec) -> None:
+        """Prepare nested PSF coefficient containers before path assignment.
+
+        Segment hexikes use integer dictionary keys at both the segment and
+        mode levels. The generic path setter cannot infer that the segment
+        level should be a dictionary rather than a list when the science PSF is
+        perfect and the family is absent, so handle that structure explicitly.
+        """
+        if spec.family != "segment_hexikes":
+            return
+        segment_id = int(spec.path[-2])
+        aberr = config.setdefault("psf", {}).setdefault("aberrations", {})
+        family = aberr.setdefault("segment_hexikes", {})
+        if family is None:
+            family = {}
+            aberr["segment_hexikes"] = family
+        if not isinstance(family, dict):
+            raise ValueError("psf.aberrations.segment_hexikes must be a dictionary.")
+        if family.get(segment_id) is None:
+            family[segment_id] = {}
+        if not isinstance(family[segment_id], dict):
+            raise ValueError(
+                f"psf.aberrations.segment_hexikes[{segment_id}] must be a dictionary."
+            )
 
     def _compute_local_mode_scan(self, mu1_adu_2d: np.ndarray) -> FisherModeScanData:
         all_sigmas_known = all(sigma is not None for sigma in self.psf_scan_mode_sigmas)

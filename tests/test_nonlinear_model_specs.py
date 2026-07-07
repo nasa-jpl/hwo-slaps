@@ -60,7 +60,7 @@ def test_nfw_fixed_template_spec_preserves_forward_model_parameters():
     )
 
     spec = subhalo_model_spec_from_trial(_config(), trial, fit_mode="fixed_template")
-    mass = spec.galaxies["subhalo"].components["mass"]
+    mass = spec.galaxies["lens"].components["subhalo"]
 
     assert mass.class_name == "NFWSph"
     assert mass.parameters["centre_0"].kind == "fixed"
@@ -82,7 +82,7 @@ def test_local_search_frees_only_the_subhalo_center_by_default():
     )
 
     spec = subhalo_model_spec_from_trial(_config(), trial, fit_mode="local_search")
-    mass = spec.galaxies["subhalo"].components["mass"]
+    mass = spec.galaxies["lens"].components["subhalo"]
 
     assert mass.parameters["centre_0"].kind == "uniform"
     assert mass.parameters["centre_0"].lower == pytest.approx(0.17)

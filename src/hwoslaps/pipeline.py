@@ -8,6 +8,7 @@ mode and subhalo detection mode.
 import yaml
 from typing import Dict, Union
 from copy import deepcopy
+from pathlib import Path
 
 from .lensing import generate_lensing_system
 from .psf import generate_psf_system  
@@ -18,6 +19,15 @@ from .observation.utils import print_observation_summary, ObservationData
 from .plotting import generate_all_plots
 from .modeling.utils_fisher import FisherDetectionData, print_fisher_summary
 from .config.validation import validate_or_raise
+
+
+def _resolve_relative_output_dir(config: Dict) -> None:
+    plotting = config.get('plotting', {})
+    if not isinstance(plotting, dict) or 'output_dir' not in plotting:
+        return
+    output_dir = Path(plotting['output_dir']).expanduser()
+    if not output_dir.is_absolute():
+        plotting['output_dir'] = str(Path(__file__).resolve().parents[2] / output_dir)
 
 
 class Pipeline:
@@ -318,6 +328,7 @@ def run_enhanced_pipeline(config_path: str, verbose: bool = True) -> Union[Obser
     # Load configuration
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
+    _resolve_relative_output_dir(config)
     validate_or_raise(config)
     
     # Create and run pipeline

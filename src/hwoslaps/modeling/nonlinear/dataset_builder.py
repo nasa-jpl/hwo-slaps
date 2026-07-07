@@ -82,8 +82,8 @@ def known_sky_dark_background_adu(observation: Any) -> float:
     )
 
 
-def source_only_data_adu(observation: Any, dataset_kind: str) -> np.ndarray:
-    """Return source-only validation data in ADU.
+def source_only_data_electron_rate(observation: Any, dataset_kind: str) -> np.ndarray:
+    """Return source-only validation data in electron-rate units.
 
     Parameters
     ----------
@@ -95,12 +95,22 @@ def source_only_data_adu(observation: Any, dataset_kind: str) -> np.ndarray:
     Returns
     -------
     data : `numpy.ndarray`
-        Source-only data in ADU.
+        Source-only data in electrons per second, matching the PyAutoLens
+        light-profile intensity units used by the forward model.
     """
     dataset_kind = _validate_choice(dataset_kind, ("asimov", "noisy"), "dataset_kind")
     if dataset_kind == "asimov":
-        return np.asarray(observation.source_electrons, dtype=float) / float(observation.gain)
-    return np.asarray(observation.data.native, dtype=float)
+        return np.asarray(observation.noiseless_source_eps, dtype=float)
+    return (
+        np.asarray(observation.data.native, dtype=float)
+        * float(observation.gain)
+        / float(observation.exposure_time)
+    )
+
+
+def source_only_data_adu(observation: Any, dataset_kind: str) -> np.ndarray:
+    """Deprecated alias for `source_only_data_electron_rate`."""
+    return source_only_data_electron_rate(observation, dataset_kind)
 
 
 def data_array_from_observation(
@@ -123,17 +133,30 @@ def data_array_from_observation(
     Returns
     -------
     data : `numpy.ndarray`
-        Validation data in ADU.
+        Validation data in electrons per second.
     """
     background_treatment = _validate_choice(
         background_treatment,
         ("subtract_known", "none"),
         "background_treatment",
     )
-    data = source_only_data_adu(observation, dataset_kind)
+    data = source_only_data_electron_rate(observation, dataset_kind)
     if dataset_kind == "noisy" and background_treatment == "subtract_known":
-        data = data - known_sky_dark_background_adu(observation)
+        data = data - (
+            known_sky_dark_background_adu(observation)
+            * float(observation.gain)
+            / float(observation.exposure_time)
+        )
     return np.asarray(data, dtype=float)
+
+
+def noise_rate_from_observation(observation: Any) -> np.ndarray:
+    """Return the observation noise map in electron-rate units."""
+    return (
+        np.asarray(observation.noise_map.native, dtype=float)
+        * float(observation.gain)
+        / float(observation.exposure_time)
+    )
 
 
 def mask_from_fisher_use_mask(fisher_use_mask: np.ndarray, pixel_scale: float) -> Any:
@@ -276,12 +299,12 @@ def imaging_from_observation(
         n_unmasked_pixels = int(np.count_nonzero(use_mask))
 
     data_array = al.Array2D(values=data, mask=mask)
-    noise_array = al.Array2D(values=np.asarray(observation.noise_map.native, dtype=float), mask=mask)
+    noise_array = al.Array2D(values=noise_rate_from_observation(observation), mask=mask)
     dataset = al.Imaging(data=data_array, noise_map=noise_array, psf=psf)
 
     metadata = NonlinearDatasetMetadata(
         dataset_kind=dataset_kind,
-        data_units="adu",
+        data_units="e_per_s",
         background_treatment=background_treatment,
         sky_dark_background_adu=known_sky_dark_background_adu(observation),
         mask_name=mask_name,
