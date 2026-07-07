@@ -199,6 +199,11 @@ def calculate_raw_peak_ratio(aberrated_psf, perfect_psf):
     """Return the unclipped aberrated/perfect PSF peak ratio."""
     aberrated_peak = float(np.max(aberrated_psf.intensity))
     perfect_peak = float(np.max(perfect_psf.intensity))
+    if not np.isfinite(perfect_peak) or perfect_peak <= 0.0:
+        raise ValueError(
+            "Perfect PSF peak intensity must be finite and positive to "
+            "calculate a peak ratio."
+        )
     return aberrated_peak / perfect_peak
 
 

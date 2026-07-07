@@ -285,15 +285,24 @@ def generate_psf_system(config, full_config=None):
         statistic='sum',
     )
     
-    # Normalize psf_downsampled to sum to 1.
-    psf_downsampled_normalized = psf_downsampled / np.sum(psf_downsampled)
-    psf_perfect_downsampled_normalized = psf_perfect_downsampled / np.sum(psf_perfect_downsampled)
+    # Normalize detector kernels to unit flux.
+    psf_sum = float(np.sum(psf_downsampled))
+    perfect_psf_sum = float(np.sum(psf_perfect_downsampled))
+    if not np.isfinite(psf_sum) or psf_sum <= 0.0:
+        raise ValueError("Detector-sampled PSF has non-positive or non-finite flux.")
+    if not np.isfinite(perfect_psf_sum) or perfect_psf_sum <= 0.0:
+        raise ValueError(
+            "Perfect detector-sampled PSF has non-positive or non-finite flux."
+        )
+    psf_downsampled_normalized = psf_downsampled / psf_sum
+    psf_perfect_downsampled_normalized = psf_perfect_downsampled / perfect_psf_sum
+    perfect_kernel = np.asarray(psf_perfect_downsampled_normalized.shaped, dtype=float)
     kernel_diff = (
         np.asarray(psf_downsampled_normalized.shaped, dtype=float)
-        - np.asarray(psf_perfect_downsampled_normalized.shaped, dtype=float)
+        - perfect_kernel
     )
     kernel_diff_l2_norm = float(np.linalg.norm(kernel_diff))
-    perfect_kernel_l2_norm = float(np.linalg.norm(psf_perfect_downsampled_normalized.shaped))
+    perfect_kernel_l2_norm = float(np.linalg.norm(perfect_kernel))
     kernel_diff_l2_rel = (
         kernel_diff_l2_norm / perfect_kernel_l2_norm
         if perfect_kernel_l2_norm > 0.0

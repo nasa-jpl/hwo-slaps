@@ -204,8 +204,10 @@ def _patch_analysis_imaging_adapt_images_compat(al: Any) -> None:
         return
 
     def fit_from_compat(self, instance):
-        if self._use_jax:
-            self._register_fit_imaging_pytrees()
+        if getattr(self, "_use_jax", False):
+            register_pytrees = getattr(self, "_register_fit_imaging_pytrees", None)
+            if register_pytrees is not None:
+                register_pytrees()
 
         tracer = self.tracer_via_instance_from(instance=instance)
         dataset_model = self.dataset_model_via_instance_from(instance=instance)
@@ -216,14 +218,18 @@ def _patch_analysis_imaging_adapt_images_compat(al: Any) -> None:
 
         from autolens.imaging.fit_imaging import FitImaging
 
-        return FitImaging(
-            dataset=self.dataset,
-            tracer=tracer,
-            dataset_model=dataset_model,
-            adapt_images=adapt_images,
-            settings=self.settings,
-            xp=self._xp,
+        kwargs = _filter_kwargs(
+            FitImaging,
+            {
+                "dataset": self.dataset,
+                "tracer": tracer,
+                "dataset_model": dataset_model,
+                "adapt_images": adapt_images,
+                "settings": getattr(self, "settings", None),
+                "xp": getattr(self, "_xp", None),
+            },
         )
+        return FitImaging(**kwargs)
 
     analysis_cls.fit_from = fit_from_compat
     analysis_cls._hwoslaps_adapt_images_compat = True

@@ -72,7 +72,7 @@ def plot_fisher_local_summary(
         ("Condition number", f"{detection_data.gram_condition_number:.3e}"),
         ("SNR mask threshold", f"{detection_data.snr_threshold:.3f}"),
         ("SNR_asimov", f"{local.snr_asimov:.4f}"),
-        ("SCDD threshold", f"q_F > {SCDD_Q_THRESHOLD:.1f}; Z_F > sqrt(10)"),
+        ("SCDD threshold", f"q_F > {SCDD_Q_THRESHOLD:.1f}; Z_F > {SCDD_Z_THRESHOLD:.3f}"),
         ("DeltaChi2 raw", f"{local.delta_chi2_raw:.4f}"),
         ("DeltaChi2 profiled", f"{local.delta_chi2_profiled:.4f}"),
         ("Profiling degradation", f"{local.degradation:.4f}"),

@@ -8,6 +8,8 @@ from hwoslaps.modeling.nonlinear.dataset_builder import (
     _exclude_psf_edge_pixels,
     data_array_from_observation,
     noise_rate_from_observation,
+    source_only_data_adu,
+    source_only_data_electron_rate,
 )
 
 
@@ -38,10 +40,14 @@ def test_exclude_psf_edge_pixels_removes_kernel_half_width_border():
 def test_validation_dataset_uses_rate_units_matching_pyautolens_model():
     observation = _Observation()
 
+    source_rate = source_only_data_electron_rate(observation, dataset_kind="noisy")
+    source_rate_alias = source_only_data_adu(observation, dataset_kind="noisy")
     asimov = data_array_from_observation(observation, dataset_kind="asimov")
     noisy = data_array_from_observation(observation, dataset_kind="noisy")
     noise = noise_rate_from_observation(observation)
 
+    assert np.allclose(source_rate, [[5.0, 7.0]])
+    assert np.allclose(source_rate_alias, source_rate)
     assert np.allclose(asimov, [[1.5, 2.5]])
     # ADU -> electrons / second, then subtract known sky+dark in the same units.
     assert np.allclose(noisy, [[3.8, 5.8]])

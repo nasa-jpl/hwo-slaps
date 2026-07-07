@@ -82,7 +82,7 @@ def known_sky_dark_background_adu(observation: Any) -> float:
     )
 
 
-def source_only_data_adu(observation: Any, dataset_kind: str) -> np.ndarray:
+def source_only_data_electron_rate(observation: Any, dataset_kind: str) -> np.ndarray:
     """Return source-only validation data in electron-rate units.
 
     Parameters
@@ -106,6 +106,11 @@ def source_only_data_adu(observation: Any, dataset_kind: str) -> np.ndarray:
         * float(observation.gain)
         / float(observation.exposure_time)
     )
+
+
+def source_only_data_adu(observation: Any, dataset_kind: str) -> np.ndarray:
+    """Deprecated alias for `source_only_data_electron_rate`."""
+    return source_only_data_electron_rate(observation, dataset_kind)
 
 
 def data_array_from_observation(
@@ -135,7 +140,7 @@ def data_array_from_observation(
         ("subtract_known", "none"),
         "background_treatment",
     )
-    data = source_only_data_adu(observation, dataset_kind)
+    data = source_only_data_electron_rate(observation, dataset_kind)
     if dataset_kind == "noisy" and background_treatment == "subtract_known":
         data = data - (
             known_sky_dark_background_adu(observation)
