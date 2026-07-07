@@ -1,8 +1,7 @@
 """Ensemble detection summaries with binomial uncertainties.
 
-Turns per-case detection tables (lists of row mappings, e.g. from an
-aggregate CSV) into grouped completeness summaries with Wilson score
-intervals, as used for the SPIE mass-completeness results.
+Turns per-case detection tables into grouped completeness summaries with
+Wilson score intervals.
 """
 
 from __future__ import annotations

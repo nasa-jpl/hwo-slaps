@@ -22,7 +22,7 @@ Caveats
 This is still a local detector. Its statistical object is rigorous, explicit,
 and sweepable, but it remains a surrogate for the full nonlinear profile
 likelihood and therefore should be calibrated against sparse full fits before
-the final manuscript.
+making requirement-level claims.
 """
 
 from __future__ import annotations

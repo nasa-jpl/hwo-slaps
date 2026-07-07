@@ -7,8 +7,7 @@ configuration into an ordered list of fully specified `RunSpec` entries.
 
 Notes
 -----
-The expansion and seeding semantics are load-bearing for reproducing the
-SPIE 2026 study ensembles and must not change silently:
+The expansion order and seeding semantics are part of the manifest contract:
 
 - Sweeps expand in a fixed order: mass sweep, primary PSF sweep, optional
   PSF sweeps, PSF ensemble.
