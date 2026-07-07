@@ -30,9 +30,8 @@ class NonlinearMetricValidator:
         trial: SubhaloTrial,
         psf_case: str = "nominal",
         priors_config: dict | None = None,
-        fit_mode: str = "fixed_template",
     ) -> NonlinearCaseResult:
-        """Run a fixed-template or local-search nonlinear validation case.
+        """Run a fixed-template nonlinear validation case.
 
         Parameters
         ----------
@@ -54,8 +53,7 @@ class NonlinearMetricValidator:
         result : `NonlinearCaseResult`
             Validation result.
         """
-        if fit_mode not in {"fixed_template", "local_search"}:
-            raise ValueError("fit_mode must be 'fixed_template' or 'local_search'")
+        fit_mode = "fixed_template"
         analysis = self.runner.make_analysis(dataset)
         smooth_spec = smooth_model_spec_from_config(
             full_config,

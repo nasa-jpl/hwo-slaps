@@ -36,10 +36,6 @@ NONLINEAR_CASE_CSV_COLUMNS = (
     "log_l_subhalo",
     "signed_delta_log_l_fit",
     "q_fit",
-    "log_evidence_smooth",
-    "log_evidence_subhalo",
-    "delta_log_evidence",
-    "log10_bayes_factor",
     "z_fit_local",
     "detected_fisher_scdd",
     "detected_fit_scdd",
@@ -206,16 +202,6 @@ class NonlinearCaseResult:
         q_ratio = None
         if q_fit is not None and self.fisher_q not in (None, 0.0):
             q_ratio = q_fit / self.fisher_q
-        delta_log_evidence = None
-        log10_bayes_factor = None
-        if (
-            self.smooth_fit.log_evidence is not None
-            and self.subhalo_fit.log_evidence is not None
-        ):
-            delta_log_evidence = (
-                self.subhalo_fit.log_evidence - self.smooth_fit.log_evidence
-            )
-            log10_bayes_factor = delta_log_evidence / np.log(10.0)
         errors = [
             fit.error
             for fit in (self.smooth_fit, self.subhalo_fit)
@@ -244,10 +230,6 @@ class NonlinearCaseResult:
                 metric.signed_delta_log_l if metric is not None else None
             ),
             "q_fit": q_fit,
-            "log_evidence_smooth": self.smooth_fit.log_evidence,
-            "log_evidence_subhalo": self.subhalo_fit.log_evidence,
-            "delta_log_evidence": delta_log_evidence,
-            "log10_bayes_factor": log10_bayes_factor,
             "z_fit_local": metric.z_local if metric is not None else None,
             "detected_fisher_scdd": (
                 self.fisher_q >= 10.0 if self.fisher_q is not None else None
