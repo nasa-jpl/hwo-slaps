@@ -432,86 +432,226 @@ RASTI paper. The goal is to show that the PSF-stability conclusion is not an
 artifact of one lensing scene, one monochromatic static PSF, one pixel scale, or
 one targeted nonlinear fit.
 
-Lensing scene upgrades:
+**[L] Lensing scene upgrades:**
 
-- Expand from the canonical SPIE scene to many lens/source/subhalo
+- L1: Expand from the canonical SPIE scene to many lens/source/subhalo
   configurations, including a mass and position ladder for subhalos.
-- Add source-morphology complexity beyond smooth elliptical profiles, including
+- L2: Add source-morphology complexity beyond smooth elliptical profiles, including
   clumpy or irregular source structure.
-- Add lens-model realism and stress tests for lens light, subtraction residuals,
+- L3: Add lens-model realism and stress tests for lens light, subtraction residuals,
   external shear, and line-of-sight structure or an explicit caveat when those
   effects remain out of scope.
-- Track which conclusions are population-level and which remain tied to a
-  canonical demonstration scene.
 
-PSF model upgrades:
+**[P] PSF model upgrades:**
 
-- Replace the static single-PSF assumption with time-varying or exposure-varying
+- P1: Replace the static single-PSF assumption with time-varying or exposure-varying
   PSFs when the observation model includes multiple visits or coadds.
-- Use the EAC1 pupil PSD or covariance model if it becomes available; otherwise,
+- P2: Use the EAC1 pupil PSD or covariance model if it becomes available; otherwise,
   use documented parametric priors on PSF mode coefficients.
-- Sweep a broad segmented and global mode basis, including segment piston,
+- P3: Sweep a broad segmented and global mode basis, including segment piston,
   segment tip/tilt, segment hexikes, global Zernikes, and selected mixed modes.
-- Treat the distribution or weight function over modes as a tunable study knob,
+- P4: Treat the distribution or weight function over modes as a tunable study knob,
   not only as independent one-mode perturbations.
-- Preserve perfect-PSF, perturbed-PSF, and posterior-marginalized PSF cases as
-  separate controls.
+- P5: Include a perfect-PSF reference arm and a matched-truth-PSF control arm in
+  every ensemble grid manifest, alongside the marginalized-PSF cases.
 
-Observation model upgrades:
+**[O] Observation model upgrades:**
 
-- Replace monochromatic draws with realistic bandpasses or a documented
+- O1: Replace monochromatic draws with realistic bandpasses or a documented
   approximation to bandpass-integrated images.
-- Add HWO observing assumptions for exposure time, visit cadence, roll angle or
+- O2: Add HWO observing assumptions for exposure time, visit cadence, roll angle or
   sky orientation diversity, and coaddition when those are needed for a claim.
-- Sweep pixel scale because the high-resolution imager sampling is not fixed.
-- Keep detector noise, background, and throughput assumptions explicit enough
-  that requirement curves can be regenerated under changed architecture inputs.
+- O3: Sweep pixel scale because the high-resolution imager sampling is not fixed.
+- O4: Record detector noise, background, and throughput as explicit config fields
+  so any requirement curve can be regenerated under changed architecture inputs.
 
-Detection and inference upgrades:
+**[D] Detection and inference upgrades:**
 
-- Move from targeted detection tests to a broader nonlinear search over subhalo
+- D1: Move from targeted detection tests to a broader nonlinear search over subhalo
   mass, position, and nuisance parameters.
-- Include PSF uncertainty in the nonlinear inference through PSF posterior
+- D2: Include PSF uncertainty in the nonlinear inference through PSF posterior
   samples, coefficient priors, or controlled nuisance marginalization.
-- Validate Fisher predictions against nonlinear fits across more than one scene,
+- D3: Validate Fisher predictions against nonlinear fits across more than one scene,
   PSF family, mass scale, and signal-to-noise regime.
-- Quantify false positives where PSF mismatch, source complexity, or lens-model
+- D4: Quantify false positives where PSF mismatch, source complexity, or lens-model
   mismatch can mimic substructure.
-- Report detectable-area maps and mass-floor curves rather than only
+- D5: Report detectable-area maps and mass-floor curves rather than only
   single-location detection statistics.
 
-Overall study and comparison upgrades:
+**[S] Overall study and comparison upgrades:**
 
-- Convert the one-scene SPIE proof of concept into a reproducible ensemble study
+- S1: Convert the one-scene SPIE proof of concept into a reproducible ensemble study
   with manifests, provenance, aggregated tables, and regenerable figures.
-- Separate minimum RASTI requirements from stretch diagnostics so the paper does
-  not depend on every possible realism upgrade.
-- Include JWST/Webb and alternate HWO architecture comparisons, such as EAC2 or
+- S3: Include JWST/Webb and alternate HWO architecture comparisons, such as EAC2 or
   later EAC concepts, where they are needed to support an HWO-specific claim.
-- State which architecture choices are frozen assumptions and which are swept as
-  design parameters.
+- S4: Mark every physical and instrument parameter as frozen or swept in the
+  config/manifest schema.
 
-Recommended scope:
+**[R] Requirements and science endpoints:**
 
-- Mass ladder: `1e6`, `10^6.5`, `10^6.75`, `1e7`, `10^7.25`,
-  `10^7.5`, `10^7.75`, and `1e8 Msun`. The archived canonical-scene
-  PSF-bank curve covers `10^6.5` through `10^7.5`; RASTI should broaden that
-  result rather than merely repeat it.
-- Full 2D sensitivity maps over subhalo positions around the lensed arcs.
-- Multiple PSF mode families:
-  - segment piston,
-  - segment tip/tilt,
-  - segment hexikes,
-  - global Zernikes,
-  - selected combinations.
-- Multiple amplitudes per PSF family.
-- Perfect-PSF and perturbed-PSF comparisons.
-- Expanded Fisher-versus-PyAutoLens validation suite.
-- Expanded false-positive analysis with broader PSF nuisance and noisy ensembles.
-- Detectable-area and mass-floor curves derived from thresholded 2D maps.
-- Source-morphology stress tests.
-- Lens-light and subtraction-residual stress tests.
-- Time-varying PSF or drift tests, if motivated by HWO observing assumptions.
+- R1: Define the requirement-statement format before running sweeps: the number
+  an engineer receives, for example tolerable unmodeled WFE per mode family in
+  nm RMS at fixed completeness and false-positive rate.
+- R2: Run a graded PSF-knowledge-error sweep: generate with the truth PSF, fit
+  with a PSF wrong by a controlled amount `delta`, and sweep `delta` per mode
+  family to locate where completeness degrades and false positives rise. This
+  is the requirement-grade form of the D4 PSF-mismatch test.
+- R3: Fold the 2D sensitivity maps with subhalo mass functions under competing
+  dark-matter models (CDM plus WDM suppression) to forecast expected detections
+  per lens and the number of lenses needed to discriminate models.
+
+Tiered scope ranking:
+
+This ranking replaces the earlier flat recommended-scope list. It ranks only
+pipeline/study work by the depth it receives; process and writing conventions
+are not ranked (former L4 and S2 were process notes and have been removed —
+this ranking itself does S2's job). Non-binary items are split into lettered
+subitems whose minimum and extended forms can land in different tiers. Every
+item is broken into check-offable deliverables — codebase features or defined
+sweeps/runs — checked off when the change lands or the run completes and is
+aggregated. Tier definitions:
+
+- **T0 enabling tooling:** built first so the sweeps can run; not a depth
+  choice.
+- **T1 core:** a headline claim dies without it; must be complete for the
+  31 August submission no matter what.
+- **T2 referee-proofing:** cheap relative to the predictable objection it
+  defuses; do when T1 is on schedule.
+- **T3 stretch:** strengthens the paper but nothing depends on it; only if
+  ahead of schedule after T1 and T2.
+- **T4 deferred:** out of scope; the deliverable is the named caveat in the
+  limitations and future-work text.
+
+Cost tags: `(A)` mainly agent time, `(C)` mainly compute (front-load while xtx
+access lasts), `(G)` mainly George time (batch into review sessions).
+`[ext]` marks items blocked on external input; chase these in week 1 or they
+default to T4.
+
+**T0 — enabling tooling (week 1):**
+
+- S1 (A): supported analysis layer; every other item runs through it.
+  - [ ] Build `src/hwoslaps/analysis/`: sweep-manifest parser, study
+        aggregator, provenance capture, and figure-generation entry points.
+  - [ ] Encode the schema requirements: detector noise, background, and
+        throughput as explicit config fields (O4); every parameter marked
+        frozen or swept (S4); perfect-PSF reference arm and matched-truth-PSF
+        control arm mandatory in every grid manifest (P5).
+
+**T1 — core (the paper on 31 August):**
+
+Workstream 1 — mass reach:
+
+- L1a (C): structured scene ensemble. The archived canonical-scene curve
+  covers `10^6.5` to `10^7.5 Msun`; broaden it, do not repeat it.
+  - [ ] Define 3-4 lens/source ensemble configurations beyond the canonical
+        scene.
+  - [ ] Run the ensemble Fisher sweep: scenes crossed with the mass ladder
+        (`1e6` to `1e8 Msun`, `10^0.25` steps in the core range) and
+        near-ring positions, aggregated into one results table.
+- L2a (C): clumpy sources.
+  - [ ] Implement one or two clumpy/irregular source models.
+  - [ ] Run their injected-subhalo and no-subhalo ensemble grids.
+- L3a (A): external shear.
+  - [ ] Add external shear to the base lens model in generating and fitting
+        configs.
+- D5 (C): 2D sensitivity maps; the main GPU burn and the input to R3.
+  - [ ] Implement 2D Fisher sensitivity maps over subhalo position.
+  - [ ] Run the map grid across ensemble scenes, masses, and PSF states;
+        produce thresholded detectable-area and mass-floor curves.
+- D4a (C): no-subhalo false-positive controls along every T1 axis.
+  - [ ] Run matched-PSF no-subhalo control grids across the ensemble.
+  - [ ] Run clumpy-source no-subhalo data against smooth-source fit models.
+- R3 (A/G): dark-matter fold.
+  - [ ] Implement the fold of the D5 maps with CDM and WDM subhalo mass
+        functions.
+  - [ ] Produce expected-detections-per-lens and lenses-to-discriminate
+        forecasts.
+
+Workstream 2 — PSF requirements:
+
+- R1 (G): requirement-statement format; gates which sweeps are needed.
+  - [ ] Write the requirement-metric definition (tolerable unmodeled WFE per
+        mode family at fixed completeness and false-positive budget) into
+        this doc and the canonical configs after advisor input, week 1.
+- P2 (A/G) `[ext]`: PSF coefficient priors; feed D2a and R2.
+  - [ ] Request the EAC1 pupil PSD or covariance model from HWO/JPL contacts.
+  - [ ] Freeze documented parametric priors on mode coefficients (the default
+        if no PSD arrives by mid-July).
+- P3 (C): mode-family sweep.
+  - [ ] Add segment-piston and segment tip/tilt PSF families alongside the
+        existing hexike, global-Zernike, and combined families.
+  - [ ] Run the family-by-amplitude-ladder Fisher grid.
+- R2 (C): graded PSF-knowledge-error sweep; anchors the requirement curves.
+  - [ ] Implement delta-mismatch fitting: generate with the truth PSF, fit
+        with a PSF wrong by a controlled `delta`.
+  - [ ] Run the `delta` ladder per mode family; produce completeness and
+        false-positive degradation curves.
+- D2a (C): prior-sampled PSF nuisance bank.
+  - [ ] Extend the PSF bank from 4 scaled candidates to roughly 16-32 draws
+        from the P2 priors with log-sum-exp marginalization.
+  - [ ] Rerun the bank-marginalized completeness and control grids with the
+        new bank.
+
+Workstream 3 — calibration:
+
+- D1a (C): freed nonlinear searches.
+  - [ ] Free the subhalo mass (`log M200`) and widen the position window in
+        the nonlinear fit model.
+  - [ ] Rerun the nonlinear validation grid with the freed model.
+- D3 (C/G): Fisher-to-nonlinear calibration; expect `alpha` to shift for
+  clumpy sources.
+  - [ ] Select a stratified validation subset across scene, source type, PSF
+        family, mass, and S/N.
+  - [ ] Fit `q_fit ~ alpha q_F` per regime and report the calibration with
+        uncertainty.
+
+**T2 — referee-proofing:**
+
+- O1 (A/C): bandpass.
+  - [ ] Implement few-wavelength quadrature (3-5 wavelengths across one HRI
+        band) in the PSF/observation model.
+  - [ ] Run the monochromatic-versus-bandpass comparison and document the
+        approximation error.
+- O3 (C): pixel scale.
+  - [ ] Rerun the core Fisher grids at 2-3 HRI-plausible pixel scales with a
+        few nonlinear anchors.
+- O2a (A): S/N scaling.
+  - [ ] Derive the exposure-time/S-N scaling of the requirement curves and
+        report all curves at a stated fixed S/N.
+- L3b (C/G): lens-light stress test; degrades to a T4 caveat if the schedule
+  collapses.
+  - [ ] Add lens-galaxy light and an imperfect-subtraction model to the
+        canonical scene.
+  - [ ] Run one injected-subhalo plus no-subhalo stress grid against it.
+
+**T3 — stretch:**
+
+- P4 (A/C): mode weighting; collapses into P2 if a real PSD model arrives.
+  - [ ] Run one or two alternative mode-weighting functions beyond the
+        fiducial prior.
+- S3b (C) `[ext]`: EAC contrast case.
+  - [ ] Obtain an EAC2 or alternate-EAC pupil definition.
+  - [ ] Run one Fisher-only contrast grid at a fixed scene.
+- P1a (C): PSF drift demo, only if T1 and T2 lock early.
+  - [ ] Run a single two-epoch PSF-drift demonstration.
+
+**T4 — deferred; each item checks off when its caveat lands in the
+limitations/future-work text:**
+
+- [ ] L1b: population-level random lens ensembles (conclusions stay
+      structured-ensemble level).
+- [ ] L2b: systematic source-morphology survey beyond the clumpy variants.
+- [ ] L3c: line-of-sight halos (lens-plane-only is conservative for expected
+      counts).
+- [ ] P1b: full time-varying or exposure-varying PSF treatment.
+- [ ] O2b `[ext]`: visit cadence, roll diversity, and coaddition.
+- [ ] D1b: fully blind whole-image subhalo searches (Fisher maps cover
+      position dependence).
+- [ ] D2b: continuous or hierarchical PSF-posterior inference in the
+      nonlinear fits.
+- [ ] D4b: broader lens-model-mismatch false-positive survey (cite He et al.
+      2022).
+- [ ] S3a: quantitative JWST comparison (cite existing literature).
 
 RASTI study questions:
 
