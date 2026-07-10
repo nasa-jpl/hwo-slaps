@@ -543,17 +543,29 @@ Workstream 1 — mass reach:
 
 - L1a (C): structured scene ensemble. The archived canonical-scene curve
   covers `10^6.5` to `10^7.5 Msun`; broaden it, do not repeat it.
-  - [ ] Define 3-4 lens/source ensemble configurations beyond the canonical
-        scene.
+  - [ ] Define the five candidate scenes: the legacy smooth ring; a source
+        with 2-5 compact Sersic clumps; a low-symmetry bow-and-dot partial-arc
+        configuration; a rescaled spiral or irregular source; and a complex
+        macro-lens scene with the source held fixed relative to the legacy
+        case.
+  - [ ] Run an initial probe with a fixed `1e7 Msun` subhalo at 24 positions
+        around the critical curve under a perfect PSF. Use this probe to
+        choose the full spatial grid and nonlinear calibration anchors, not
+        as the final RASTI completeness experiment.
   - [ ] Run the ensemble Fisher sweep: scenes crossed with the mass ladder
         (`1e6` to `1e8 Msun`, `10^0.25` steps in the core range) and
         near-ring positions, aggregated into one results table.
 - L2a (C): clumpy sources.
-  - [ ] Implement one or two clumpy/irregular source models.
+  - [ ] Implement the compact 2-5-component Sersic source and the rescaled
+        spiral or irregular image-based source.
   - [ ] Run their injected-subhalo and no-subhalo ensemble grids.
-- L3a (A): external shear.
-  - [ ] Add external shear to the base lens model in generating and fitting
-        configs.
+- L3a (A/C): complex macro lens.
+  - [ ] Select and implement one flexible macro-lens truth model for the fifth
+        scene, such as an elliptical power law with angular multipoles or a
+        decomposed stellar-plus-dark-matter model.
+  - [ ] Fit the fifth scene with the correct flexible model for the main scene
+        comparison, then refit selected injected and no-subhalo cases with the
+        simpler legacy macro model as a mismatch ablation.
 - D5 (C): 2D sensitivity maps; the main GPU burn and the input to R3.
   - [ ] Implement 2D Fisher sensitivity maps over subhalo position.
   - [ ] Run the map grid across ensemble scenes, masses, and PSF states;
@@ -716,8 +728,8 @@ Reference date: 17 May 2026.
 
 1. Decide which SPIE archive components should be promoted into supported RASTI
    analysis tooling.
-2. Decide the first RASTI scene/source expansion beyond the canonical SPIE
-   setup.
+2. Freeze the detailed parameters and input provenance for the five-scene
+   lensing suite, including the flexible macro-lens model used by scene five.
 3. Decide how to replace or extend the discrete PSF-bank validation with a
    broader PSF-nuisance treatment.
 4. Decide which SPIE figures should seed RASTI figures and which should remain
