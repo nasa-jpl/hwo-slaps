@@ -555,6 +555,9 @@ Workstream 1 — mass reach:
   - [ ] Run the ensemble Fisher sweep: scenes crossed with the mass ladder
         (`1e6` to `1e8 Msun`, `10^0.25` steps in the core range) and
         near-ring positions, aggregated into one results table.
+  - [ ] Run a subhalo concentration-variation robustness sweep at the
+        `1e7 Msun` anchor (Moliné `x_sub` variation and the power-law
+        concentration alternative already in the config schema).
 - L2a (C): clumpy sources.
   - [ ] Implement the compact 2-5-component Sersic source and the rescaled
         spiral or irregular image-based source.
@@ -567,7 +570,7 @@ Workstream 1 — mass reach:
         comparison, then refit selected injected and no-subhalo cases with the
         simpler legacy macro model as a mismatch ablation.
 - D5 (C): 2D sensitivity maps; the main GPU burn and the input to R3.
-  - [ ] Implement 2D Fisher sensitivity maps over subhalo position.
+  - [x] Implement 2D Fisher sensitivity maps over subhalo position.
   - [ ] Run the map grid across ensemble scenes, masses, and PSF states;
         produce thresholded detectable-area and mass-floor curves.
 - D4a (C): no-subhalo false-positive controls along every T1 axis.
@@ -664,6 +667,12 @@ limitations/future-work text:**
 - [ ] D4b: broader lens-model-mismatch false-positive survey (cite He et al.
       2022).
 - [ ] S3a: quantitative JWST comparison (cite existing literature).
+- [ ] Pixelized/free-form source fitting in the nonlinear validation
+      (parametric-source fits are internally consistent for the controlled
+      forecast; revisit a single pixelized-source demonstration after the
+      post-engine review).
+- [ ] PSF field-position dependence (a single on-axis PSF is assumed; cite
+      the Roman focal-plane PSF-variation result).
 
 RASTI study questions:
 
