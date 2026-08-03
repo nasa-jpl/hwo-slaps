@@ -304,6 +304,7 @@ class FisherDetector:
         }
         self._candidate_positions_cache: Optional[List[Tuple[float, float]]] = None
         self._grid_layout_cache: Optional[_GridLayout] = None
+        self._jax_grid_engine = None
 
         self.science_psf_config_template = self._build_science_psf_config_template()
 
@@ -638,7 +639,11 @@ class FisherDetector:
         positions: Sequence[Tuple[float, float]],
         num_workers: int,
     ) -> Iterator[np.ndarray]:
-        """Yield masked signal vectors for grid nodes, serially or via a pool."""
+        """Yield masked signal vectors for grid nodes, serial or pooled."""
+        engine = str(self.map_config.get("engine", "reference")).lower()
+        if engine == "jax":
+            yield from self._grid_signal_iterator_jax(positions)
+            return
         if num_workers <= 1:
             for position in positions:
                 mu1_adu_2d = self._mean_adu_for_position(position)
@@ -648,6 +653,23 @@ class FisherDetector:
                 )
             return
         yield from self._grid_signal_iterator_parallel(positions, num_workers)
+
+    def _grid_signal_iterator_jax(
+        self,
+        positions: Sequence[Tuple[float, float]],
+    ) -> Iterator[np.ndarray]:
+        if self._jax_grid_engine is None:
+            from .fisher_grid_jax import JaxGridTemplateEngine
+
+            kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+            self._jax_grid_engine = JaxGridTemplateEngine(
+                lensing_baseline=self.lensing_baseline,
+                map_config_template=deepcopy(self.map_config_template),
+                psf_kernel_native=np.asarray(pyauto_kernel_native(kernel), dtype=float),
+                mu0_adu_2d=self.mu0_adu_2d,
+                mask_2d=self.mask_2d,
+            )
+        yield from self._jax_grid_engine.signal_iterator(positions)
 
     def _grid_signal_iterator_parallel(
         self,
@@ -797,7 +819,7 @@ class FisherDetector:
         return _wrap
 
     def _candidate_positions(self) -> List[Tuple[float, float]]:
-        """Build map candidate positions for the ring and explicit map types."""
+        """Build candidate positions for the ring and explicit map types."""
         if self._candidate_positions_cache is not None:
             return list(self._candidate_positions_cache)
 

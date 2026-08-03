@@ -474,3 +474,69 @@ def test_grid_map_plot_writes_png(grid_setup, tmp_path):
     )
 
     assert (tmp_path / "grid-plot-test" / "modeling" / "fisher_grid_map.png").exists()
+
+
+# ----------------------------------------------------------------------
+# JAX engine equivalence
+# ----------------------------------------------------------------------
+
+
+def _make_jax_detector(grid_setup) -> FisherDetector:
+    return _make_detector(
+        grid_setup,
+        {
+            "type": "grid",
+            "grid": {
+                "spacing_arcsec": GRID_SPACING,
+                "half_width_arcsec": GRID_HALF_WIDTH,
+                "annulus": None,
+            },
+            "detection_q_threshold": 10.0,
+            "num_workers": 1,
+            "engine": "jax",
+        },
+    )
+
+
+def test_jax_engine_template_matches_reference(grid_setup):
+    pytest.importorskip("jax")
+    detector = _make_jax_detector(grid_setup)
+    position = SUBHALO_POSITION
+
+    reference_signal = np.asarray(
+        detector._mean_adu_for_position(position) - detector.mu0_adu_2d
+    )[np.asarray(detector.mask_2d, dtype=bool)]
+
+    jax_signal = next(detector._grid_signal_iterator_jax([position]))
+
+    scale = float(np.max(np.abs(reference_signal)))
+    assert scale > 0.0
+    np.testing.assert_allclose(
+        jax_signal,
+        reference_signal,
+        rtol=1.0e-5,
+        atol=1.0e-7 * scale,
+    )
+
+
+def test_jax_engine_grid_map_matches_reference(grid_setup):
+    pytest.importorskip("jax")
+    detector = _make_jax_detector(grid_setup)
+    jax_map = detector.compute_grid_map()
+    reference_map = grid_setup["grid_map"]
+
+    np.testing.assert_allclose(
+        jax_map.q_asimov_2d,
+        reference_map.q_asimov_2d,
+        rtol=1.0e-6,
+    )
+    np.testing.assert_allclose(
+        jax_map.fisher_raw_2d,
+        reference_map.fisher_raw_2d,
+        rtol=1.0e-6,
+    )
+    cell_area = GRID_SPACING**2
+    assert (
+        abs(jax_map.detectable_area_arcsec2 - reference_map.detectable_area_arcsec2)
+        <= cell_area
+    )

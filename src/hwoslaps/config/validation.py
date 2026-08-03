@@ -469,6 +469,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         'explicit_positions_yx',
         'detection_q_threshold',
         'num_workers',
+        'engine',
     }
     unsupported_map_keys = sorted(set(map_cfg) - supported_map_keys)
     if unsupported_map_keys:
@@ -602,6 +603,14 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
     if num_workers is not None:
         if isinstance(num_workers, bool) or not isinstance(num_workers, int) or num_workers <= 0:
             raise ValueError("modeling.fisher.map.num_workers must be a positive integer")
+
+    engine = map_cfg.get('engine')
+    if engine is not None:
+        _require_type(engine, str, 'modeling.fisher.map.engine')
+        if engine.lower() not in {'reference', 'jax'}:
+            raise ValueError(
+                "modeling.fisher.map.engine must be one of: 'reference', 'jax'"
+            )
 
     supported_fisher_keys = {
         'enable',

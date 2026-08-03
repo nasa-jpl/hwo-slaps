@@ -251,3 +251,4 @@ modeling:
       explicit_positions_yx: null
       detection_q_threshold: 10.0 # SCDD threshold on q_F for the detectable-area product
       num_workers: 1              # grid template-generation worker processes (CPU)
+      engine: reference           # reference | jax (batched JAX templates; ignores num_workers)

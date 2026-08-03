@@ -228,6 +228,7 @@ class FisherDetectionData:
 
     @property
     def has_grid_map(self) -> bool:
+        """Whether a grid-map result is present (`bool`, read-only)."""
         return self.grid_map is not None
 
 
