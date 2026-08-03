@@ -59,8 +59,14 @@ def main():
             print(f"Run log: {log_path}")
             print(f"Config snapshot: {snapshot_path}")
 
-            # Import here so third-party import-time logs are also captured.
+            # Import here so third-party import-time logs are also captured;
+            # provenance capture imports packages to read their __version__.
             from hwoslaps.pipeline import run_enhanced_pipeline
+            from hwoslaps.provenance import write_provenance
+
+            provenance_path = run_dir / 'provenance.yaml'
+            write_provenance(provenance_path, config=config, command=sys.argv)
+            print(f"Provenance: {provenance_path}")
 
             # Run enhanced pipeline (automatically detects standard vs detection mode)
             run_enhanced_pipeline(str(config_path), verbose=not args.quiet)
