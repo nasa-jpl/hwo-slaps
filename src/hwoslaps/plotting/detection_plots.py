@@ -366,3 +366,93 @@ def plot_fisher_map_degradation(
     plt.close(fig)
 
     print(f"Saved Fisher map degradation plot: {save_path}")
+
+
+@plot_function(
+    module="detection",
+    detection_mode_only=True,
+    description="2D Fisher sensitivity grid map with detectable-area contour",
+)
+def plot_fisher_detection_grid_map(
+    detection_data: FisherDetectionData,
+    plot_config: Dict[str, Any],
+    run_name: str = None,
+) -> None:
+    """Plot the 2D sensitivity grid map when grid output is available."""
+    if not _fisher_detection_guard(detection_data, "Fisher grid map plot"):
+        return
+    if detection_data.grid_map is None:
+        print("Skipping Fisher grid map plot: Fisher output has no grid map payload.")
+        return
+
+    output_dir = _modeling_output_dir(plot_config, run_name)
+    grid = detection_data.grid_map
+
+    half_cell = 0.5 * grid.spacing_arcsec
+    extent = (
+        grid.x_coords[0] - half_cell,
+        grid.x_coords[-1] + half_cell,
+        grid.y_coords[0] - half_cell,
+        grid.y_coords[-1] + half_cell,
+    )
+
+    fig, ax = plt.subplots(figsize=(7.5, 6.5))
+    z_map = np.ma.masked_invalid(grid.z_asimov_2d)
+    image = ax.imshow(
+        z_map,
+        origin="lower",
+        extent=extent,
+        cmap="viridis",
+        interpolation="nearest",
+    )
+    plt.colorbar(image, ax=ax, fraction=0.046, label=r"$Z_F$")
+
+    if np.any(grid.detectable_mask_2d):
+        ax.contour(
+            grid.x_coords,
+            grid.y_coords,
+            np.ma.masked_invalid(grid.q_asimov_2d),
+            levels=[grid.detection_q_threshold],
+            colors="white",
+            linewidths=1.4,
+        )
+
+    if grid.lens_einstein_radius is not None:
+        theta = np.linspace(0.0, 2.0 * np.pi, 361)
+        centre_y, centre_x = grid.centre_yx
+        ax.plot(
+            centre_x + grid.lens_einstein_radius * np.cos(theta),
+            centre_y + grid.lens_einstein_radius * np.sin(theta),
+            color="#d95f02",
+            linestyle="--",
+            linewidth=1.2,
+            label="Einstein ring",
+        )
+        ax.legend(loc="upper right", fontsize=8)
+
+    ax.set_xlabel("x (arcsec)")
+    ax.set_ylabel("y (arcsec)")
+    ax.set_aspect("equal")
+    mass_label = (
+        "" if grid.subhalo_mass is None else f", M={grid.subhalo_mass:.2e} M_sun"
+    )
+    ax.set_title(
+        "Fisher Sensitivity Grid Map\n"
+        f"detectable area {grid.detectable_area_arcsec2:.3f} arcsec$^2$ "
+        f"(q_F >= {grid.detection_q_threshold:.1f}){mass_label}",
+        fontsize=10,
+    )
+    fig.text(
+        0.5,
+        0.01,
+        "White contour bounds the detectable region; NaN nodes were excluded by the annulus.",
+        ha="center",
+        fontsize=8.5,
+    )
+    plt.tight_layout(rect=(0.0, 0.03, 1.0, 1.0))
+
+    save_path = output_dir / "fisher_grid_map.png"
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"Saved Fisher grid map plot: {save_path}")

@@ -76,6 +76,7 @@ def perform_fisher_detection(
 
     local_data = None
     map_data = None
+    grid_map_data = None
     if mode in {"local", "both"}:
         start = perf_counter()
         local_data = detector.compute_local(
@@ -85,13 +86,18 @@ def perform_fisher_detection(
         _log_fisher_timing("top-level local computation", perf_counter() - start)
     if mode in {"map", "both"}:
         start = perf_counter()
-        map_data = detector.compute_map()
-        _log_fisher_timing("top-level map computation", perf_counter() - start)
+        if detector.map_type == "grid":
+            grid_map_data = detector.compute_grid_map()
+            _log_fisher_timing("top-level grid map computation", perf_counter() - start)
+        else:
+            map_data = detector.compute_map()
+            _log_fisher_timing("top-level map computation", perf_counter() - start)
 
     return FisherDetectionData(
         mode=mode,
         local=local_data,
         map=map_data,
+        grid_map=grid_map_data,
         snr_threshold=float(fisher_cfg["snr_threshold"]),
         include_background_offset=bool(fisher_cfg["include_background_offset"]),
         finite_diff=deepcopy(fisher_cfg["finite_diff"]),

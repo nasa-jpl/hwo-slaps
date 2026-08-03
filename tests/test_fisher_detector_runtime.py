@@ -80,8 +80,11 @@ def _build_runtime_config(tmp_dir: Path) -> dict:
     config["modeling"]["fisher"]["snr_threshold"] = 3.0
     config["modeling"]["fisher"]["mode"] = "local"
     config["modeling"]["fisher"]["map"] = {
-        "num_angles": 4,
-        "offset_pixels": 0.0,
+        "type": "explicit",
+        "ring": {
+            "num_angles": 4,
+            "offset_pixels": 0.0,
+        },
         "explicit_positions_yx": [[0.2, -0.1], [0.0, 0.3]],
     }
     config["modeling"]["fisher"]["mask_mode"] = "all_pixels"
@@ -148,15 +151,16 @@ def _make_detector(runtime_setup, *, mode: str, fisher_overrides: dict | None = 
 def _detector_stub_with_map_config(map_config: dict):
     detector = FisherDetector.__new__(FisherDetector)
     detector.map_config = map_config
+    detector.map_type = str(map_config.get("type", "")).lower()
     detector._candidate_positions_cache = None
+    detector._grid_layout_cache = None
     return detector
 
 
 def test_fisher_detector_rejects_empty_explicit_map_positions():
     detector = _detector_stub_with_map_config(
         {
-            "num_angles": 4,
-            "offset_pixels": 0.0,
+            "type": "explicit",
             "explicit_positions_yx": [],
         }
     )
@@ -176,8 +180,7 @@ def test_fisher_detector_rejects_empty_explicit_map_positions():
 def test_fisher_detector_rejects_malformed_explicit_map_positions(explicit_positions):
     detector = _detector_stub_with_map_config(
         {
-            "num_angles": 4,
-            "offset_pixels": 0.0,
+            "type": "explicit",
             "explicit_positions_yx": explicit_positions,
         }
     )

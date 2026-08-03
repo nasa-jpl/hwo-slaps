@@ -32,8 +32,11 @@ def _make_fisher_config_with_required_fields() -> dict:
             "source_reff_frac": 1.0e-2,
         },
         "map": {
-            "num_angles": 24,
-            "offset_pixels": 0.0,
+            "type": "ring",
+            "ring": {
+                "num_angles": 24,
+                "offset_pixels": 0.0,
+            },
             "explicit_positions_yx": None,
         },
     }

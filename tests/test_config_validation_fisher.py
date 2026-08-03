@@ -46,9 +46,19 @@ def _with_valid_fisher_block(config: dict) -> dict:
             "source_reff_frac": 1.0e-2,
         },
         "map": {
-            "num_angles": 24,
-            "offset_pixels": 0.0,
+            "type": "ring",
+            "ring": {
+                "num_angles": 24,
+                "offset_pixels": 0.0,
+            },
+            "grid": {
+                "spacing_arcsec": 0.05,
+                "half_width_arcsec": 1.5,
+                "annulus": None,
+            },
             "explicit_positions_yx": None,
+            "detection_q_threshold": 10.0,
+            "num_workers": 1,
         },
     }
     return fisher_config
@@ -100,10 +110,128 @@ def test_fisher_rejects_invalid_finite_diff_values(bad_step):
 @pytest.mark.parametrize("bad_num_angles", [0, -4, 2.5, True])
 def test_fisher_rejects_invalid_map_num_angles(bad_num_angles):
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["map"]["num_angles"] = bad_num_angles
+    config["modeling"]["fisher"]["map"]["ring"]["num_angles"] = bad_num_angles
 
-    with pytest.raises(ValueError, match="modeling.fisher.map.num_angles must be a positive integer"):
+    with pytest.raises(ValueError, match="modeling.fisher.map.ring.num_angles must be a positive integer"):
         validation.validate_or_raise(config)
+
+
+def test_fisher_map_requires_type():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"].pop("type")
+
+    with pytest.raises(ValueError, match="Missing required key 'type'"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_rejects_unknown_type():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["type"] = "spiral"
+
+    with pytest.raises(ValueError, match="modeling.fisher.map.type must be one of"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_rejects_legacy_flat_keys():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["num_angles"] = 24
+
+    with pytest.raises(ValueError, match="modeling.fisher.map contains unsupported keys"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_ring_type_requires_ring_block():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"].pop("ring")
+
+    with pytest.raises(ValueError, match="Missing required key 'ring'"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_grid_type_requires_grid_block():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["type"] = "grid"
+    config["modeling"]["fisher"]["map"].pop("grid")
+
+    with pytest.raises(ValueError, match="Missing required key 'grid'"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_spacing", [0.0, -0.1, float("nan"), True])
+def test_fisher_map_rejects_invalid_grid_spacing(bad_spacing):
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["grid"]["spacing_arcsec"] = bad_spacing
+
+    with pytest.raises(ValueError, match="modeling.fisher.map.grid.spacing_arcsec"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_rejects_half_width_below_spacing():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["grid"]["half_width_arcsec"] = 0.01
+
+    with pytest.raises(ValueError, match="half_width_arcsec must be >= spacing_arcsec"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_rejects_inverted_annulus():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["grid"]["annulus"] = {
+        "r_min_arcsec": 1.0,
+        "r_max_arcsec": 0.5,
+    }
+
+    with pytest.raises(ValueError, match="r_max_arcsec must be > r_min_arcsec"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_rejects_unknown_annulus_key():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["grid"]["annulus"] = {
+        "r_min_arcsec": 0.5,
+        "r_max_arcsec": 1.5,
+        "radius": 1.0,
+    }
+
+    with pytest.raises(ValueError, match="annulus contains unsupported keys"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_explicit_type_requires_positions():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["type"] = "explicit"
+    config["modeling"]["fisher"]["map"]["explicit_positions_yx"] = []
+
+    with pytest.raises(ValueError, match="must be non-empty when map.type is 'explicit'"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_threshold", [0.0, -10.0, float("inf"), True])
+def test_fisher_map_rejects_invalid_detection_q_threshold(bad_threshold):
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["detection_q_threshold"] = bad_threshold
+
+    with pytest.raises(ValueError, match="modeling.fisher.map.detection_q_threshold"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_workers", [0, -2, 1.5, True])
+def test_fisher_map_rejects_invalid_num_workers(bad_workers):
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["num_workers"] = bad_workers
+
+    with pytest.raises(ValueError, match="modeling.fisher.map.num_workers must be a positive integer"):
+        validation.validate_or_raise(config)
+
+
+def test_fisher_map_grid_config_passes_validation():
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["map"]["type"] = "grid"
+    config["modeling"]["fisher"]["map"]["grid"]["annulus"] = {
+        "r_min_arcsec": 0.5,
+        "r_max_arcsec": 1.5,
+    }
+    validation.validate_or_raise(config)
 
 
 def test_fisher_rejects_invalid_explicit_positions_shape():

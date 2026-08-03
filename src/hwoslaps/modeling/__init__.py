@@ -22,22 +22,26 @@ from .fisher_core import (
 )
 from .utils_fisher import (
     FisherDetectionData,
+    FisherGridMapData,
     FisherLocalData,
     FisherMapData,
     FisherModeCouplingData,
     FisherModeScanData,
     print_fisher_summary,
+    save_fisher_grid_map_npz,
 )
 
 __all__ = [
     'perform_fisher_detection',
     'FisherDetector',
     'FisherDetectionData',
+    'FisherGridMapData',
     'FisherLocalData',
     'FisherMapData',
     'FisherModeCouplingData',
     'FisherModeScanData',
     'print_fisher_summary',
+    'save_fisher_grid_map_npz',
     'AsimovAmplitudeResult',
     'SignalBankResult',
     'SpuriousAmplitudeResult',

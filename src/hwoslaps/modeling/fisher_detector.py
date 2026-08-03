@@ -29,12 +29,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import multiprocessing
 import os
 import sys
 from time import perf_counter
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 import autolens as al
@@ -63,8 +64,9 @@ from .fisher_adapter import (
     scan_systematic_modes_from_images,
     stack_masked_images,
 )
-from .fisher_core import ProfileLikelihoodWorkspace, Whitener
+from .fisher_core import ProfileLikelihoodWorkspace, Whitener, detectable_area
 from .utils_fisher import (
+    FisherGridMapData,
     FisherLocalData,
     FisherMapData,
     FisherModeCouplingData,
@@ -93,6 +95,113 @@ class _PsfModeSpec:
     enable_flag_path: Tuple[Any, ...]
     step: float
     prior_sigma: Optional[float] = None
+
+
+@dataclass(frozen=True)
+class _GridLayout:
+    """Node layout for a 2D sensitivity grid map.
+
+    ``positions_yx`` lists only the evaluated nodes in row-major order and
+    ``node_indices`` gives each one's ``(i, j)`` into the 2D arrays.
+    """
+
+    y_coords: np.ndarray
+    x_coords: np.ndarray
+    spacing_arcsec: float
+    centre_yx: Tuple[float, float]
+    evaluated_mask: np.ndarray
+    positions_yx: Tuple[Tuple[float, float], ...]
+    node_indices: Tuple[Tuple[int, int], ...]
+
+
+def _mean_adu_from_lensing_arrays(
+    lensing_data: LensingData,
+    observation_config: Dict[str, Any],
+    psf_kernel,
+) -> np.ndarray:
+    """Noiseless PSF-convolved mean image in ADU for one lensing scene.
+
+    Shared by the in-process detector paths and the grid-map worker
+    processes; ``psf_kernel`` must already have odd dimensions.
+    """
+    psf_convolver = make_pyauto_convolver(psf_kernel)
+    exposure_time = float(observation_config["exposure_time"])
+    throughput = float(observation_config["throughput"])
+    detector = observation_config["detector"]
+    gain = float(detector["gain"])
+    sky_background = float(detector["sky_background"])
+    dark_current = float(detector["dark_current"])
+
+    mask = al.Mask2D.all_false(
+        shape_native=lensing_data.image.shape,
+        pixel_scales=lensing_data.pixel_scale,
+    )
+    lensed_image = al.Array2D(values=lensing_data.image, mask=mask)
+
+    simulator_noiseless = al.SimulatorImaging(
+        exposure_time=exposure_time,
+        psf=psf_convolver,
+        background_sky_level=0.0,
+        normalize_psf=False,
+        add_poisson_noise_to_data=False,
+        noise_seed=0,
+    )
+    noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
+    source_only_eps = noiseless_dataset.data.native * throughput
+
+    source_e = source_only_eps * exposure_time
+    sky_e = sky_background * exposure_time
+    dark_e = dark_current * exposure_time
+    return (source_e + sky_e + dark_e) / gain
+
+
+_GRID_WORKER_STATE: Dict[str, Any] = {}
+
+# Grid-map worker processes are CPU-bound template factories; cap library
+# threading so a large pool does not oversubscribe cores, and keep JAX off
+# the GPUs so many workers never contend for accelerator contexts.
+_GRID_WORKER_ENV = {
+    "JAX_PLATFORMS": "cpu",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+}
+
+
+def _grid_worker_init(
+    config_template: Dict[str, Any],
+    kernel_native: np.ndarray,
+    kernel_pixel_scales,
+    mu0_adu_2d: np.ndarray,
+    mask_2d: np.ndarray,
+) -> None:
+    _GRID_WORKER_STATE["config_template"] = config_template
+    _GRID_WORKER_STATE["kernel"] = make_pyauto_kernel(
+        values=kernel_native,
+        pixel_scales=kernel_pixel_scales,
+        normalize=False,
+    )
+    _GRID_WORKER_STATE["mu0"] = mu0_adu_2d
+    _GRID_WORKER_STATE["mask"] = mask_2d
+
+
+def _grid_worker_signal(position_yx: Tuple[float, float]) -> np.ndarray:
+    config = deepcopy(_GRID_WORKER_STATE["config_template"])
+    config["lensing"]["subhalo"]["position"] = {
+        "type": "direct",
+        "centre": [float(position_yx[0]), float(position_yx[1])],
+    }
+    lensing_data = generate_lensing_system(config["lensing"], full_config=config)
+    mu1_adu_2d = _mean_adu_from_lensing_arrays(
+        lensing_data=lensing_data,
+        observation_config=config["observation"],
+        psf_kernel=_GRID_WORKER_STATE["kernel"],
+    )
+    return flatten_masked_image(
+        mu1_adu_2d - _GRID_WORKER_STATE["mu0"],
+        mask=_GRID_WORKER_STATE["mask"],
+    )
 
 
 class FisherDetector:
@@ -130,6 +239,11 @@ class FisherDetector:
         self.snr_threshold = float(self.fisher_config["snr_threshold"])
         self.finite_diff = deepcopy(self.fisher_config["finite_diff"])
         self.map_config = deepcopy(self.fisher_config["map"])
+        self.map_type = str(self.map_config.get("type", "")).lower()
+        if self.map_type not in {"ring", "grid", "explicit"}:
+            raise ValueError(
+                "modeling.fisher.map.type must be one of: 'ring', 'grid', 'explicit'"
+            )
         self.show_progress = self._progress_enabled()
         self.show_timing = self._timing_enabled()
 
@@ -189,6 +303,7 @@ class FisherDetector:
             "centre": [0.0, 0.0],
         }
         self._candidate_positions_cache: Optional[List[Tuple[float, float]]] = None
+        self._grid_layout_cache: Optional[_GridLayout] = None
 
         self.science_psf_config_template = self._build_science_psf_config_template()
 
@@ -217,7 +332,10 @@ class FisherDetector:
 
         self.n_psf_fit_modes = len(self.fit_psf_mode_specs)
         self.n_psf_scan_modes = len(self.scan_psf_mode_specs)
-        self.n_map_positions = len(self._candidate_positions())
+        if self.map_type == "grid":
+            self.n_map_positions = len(self._grid_layout().positions_yx)
+        else:
+            self.n_map_positions = len(self._candidate_positions())
         self._log_modeling_summary()
 
         self.scalar_nuisance_images = self._timed_call(
@@ -277,6 +395,7 @@ class FisherDetector:
         else:
             self.masked_covariance = None
             whitener = Whitener.from_sigma(self.sigma_masked)
+        self.whitener = whitener
 
         if self.n_nuisance > 0:
             nuisance_design = stack_masked_images(self.nuisance_images, mask=self.mask_2d)
@@ -409,6 +528,158 @@ class FisherDetector:
             absorbed_fraction_by_position=np.asarray(result.absorbed_fraction, dtype=float),
         )
 
+    _GRID_EVAL_BATCH = 256
+
+    def compute_grid_map(self) -> FisherGridMapData:
+        """Compute a 2D sensitivity grid map with streaming bank evaluation.
+
+        Templates are generated, projected, and discarded in batches so
+        memory stays flat regardless of grid size.  With
+        ``map.num_workers > 1`` template generation fans out over spawned
+        worker processes; the statistical evaluation always runs in the
+        parent against the workspace built at construction time.
+        """
+        if self.map_type != "grid":
+            raise ValueError("compute_grid_map requires modeling.fisher.map.type: 'grid'.")
+
+        layout = self._grid_layout()
+        positions = list(layout.positions_yx)
+        n_positions = len(positions)
+        num_workers = int(self.map_config.get("num_workers", 1))
+        threshold = float(self.map_config.get("detection_q_threshold", 10.0))
+
+        start = perf_counter()
+        signal_iter = self._grid_signal_iterator(positions, num_workers=num_workers)
+        progressed = self._progress_iter(
+            signal_iter,
+            desc="Fisher grid map templates",
+            total=n_positions,
+        )
+
+        batch: List[np.ndarray] = []
+        results = []
+
+        def _flush() -> None:
+            if not batch:
+                return
+            signal_matrix = np.column_stack(batch)
+            whitened = self.whitener.apply(signal_matrix)
+            results.append(self.workspace.evaluate_signal_bank(whitened.T))
+            batch.clear()
+
+        for signal in progressed:
+            batch.append(np.asarray(signal, dtype=float))
+            if len(batch) >= self._GRID_EVAL_BATCH:
+                _flush()
+        _flush()
+        self._log_timing(
+            "grid map streaming evaluation",
+            perf_counter() - start,
+            count=n_positions,
+            unit="position",
+        )
+
+        fisher_raw = np.concatenate([np.atleast_1d(r.fisher_raw) for r in results])
+        fisher_profiled = np.concatenate([np.atleast_1d(r.fisher_profiled) for r in results])
+        q_asimov = np.concatenate([np.atleast_1d(r.q_asimov_local) for r in results])
+        z_asimov = np.concatenate([np.atleast_1d(r.z_asimov_local) for r in results])
+        sigma_amplitude = np.concatenate(
+            [np.atleast_1d(r.sigma_amplitude_profiled) for r in results]
+        )
+        degradation = np.concatenate([np.atleast_1d(r.degradation) for r in results])
+        absorbed_fraction = np.concatenate(
+            [np.atleast_1d(r.absorbed_fraction) for r in results]
+        )
+
+        node_idx = np.asarray(layout.node_indices, dtype=int)
+        shape = layout.evaluated_mask.shape
+
+        def _to_2d(values: np.ndarray) -> np.ndarray:
+            grid = np.full(shape, np.nan, dtype=float)
+            grid[node_idx[:, 0], node_idx[:, 1]] = values
+            return grid
+
+        detectable_flat = q_asimov >= threshold
+        detectable_mask_2d = np.zeros(shape, dtype=bool)
+        detectable_mask_2d[node_idx[:, 0], node_idx[:, 1]] = detectable_flat
+
+        cell_area = layout.spacing_arcsec * layout.spacing_arcsec
+        area_arcsec2 = detectable_area(q_asimov, cell_area, threshold)
+
+        subhalo_config = self.full_config["lensing"]["subhalo"]
+
+        return FisherGridMapData(
+            y_coords=layout.y_coords.copy(),
+            x_coords=layout.x_coords.copy(),
+            spacing_arcsec=layout.spacing_arcsec,
+            centre_yx=layout.centre_yx,
+            detection_q_threshold=threshold,
+            evaluated_mask_2d=layout.evaluated_mask.copy(),
+            detectable_mask_2d=detectable_mask_2d,
+            q_asimov_2d=_to_2d(q_asimov),
+            z_asimov_2d=_to_2d(z_asimov),
+            fisher_raw_2d=_to_2d(fisher_raw),
+            fisher_profiled_2d=_to_2d(fisher_profiled),
+            sigma_amplitude_profiled_2d=_to_2d(sigma_amplitude),
+            degradation_2d=_to_2d(degradation),
+            absorbed_fraction_2d=_to_2d(absorbed_fraction),
+            num_positions_evaluated=n_positions,
+            num_detectable=int(np.count_nonzero(detectable_flat)),
+            detectable_area_arcsec2=float(area_arcsec2),
+            max_z_asimov=float(np.max(z_asimov)),
+            median_z_asimov=float(np.median(z_asimov)),
+            subhalo_mass=float(subhalo_config["mass"]) if "mass" in subhalo_config else None,
+            subhalo_model=str(subhalo_config["model"]) if "model" in subhalo_config else None,
+            lens_einstein_radius=float(self.lensing_baseline.lens_einstein_radius),
+        )
+
+    def _grid_signal_iterator(
+        self,
+        positions: Sequence[Tuple[float, float]],
+        num_workers: int,
+    ) -> Iterator[np.ndarray]:
+        """Yield masked signal vectors for grid nodes, serially or via a pool."""
+        if num_workers <= 1:
+            for position in positions:
+                mu1_adu_2d = self._mean_adu_for_position(position)
+                yield flatten_masked_image(
+                    mu1_adu_2d - self.mu0_adu_2d,
+                    mask=self.mask_2d,
+                )
+            return
+        yield from self._grid_signal_iterator_parallel(positions, num_workers)
+
+    def _grid_signal_iterator_parallel(
+        self,
+        positions: Sequence[Tuple[float, float]],
+        num_workers: int,
+    ) -> Iterator[np.ndarray]:
+        kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+        initargs = (
+            deepcopy(self.map_config_template),
+            np.asarray(pyauto_kernel_native(kernel), dtype=float),
+            pyauto_kernel_pixel_scales(kernel),
+            np.asarray(self.mu0_adu_2d, dtype=float),
+            np.asarray(self.mask_2d, dtype=bool),
+        )
+        saved_env = {key: os.environ.get(key) for key in _GRID_WORKER_ENV}
+        os.environ.update(_GRID_WORKER_ENV)
+        try:
+            context = multiprocessing.get_context("spawn")
+            with context.Pool(
+                processes=num_workers,
+                initializer=_grid_worker_init,
+                initargs=initargs,
+            ) as pool:
+                chunksize = max(1, len(positions) // (num_workers * 8))
+                yield from pool.imap(_grid_worker_signal, positions, chunksize=chunksize)
+        finally:
+            for key, value in saved_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
     # ------------------------------------------------------------------
     # Forward-model runtime helpers
     # ------------------------------------------------------------------
@@ -526,18 +797,20 @@ class FisherDetector:
         return _wrap
 
     def _candidate_positions(self) -> List[Tuple[float, float]]:
-        """Build map candidate positions.
-
-        Positions come from an explicit list or ring sampling.
-        """
+        """Build map candidate positions for the ring and explicit map types."""
         if self._candidate_positions_cache is not None:
             return list(self._candidate_positions_cache)
 
-        explicit = self.map_config.get("explicit_positions_yx")
-        if explicit is not None:
-            if len(explicit) == 0:
+        if self.map_type == "grid":
+            raise ValueError(
+                "Grid maps do not use _candidate_positions; use _grid_layout instead."
+            )
+
+        if self.map_type == "explicit":
+            explicit = self.map_config.get("explicit_positions_yx")
+            if explicit is None or len(explicit) == 0:
                 raise ValueError(
-                    "modeling.fisher.map.explicit_positions_yx must be non-empty when provided."
+                    "modeling.fisher.map.explicit_positions_yx must be non-empty when map.type is 'explicit'."
                 )
             positions = []
             numeric_types = (int, float, np.integer, np.floating)
@@ -570,8 +843,9 @@ class FisherDetector:
             self._candidate_positions_cache = positions
             return list(self._candidate_positions_cache)
 
-        num_angles = int(self.map_config["num_angles"])
-        offset_pixels = float(self.map_config["offset_pixels"])
+        ring_config = self.map_config["ring"]
+        num_angles = int(ring_config["num_angles"])
+        offset_pixels = float(ring_config["offset_pixels"])
         einstein_radius = float(self.lensing_baseline.lens_einstein_radius)
         pixel_scale = float(self.lensing_baseline.pixel_scale)
 
@@ -587,6 +861,72 @@ class FisherDetector:
             )
         self._candidate_positions_cache = positions
         return list(self._candidate_positions_cache)
+
+    def _grid_layout(self) -> _GridLayout:
+        """Build the node layout for a 2D sensitivity grid map.
+
+        The grid is a square lattice centred on the configured lens mass
+        centre, optionally restricted to an annulus around that centre.
+        """
+        if self._grid_layout_cache is not None:
+            return self._grid_layout_cache
+        if self.map_type != "grid":
+            raise ValueError("_grid_layout is only available when map.type is 'grid'.")
+
+        grid_config = self.map_config["grid"]
+        spacing = float(grid_config["spacing_arcsec"])
+        half_width = float(grid_config["half_width_arcsec"])
+        if spacing <= 0.0 or not np.isfinite(spacing):
+            raise ValueError("modeling.fisher.map.grid.spacing_arcsec must be positive and finite.")
+        if half_width < spacing or not np.isfinite(half_width):
+            raise ValueError(
+                "modeling.fisher.map.grid.half_width_arcsec must be finite and >= spacing_arcsec."
+            )
+
+        lens_centre = self.full_config["lensing"]["lens_galaxy"]["mass"]["centre"]
+        centre_y = float(lens_centre[0])
+        centre_x = float(lens_centre[1])
+
+        n_half = int(np.floor(half_width / spacing + 1.0e-9))
+        offsets = spacing * np.arange(-n_half, n_half + 1, dtype=float)
+        y_coords = centre_y + offsets
+        x_coords = centre_x + offsets
+
+        yy = y_coords[:, None]
+        xx = x_coords[None, :]
+        radius = np.hypot(yy - centre_y, xx - centre_x)
+
+        annulus = grid_config.get("annulus")
+        if annulus is None:
+            evaluated_mask = np.ones((y_coords.size, x_coords.size), dtype=bool)
+        else:
+            r_min = float(annulus["r_min_arcsec"])
+            r_max = float(annulus["r_max_arcsec"])
+            evaluated_mask = (radius >= r_min) & (radius <= r_max)
+            if not np.any(evaluated_mask):
+                raise ValueError(
+                    "modeling.fisher.map.grid.annulus selects no grid nodes; "
+                    "widen the annulus or refine the spacing."
+                )
+
+        node_indices = []
+        positions = []
+        for i in range(y_coords.size):
+            for j in range(x_coords.size):
+                if evaluated_mask[i, j]:
+                    node_indices.append((i, j))
+                    positions.append((float(y_coords[i]), float(x_coords[j])))
+
+        self._grid_layout_cache = _GridLayout(
+            y_coords=y_coords,
+            x_coords=x_coords,
+            spacing_arcsec=spacing,
+            centre_yx=(centre_y, centre_x),
+            evaluated_mask=evaluated_mask,
+            positions_yx=tuple(positions),
+            node_indices=tuple(node_indices),
+        )
+        return self._grid_layout_cache
 
     def _mean_adu_for_position(self, position_yx: Tuple[float, float]) -> np.ndarray:
         """Generate mean ADU image for a specific direct subhalo position."""
@@ -617,36 +957,11 @@ class FisherDetector:
 
         The returned image is in ADU and generated from a lensing scene.
         """
-        psf_kernel = self._ensure_odd_kernel(self.psf_data.kernel)
-        psf_convolver = make_pyauto_convolver(psf_kernel)
-        exposure_time = float(observation_config["exposure_time"])
-        throughput = float(observation_config["throughput"])
-        detector = observation_config["detector"]
-        gain = float(detector["gain"])
-        sky_background = float(detector["sky_background"])
-        dark_current = float(detector["dark_current"])
-
-        mask = al.Mask2D.all_false(
-            shape_native=lensing_data.image.shape,
-            pixel_scales=lensing_data.pixel_scale,
+        return _mean_adu_from_lensing_arrays(
+            lensing_data=lensing_data,
+            observation_config=observation_config,
+            psf_kernel=self._ensure_odd_kernel(self.psf_data.kernel),
         )
-        lensed_image = al.Array2D(values=lensing_data.image, mask=mask)
-
-        simulator_noiseless = al.SimulatorImaging(
-            exposure_time=exposure_time,
-            psf=psf_convolver,
-            background_sky_level=0.0,
-            normalize_psf=False,
-            add_poisson_noise_to_data=False,
-            noise_seed=0,
-        )
-        noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
-        source_only_eps = noiseless_dataset.data.native * throughput
-
-        source_e = source_only_eps * exposure_time
-        sky_e = sky_background * exposure_time
-        dark_e = dark_current * exposure_time
-        return (source_e + sky_e + dark_e) / gain
 
     def _mean_adu_from_observation(self, observation_data: ObservationData) -> np.ndarray:
         """Compute mean ADU image from ObservationData fields."""

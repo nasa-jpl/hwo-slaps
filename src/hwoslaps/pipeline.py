@@ -168,7 +168,22 @@ class Pipeline:
         if self.verbose:
             print("\n🎯 Fisher detectability analysis complete!")
             print_fisher_summary(detection_data)
-        
+
+        # Grid maps are stage-two analysis inputs; persist the arrays even
+        # when plotting is disabled.
+        if detection_data.has_grid_map:
+            from .modeling.utils_fisher import save_fisher_grid_map_npz
+            grid_map_dir = (
+                Path(config['plotting']['output_dir']) / config['run_name'] / 'modeling'
+            )
+            grid_map_dir.mkdir(parents=True, exist_ok=True)
+            grid_map_path = save_fisher_grid_map_npz(
+                detection_data.grid_map,
+                grid_map_dir / 'fisher_grid_map.npz',
+            )
+            if self.verbose:
+                print(f"Fisher grid map arrays saved: {grid_map_path}")
+
         # Generate plots if enabled
         if config['plotting']['enabled']:
             if self.verbose:

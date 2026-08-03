@@ -461,25 +461,108 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
 
     map_cfg = _require(fisher, 'map', 'modeling.fisher')
     _require_type(map_cfg, dict, 'modeling.fisher.map')
-    num_angles = _require(map_cfg, 'num_angles', 'modeling.fisher.map')
-    if isinstance(num_angles, bool) or not isinstance(num_angles, int) or num_angles <= 0:
-        raise ValueError("modeling.fisher.map.num_angles must be a positive integer")
-    offset_pixels = _require(map_cfg, 'offset_pixels', 'modeling.fisher.map')
-    if isinstance(offset_pixels, bool) or not isinstance(offset_pixels, (int, float)):
-        raise ValueError("modeling.fisher.map.offset_pixels must be numeric")
-    if not math.isfinite(float(offset_pixels)):
-        raise ValueError("modeling.fisher.map.offset_pixels must be finite")
 
-    explicit_positions = map_cfg.get('explicit_positions_yx')
-    if explicit_positions is not None:
+    supported_map_keys = {
+        'type',
+        'ring',
+        'grid',
+        'explicit_positions_yx',
+        'detection_q_threshold',
+        'num_workers',
+    }
+    unsupported_map_keys = sorted(set(map_cfg) - supported_map_keys)
+    if unsupported_map_keys:
+        raise ValueError(
+            "modeling.fisher.map contains unsupported keys: "
+            + ", ".join(unsupported_map_keys)
+        )
+
+    map_type = _require(map_cfg, 'type', 'modeling.fisher.map')
+    _require_type(map_type, str, 'modeling.fisher.map.type')
+    map_type = map_type.lower()
+    if map_type not in {'ring', 'grid', 'explicit'}:
+        raise ValueError(
+            "modeling.fisher.map.type must be one of: 'ring', 'grid', 'explicit'"
+        )
+
+    def _validate_ring_block(ring_cfg):
+        _require_type(ring_cfg, dict, 'modeling.fisher.map.ring')
+        unsupported = sorted(set(ring_cfg) - {'num_angles', 'offset_pixels'})
+        if unsupported:
+            raise ValueError(
+                "modeling.fisher.map.ring contains unsupported keys: "
+                + ", ".join(unsupported)
+            )
+        num_angles = _require(ring_cfg, 'num_angles', 'modeling.fisher.map.ring')
+        if isinstance(num_angles, bool) or not isinstance(num_angles, int) or num_angles <= 0:
+            raise ValueError("modeling.fisher.map.ring.num_angles must be a positive integer")
+        offset_pixels = _require(ring_cfg, 'offset_pixels', 'modeling.fisher.map.ring')
+        if isinstance(offset_pixels, bool) or not isinstance(offset_pixels, (int, float)):
+            raise ValueError("modeling.fisher.map.ring.offset_pixels must be numeric")
+        if not math.isfinite(float(offset_pixels)):
+            raise ValueError("modeling.fisher.map.ring.offset_pixels must be finite")
+
+    def _validate_grid_block(grid_cfg):
+        _require_type(grid_cfg, dict, 'modeling.fisher.map.grid')
+        unsupported = sorted(set(grid_cfg) - {'spacing_arcsec', 'half_width_arcsec', 'annulus'})
+        if unsupported:
+            raise ValueError(
+                "modeling.fisher.map.grid contains unsupported keys: "
+                + ", ".join(unsupported)
+            )
+        spacing = _require_positive_finite_number(
+            _require(grid_cfg, 'spacing_arcsec', 'modeling.fisher.map.grid'),
+            'modeling.fisher.map.grid.spacing_arcsec',
+        )
+        half_width = _require_positive_finite_number(
+            _require(grid_cfg, 'half_width_arcsec', 'modeling.fisher.map.grid'),
+            'modeling.fisher.map.grid.half_width_arcsec',
+        )
+        if half_width < spacing:
+            raise ValueError(
+                "modeling.fisher.map.grid.half_width_arcsec must be >= spacing_arcsec"
+            )
+        annulus = grid_cfg.get('annulus')
+        if annulus is not None:
+            _require_type(annulus, dict, 'modeling.fisher.map.grid.annulus')
+            unsupported_annulus = sorted(set(annulus) - {'r_min_arcsec', 'r_max_arcsec'})
+            if unsupported_annulus:
+                raise ValueError(
+                    "modeling.fisher.map.grid.annulus contains unsupported keys: "
+                    + ", ".join(unsupported_annulus)
+                )
+            r_min = _require_nonnegative_finite_number(
+                _require(annulus, 'r_min_arcsec', 'modeling.fisher.map.grid.annulus'),
+                'modeling.fisher.map.grid.annulus.r_min_arcsec',
+            )
+            r_max = _require_positive_finite_number(
+                _require(annulus, 'r_max_arcsec', 'modeling.fisher.map.grid.annulus'),
+                'modeling.fisher.map.grid.annulus.r_max_arcsec',
+            )
+            if r_max <= r_min:
+                raise ValueError(
+                    "modeling.fisher.map.grid.annulus.r_max_arcsec must be > r_min_arcsec"
+                )
+
+    def _validate_explicit_positions(explicit_positions, required):
+        if explicit_positions is None:
+            if required:
+                raise ValueError(
+                    "modeling.fisher.map.explicit_positions_yx is required when map.type is 'explicit'"
+                )
+            return
         if not isinstance(explicit_positions, list):
             raise ValueError("modeling.fisher.map.explicit_positions_yx must be a list when provided")
-        for idx, pair in enumerate(explicit_positions):
+        if required and len(explicit_positions) == 0:
+            raise ValueError(
+                "modeling.fisher.map.explicit_positions_yx must be non-empty when map.type is 'explicit'"
+            )
+        for pair in explicit_positions:
             if not isinstance(pair, (list, tuple)) or len(pair) != 2:
                 raise ValueError(
                     "modeling.fisher.map.explicit_positions_yx entries must be [y, x] pairs"
                 )
-            for jdx, value in enumerate(pair):
+            for value in pair:
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
                     raise ValueError(
                         "modeling.fisher.map.explicit_positions_yx entries must be numeric"
@@ -488,6 +571,37 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                     raise ValueError(
                         "modeling.fisher.map.explicit_positions_yx entries must be finite"
                     )
+
+    # Validate whichever blocks are present to catch typos early; require
+    # the block matching the selected type.
+    ring_block = map_cfg.get('ring')
+    if map_type == 'ring':
+        _validate_ring_block(_require(map_cfg, 'ring', 'modeling.fisher.map'))
+    elif ring_block is not None:
+        _validate_ring_block(ring_block)
+
+    grid_block = map_cfg.get('grid')
+    if map_type == 'grid':
+        _validate_grid_block(_require(map_cfg, 'grid', 'modeling.fisher.map'))
+    elif grid_block is not None:
+        _validate_grid_block(grid_block)
+
+    _validate_explicit_positions(
+        map_cfg.get('explicit_positions_yx'),
+        required=(map_type == 'explicit'),
+    )
+
+    detection_q_threshold = map_cfg.get('detection_q_threshold')
+    if detection_q_threshold is not None:
+        _require_positive_finite_number(
+            detection_q_threshold,
+            'modeling.fisher.map.detection_q_threshold',
+        )
+
+    num_workers = map_cfg.get('num_workers')
+    if num_workers is not None:
+        if isinstance(num_workers, bool) or not isinstance(num_workers, int) or num_workers <= 0:
+            raise ValueError("modeling.fisher.map.num_workers must be a positive integer")
 
     supported_fisher_keys = {
         'enable',

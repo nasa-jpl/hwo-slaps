@@ -240,6 +240,14 @@ modeling:
     #   global_zernikes:
     #     mode_nolls: [4, 5, 6]
     map:
-      num_angles: 24
-      offset_pixels: 0.0
+      type: ring                  # ring | grid | explicit
+      ring:
+        num_angles: 24
+        offset_pixels: 0.0
+      grid:
+        spacing_arcsec: 0.05      # node spacing; grid is centred on the lens mass centre
+        half_width_arcsec: 1.5    # square half-width; 1.5" covers the ring with margin
+        annulus: null             # optional {r_min_arcsec, r_max_arcsec} restriction
       explicit_positions_yx: null
+      detection_q_threshold: 10.0 # SCDD threshold on q_F for the detectable-area product
+      num_workers: 1              # grid template-generation worker processes (CPU)

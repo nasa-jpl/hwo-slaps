@@ -125,9 +125,11 @@ def _install_detector_stubs():
 
     core.ProfileLikelihoodWorkspace = _Workspace
     core.Whitener = _Whitener
+    core.detectable_area = lambda *args, **kwargs: 0.0
 
     utils = ensure_module(f"{TEST_PACKAGE}.modeling.utils_fisher")
     for name in (
+        "FisherGridMapData",
         "FisherLocalData",
         "FisherMapData",
         "FisherModeCouplingData",
