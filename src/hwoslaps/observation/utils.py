@@ -78,6 +78,11 @@ class ObservationData:
         return self.metadata['exposure_time']
     
     @property
+    def throughput(self) -> float:
+        """Dimensionless end-to-end system throughput applied to source flux."""
+        return self.metadata['throughput']
+
+    @property
     def pixel_scale(self) -> float:
         """Pixel scale in arcsec/pixel."""
         return self.metadata['pixel_scale']

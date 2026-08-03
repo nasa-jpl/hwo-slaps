@@ -79,7 +79,7 @@ def test_generate_observation_identity_psf_end_to_end():
     obs = generate_observation(
         lensing_data=lensing,
         psf_data=psf_data,
-        observation_config={'exposure_time': exposure_time, 'detector': detector},
+        observation_config={'exposure_time': exposure_time, 'throughput': 1.0, 'detector': detector},
         full_config={'global_seed': 42, 'run_name': 'unit_test_observation'}
     )
 
@@ -136,7 +136,7 @@ def test_pixel_scale_mismatch_raises():
         generate_observation(
             lensing_data=lensing,
             psf_data=psf_data,
-            observation_config={'exposure_time': 100.0, 'detector': detector},
+            observation_config={'exposure_time': 100.0, 'throughput': 1.0, 'detector': detector},
             full_config={'global_seed': 1, 'run_name': 'unit_test_observation'}
         )
 
@@ -165,6 +165,6 @@ def test_even_psf_is_rejected():
         generate_observation(
             lensing_data=lensing,
             psf_data=psf_data,
-            observation_config={'exposure_time': 100.0, 'detector': detector},
+            observation_config={'exposure_time': 100.0, 'throughput': 1.0, 'detector': detector},
             full_config={'global_seed': 7, 'run_name': 'unit_test_observation'}
         )

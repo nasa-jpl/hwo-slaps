@@ -71,6 +71,7 @@ def generate_observation(
     
     # Extract parameters
     exposure_time = observation_config['exposure_time']
+    throughput = float(observation_config['throughput'])
     detector_config = observation_config['detector']
     
     # Extract global seed from full_config
@@ -111,9 +112,11 @@ def generate_observation(
         noise_seed=noise_seed
     )
     
-    # Get noiseless but PSF-convolved image (units are electrons-per-second)
+    # Get noiseless but PSF-convolved image (units are electrons-per-second).
+    # The end-to-end system throughput scales the source flux only; sky
+    # background and dark current are configured as detected rates already.
     noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
-    source_only_eps = noiseless_dataset.data.native  # e-/s
+    source_only_eps = noiseless_dataset.data.native * throughput  # e-/s
     
     # Step 2: Apply realistic detector noise
     # This includes Poisson noise, read noise, dark current, and sky background
@@ -149,6 +152,7 @@ def generate_observation(
         'lensing_run': lensing_data.config.get('run_name') if lensing_data.config else None,
         'psf_run': psf_data.config.get('run_name') if psf_data.config else None,
         'exposure_time': exposure_time,
+        'throughput': throughput,
         'detector': deepcopy(detector_config),
         'noise_seed': noise_seed,
         'pixel_scale': lensing_data.pixel_scale,

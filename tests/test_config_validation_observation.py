@@ -58,6 +58,27 @@ def test_observation_rejects_non_positive_exposure_time(bad_exposure_time):
         validation.validate_or_raise(bad_config)
 
 
+def test_observation_requires_throughput():
+    config = _load_master_config()
+    bad_config = copy.deepcopy(config)
+    del bad_config["observation"]["throughput"]
+
+    with pytest.raises(ValueError, match="throughput"):
+        validation.validate_or_raise(bad_config)
+
+
+@pytest.mark.parametrize(
+    "bad_throughput", [True, float("nan"), float("inf"), 0.0, -0.5]
+)
+def test_observation_rejects_nonphysical_throughput(bad_throughput):
+    config = _load_master_config()
+    bad_config = copy.deepcopy(config)
+    bad_config["observation"]["throughput"] = bad_throughput
+
+    with pytest.raises(ValueError, match="observation.throughput"):
+        validation.validate_or_raise(bad_config)
+
+
 @pytest.mark.parametrize(
     "path,bad_value",
     [

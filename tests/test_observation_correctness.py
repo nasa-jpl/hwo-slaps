@@ -78,6 +78,7 @@ def _make_psf_data(kernel_values: np.ndarray, *, pixel_scale: float = 0.1) -> PS
 def _observation_config(
     *,
     exposure_time: float = 100.0,
+    throughput: float = 1.0,
     gain: float = 1.0,
     read_noise: float = 0.2,
     dark_current: float = 0.002,
@@ -85,6 +86,7 @@ def _observation_config(
 ) -> dict:
     return {
         "exposure_time": exposure_time,
+        "throughput": throughput,
         "detector": {
             "gain": gain,
             "read_noise": read_noise,
@@ -223,6 +225,76 @@ def test_observation_source_snr_scales_with_exposure_depth():
 
     assert np.all(snr_maps[1] > snr_maps[0])
     assert np.all(snr_maps[2] > snr_maps[1])
+
+
+def test_observation_throughput_scales_source_but_not_background():
+    source_eps = np.array(
+        [
+            [0.2, 0.5, 1.0],
+            [1.5, 2.0, 3.0],
+            [0.4, 0.8, 1.2],
+        ],
+        dtype=float,
+    )
+    lensing = _make_lensing_data(image=source_eps, pixel_scale=0.1)
+    psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
+    exposure_time = 100.0
+    throughput = 0.25
+    detector = {
+        "gain": 2.0,
+        "read_noise": 3.0,
+        "dark_current": 0.01,
+        "sky_background": 0.4,
+    }
+
+    obs = generate_observation(
+        lensing_data=lensing,
+        psf_data=psf_data,
+        observation_config=_observation_config(
+            exposure_time=exposure_time,
+            throughput=throughput,
+            **detector,
+        ),
+        full_config={"global_seed": 3, "run_name": "throughput_scaling"},
+    )
+
+    # Source flux is scaled by the throughput; the identity PSF keeps the
+    # noiseless rate image otherwise unchanged.
+    np.testing.assert_allclose(
+        obs.noiseless_source_eps,
+        source_eps * throughput,
+        rtol=0.0,
+        atol=1e-12,
+    )
+    assert obs.throughput == throughput
+
+    # Sky and dark are detected rates and are not scaled by the throughput.
+    np.testing.assert_allclose(
+        obs.noise_components["sky_e"],
+        detector["sky_background"] * exposure_time,
+        rtol=0.0,
+        atol=1e-12,
+    )
+    np.testing.assert_allclose(
+        obs.noise_components["dark_e"],
+        detector["dark_current"] * exposure_time,
+        rtol=0.0,
+        atol=1e-12,
+    )
+
+    # The noise map reflects the throughput-scaled source counts.
+    expected_e = (
+        source_eps * throughput * exposure_time
+        + detector["dark_current"] * exposure_time
+        + detector["sky_background"] * exposure_time
+    )
+    expected_noise_adu = np.sqrt(expected_e + detector["read_noise"] ** 2) / detector["gain"]
+    np.testing.assert_allclose(
+        obs.noise_map.native,
+        expected_noise_adu,
+        rtol=0.0,
+        atol=1e-12,
+    )
 
 
 def test_detector_noise_monte_carlo_matches_expected_moments():

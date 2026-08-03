@@ -163,6 +163,10 @@ psf:
 # Observation simulation parameters
 observation:
   exposure_time: 900.0  # seconds
+  # Dimensionless end-to-end system throughput applied to the source flux.
+  # Source intensities are defined as detected e-/s at throughput 1.0; sky
+  # background and dark current are detected rates and are not scaled.
+  throughput: 1.0
   output_format: "pyautolens_ready"
   
   # Detector configuration

@@ -620,6 +620,7 @@ class FisherDetector:
         psf_kernel = self._ensure_odd_kernel(self.psf_data.kernel)
         psf_convolver = make_pyauto_convolver(psf_kernel)
         exposure_time = float(observation_config["exposure_time"])
+        throughput = float(observation_config["throughput"])
         detector = observation_config["detector"]
         gain = float(detector["gain"])
         sky_background = float(detector["sky_background"])
@@ -640,7 +641,7 @@ class FisherDetector:
             noise_seed=0,
         )
         noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
-        source_only_eps = noiseless_dataset.data.native
+        source_only_eps = noiseless_dataset.data.native * throughput
 
         source_e = source_only_eps * exposure_time
         sky_e = sky_background * exposure_time
@@ -679,10 +680,13 @@ class FisherDetector:
         lensed_image = al.Array2D(values=self.lensing_baseline.image, mask=mask)
         # PSF derivative kernels are signed and therefore cannot pass through
         # the simulator's Poisson-count path. Use the raw linear convolution.
-        source_only_eps = psf_convolver.convolved_image_via_real_space_from(
-            image=lensed_image,
-            blurring_image=None,
-        ).native
+        source_only_eps = (
+            psf_convolver.convolved_image_via_real_space_from(
+                image=lensed_image,
+                blurring_image=None,
+            ).native
+            * self.observation_baseline.throughput
+        )
         source_e = source_only_eps * self.observation_baseline.exposure_time
         return source_e / self.observation_baseline.gain
 

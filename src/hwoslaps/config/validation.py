@@ -401,6 +401,9 @@ def validate_observation_config(observation: Dict[str, Any]) -> None:
     exposure_time = _require(observation, 'exposure_time', 'observation')
     _require_positive_finite_number(exposure_time, 'observation.exposure_time')
 
+    throughput = _require(observation, 'throughput', 'observation')
+    _require_positive_finite_number(throughput, 'observation.throughput')
+
     detector = _require(observation, 'detector', 'observation')
     _require_type(detector, dict, 'observation.detector')
     gain = _require(detector, 'gain', 'observation.detector')
