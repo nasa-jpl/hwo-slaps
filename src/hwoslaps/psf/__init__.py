@@ -20,6 +20,14 @@ from .aberration_models import (
     apply_segment_zernikes,
     apply_global_zernikes
 )
+from .families import (
+    draw_segment_piston_family,
+    draw_segment_tiptilt_family,
+    draw_segment_hexike_family,
+    draw_global_zernike_family,
+    measure_aperture_rms_nm,
+    renormalize_to_aperture_rms
+)
 
 __all__ = [
     'generate_psf_system',
@@ -32,5 +40,11 @@ __all__ = [
     'apply_segment_tiptilts',
     'apply_segment_zernikes',
     'apply_global_zernikes',
+    'draw_segment_piston_family',
+    'draw_segment_tiptilt_family',
+    'draw_segment_hexike_family',
+    'draw_global_zernike_family',
+    'measure_aperture_rms_nm',
+    'renormalize_to_aperture_rms',
     'plot_psf_complete_analysis'
 ]
