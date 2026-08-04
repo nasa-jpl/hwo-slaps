@@ -460,3 +460,71 @@ def plot_fisher_detection_grid_map(
     plt.close(fig)
 
     print(f"Saved Fisher grid map plot: {save_path}")
+
+    if grid.z_spurious_2d is None:
+        return
+
+    fig, ax = plt.subplots(figsize=(7.5, 6.5))
+    z_spurious = np.ma.masked_invalid(grid.z_spurious_2d)
+    image = ax.imshow(
+        z_spurious,
+        origin="lower",
+        extent=extent,
+        cmap="viridis",
+        interpolation="nearest",
+    )
+    plt.colorbar(image, ax=ax, fraction=0.046, label=r"$Z_{\rm spur}$")
+
+    if (
+        grid.false_positive_mask_2d is not None
+        and np.any(grid.false_positive_mask_2d)
+    ):
+        ax.contour(
+            grid.x_coords,
+            grid.y_coords,
+            grid.false_positive_mask_2d.astype(float),
+            levels=[0.5],
+            colors="white",
+            linewidths=1.4,
+        )
+
+    if grid.lens_einstein_radius is not None:
+        theta = np.linspace(0.0, 2.0 * np.pi, 361)
+        centre_y, centre_x = grid.centre_yx
+        ax.plot(
+            centre_x + grid.lens_einstein_radius * np.cos(theta),
+            centre_y + grid.lens_einstein_radius * np.sin(theta),
+            color="#d95f02",
+            linestyle="--",
+            linewidth=1.2,
+            label="Einstein ring",
+        )
+        ax.legend(loc="upper right", fontsize=8)
+
+    ax.set_xlabel("x (arcsec)")
+    ax.set_ylabel("y (arcsec)")
+    ax.set_aspect("equal")
+    mass_label = (
+        "" if grid.subhalo_mass is None else f", M={grid.subhalo_mass:.2e} M_sun"
+    )
+    ax.set_title(
+        "PSF-Mismatch Spurious Significance\n"
+        f"false-positive area {grid.false_positive_area_arcsec2:.3f} arcsec$^2$ "
+        f"(q >= {grid.detection_q_threshold:.1f}){mass_label}",
+        fontsize=10,
+    )
+    fig.text(
+        0.5,
+        0.01,
+        "White contour bounds the one-sided false-positive region; "
+        "NaN nodes were excluded by the annulus.",
+        ha="center",
+        fontsize=8.5,
+    )
+    plt.tight_layout(rect=(0.0, 0.03, 1.0, 1.0))
+
+    spurious_path = output_dir / "fisher_grid_map_spurious.png"
+    plt.savefig(spurious_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+
+    print(f"Saved Fisher spurious grid map plot: {spurious_path}")

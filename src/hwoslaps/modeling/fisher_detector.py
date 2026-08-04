@@ -124,7 +124,25 @@ def _mean_adu_from_lensing_arrays(
     Shared by the in-process detector paths and the grid-map worker
     processes; ``psf_kernel`` must already have odd dimensions.
     """
-    psf_convolver = make_pyauto_convolver(psf_kernel)
+    return _mean_adu_images_from_lensing_arrays(
+        lensing_data=lensing_data,
+        observation_config=observation_config,
+        psf_kernels=(psf_kernel,),
+    )[0]
+
+
+def _mean_adu_images_from_lensing_arrays(
+    lensing_data: LensingData,
+    observation_config: Dict[str, Any],
+    psf_kernels: Sequence[Any],
+) -> Tuple[np.ndarray, ...]:
+    """Apply one or more PSF kernels to one prepared lensing scene.
+
+    Ray tracing and construction of the AutoLens image are shared across all
+    kernels.  The returned noiseless ADU images follow the kernel order.
+    """
+    if not psf_kernels:
+        raise ValueError("psf_kernels must contain at least one kernel.")
     exposure_time = float(observation_config["exposure_time"])
     throughput = float(observation_config["throughput"])
     detector = observation_config["detector"]
@@ -138,21 +156,23 @@ def _mean_adu_from_lensing_arrays(
     )
     lensed_image = al.Array2D(values=lensing_data.image, mask=mask)
 
-    simulator_noiseless = al.SimulatorImaging(
-        exposure_time=exposure_time,
-        psf=psf_convolver,
-        background_sky_level=0.0,
-        normalize_psf=False,
-        add_poisson_noise_to_data=False,
-        noise_seed=0,
-    )
-    noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
-    source_only_eps = noiseless_dataset.data.native * throughput
-
-    source_e = source_only_eps * exposure_time
     sky_e = sky_background * exposure_time
     dark_e = dark_current * exposure_time
-    return (source_e + sky_e + dark_e) / gain
+    images = []
+    for psf_kernel in psf_kernels:
+        simulator_noiseless = al.SimulatorImaging(
+            exposure_time=exposure_time,
+            psf=make_pyauto_convolver(psf_kernel),
+            background_sky_level=0.0,
+            normalize_psf=False,
+            add_poisson_noise_to_data=False,
+            noise_seed=0,
+        )
+        noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
+        source_only_eps = noiseless_dataset.data.native * throughput
+        source_e = source_only_eps * exposure_time
+        images.append((source_e + sky_e + dark_e) / gain)
+    return tuple(images)
 
 
 _GRID_WORKER_STATE: Dict[str, Any] = {}
@@ -175,6 +195,8 @@ def _grid_worker_init(
     kernel_pixel_scales,
     mu0_adu_2d: np.ndarray,
     mask_2d: np.ndarray,
+    truth_kernel_native: Optional[np.ndarray] = None,
+    truth_kernel_pixel_scales=None,
 ) -> None:
     _GRID_WORKER_STATE["config_template"] = config_template
     _GRID_WORKER_STATE["kernel"] = make_pyauto_kernel(
@@ -184,6 +206,14 @@ def _grid_worker_init(
     )
     _GRID_WORKER_STATE["mu0"] = mu0_adu_2d
     _GRID_WORKER_STATE["mask"] = mask_2d
+    if truth_kernel_native is None:
+        _GRID_WORKER_STATE["truth_kernel"] = None
+    else:
+        _GRID_WORKER_STATE["truth_kernel"] = make_pyauto_kernel(
+            values=truth_kernel_native,
+            pixel_scales=truth_kernel_pixel_scales,
+            normalize=False,
+        )
 
 
 def _grid_worker_signal(position_yx: Tuple[float, float]) -> np.ndarray:
@@ -193,15 +223,25 @@ def _grid_worker_signal(position_yx: Tuple[float, float]) -> np.ndarray:
         "centre": [float(position_yx[0]), float(position_yx[1])],
     }
     lensing_data = generate_lensing_system(config["lensing"], full_config=config)
-    mu1_adu_2d = _mean_adu_from_lensing_arrays(
+    kernels = [_GRID_WORKER_STATE["kernel"]]
+    if _GRID_WORKER_STATE["truth_kernel"] is not None:
+        kernels.append(_GRID_WORKER_STATE["truth_kernel"])
+    mu1_images = _mean_adu_images_from_lensing_arrays(
         lensing_data=lensing_data,
         observation_config=config["observation"],
-        psf_kernel=_GRID_WORKER_STATE["kernel"],
+        psf_kernels=kernels,
     )
-    return flatten_masked_image(
-        mu1_adu_2d - _GRID_WORKER_STATE["mu0"],
+    model_signal = flatten_masked_image(
+        mu1_images[0] - _GRID_WORKER_STATE["mu0"],
         mask=_GRID_WORKER_STATE["mask"],
     )
+    if len(mu1_images) == 1:
+        return model_signal
+    data_residual = flatten_masked_image(
+        mu1_images[1] - _GRID_WORKER_STATE["mu0"],
+        mask=_GRID_WORKER_STATE["mask"],
+    )
+    return np.stack((model_signal, data_residual), axis=0)
 
 
 class FisherDetector:
@@ -234,6 +274,23 @@ class FisherDetector:
         self.psf_data = psf_data
         self.full_config = deepcopy(full_config)
         self.fisher_config = deepcopy(fisher_config)
+
+        fit_psf_config = self.full_config["modeling"].get("fit_psf")
+        self.mismatch_enabled = bool(
+            fit_psf_config is not None
+            and str(fit_psf_config.get("mode", "")).lower() == "explicit"
+        )
+        if self.mismatch_enabled:
+            self.fit_full_config = deepcopy(self.full_config)
+            self.fit_full_config["psf"] = deepcopy(fit_psf_config["psf"])
+            self.fit_psf_data = self._quiet_generate_psf_system(
+                self.fit_full_config
+            )
+            self.model_psf_data = self.fit_psf_data
+        else:
+            self.fit_full_config = self.full_config
+            self.fit_psf_data = None
+            self.model_psf_data = self.psf_data
 
         self.include_background_offset = bool(self.fisher_config["include_background_offset"])
         self.snr_threshold = float(self.fisher_config["snr_threshold"])
@@ -307,9 +364,20 @@ class FisherDetector:
         self._grid_layout_cache: Optional[_GridLayout] = None
         self._jax_grid_engine = None
 
-        self.science_psf_config_template = self._build_science_psf_config_template()
+        self.fit_psf_config_template = self._build_science_psf_config_template(
+            self.fit_full_config
+        )
+        self.scan_psf_config_template = self._build_science_psf_config_template(
+            self.full_config
+        )
 
         self.mu0_adu_2d = self._mean_adu_from_observation(self.observation_baseline)
+        if self.mismatch_enabled:
+            self.mu0_model_adu_2d = self._mean_adu_from_config(
+                self.baseline_config_template
+            )
+        else:
+            self.mu0_model_adu_2d = self.mu0_adu_2d
         self.source_adu_2d = self._source_adu_from_observation(self.observation_baseline)
         self.sigma_adu_2d = self.observation_baseline.noise_map.native
 
@@ -351,6 +419,7 @@ class FisherDetector:
             self._build_psf_mode_images,
             self.fit_psf_mode_specs,
             desc="Fisher PSF fit derivatives",
+            role="fit",
             count=self.n_psf_fit_modes,
             unit="mode",
         )
@@ -359,6 +428,7 @@ class FisherDetector:
             self._build_psf_mode_images,
             self.scan_psf_mode_specs,
             desc="Fisher PSF scan derivatives",
+            role="scan",
             count=self.n_psf_scan_modes,
             unit="mode",
         )
@@ -398,6 +468,14 @@ class FisherDetector:
             self.masked_covariance = None
             whitener = Whitener.from_sigma(self.sigma_masked)
         self.whitener = whitener
+        if self.mismatch_enabled:
+            bias_masked = flatten_masked_image(
+                self.mu0_adu_2d - self.mu0_model_adu_2d,
+                mask=self.mask_2d,
+            )
+            self._bias_whitened = whitener.apply(bias_masked)
+        else:
+            self._bias_whitened = None
 
         if self.n_nuisance > 0:
             nuisance_design = stack_masked_images(self.nuisance_images, mask=self.mask_2d)
@@ -425,14 +503,28 @@ class FisherDetector:
     ) -> FisherLocalData:
         """Compute local profiled Asimov detectability.
 
-        The calculation uses the injected position.
+        The calculation uses the injected position.  Existing Fisher fields
+        describe the fit-side template alone.  With an explicit fit PSF, the
+        optional mismatch fields project truth-side data and the smooth
+        truth-minus-fit residual onto that profiled template.
         """
         mu1_adu_2d = self._mean_adu_from_observation(observation_test)
+        if self.mismatch_enabled:
+            mu1_model_adu_2d = self._mean_adu_from_lensing(
+                lensing_data=lensing_test,
+                observation_config=self.full_config["observation"],
+            )
+            smooth_mean_image = self.mu0_model_adu_2d
+            subhalo_mean_image = mu1_model_adu_2d
+        else:
+            mu1_model_adu_2d = mu1_adu_2d
+            smooth_mean_image = self.mu0_adu_2d
+            subhalo_mean_image = mu1_adu_2d
         result = self._timed_call(
             "local Asimov evaluation",
             compute_asimov_from_images,
-            smooth_mean_image=self.mu0_adu_2d,
-            subhalo_mean_image=mu1_adu_2d,
+            smooth_mean_image=smooth_mean_image,
+            subhalo_mean_image=subhalo_mean_image,
             sigma_image=None if self.masked_covariance is not None else self.sigma_adu_2d,
             nuisance_images=self.nuisance_images if self.nuisance_images else None,
             prior_precision=self.prior_precision,
@@ -444,7 +536,42 @@ class FisherDetector:
 
         mode_scan = None
         if self.compute_psf_mode_scan and self.scan_psf_mode_images:
-            mode_scan = self._compute_local_mode_scan(mu1_adu_2d)
+            mode_scan = self._compute_local_mode_scan(mu1_model_adu_2d)
+
+        amplitude_hat_mismatch = None
+        q_mismatch = None
+        z_mismatch = None
+        amplitude_spurious = None
+        q_spurious = None
+        z_spurious = None
+        if self.mismatch_enabled:
+            template_masked = flatten_masked_image(
+                mu1_model_adu_2d - self.mu0_model_adu_2d,
+                mask=self.mask_2d,
+            )
+            data_residual_masked = flatten_masked_image(
+                mu1_adu_2d - self.mu0_model_adu_2d,
+                mask=self.mask_2d,
+            )
+            template_whitened = self.whitener.apply(template_masked)
+            data_residual_whitened = self.whitener.apply(data_residual_masked)
+            mismatch = self.workspace.spurious_from_bias(
+                template_whitened,
+                data_residual_whitened,
+            )
+            assert self._bias_whitened is not None
+            spurious = self.workspace.spurious_from_bias(
+                template_whitened,
+                self._bias_whitened,
+            )
+            amplitude_hat_mismatch = float(mismatch.amplitude_spurious)
+            z_mismatch = float(
+                amplitude_hat_mismatch / result.sigma_amplitude_profiled
+            )
+            q_mismatch = float(z_mismatch**2)
+            amplitude_spurious = float(spurious.amplitude_spurious)
+            z_spurious = float(spurious.z_spurious)
+            q_spurious = float(z_spurious**2)
 
         return FisherLocalData(
             snr_asimov=float(result.z_asimov_local),
@@ -470,10 +597,22 @@ class FisherDetector:
             nuisance_rank=int(result.nuisance_rank),
             whitened_size=int(result.whitened_size),
             psf_mode_scan=mode_scan,
+            mismatch_enabled=self.mismatch_enabled,
+            amplitude_hat_mismatch=amplitude_hat_mismatch,
+            q_mismatch=q_mismatch,
+            z_mismatch=z_mismatch,
+            amplitude_spurious=amplitude_spurious,
+            q_spurious=q_spurious,
+            z_spurious=z_spurious,
         )
 
     def compute_map(self) -> FisherMapData:
         """Compute a signal-bank detectability map over candidate positions."""
+        if self.mismatch_enabled:
+            raise ValueError(
+                "PSF mismatch is unsupported for legacy bank maps; use "
+                "map.type: grid for mismatch runs."
+            )
         positions_yx = self._candidate_positions()
         build_start = perf_counter()
         subhalo_mean_images = [
@@ -540,6 +679,10 @@ class FisherDetector:
         ``map.num_workers > 1`` template generation fans out over spawned
         worker processes; the statistical evaluation always runs in the
         parent against the workspace built at construction time.
+
+        Existing Fisher arrays describe fit-side templates.  With an explicit
+        fit PSF, paired truth-side data residuals are evaluated in the same
+        streaming batches and populate the optional mismatch arrays.
         """
         if self.map_type != "grid":
             raise ValueError("compute_grid_map requires modeling.fisher.map.type: 'grid'.")
@@ -564,9 +707,23 @@ class FisherDetector:
         def _flush() -> None:
             if not batch:
                 return
-            signal_matrix = np.column_stack(batch)
-            whitened = self.whitener.apply(signal_matrix)
-            results.append(self.workspace.evaluate_signal_bank(whitened.T))
+            if self.mismatch_enabled:
+                signal_matrix = np.column_stack([pair[0] for pair in batch])
+                data_matrix = np.column_stack([pair[1] for pair in batch])
+                signal_whitened = self.whitener.apply(signal_matrix)
+                data_whitened = self.whitener.apply(data_matrix)
+                assert self._bias_whitened is not None
+                results.append(
+                    self.workspace.evaluate_signal_bank(
+                        signal_whitened.T,
+                        data_bank_whitened=data_whitened.T,
+                        bias_whitened=self._bias_whitened,
+                    )
+                )
+            else:
+                signal_matrix = np.column_stack(batch)
+                whitened = self.whitener.apply(signal_matrix)
+                results.append(self.workspace.evaluate_signal_bank(whitened.T))
             batch.clear()
 
         for signal in progressed:
@@ -592,6 +749,32 @@ class FisherDetector:
         absorbed_fraction = np.concatenate(
             [np.atleast_1d(r.absorbed_fraction) for r in results]
         )
+        if self.mismatch_enabled:
+            amplitude_hat = np.concatenate(
+                [np.atleast_1d(r.amplitude_hat) for r in results]
+            )
+            q_mismatch = np.concatenate(
+                [np.atleast_1d(r.q_mismatch) for r in results]
+            )
+            z_mismatch = np.concatenate(
+                [np.atleast_1d(r.z_mismatch) for r in results]
+            )
+            amplitude_spurious = np.concatenate(
+                [np.atleast_1d(r.amplitude_spurious) for r in results]
+            )
+            q_spurious = np.concatenate(
+                [np.atleast_1d(r.q_spurious) for r in results]
+            )
+            z_spurious = np.concatenate(
+                [np.atleast_1d(r.z_spurious) for r in results]
+            )
+        else:
+            amplitude_hat = None
+            q_mismatch = None
+            z_mismatch = None
+            amplitude_spurious = None
+            q_spurious = None
+            z_spurious = None
 
         node_idx = np.asarray(layout.node_indices, dtype=int)
         shape = layout.evaluated_mask.shape
@@ -607,6 +790,43 @@ class FisherDetector:
 
         cell_area = layout.spacing_arcsec * layout.spacing_arcsec
         area_arcsec2 = detectable_area(q_asimov, cell_area, threshold)
+
+        mismatch_detectable_mask_2d = None
+        mismatch_area_arcsec2 = None
+        num_mismatch_detectable = None
+        false_positive_mask_2d = None
+        false_positive_area_arcsec2 = None
+        num_false_positive = None
+        max_z_spurious = None
+        if self.mismatch_enabled:
+            assert amplitude_hat is not None
+            assert q_mismatch is not None
+            assert amplitude_spurious is not None
+            assert q_spurious is not None
+            assert z_spurious is not None
+            mismatch_detectable_flat = (
+                (amplitude_hat > 0.0) & (q_mismatch >= threshold)
+            )
+            false_positive_flat = (
+                (amplitude_spurious > 0.0) & (q_spurious >= threshold)
+            )
+            mismatch_detectable_mask_2d = np.zeros(shape, dtype=bool)
+            mismatch_detectable_mask_2d[
+                node_idx[:, 0], node_idx[:, 1]
+            ] = mismatch_detectable_flat
+            false_positive_mask_2d = np.zeros(shape, dtype=bool)
+            false_positive_mask_2d[
+                node_idx[:, 0], node_idx[:, 1]
+            ] = false_positive_flat
+            num_mismatch_detectable = int(
+                np.count_nonzero(mismatch_detectable_flat)
+            )
+            num_false_positive = int(np.count_nonzero(false_positive_flat))
+            mismatch_area_arcsec2 = float(num_mismatch_detectable * cell_area)
+            false_positive_area_arcsec2 = float(
+                num_false_positive * cell_area
+            )
+            max_z_spurious = float(np.nanmax(z_spurious))
 
         subhalo_config = self.full_config["lensing"]["subhalo"]
 
@@ -633,6 +853,22 @@ class FisherDetector:
             subhalo_mass=float(subhalo_config["mass"]) if "mass" in subhalo_config else None,
             subhalo_model=str(subhalo_config["model"]) if "model" in subhalo_config else None,
             lens_einstein_radius=float(self.lensing_baseline.lens_einstein_radius),
+            mismatch_enabled=self.mismatch_enabled,
+            amplitude_hat_2d=None if amplitude_hat is None else _to_2d(amplitude_hat),
+            q_mismatch_2d=None if q_mismatch is None else _to_2d(q_mismatch),
+            z_mismatch_2d=None if z_mismatch is None else _to_2d(z_mismatch),
+            mismatch_detectable_mask_2d=mismatch_detectable_mask_2d,
+            mismatch_detectable_area_arcsec2=mismatch_area_arcsec2,
+            num_mismatch_detectable=num_mismatch_detectable,
+            amplitude_spurious_2d=(
+                None if amplitude_spurious is None else _to_2d(amplitude_spurious)
+            ),
+            q_spurious_2d=None if q_spurious is None else _to_2d(q_spurious),
+            z_spurious_2d=None if z_spurious is None else _to_2d(z_spurious),
+            false_positive_mask_2d=false_positive_mask_2d,
+            false_positive_area_arcsec2=false_positive_area_arcsec2,
+            num_false_positive=num_false_positive,
+            max_z_spurious=max_z_spurious,
         )
 
     def _grid_signal_iterator(
@@ -647,11 +883,29 @@ class FisherDetector:
             return
         if num_workers <= 1:
             for position in positions:
-                mu1_adu_2d = self._mean_adu_for_position(position)
-                yield flatten_masked_image(
-                    mu1_adu_2d - self.mu0_adu_2d,
-                    mask=self.mask_2d,
-                )
+                if self.mismatch_enabled:
+                    mu1_model_adu_2d, mu1_truth_adu_2d = (
+                        self._mean_adu_pair_for_position(position)
+                    )
+                    yield np.stack(
+                        (
+                            flatten_masked_image(
+                                mu1_model_adu_2d - self.mu0_model_adu_2d,
+                                mask=self.mask_2d,
+                            ),
+                            flatten_masked_image(
+                                mu1_truth_adu_2d - self.mu0_model_adu_2d,
+                                mask=self.mask_2d,
+                            ),
+                        ),
+                        axis=0,
+                    )
+                else:
+                    mu1_adu_2d = self._mean_adu_for_position(position)
+                    yield flatten_masked_image(
+                        mu1_adu_2d - self.mu0_adu_2d,
+                        mask=self.mask_2d,
+                    )
             return
         yield from self._grid_signal_iterator_parallel(positions, num_workers)
 
@@ -662,13 +916,21 @@ class FisherDetector:
         if self._jax_grid_engine is None:
             from .fisher_grid_jax import JaxGridTemplateEngine
 
-            kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+            kernel = self._ensure_odd_kernel(self.model_psf_data.kernel)
+            truth_kernel_native = None
+            if self.mismatch_enabled:
+                truth_kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+                truth_kernel_native = np.asarray(
+                    pyauto_kernel_native(truth_kernel),
+                    dtype=float,
+                )
             self._jax_grid_engine = JaxGridTemplateEngine(
                 lensing_baseline=self.lensing_baseline,
                 map_config_template=deepcopy(self.map_config_template),
                 psf_kernel_native=np.asarray(pyauto_kernel_native(kernel), dtype=float),
-                mu0_adu_2d=self.mu0_adu_2d,
+                mu0_adu_2d=self.mu0_model_adu_2d,
                 mask_2d=self.mask_2d,
+                truth_psf_kernel_native=truth_kernel_native,
             )
         yield from self._jax_grid_engine.signal_iterator(positions)
 
@@ -677,13 +939,24 @@ class FisherDetector:
         positions: Sequence[Tuple[float, float]],
         num_workers: int,
     ) -> Iterator[np.ndarray]:
-        kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+        kernel = self._ensure_odd_kernel(self.model_psf_data.kernel)
+        truth_kernel_native = None
+        truth_kernel_pixel_scales = None
+        if self.mismatch_enabled:
+            truth_kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+            truth_kernel_native = np.asarray(
+                pyauto_kernel_native(truth_kernel),
+                dtype=float,
+            )
+            truth_kernel_pixel_scales = pyauto_kernel_pixel_scales(truth_kernel)
         initargs = (
             deepcopy(self.map_config_template),
             np.asarray(pyauto_kernel_native(kernel), dtype=float),
             pyauto_kernel_pixel_scales(kernel),
-            np.asarray(self.mu0_adu_2d, dtype=float),
+            np.asarray(self.mu0_model_adu_2d, dtype=float),
             np.asarray(self.mask_2d, dtype=bool),
+            truth_kernel_native,
+            truth_kernel_pixel_scales,
         )
         saved_env = {key: os.environ.get(key) for key in _GRID_WORKER_ENV}
         os.environ.update(_GRID_WORKER_ENV)
@@ -960,6 +1233,29 @@ class FisherDetector:
         }
         return self._mean_adu_from_config(config)
 
+    def _mean_adu_pair_for_position(
+        self,
+        position_yx: Tuple[float, float],
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Generate fit- and truth-PSF images from one ray-traced scene."""
+        config = deepcopy(self.map_config_template)
+        config["lensing"]["subhalo"]["position"] = {
+            "type": "direct",
+            "centre": [float(position_yx[0]), float(position_yx[1])],
+        }
+        lensing_data = generate_lensing_system(
+            config["lensing"],
+            full_config=config,
+        )
+        model_kernel = self._ensure_odd_kernel(self.model_psf_data.kernel)
+        truth_kernel = self._ensure_odd_kernel(self.psf_data.kernel)
+        model_image, truth_image = _mean_adu_images_from_lensing_arrays(
+            lensing_data=lensing_data,
+            observation_config=config["observation"],
+            psf_kernels=(model_kernel, truth_kernel),
+        )
+        return model_image, truth_image
+
     def _mean_adu_from_config(self, config: Dict[str, Any]) -> np.ndarray:
         """Generate a deterministic mean ADU image.
 
@@ -983,7 +1279,7 @@ class FisherDetector:
         return _mean_adu_from_lensing_arrays(
             lensing_data=lensing_data,
             observation_config=observation_config,
-            psf_kernel=self._ensure_odd_kernel(self.psf_data.kernel),
+            psf_kernel=self._ensure_odd_kernel(self.model_psf_data.kernel),
         )
 
     def _mean_adu_from_observation(self, observation_data: ObservationData) -> np.ndarray:
@@ -1332,9 +1628,10 @@ class FisherDetector:
         specs: Sequence[_PsfModeSpec],
         *,
         desc: str,
+        role: str,
     ) -> List[np.ndarray]:
         return [
-            self._psf_derivative_image(spec)
+            self._psf_derivative_image(spec, role=role)
             for spec in self._progress_iter(
                 specs,
                 desc=desc,
@@ -1342,8 +1639,11 @@ class FisherDetector:
             )
         ]
 
-    def _build_science_psf_config_template(self) -> Dict[str, Any]:
-        config = deepcopy(self.full_config)
+    def _build_science_psf_config_template(
+        self,
+        full_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        config = deepcopy(self.full_config if full_config is None else full_config)
         aberr = config.setdefault("psf", {}).setdefault("aberrations", {})
         family_flags = {
             "segment_pistons": "enable_segment_pistons",
@@ -1358,18 +1658,40 @@ class FisherDetector:
                 aberr[family] = {}
         return config
 
-    def _science_psf_base_value(self, spec: _PsfModeSpec) -> float:
+    def _science_psf_base_value(
+        self,
+        spec: _PsfModeSpec,
+        *,
+        role: str = "fit",
+    ) -> float:
+        if role == "fit":
+            template = self.fit_psf_config_template
+        elif role == "scan":
+            template = self.scan_psf_config_template
+        else:
+            raise ValueError("PSF derivative role must be 'fit' or 'scan'.")
         enabled = bool(self._get_path_value_or_default(
-            self.science_psf_config_template, spec.enable_flag_path, False))
+            template, spec.enable_flag_path, False))
         if not enabled:
             return 0.0
-        return float(self._get_path_value_or_default(self.science_psf_config_template, spec.path, 0.0))
+        return float(self._get_path_value_or_default(template, spec.path, 0.0))
 
-    def _psf_derivative_image(self, spec: _PsfModeSpec) -> np.ndarray:
-        plus_config = deepcopy(self.science_psf_config_template)
-        minus_config = deepcopy(self.science_psf_config_template)
+    def _psf_derivative_image(
+        self,
+        spec: _PsfModeSpec,
+        *,
+        role: str,
+    ) -> np.ndarray:
+        if role == "fit":
+            template = self.fit_psf_config_template
+        elif role == "scan":
+            template = self.scan_psf_config_template
+        else:
+            raise ValueError("PSF derivative role must be 'fit' or 'scan'.")
+        plus_config = deepcopy(template)
+        minus_config = deepcopy(template)
 
-        base_value = self._science_psf_base_value(spec)
+        base_value = self._science_psf_base_value(spec, role=role)
         self._set_path_value_create(plus_config, spec.enable_flag_path, True)
         self._set_path_value_create(minus_config, spec.enable_flag_path, True)
         self._ensure_psf_derivative_container(plus_config, spec)
@@ -1428,7 +1750,7 @@ class FisherDetector:
         scan = self._timed_call(
             "local mode scan",
             scan_systematic_modes_from_images,
-            smooth_mean_image=self.mu0_adu_2d,
+            smooth_mean_image=self.mu0_model_adu_2d,
             subhalo_mean_image=mu1_adu_2d,
             systematic_mode_images=self.scan_psf_mode_images,
             sigma_image=None if self.masked_covariance is not None else self.sigma_adu_2d,

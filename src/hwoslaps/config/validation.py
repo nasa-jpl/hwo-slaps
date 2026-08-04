@@ -490,6 +490,36 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
     if not modeling['enabled']:
         return
 
+    if 'fit_psf' in modeling:
+        fit_psf = modeling['fit_psf']
+        _require_type(fit_psf, dict, 'modeling.fit_psf')
+        unsupported_fit_psf_keys = sorted(set(fit_psf) - {'mode', 'psf'})
+        if unsupported_fit_psf_keys:
+            raise ValueError(
+                "modeling.fit_psf contains unsupported keys: "
+                + ", ".join(unsupported_fit_psf_keys)
+            )
+        fit_psf_mode = _require(fit_psf, 'mode', 'modeling.fit_psf')
+        _require_type(fit_psf_mode, str, 'modeling.fit_psf.mode')
+        fit_psf_mode = fit_psf_mode.lower()
+        if fit_psf_mode not in {'matched', 'explicit'}:
+            raise ValueError(
+                "modeling.fit_psf.mode must be one of: 'matched', 'explicit'"
+            )
+        if fit_psf_mode == 'matched':
+            if 'psf' in fit_psf:
+                raise ValueError(
+                    "modeling.fit_psf.psf must not be present when "
+                    "modeling.fit_psf.mode is 'matched'"
+                )
+        else:
+            explicit_psf = _require(fit_psf, 'psf', 'modeling.fit_psf')
+            _require_type(explicit_psf, dict, 'modeling.fit_psf.psf')
+            try:
+                validate_psf_config(explicit_psf)
+            except ValueError as exc:
+                raise ValueError(f"modeling.fit_psf.psf is invalid: {exc}") from exc
+
     detection = _require(modeling, 'detection', 'modeling')
     _require_type(detection, str, 'modeling.detection')
     detection = detection.lower()

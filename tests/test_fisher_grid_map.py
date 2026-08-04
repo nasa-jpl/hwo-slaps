@@ -29,6 +29,7 @@ from hwoslaps.modeling.generator_fisher import perform_fisher_detection
 from hwoslaps.modeling.utils_fisher import (
     FisherDetectionData,
     FisherGridMapData,
+    print_fisher_summary,
     save_fisher_grid_map_npz,
 )
 from hwoslaps.observation import generate_observation
@@ -38,6 +39,39 @@ from hwoslaps.psf.generator import generate_psf_system
 GRID_SPACING = 0.1
 GRID_HALF_WIDTH = 0.2
 SUBHALO_POSITION = (0.2, -0.1)
+MISMATCH_FIELDS = {
+    "mismatch_enabled",
+    "amplitude_hat_mismatch",
+    "q_mismatch",
+    "z_mismatch",
+    "amplitude_spurious",
+    "q_spurious",
+    "z_spurious",
+}
+MATCHED_NPZ_KEYS = {
+    "y_coords",
+    "x_coords",
+    "spacing_arcsec",
+    "centre_yx",
+    "detection_q_threshold",
+    "evaluated_mask_2d",
+    "detectable_mask_2d",
+    "q_asimov_2d",
+    "z_asimov_2d",
+    "fisher_raw_2d",
+    "fisher_profiled_2d",
+    "sigma_amplitude_profiled_2d",
+    "degradation_2d",
+    "absorbed_fraction_2d",
+    "num_positions_evaluated",
+    "num_detectable",
+    "detectable_area_arcsec2",
+    "max_z_asimov",
+    "median_z_asimov",
+    "subhalo_mass",
+    "subhalo_model",
+    "lens_einstein_radius",
+}
 
 
 def _load_master_config() -> dict:
@@ -75,11 +109,11 @@ def _build_grid_config(tmp_dir: Path) -> dict:
     aberr["enable_segment_pistons"] = False
     aberr["enable_segment_tiptilts"] = False
     aberr["enable_segment_hexikes"] = False
-    aberr["enable_global_zernikes"] = False
+    aberr["enable_global_zernikes"] = True
     aberr["segment_pistons"] = {}
     aberr["segment_tiptilts"] = {}
     aberr["segment_hexikes"] = {}
-    aberr["global_zernikes"] = {}
+    aberr["global_zernikes"] = {4: 20.0}
 
     config["observation"]["exposure_time"] = 200.0
     config["observation"]["detector"]["sky_background"] = 0.5
@@ -164,6 +198,58 @@ def _make_detector(grid_setup, fisher_map_config: dict) -> FisherDetector:
         full_config=config,
         fisher_config=copy.deepcopy(config["modeling"]["fisher"]),
     )
+
+
+def _perfect_psf_config(config: dict) -> dict:
+    psf = copy.deepcopy(config["psf"])
+    aberr = psf["aberrations"]
+    aberr["enable_segment_pistons"] = False
+    aberr["enable_segment_tiptilts"] = False
+    aberr["enable_segment_hexikes"] = False
+    aberr["enable_global_zernikes"] = False
+    aberr["segment_pistons"] = {}
+    aberr["segment_tiptilts"] = {}
+    aberr["segment_hexikes"] = {}
+    aberr["global_zernikes"] = {}
+    return psf
+
+
+def _make_mismatch_detector(
+    grid_setup,
+    fit_psf: dict,
+    fisher_map_config: dict | None = None,
+) -> FisherDetector:
+    config = copy.deepcopy(grid_setup["config"])
+    config["modeling"]["fit_psf"] = {
+        "mode": "explicit",
+        "psf": copy.deepcopy(fit_psf),
+    }
+    if fisher_map_config is not None:
+        config["modeling"]["fisher"]["map"] = fisher_map_config
+    return FisherDetector(
+        observation_baseline=grid_setup["observation_baseline"],
+        lensing_baseline=grid_setup["lensing_baseline"],
+        psf_data=grid_setup["psf_data"],
+        full_config=config,
+        fisher_config=copy.deepcopy(config["modeling"]["fisher"]),
+    )
+
+
+@pytest.fixture(scope="module")
+def mismatch_setup(grid_setup):
+    """Build one truth-aberrated, perfect-fit mismatch detector and outputs."""
+    detector = _make_mismatch_detector(
+        grid_setup,
+        _perfect_psf_config(grid_setup["config"]),
+    )
+    return {
+        "detector": detector,
+        "grid_map": detector.compute_grid_map(),
+        "local": detector.compute_local(
+            observation_test=grid_setup["observation_test"],
+            lensing_test=grid_setup["lensing_test"],
+        ),
+    }
 
 
 def _layout_stub(map_config: dict, lens_centre) -> FisherDetector:
@@ -291,6 +377,150 @@ def test_grid_map_schema_and_area(grid_setup):
     assert grid_map.lens_einstein_radius == pytest.approx(0.5)
 
 
+def test_no_fit_psf_block_leaves_mismatch_outputs_empty(grid_setup, tmp_path):
+    """Preserve no-block result fields and the legacy NPZ key set."""
+    local = grid_setup["detector"].compute_local(
+        observation_test=grid_setup["observation_test"],
+        lensing_test=grid_setup["lensing_test"],
+    )
+    grid_map = grid_setup["grid_map"]
+
+    assert grid_setup["detector"].mu0_model_adu_2d is (
+        grid_setup["detector"].mu0_adu_2d
+    )
+    assert local.mismatch_enabled is False
+    for name in MISMATCH_FIELDS - {"mismatch_enabled"}:
+        assert getattr(local, name) is None
+    assert grid_map.mismatch_enabled is False
+    for name in (
+        "amplitude_hat_2d",
+        "q_mismatch_2d",
+        "z_mismatch_2d",
+        "mismatch_detectable_mask_2d",
+        "mismatch_detectable_area_arcsec2",
+        "num_mismatch_detectable",
+        "amplitude_spurious_2d",
+        "q_spurious_2d",
+        "z_spurious_2d",
+        "false_positive_mask_2d",
+        "false_positive_area_arcsec2",
+        "num_false_positive",
+        "max_z_spurious",
+    ):
+        assert getattr(grid_map, name) is None
+
+    npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "matched.npz")
+    with np.load(npz_path) as data:
+        assert set(data.files) == MATCHED_NPZ_KEYS
+
+
+def test_identical_explicit_fit_psf_recovers_matched_limit(grid_setup):
+    """Recover matched local and grid outputs for an identical explicit PSF."""
+    detector = _make_mismatch_detector(grid_setup, grid_setup["config"]["psf"])
+    local = detector.compute_local(
+        observation_test=grid_setup["observation_test"],
+        lensing_test=grid_setup["lensing_test"],
+    )
+    matched_local = grid_setup["detector"].compute_local(
+        observation_test=grid_setup["observation_test"],
+        lensing_test=grid_setup["lensing_test"],
+    )
+    for name in matched_local.__dataclass_fields__:
+        if name in MISMATCH_FIELDS:
+            continue
+        expected = getattr(matched_local, name)
+        actual = getattr(local, name)
+        if isinstance(expected, float):
+            np.testing.assert_allclose(actual, expected, rtol=1.0e-12)
+        else:
+            assert actual == expected
+
+    assert local.mismatch_enabled is True
+    np.testing.assert_allclose(local.q_mismatch, local.q_asimov_local, rtol=1.0e-10)
+    assert local.amplitude_spurious == pytest.approx(0.0, abs=1.0e-12)
+
+    grid_map = detector.compute_grid_map()
+    matched_grid_map = grid_setup["grid_map"]
+    for name in (
+        "q_asimov_2d",
+        "z_asimov_2d",
+        "fisher_raw_2d",
+        "fisher_profiled_2d",
+        "sigma_amplitude_profiled_2d",
+        "degradation_2d",
+        "absorbed_fraction_2d",
+    ):
+        np.testing.assert_allclose(
+            getattr(grid_map, name),
+            getattr(matched_grid_map, name),
+            rtol=1.0e-12,
+        )
+    np.testing.assert_array_equal(
+        grid_map.detectable_mask_2d,
+        matched_grid_map.detectable_mask_2d,
+    )
+    np.testing.assert_allclose(
+        grid_map.q_mismatch_2d,
+        grid_map.q_asimov_2d,
+        rtol=1.0e-10,
+    )
+    assert grid_map.false_positive_area_arcsec2 == pytest.approx(0.0)
+    assert grid_map.num_false_positive == 0
+
+
+def test_local_spurious_q_scales_with_psf_offset_squared(grid_setup):
+    """Scale spurious q quadratically with a small PSF offset."""
+    q_values = []
+    for offset_nm in (0.5, 1.0):
+        fit_psf = copy.deepcopy(grid_setup["config"]["psf"])
+        fit_psf["aberrations"]["global_zernikes"][4] = 20.0 + offset_nm
+        detector = _make_mismatch_detector(grid_setup, fit_psf)
+        local = detector.compute_local(
+            observation_test=grid_setup["observation_test"],
+            lensing_test=grid_setup["lensing_test"],
+        )
+        q_values.append(local.q_spurious)
+
+    ratio = q_values[1] / q_values[0]
+    assert ratio == pytest.approx(4.0, rel=0.15)
+
+
+def test_mismatch_grid_endpoint_has_structure_and_signed_masks(mismatch_setup):
+    """Produce structured spurious statistics and enforce one-sided masks."""
+    grid_map = mismatch_setup["grid_map"]
+    evaluated = grid_map.evaluated_mask_2d
+
+    assert not np.all(np.isnan(grid_map.q_spurious_2d))
+    assert np.nanmax(grid_map.q_spurious_2d) > np.nanmedian(grid_map.q_spurious_2d)
+    expected_mismatch = (
+        evaluated
+        & (grid_map.amplitude_hat_2d > 0.0)
+        & (grid_map.q_mismatch_2d >= grid_map.detection_q_threshold)
+    )
+    expected_false_positive = (
+        evaluated
+        & (grid_map.amplitude_spurious_2d > 0.0)
+        & (grid_map.q_spurious_2d >= grid_map.detection_q_threshold)
+    )
+    np.testing.assert_array_equal(
+        grid_map.mismatch_detectable_mask_2d,
+        expected_mismatch,
+    )
+    np.testing.assert_array_equal(
+        grid_map.false_positive_mask_2d,
+        expected_false_positive,
+    )
+    assert grid_map.mismatch_detectable_area_arcsec2 == pytest.approx(
+        np.count_nonzero(expected_mismatch) * GRID_SPACING**2
+    )
+    assert grid_map.false_positive_area_arcsec2 == pytest.approx(
+        np.count_nonzero(expected_false_positive) * GRID_SPACING**2
+    )
+    assert grid_map.max_z_spurious == pytest.approx(
+        np.nanmax(grid_map.z_spurious_2d)
+    )
+
+
 def test_grid_map_matches_explicit_bank_path(grid_setup):
     """Match grid-map values against the explicit position bank path."""
     grid_map = grid_setup["grid_map"]
@@ -334,6 +564,20 @@ def test_grid_map_node_matches_compute_local(grid_setup):
         grid_map.q_asimov_2d[y_idx, x_idx],
         local.q_asimov_local,
         rtol=1.0e-6,
+    )
+
+
+def test_mismatch_grid_node_matches_compute_local(mismatch_setup):
+    """Match mismatch q at the injected grid node against compute_local."""
+    grid_map = mismatch_setup["grid_map"]
+    local = mismatch_setup["local"]
+    y_idx = int(np.argmin(np.abs(grid_map.y_coords - SUBHALO_POSITION[0])))
+    x_idx = int(np.argmin(np.abs(grid_map.x_coords - SUBHALO_POSITION[1])))
+
+    np.testing.assert_allclose(
+        grid_map.q_mismatch_2d[y_idx, x_idx],
+        local.q_mismatch,
+        rtol=1.0e-8,
     )
 
 
@@ -399,6 +643,38 @@ def test_grid_map_parallel_matches_serial(grid_setup):
     assert grid_map_parallel.num_detectable == grid_map_serial.num_detectable
 
 
+def test_mismatch_grid_map_parallel_matches_serial(grid_setup, mismatch_setup):
+    """Produce identical mismatch statistics with one and two workers."""
+    map_config = copy.deepcopy(grid_setup["config"]["modeling"]["fisher"]["map"])
+    map_config["num_workers"] = 2
+    detector = _make_mismatch_detector(
+        grid_setup,
+        _perfect_psf_config(grid_setup["config"]),
+        map_config,
+    )
+    parallel = detector.compute_grid_map()
+    serial = mismatch_setup["grid_map"]
+
+    np.testing.assert_allclose(
+        parallel.q_mismatch_2d,
+        serial.q_mismatch_2d,
+        rtol=1.0e-10,
+    )
+    np.testing.assert_allclose(
+        parallel.q_spurious_2d,
+        serial.q_spurious_2d,
+        rtol=1.0e-10,
+    )
+    np.testing.assert_array_equal(
+        parallel.mismatch_detectable_mask_2d,
+        serial.mismatch_detectable_mask_2d,
+    )
+    np.testing.assert_array_equal(
+        parallel.false_positive_mask_2d,
+        serial.false_positive_mask_2d,
+    )
+
+
 def test_generator_dispatches_grid_map(grid_setup):
     """Route a grid map config through perform_fisher_detection."""
     config = copy.deepcopy(grid_setup["config"])
@@ -432,6 +708,23 @@ def test_grid_map_requires_grid_type(grid_setup):
         detector.compute_grid_map()
 
 
+def test_mismatch_compute_map_requires_grid_type(grid_setup):
+    """Reject the legacy ring bank when explicit PSF mismatch is enabled."""
+    detector = _make_mismatch_detector(
+        grid_setup,
+        _perfect_psf_config(grid_setup["config"]),
+        {
+            "type": "ring",
+            "ring": {"num_angles": 4, "offset_pixels": 0.0},
+            "detection_q_threshold": 10.0,
+            "num_workers": 1,
+        },
+    )
+
+    with pytest.raises(ValueError, match="map.type: grid"):
+        detector.compute_map()
+
+
 # ----------------------------------------------------------------------
 # Persistence and plotting
 # ----------------------------------------------------------------------
@@ -463,6 +756,39 @@ def test_grid_map_npz_roundtrip(grid_setup, tmp_path):
         assert str(data["subhalo_model"]) == "PointMass"
 
 
+def test_mismatch_grid_map_npz_roundtrip(mismatch_setup, tmp_path):
+    """Round-trip all optional mismatch fields through the NPZ archive."""
+    grid_map = mismatch_setup["grid_map"]
+    npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "mismatch.npz")
+
+    with np.load(npz_path) as data:
+        for name in (
+            "amplitude_hat_2d",
+            "q_mismatch_2d",
+            "z_mismatch_2d",
+            "mismatch_detectable_mask_2d",
+            "amplitude_spurious_2d",
+            "q_spurious_2d",
+            "z_spurious_2d",
+            "false_positive_mask_2d",
+        ):
+            np.testing.assert_array_equal(data[name], getattr(grid_map, name))
+        assert bool(data["mismatch_enabled"])
+        assert float(data["false_positive_area_arcsec2"]) == pytest.approx(
+            grid_map.false_positive_area_arcsec2
+        )
+        assert int(data["num_false_positive"]) == grid_map.num_false_positive
+        assert float(data["mismatch_detectable_area_arcsec2"]) == pytest.approx(
+            grid_map.mismatch_detectable_area_arcsec2
+        )
+        assert int(data["num_mismatch_detectable"]) == (
+            grid_map.num_mismatch_detectable
+        )
+        assert float(data["max_z_spurious"]) == pytest.approx(
+            grid_map.max_z_spurious
+        )
+
+
 def test_grid_map_plot_writes_png(grid_setup, tmp_path):
     """Write a grid-map figure to disk from FisherDetectionData."""
     detection_data = FisherDetectionData(
@@ -487,6 +813,68 @@ def test_grid_map_plot_writes_png(grid_setup, tmp_path):
     )
 
     assert (tmp_path / "grid-plot-test" / "modeling" / "fisher_grid_map.png").exists()
+    assert not (
+        tmp_path / "grid-plot-test" / "modeling" / "fisher_grid_map_spurious.png"
+    ).exists()
+
+
+def test_mismatch_grid_map_plot_writes_spurious_png(mismatch_setup, tmp_path):
+    """Write the additional spurious-significance heat map for mismatch."""
+    grid_map = mismatch_setup["grid_map"]
+    detection_data = FisherDetectionData(
+        mode="map",
+        local=mismatch_setup["local"],
+        map=None,
+        snr_threshold=3.0,
+        include_background_offset=True,
+        finite_diff={},
+        map_config={},
+        pixels_unmasked=mismatch_setup["detector"].pixels_unmasked,
+        n_nuisance=mismatch_setup["detector"].n_nuisance,
+        gram_condition_number=1.0,
+        pixel_scale=0.1,
+        grid_map=grid_map,
+    )
+
+    plot_fisher_detection_grid_map(
+        detection_data,
+        {"output_dir": str(tmp_path)},
+        run_name="mismatch-plot-test",
+    )
+
+    output_dir = tmp_path / "mismatch-plot-test" / "modeling"
+    assert (output_dir / "fisher_grid_map.png").exists()
+    assert (output_dir / "fisher_grid_map_spurious.png").exists()
+
+
+def test_mismatch_summary_prints_local_and_grid_statistics(
+    mismatch_setup,
+    capsys,
+):
+    """Print the fit mode and compact mismatch and false-positive summary."""
+    detection_data = FisherDetectionData(
+        mode="both",
+        local=mismatch_setup["local"],
+        map=None,
+        snr_threshold=3.0,
+        include_background_offset=True,
+        finite_diff={},
+        map_config={},
+        pixels_unmasked=mismatch_setup["detector"].pixels_unmasked,
+        n_nuisance=mismatch_setup["detector"].n_nuisance,
+        gram_condition_number=1.0,
+        pixel_scale=0.1,
+        grid_map=mismatch_setup["grid_map"],
+    )
+
+    print_fisher_summary(detection_data)
+
+    output = capsys.readouterr().out
+    assert "Fit PSF mode: explicit" in output
+    assert "q_mismatch" in output
+    assert "q_spurious" in output
+    assert "Mismatch-detectable area" in output
+    assert "False-positive area" in output
 
 
 # ----------------------------------------------------------------------
@@ -554,4 +942,37 @@ def test_jax_engine_grid_map_matches_reference(grid_setup):
     assert (
         abs(jax_map.detectable_area_arcsec2 - reference_map.detectable_area_arcsec2)
         <= cell_area
+    )
+
+
+def test_jax_engine_mismatch_grid_map_matches_reference(grid_setup, mismatch_setup):
+    """Match JAX and reference mismatch statistics and one-sided masks."""
+    pytest.importorskip("jax")
+    map_config = copy.deepcopy(grid_setup["config"]["modeling"]["fisher"]["map"])
+    map_config["engine"] = "jax"
+    detector = _make_mismatch_detector(
+        grid_setup,
+        _perfect_psf_config(grid_setup["config"]),
+        map_config,
+    )
+    jax_map = detector.compute_grid_map()
+    reference = mismatch_setup["grid_map"]
+
+    np.testing.assert_allclose(
+        jax_map.q_mismatch_2d,
+        reference.q_mismatch_2d,
+        rtol=1.0e-6,
+    )
+    np.testing.assert_allclose(
+        jax_map.q_spurious_2d,
+        reference.q_spurious_2d,
+        rtol=1.0e-6,
+    )
+    np.testing.assert_array_equal(
+        jax_map.mismatch_detectable_mask_2d,
+        reference.mismatch_detectable_mask_2d,
+    )
+    np.testing.assert_array_equal(
+        jax_map.false_positive_mask_2d,
+        reference.false_positive_mask_2d,
     )

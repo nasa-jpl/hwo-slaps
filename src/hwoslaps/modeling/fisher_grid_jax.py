@@ -32,7 +32,7 @@ radial table and FFT round-off and is gated by the equivalence tests.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterator, List, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -40,6 +40,7 @@ from ..lensing.generator import _create_subhalo
 from ..lensing.utils import LensingData
 
 _RADIAL_SAMPLES = 8192
+_MISMATCH_RADIAL_SAMPLES = 32768
 _RADIAL_R_MIN_ARCSEC = 1.0e-6
 _DEFAULT_BATCH_SIZE = 16
 _SOURCE_VERIFY_POINTS = 128
@@ -74,6 +75,9 @@ class JaxGridTemplateEngine:
         the subhalo model and the observation/detector parameters.
     psf_kernel_native : `numpy.ndarray`
         Native-resolution PSF kernel; both dimensions must be odd.
+    truth_psf_kernel_native : `numpy.ndarray`, optional
+        Truth-side PSF kernel.  When supplied, the engine applies both kernels
+        to the same node scene and yields fit-template/truth-residual pairs.
     mu0_adu_2d : `numpy.ndarray`
         Baseline (no-subhalo) mean image in ADU on the native grid.
     mask_2d : `numpy.ndarray`
@@ -90,6 +94,7 @@ class JaxGridTemplateEngine:
         psf_kernel_native: np.ndarray,
         mu0_adu_2d: np.ndarray,
         mask_2d: np.ndarray,
+        truth_psf_kernel_native: Optional[np.ndarray] = None,
         batch_size: int = _DEFAULT_BATCH_SIZE,
     ):
         import jax
@@ -130,6 +135,11 @@ class JaxGridTemplateEngine:
         radii, alpha_radial = self._sample_radial_deflection(
             subhalo_profile,
             over_sampled=over_sampled,
+            num_samples=(
+                _MISMATCH_RADIAL_SAMPLES
+                if truth_psf_kernel_native is not None
+                else _RADIAL_SAMPLES
+            ),
         )
 
         source_profiles = self._extract_source_profiles(
@@ -170,6 +180,28 @@ class JaxGridTemplateEngine:
         self._alpha_radial = jnp.asarray(alpha_radial)
         self._source_profiles = tuple(source_profiles)
         self._kernel_fft = jnp.asarray(kernel_fft)
+        self._truth_kernel_fft = None
+        self._truth_fft_shape = None
+        self._truth_crop_y = None
+        self._truth_crop_x = None
+        if truth_psf_kernel_native is not None:
+            truth_kernel = np.asarray(truth_psf_kernel_native, dtype=float)
+            if (
+                truth_kernel.shape[0] % 2 != 1
+                or truth_kernel.shape[1] % 2 != 1
+            ):
+                raise ValueError(
+                    "truth_psf_kernel_native must have odd dimensions."
+                )
+            self._truth_fft_shape = (
+                shape_native[0] + truth_kernel.shape[0] - 1,
+                shape_native[1] + truth_kernel.shape[1] - 1,
+            )
+            self._truth_kernel_fft = jnp.asarray(
+                np.fft.rfft2(truth_kernel, s=self._truth_fft_shape)
+            )
+            self._truth_crop_y = truth_kernel.shape[0] // 2
+            self._truth_crop_x = truth_kernel.shape[1] // 2
         self._mu0_flat = jnp.asarray(np.asarray(mu0_adu_2d, dtype=float).reshape(-1))
         self._mask_flat_idx = jnp.asarray(mask_flat_idx)
         self._scale_source = throughput * exposure_time
@@ -210,6 +242,7 @@ class JaxGridTemplateEngine:
     def _sample_radial_deflection(
         subhalo_profile,
         over_sampled: np.ndarray,
+        num_samples: int,
     ) -> Tuple[np.ndarray, np.ndarray]:
         import autolens as al
 
@@ -219,7 +252,7 @@ class JaxGridTemplateEngine:
         radii = np.logspace(
             np.log10(_RADIAL_R_MIN_ARCSEC),
             np.log10(r_max),
-            _RADIAL_SAMPLES,
+            num_samples,
         )
         sample_grid = al.Grid2DIrregular(
             values=np.column_stack([np.zeros_like(radii), radii])
@@ -355,17 +388,44 @@ class JaxGridTemplateEngine:
         image = image.reshape(self._shape_native)
 
         image_fft = jnp.fft.rfft2(image, s=self._fft_shape)
-        convolved = jnp.fft.irfft2(image_fft * self._kernel_fft, s=self._fft_shape)
-        convolved = convolved[
+        convolved_model = jnp.fft.irfft2(
+            image_fft * self._kernel_fft,
+            s=self._fft_shape,
+        )
+        convolved_model = convolved_model[
             self._crop_y:self._crop_y + self._shape_native[0],
             self._crop_x:self._crop_x + self._shape_native[1],
         ]
 
-        mu1_flat = (
-            convolved.reshape(-1) * self._scale_source / self._gain + self._offset_adu
+        mu1_model_flat = (
+            convolved_model.reshape(-1) * self._scale_source / self._gain
+            + self._offset_adu
         )
-        signal = mu1_flat - self._mu0_flat
-        return signal[self._mask_flat_idx]
+        model_signal = (mu1_model_flat - self._mu0_flat)[self._mask_flat_idx]
+        if self._truth_kernel_fft is None:
+            return model_signal
+
+        truth_fft_shape = self._truth_fft_shape
+        truth_crop_y = self._truth_crop_y
+        truth_crop_x = self._truth_crop_x
+        assert truth_fft_shape is not None
+        assert truth_crop_y is not None
+        assert truth_crop_x is not None
+        truth_image_fft = jnp.fft.rfft2(image, s=truth_fft_shape)
+        convolved_truth = jnp.fft.irfft2(
+            truth_image_fft * self._truth_kernel_fft,
+            s=truth_fft_shape,
+        )
+        convolved_truth = convolved_truth[
+            truth_crop_y:truth_crop_y + self._shape_native[0],
+            truth_crop_x:truth_crop_x + self._shape_native[1],
+        ]
+        mu1_truth_flat = (
+            convolved_truth.reshape(-1) * self._scale_source / self._gain
+            + self._offset_adu
+        )
+        data_residual = (mu1_truth_flat - self._mu0_flat)[self._mask_flat_idx]
+        return jnp.stack((model_signal, data_residual), axis=0)
 
     # ------------------------------------------------------------------
     # Public API
@@ -374,7 +434,7 @@ class JaxGridTemplateEngine:
     def signal_iterator(
         self, positions: Sequence[Tuple[float, float]]
     ) -> Iterator[np.ndarray]:
-        """Yield masked signal vectors for each position, in order.
+        """Yield masked signal vectors or mismatch pairs for each position.
 
         Parameters
         ----------
@@ -384,7 +444,9 @@ class JaxGridTemplateEngine:
         Yields
         ------
         signal : `numpy.ndarray`
-            Masked ``mu1 - mu0`` signal vector in ADU for one position.
+            Masked ``mu1 - mu0`` signal vector in ADU for one position, or a
+            ``(2, n_masked)`` fit-template/truth-residual pair when the truth
+            kernel was supplied.
         """
         jnp = self._jnp
         positions_arr = np.asarray(positions, dtype=float)

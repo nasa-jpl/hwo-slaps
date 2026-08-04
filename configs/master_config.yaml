@@ -180,6 +180,10 @@ observation:
 modeling:
   enabled: true  # Set to true to enable detection mode
   detection: 'fisher'
+  # Optional analysis-PSF override. Explicit mode requires a complete psf block.
+  # fit_psf:
+  #   mode: matched               # matched | explicit
+  #   # psf: {...}                # required only for explicit; same shape as top-level psf
   fisher:
     mode: both                    # local | map | both
     snr_threshold: 3.0

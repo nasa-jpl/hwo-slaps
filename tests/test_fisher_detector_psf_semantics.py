@@ -185,8 +185,8 @@ def test_science_fiducial_ignores_placeholder_coefficients_in_disabled_family():
         }
     }
 
-    detector.science_psf_config_template = detector._build_science_psf_config_template()
-    aberr = detector.science_psf_config_template["psf"]["aberrations"]
+    detector.fit_psf_config_template = detector._build_science_psf_config_template()
+    aberr = detector.fit_psf_config_template["psf"]["aberrations"]
     assert aberr["segment_pistons"] == {}
     assert aberr["segment_tiptilts"] == {}
     assert aberr["segment_hexikes"] == {}
@@ -200,7 +200,57 @@ def test_science_fiducial_ignores_placeholder_coefficients_in_disabled_family():
         step=1.0,
         prior_sigma=None,
     )
-    assert detector._science_psf_base_value(spec) == 0.0
+    assert detector._science_psf_base_value(spec, role="fit") == 0.0
+
+
+def test_fit_and_scan_psf_fiducials_use_separate_templates():
+    """Use separate fit- and truth-side PSF fiducials."""
+    module, detector = _make_detector_stub()
+    detector.full_config = {
+        "psf": {
+            "aberrations": {
+                "enable_segment_pistons": False,
+                "enable_segment_tiptilts": False,
+                "enable_segment_hexikes": False,
+                "enable_global_zernikes": True,
+                "segment_pistons": {},
+                "segment_tiptilts": {},
+                "segment_hexikes": {},
+                "global_zernikes": {4: 20.0},
+            }
+        }
+    }
+    detector.fit_full_config = {
+        "psf": {
+            "aberrations": {
+                "enable_segment_pistons": False,
+                "enable_segment_tiptilts": False,
+                "enable_segment_hexikes": False,
+                "enable_global_zernikes": True,
+                "segment_pistons": {},
+                "segment_tiptilts": {},
+                "segment_hexikes": {},
+                "global_zernikes": {4: 3.0},
+            }
+        }
+    }
+    detector.fit_psf_config_template = detector._build_science_psf_config_template(
+        detector.fit_full_config
+    )
+    detector.scan_psf_config_template = detector._build_science_psf_config_template(
+        detector.full_config
+    )
+    mode_spec = module._PsfModeSpec(
+        name="psf.global_zernikes[4]",
+        family="global_zernikes",
+        path=("psf", "aberrations", "global_zernikes", 4),
+        enable_flag_path=("psf", "aberrations", "enable_global_zernikes"),
+        step=1.0,
+        prior_sigma=None,
+    )
+
+    assert detector._science_psf_base_value(mode_spec, role="fit") == 3.0
+    assert detector._science_psf_base_value(mode_spec, role="scan") == 20.0
 
 
 def test_segment_hexike_derivative_assignment_preserves_dict_shape_for_perfect_psf():

@@ -387,3 +387,99 @@ def test_valid_fisher_psf_options_pass_validation():
         },
     })
     validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "fit_psf",
+    [
+        {"mode": "matched"},
+        {"mode": "explicit"},
+    ],
+)
+def test_fit_psf_accepts_supported_modes(fit_psf):
+    """Accept matched and complete explicit fit-PSF configurations."""
+    config = _with_valid_fisher_block(_load_master_config())
+    if fit_psf["mode"] == "explicit":
+        fit_psf["psf"] = copy.deepcopy(config["psf"])
+    config["modeling"]["fit_psf"] = fit_psf
+
+    validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_fit_psf", ["matched", None, []])
+def test_fit_psf_rejects_non_dict_block(bad_fit_psf):
+    """Reject a non-dictionary modeling.fit_psf block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = bad_fit_psf
+
+    with pytest.raises(ValueError, match="modeling.fit_psf"):
+        validation.validate_or_raise(config)
+
+
+def test_fit_psf_rejects_unknown_key():
+    """Reject an unsupported key inside modeling.fit_psf."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {"mode": "matched", "extra": True}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf contains unsupported keys"):
+        validation.validate_or_raise(config)
+
+
+def test_fit_psf_requires_mode():
+    """Reject a modeling.fit_psf block without a mode."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {}
+
+    with pytest.raises(ValueError, match="mode.*modeling.fit_psf"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_mode", ["offset", 1, None])
+def test_fit_psf_rejects_invalid_mode(bad_mode):
+    """Reject a non-string or unsupported modeling.fit_psf mode."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {"mode": bad_mode}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.mode"):
+        validation.validate_or_raise(config)
+
+
+def test_explicit_fit_psf_requires_psf():
+    """Reject explicit fit-PSF mode without a PSF block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {"mode": "explicit"}
+
+    with pytest.raises(ValueError, match="psf.*modeling.fit_psf"):
+        validation.validate_or_raise(config)
+
+
+def test_matched_fit_psf_rejects_psf():
+    """Reject a silently ignored PSF block in matched mode."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {
+        "mode": "matched",
+        "psf": copy.deepcopy(config["psf"]),
+    }
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.psf"):
+        validation.validate_or_raise(config)
+
+
+def test_explicit_fit_psf_rejects_non_dict_psf():
+    """Reject a non-dictionary explicit fit-PSF payload."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {"mode": "explicit", "psf": []}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.psf"):
+        validation.validate_or_raise(config)
+
+
+def test_explicit_fit_psf_delegates_inner_validation():
+    """Reject an invalid inner PSF block with the full fit-PSF path."""
+    config = _with_valid_fisher_block(_load_master_config())
+    fit_psf = copy.deepcopy(config["psf"])
+    fit_psf["hres_psf"].pop("wavelength")
+    config["modeling"]["fit_psf"] = {"mode": "explicit", "psf": fit_psf}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.psf"):
+        validation.validate_or_raise(config)

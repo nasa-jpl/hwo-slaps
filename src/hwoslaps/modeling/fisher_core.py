@@ -112,7 +112,13 @@ class AsimovAmplitudeResult:
 
 @dataclass(frozen=True)
 class SignalBankResult:
-    """Vectorized Asimov results for a bank of signal templates."""
+    """Vectorized results for a bank of profiled signal templates.
+
+    The existing Fisher and Asimov fields describe each analysis-model
+    template by itself.  The optional mismatch fields describe projections of
+    separately supplied data residuals and a fixed bias residual onto those
+    templates; they remain `None` when those residuals are not supplied.
+    """
 
     fisher_raw: np.ndarray
     fisher_profiled: np.ndarray
@@ -125,6 +131,12 @@ class SignalBankResult:
     nuisance_rank: int
     nuisance_condition_number: float
     whitened_size: int
+    amplitude_hat: Optional[np.ndarray] = None
+    q_mismatch: Optional[np.ndarray] = None
+    z_mismatch: Optional[np.ndarray] = None
+    amplitude_spurious: Optional[np.ndarray] = None
+    q_spurious: Optional[np.ndarray] = None
+    z_spurious: Optional[np.ndarray] = None
 
 
 @dataclass(frozen=True)
@@ -553,9 +565,51 @@ class ProfileLikelihoodWorkspace:
         self,
         signal_bank_whitened: MatrixLike,
         amplitude_true: Union[float, ArrayLike] = 1.0,
+        *,
+        data_bank_whitened: Optional[MatrixLike] = None,
+        bias_whitened: Optional[ArrayLike] = None,
     ) -> SignalBankResult:
-        """Vectorized evaluation for many whitened signal templates."""
+        """Vectorized evaluation for many whitened signal templates.
+
+        Parameters
+        ----------
+        signal_bank_whitened : array-like
+            Analysis-model templates with shape ``(n_signals, n_data)``.
+        amplitude_true : `float` or array-like, optional
+            Matched-model signal amplitudes used for the existing Asimov
+            fields.
+        data_bank_whitened : array-like, optional
+            Per-template data residuals with the same shape as the signal
+            bank.  When supplied, mismatch amplitude and significance fields
+            are computed.
+        bias_whitened : array-like, optional
+            One fixed data-model bias residual of length ``n_data``.  When
+            supplied, spurious amplitude and significance fields are
+            computed.
+        """
         signals = self._validate_signal_bank(signal_bank_whitened)
+
+        data_bank = None
+        if data_bank_whitened is not None:
+            data_bank = np.asarray(data_bank_whitened, dtype=float)
+            if data_bank.ndim != 2 or data_bank.shape != signals.shape:
+                raise ValueError(
+                    "data_bank_whitened must have the same 2D shape as "
+                    "signal_bank_whitened."
+                )
+            if not np.all(np.isfinite(data_bank)):
+                raise ValueError("data_bank_whitened contains non-finite values.")
+
+        bias = None
+        if bias_whitened is not None:
+            bias = np.asarray(bias_whitened, dtype=float)
+            if bias.ndim != 1 or bias.size != signals.shape[1]:
+                raise ValueError(
+                    "bias_whitened must be a 1D array with width equal to "
+                    "signal_bank_whitened."
+                )
+            if not np.all(np.isfinite(bias)):
+                raise ValueError("bias_whitened contains non-finite values.")
 
         if np.isscalar(amplitude_true):
             amp = np.full(signals.shape[0], float(amplitude_true), dtype=float)
@@ -569,6 +623,7 @@ class ProfileLikelihoodWorkspace:
             raise ValueError("amplitude_true contains non-finite values.")
 
         raw = np.einsum("ij,ij->i", signals, signals)
+        cross = None
         if self.n_nuisance == 0:
             profiled = raw.copy()
         else:
@@ -590,6 +645,46 @@ class ProfileLikelihoodWorkspace:
         degradation = np.divide(profiled, raw, out=np.zeros_like(profiled), where=raw > 0.0)
         degradation = np.clip(degradation, 0.0, 1.0)
 
+        amplitude_hat = None
+        q_mismatch = None
+        z_mismatch = None
+        if data_bank is not None:
+            numerator_data = np.einsum("ij,ij->i", signals, data_bank)
+            if self.n_nuisance > 0:
+                assert cross is not None
+                data_cross = data_bank @ self.nuisance_whitened
+                numerator_data -= np.einsum(
+                    "ij,jk,ik->i",
+                    cross,
+                    self.normal_pinv,
+                    data_cross,
+                )
+            amplitude_hat = np.full_like(profiled, np.nan, dtype=float)
+            amplitude_hat[positive] = numerator_data[positive] / profiled[positive]
+            z_mismatch = np.full_like(profiled, np.nan, dtype=float)
+            z_mismatch[positive] = amplitude_hat[positive] * np.sqrt(profiled[positive])
+            q_mismatch = z_mismatch**2
+
+        amplitude_spurious = None
+        q_spurious = None
+        z_spurious = None
+        if bias is not None:
+            numerator_bias = signals @ bias
+            if self.n_nuisance > 0:
+                assert cross is not None
+                nuisance_bias = self.nuisance_whitened.T @ bias
+                projected_bias = self.normal_pinv @ nuisance_bias
+                numerator_bias -= cross @ projected_bias
+            amplitude_spurious = np.full_like(profiled, np.nan, dtype=float)
+            amplitude_spurious[positive] = (
+                numerator_bias[positive] / profiled[positive]
+            )
+            z_spurious = np.full_like(profiled, np.nan, dtype=float)
+            z_spurious[positive] = (
+                np.abs(amplitude_spurious[positive]) * np.sqrt(profiled[positive])
+            )
+            q_spurious = z_spurious**2
+
         return SignalBankResult(
             fisher_raw=raw,
             fisher_profiled=profiled,
@@ -602,6 +697,12 @@ class ProfileLikelihoodWorkspace:
             nuisance_rank=int(self.nuisance_rank),
             nuisance_condition_number=float(self.nuisance_condition_number),
             whitened_size=int(signals.shape[1]),
+            amplitude_hat=amplitude_hat,
+            q_mismatch=q_mismatch,
+            z_mismatch=z_mismatch,
+            amplitude_spurious=amplitude_spurious,
+            q_spurious=q_spurious,
+            z_spurious=z_spurious,
         )
 
     def spurious_from_bias(

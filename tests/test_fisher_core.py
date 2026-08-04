@@ -168,6 +168,119 @@ def test_signal_bank_matches_individual_calls():
     np.testing.assert_allclose(bank.degradation, [s.degradation for s in singles])
 
 
+def test_signal_bank_mismatch_matches_explicit_profile_algebra():
+    """Match vectorized mismatch projections to explicit nuisance algebra."""
+    nuisance = np.array([[1.0], [0.0], [1.0], [-1.0]])
+    prior_precision = np.array([[0.5]])
+    signals = np.array(
+        [
+            [1.0, 2.0, -1.0, 0.5],
+            [-0.5, 1.5, 2.0, -1.0],
+        ]
+    )
+    data = np.array(
+        [
+            [0.5, -1.0, 2.0, 0.25],
+            [1.0, 0.5, -0.5, 2.0],
+        ]
+    )
+    bias = np.array([0.2, -0.3, 0.1, 0.4])
+    workspace = ProfileLikelihoodWorkspace(
+        nuisance_whitened=nuisance,
+        prior_precision=prior_precision,
+    )
+
+    result = workspace.evaluate_signal_bank(
+        signals,
+        data_bank_whitened=data,
+        bias_whitened=bias,
+    )
+
+    normal_inverse = 1.0 / 3.5
+    cross = signals @ nuisance[:, 0]
+    expected_profiled = np.sum(signals * signals, axis=1) - cross**2 * normal_inverse
+    expected_data_numerator = (
+        np.sum(signals * data, axis=1)
+        - cross * normal_inverse * (data @ nuisance[:, 0])
+    )
+    expected_bias_numerator = (
+        signals @ bias
+        - cross * normal_inverse * float(nuisance[:, 0] @ bias)
+    )
+    expected_amplitude = expected_data_numerator / expected_profiled
+    expected_spurious = expected_bias_numerator / expected_profiled
+    expected_z_mismatch = expected_amplitude * np.sqrt(expected_profiled)
+    expected_z_spurious = np.abs(expected_spurious) * np.sqrt(expected_profiled)
+
+    np.testing.assert_allclose(result.amplitude_hat, expected_amplitude)
+    np.testing.assert_allclose(result.z_mismatch, expected_z_mismatch)
+    np.testing.assert_allclose(result.q_mismatch, expected_z_mismatch**2)
+    np.testing.assert_allclose(result.amplitude_spurious, expected_spurious)
+    np.testing.assert_allclose(result.z_spurious, expected_z_spurious)
+    np.testing.assert_allclose(result.q_spurious, expected_z_spurious**2)
+
+
+def test_signal_bank_mismatch_without_nuisance_uses_direct_products():
+    """Use direct dot products for mismatch statistics without nuisances."""
+    signals = np.array([[1.0, -2.0, 0.5], [0.5, 1.0, -1.0]])
+    data = np.array([[0.25, 1.0, 2.0], [-1.0, 0.5, 0.75]])
+    bias = np.array([0.1, -0.4, 0.2])
+    workspace = ProfileLikelihoodWorkspace()
+
+    result = workspace.evaluate_signal_bank(
+        signals,
+        data_bank_whitened=data,
+        bias_whitened=bias,
+    )
+
+    profiled = np.sum(signals * signals, axis=1)
+    expected_amplitude = np.sum(signals * data, axis=1) / profiled
+    expected_spurious = (signals @ bias) / profiled
+    np.testing.assert_allclose(result.amplitude_hat, expected_amplitude)
+    np.testing.assert_allclose(
+        result.z_mismatch,
+        expected_amplitude * np.sqrt(profiled),
+    )
+    np.testing.assert_allclose(result.amplitude_spurious, expected_spurious)
+    np.testing.assert_allclose(
+        result.z_spurious,
+        np.abs(expected_spurious) * np.sqrt(profiled),
+    )
+
+
+def test_signal_bank_mismatch_is_nan_for_zero_profiled_information():
+    """Return NaN mismatch quantities when profiled information is zero."""
+    workspace = ProfileLikelihoodWorkspace()
+
+    result = workspace.evaluate_signal_bank(
+        np.zeros((1, 3)),
+        data_bank_whitened=np.ones((1, 3)),
+        bias_whitened=np.ones(3),
+    )
+
+    assert result.fisher_profiled[0] == pytest.approx(0.0)
+    assert np.isnan(result.amplitude_hat[0])
+    assert np.isnan(result.q_mismatch[0])
+    assert np.isnan(result.z_mismatch[0])
+    assert np.isnan(result.amplitude_spurious[0])
+    assert np.isnan(result.q_spurious[0])
+    assert np.isnan(result.z_spurious[0])
+
+
+def test_signal_bank_without_mismatch_inputs_leaves_optional_fields_empty():
+    """Leave mismatch outputs empty when no residual inputs are supplied."""
+    result = ProfileLikelihoodWorkspace().evaluate_signal_bank(
+        np.array([[1.0, 2.0, 3.0]])
+    )
+
+    assert result.amplitude_hat is None
+    assert result.q_mismatch is None
+    assert result.z_mismatch is None
+    assert result.amplitude_spurious is None
+    assert result.q_spurious is None
+    assert result.z_spurious is None
+
+
 def test_spurious_amplitude_matches_closed_form_without_nuisance():
     """Match the spurious amplitude to its closed form with no nuisance."""
     signal = np.array([1.0, 2.0, -1.0])

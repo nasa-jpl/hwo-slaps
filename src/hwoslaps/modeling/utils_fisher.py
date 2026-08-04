@@ -58,7 +58,13 @@ class FisherModeScanData:
 
 @dataclass
 class FisherLocalData:
-    """Single-position Fisher detectability output."""
+    """Single-position Fisher detectability output.
+
+    The existing Fisher/Asimov fields describe the fit-side analysis template
+    alone.  When ``mismatch_enabled`` is true, the optional mismatch fields
+    additionally describe truth-side data projected onto that template and
+    the false-positive projection of the smooth truth-minus-fit residual.
+    """
 
     snr_asimov: float
     delta_chi2_raw: float
@@ -85,6 +91,13 @@ class FisherLocalData:
     nuisance_rank: Optional[int] = None
     whitened_size: Optional[int] = None
     psf_mode_scan: Optional[FisherModeScanData] = None
+    mismatch_enabled: bool = False
+    amplitude_hat_mismatch: Optional[float] = None
+    q_mismatch: Optional[float] = None
+    z_mismatch: Optional[float] = None
+    amplitude_spurious: Optional[float] = None
+    q_spurious: Optional[float] = None
+    z_spurious: Optional[float] = None
 
 
 @dataclass
@@ -120,7 +133,11 @@ class FisherGridMapData:
     indexed so that ``array[i, j]`` corresponds to a subhalo placed at
     ``(y_coords[i], x_coords[j])`` in arcseconds.  Nodes excluded by the
     optional annulus restriction are ``NaN`` in the float arrays and
-    ``False`` in both masks.
+    ``False`` in all masks.
+
+    The existing Fisher/Asimov arrays retain their matched-analysis meaning
+    and are built from fit-side templates.  Optional mismatch arrays contain
+    truth-data and smooth truth-minus-fit projections onto those templates.
     """
 
     y_coords: np.ndarray
@@ -145,6 +162,20 @@ class FisherGridMapData:
     subhalo_mass: Optional[float] = None
     subhalo_model: Optional[str] = None
     lens_einstein_radius: Optional[float] = None
+    mismatch_enabled: bool = False
+    amplitude_hat_2d: Optional[np.ndarray] = None
+    q_mismatch_2d: Optional[np.ndarray] = None
+    z_mismatch_2d: Optional[np.ndarray] = None
+    mismatch_detectable_mask_2d: Optional[np.ndarray] = None
+    mismatch_detectable_area_arcsec2: Optional[float] = None
+    num_mismatch_detectable: Optional[int] = None
+    amplitude_spurious_2d: Optional[np.ndarray] = None
+    q_spurious_2d: Optional[np.ndarray] = None
+    z_spurious_2d: Optional[np.ndarray] = None
+    false_positive_mask_2d: Optional[np.ndarray] = None
+    false_positive_area_arcsec2: Optional[float] = None
+    num_false_positive: Optional[int] = None
+    max_z_spurious: Optional[float] = None
 
 
 def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]) -> Path:
@@ -156,8 +187,7 @@ def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]
     the detector.
     """
     path = Path(path)
-    np.savez_compressed(
-        path,
+    payload = dict(
         y_coords=grid_map.y_coords,
         x_coords=grid_map.x_coords,
         spacing_arcsec=np.float64(grid_map.spacing_arcsec),
@@ -183,12 +213,38 @@ def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]
             np.nan if grid_map.lens_einstein_radius is None else grid_map.lens_einstein_radius
         ),
     )
+    if grid_map.q_mismatch_2d is not None:
+        payload.update(
+            mismatch_enabled=np.bool_(grid_map.mismatch_enabled),
+            amplitude_hat_2d=grid_map.amplitude_hat_2d,
+            q_mismatch_2d=grid_map.q_mismatch_2d,
+            z_mismatch_2d=grid_map.z_mismatch_2d,
+            mismatch_detectable_mask_2d=grid_map.mismatch_detectable_mask_2d,
+            mismatch_detectable_area_arcsec2=np.float64(
+                grid_map.mismatch_detectable_area_arcsec2
+            ),
+            num_mismatch_detectable=np.int64(grid_map.num_mismatch_detectable),
+            amplitude_spurious_2d=grid_map.amplitude_spurious_2d,
+            q_spurious_2d=grid_map.q_spurious_2d,
+            z_spurious_2d=grid_map.z_spurious_2d,
+            false_positive_mask_2d=grid_map.false_positive_mask_2d,
+            false_positive_area_arcsec2=np.float64(
+                grid_map.false_positive_area_arcsec2
+            ),
+            num_false_positive=np.int64(grid_map.num_false_positive),
+            max_z_spurious=np.float64(grid_map.max_z_spurious),
+        )
+    np.savez_compressed(path, **payload)
     return path
 
 
 @dataclass
 class FisherDetectionData:
-    """Top-level Fisher result payload for pipeline integration."""
+    """Top-level Fisher result payload for pipeline integration.
+
+    Local and grid payloads optionally include truth-vs-fit PSF mismatch
+    statistics while their existing fields retain fit-template semantics.
+    """
 
     mode: str
     local: Optional[FisherLocalData]
@@ -325,3 +381,30 @@ def print_fisher_summary(fisher_data: FisherDetectionData) -> None:
             "  Z_asimov max / median over evaluated nodes: "
             f"{gmap.max_z_asimov:.4f} / {gmap.median_z_asimov:.4f}"
         )
+
+    local_mismatch = (
+        fisher_data.local is not None and fisher_data.local.mismatch_enabled
+    )
+    grid_mismatch = (
+        fisher_data.grid_map is not None
+        and fisher_data.grid_map.mismatch_enabled
+    )
+    if local_mismatch or grid_mismatch:
+        print("\nPSF mismatch:")
+        print("  Fit PSF mode: explicit")
+        if local_mismatch:
+            local = fisher_data.local
+            assert local is not None
+            print(f"  Local q_mismatch: {local.q_mismatch:.4f}")
+            print(f"  Local q_spurious: {local.q_spurious:.4f}")
+        if grid_mismatch:
+            gmap = fisher_data.grid_map
+            assert gmap is not None
+            print(
+                "  Mismatch-detectable area: "
+                f"{gmap.mismatch_detectable_area_arcsec2:.4f} arcsec^2"
+            )
+            print(
+                "  False-positive area: "
+                f"{gmap.false_positive_area_arcsec2:.4f} arcsec^2"
+            )
