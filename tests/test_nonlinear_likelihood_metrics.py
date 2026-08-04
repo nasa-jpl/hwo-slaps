@@ -16,6 +16,7 @@ from hwoslaps.modeling.nonlinear.likelihood_metrics import (
 
 
 def test_scdd_delta_log_l_threshold_maps_to_q_and_z():
+    """Convert the SCDD delta log-likelihood threshold to q and Z."""
     q_value = q_from_delta_log_l(SCDD_DELTA_LOG_L_THRESHOLD)
 
     assert q_value == pytest.approx(SCDD_Q_THRESHOLD)
@@ -24,6 +25,7 @@ def test_scdd_delta_log_l_threshold_maps_to_q_and_z():
 
 
 def test_profile_likelihood_ratio_stores_signed_and_clipped_values():
+    """Keep the signed gap while clipping q and Z at zero."""
     metric = profile_likelihood_ratio(
         log_l_smooth=-100.0,
         log_l_subhalo=-102.0,
@@ -37,6 +39,7 @@ def test_profile_likelihood_ratio_stores_signed_and_clipped_values():
 
 
 def test_profile_likelihood_ratio_detects_from_signed_delta_log_l():
+    """Flag a detection once the signed gap clears the threshold."""
     metric = profile_likelihood_ratio(
         log_l_smooth=-105.0,
         log_l_subhalo=-100.0,
@@ -48,5 +51,6 @@ def test_profile_likelihood_ratio_detects_from_signed_delta_log_l():
 
 
 def test_metric_rejects_non_finite_likelihoods():
+    """Reject a non-finite log-likelihood input by name."""
     with pytest.raises(ValueError, match="log_l_smooth"):
         profile_likelihood_ratio(log_l_smooth=np.nan, log_l_subhalo=-1.0)

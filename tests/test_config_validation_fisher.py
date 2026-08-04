@@ -64,6 +64,7 @@ def _with_valid_fisher_block(config: dict) -> dict:
 
 
 def test_fisher_detection_requires_fisher_block():
+    """Reject fisher detection with no modeling.fisher block."""
     config = _load_master_config()
     bad_config = copy.deepcopy(config)
     bad_config["modeling"]["detection"] = "fisher"
@@ -74,6 +75,7 @@ def test_fisher_detection_requires_fisher_block():
 
 
 def test_modeling_rejects_non_fisher_detection_mode():
+    """Reject any modeling.detection value other than 'fisher'."""
     config = _load_master_config()
     config["modeling"]["detection"] = "legacy"
 
@@ -82,6 +84,7 @@ def test_modeling_rejects_non_fisher_detection_mode():
 
 
 def test_fisher_rejects_invalid_mode():
+    """Reject an unrecognised modeling.fisher.mode value."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["mode"] = "invalid"
 
@@ -90,6 +93,7 @@ def test_fisher_rejects_invalid_mode():
 
 
 def test_fisher_requires_all_finite_diff_fields():
+    """Reject a finite_diff block missing a required step field."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["finite_diff"].pop("centre_arcsec")
 
@@ -99,6 +103,7 @@ def test_fisher_requires_all_finite_diff_fields():
 
 @pytest.mark.parametrize("bad_step", [0.0, -1.0, float("nan"), True])
 def test_fisher_rejects_invalid_finite_diff_values(bad_step):
+    """Reject non-positive or non-finite finite_diff step sizes."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["finite_diff"]["ell_comp"] = bad_step
 
@@ -108,6 +113,7 @@ def test_fisher_rejects_invalid_finite_diff_values(bad_step):
 
 @pytest.mark.parametrize("bad_num_angles", [0, -4, 2.5, True])
 def test_fisher_rejects_invalid_map_num_angles(bad_num_angles):
+    """Reject ring num_angles that is not a positive integer."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["ring"]["num_angles"] = bad_num_angles
 
@@ -116,6 +122,7 @@ def test_fisher_rejects_invalid_map_num_angles(bad_num_angles):
 
 
 def test_fisher_map_requires_type():
+    """Reject a map block with no type field."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"].pop("type")
 
@@ -124,6 +131,7 @@ def test_fisher_map_requires_type():
 
 
 def test_fisher_map_rejects_unknown_type():
+    """Reject a map type outside the supported set."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["type"] = "spiral"
 
@@ -132,6 +140,7 @@ def test_fisher_map_rejects_unknown_type():
 
 
 def test_fisher_map_rejects_legacy_flat_keys():
+    """Reject legacy flat map keys left beside the nested blocks."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["num_angles"] = 24
 
@@ -140,6 +149,7 @@ def test_fisher_map_rejects_legacy_flat_keys():
 
 
 def test_fisher_map_ring_type_requires_ring_block():
+    """Reject map type 'ring' with no ring block."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"].pop("ring")
 
@@ -148,6 +158,7 @@ def test_fisher_map_ring_type_requires_ring_block():
 
 
 def test_fisher_map_grid_type_requires_grid_block():
+    """Reject map type 'grid' with no grid block."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["type"] = "grid"
     config["modeling"]["fisher"]["map"].pop("grid")
@@ -158,6 +169,7 @@ def test_fisher_map_grid_type_requires_grid_block():
 
 @pytest.mark.parametrize("bad_spacing", [0.0, -0.1, float("nan"), True])
 def test_fisher_map_rejects_invalid_grid_spacing(bad_spacing):
+    """Reject non-positive or non-finite grid spacing."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["grid"]["spacing_arcsec"] = bad_spacing
 
@@ -166,6 +178,7 @@ def test_fisher_map_rejects_invalid_grid_spacing(bad_spacing):
 
 
 def test_fisher_map_rejects_half_width_below_spacing():
+    """Reject a grid half-width smaller than the grid spacing."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["grid"]["half_width_arcsec"] = 0.01
 
@@ -174,6 +187,7 @@ def test_fisher_map_rejects_half_width_below_spacing():
 
 
 def test_fisher_map_rejects_inverted_annulus():
+    """Reject an annulus whose outer radius is below the inner one."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["grid"]["annulus"] = {
         "r_min_arcsec": 1.0,
@@ -185,6 +199,7 @@ def test_fisher_map_rejects_inverted_annulus():
 
 
 def test_fisher_map_rejects_unknown_annulus_key():
+    """Reject an annulus block carrying an unsupported key."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["grid"]["annulus"] = {
         "r_min_arcsec": 0.5,
@@ -197,6 +212,7 @@ def test_fisher_map_rejects_unknown_annulus_key():
 
 
 def test_fisher_map_explicit_type_requires_positions():
+    """Reject map type 'explicit' with an empty position list."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["type"] = "explicit"
     config["modeling"]["fisher"]["map"]["explicit_positions_yx"] = []
@@ -207,6 +223,7 @@ def test_fisher_map_explicit_type_requires_positions():
 
 @pytest.mark.parametrize("bad_threshold", [0.0, -10.0, float("inf"), True])
 def test_fisher_map_rejects_invalid_detection_q_threshold(bad_threshold):
+    """Reject a non-positive or non-finite detection q threshold."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["detection_q_threshold"] = bad_threshold
 
@@ -216,6 +233,7 @@ def test_fisher_map_rejects_invalid_detection_q_threshold(bad_threshold):
 
 @pytest.mark.parametrize("bad_workers", [0, -2, 1.5, True])
 def test_fisher_map_rejects_invalid_num_workers(bad_workers):
+    """Reject map num_workers that is not a positive integer."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["num_workers"] = bad_workers
 
@@ -224,6 +242,7 @@ def test_fisher_map_rejects_invalid_num_workers(bad_workers):
 
 
 def test_fisher_map_grid_config_passes_validation():
+    """Accept a grid map config with a well-formed annulus."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["type"] = "grid"
     config["modeling"]["fisher"]["map"]["grid"]["annulus"] = {
@@ -234,6 +253,7 @@ def test_fisher_map_grid_config_passes_validation():
 
 
 def test_fisher_rejects_invalid_explicit_positions_shape():
+    """Reject explicit positions that are not [y, x] pairs."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["explicit_positions_yx"] = [[0.1], [0.2, 0.3, 0.4]]
 
@@ -242,6 +262,7 @@ def test_fisher_rejects_invalid_explicit_positions_shape():
 
 
 def test_fisher_rejects_non_finite_explicit_positions():
+    """Reject explicit positions holding non-finite coordinates."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["map"]["explicit_positions_yx"] = [[0.1, float("inf")]]
 
@@ -250,15 +271,18 @@ def test_fisher_rejects_non_finite_explicit_positions():
 
 
 def test_valid_fisher_config_passes_validation():
+    """Accept a fully populated, well-formed fisher block."""
     config = _with_valid_fisher_block(_load_master_config())
     validation.validate_or_raise(config)
 
 
 def test_master_config_fisher_defaults_pass_validation():
+    """Accept the fisher defaults shipped in master_config.yaml."""
     validation.validate_or_raise(_load_master_config())
 
 
 def test_fisher_rejects_unknown_key():
+    """Reject an unrecognised key inside modeling.fisher."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["unexpected_option"] = True
 
@@ -267,6 +291,7 @@ def test_fisher_rejects_unknown_key():
 
 
 def test_fisher_rejects_invalid_mask_mode():
+    """Reject an unrecognised modeling.fisher.mask_mode value."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["mask_mode"] = "bad"
 
@@ -275,6 +300,7 @@ def test_fisher_rejects_invalid_mask_mode():
 
 
 def test_fisher_rejects_nonpositive_psf_mode_step():
+    """Reject a non-positive PSF mode finite-difference step."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["psf_mode_steps"] = {"segment_hexikes": 0.0}
 
@@ -283,6 +309,7 @@ def test_fisher_rejects_nonpositive_psf_mode_step():
 
 
 def test_fisher_rejects_nonpositive_psf_mode_prior_sigma():
+    """Reject a non-positive PSF mode prior sigma."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["psf_mode_prior_sigmas"] = {"segment_hexikes": 0.0}
 
@@ -291,6 +318,7 @@ def test_fisher_rejects_nonpositive_psf_mode_prior_sigma():
 
 
 def test_fisher_rejects_legacy_psf_mode_selection_alias():
+    """Reject the removed psf_mode_selection alias."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["psf_mode_selection"] = {"segment_pistons": {"segments": [0]}}
 
@@ -299,6 +327,7 @@ def test_fisher_rejects_legacy_psf_mode_selection_alias():
 
 
 def test_fisher_rejects_malformed_psf_basis_selector():
+    """Reject a psf_basis selector with a non-integer segment id."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["psf_basis"] = {"segment_pistons": {"segments": ["zero"]}}
 
@@ -307,6 +336,7 @@ def test_fisher_rejects_malformed_psf_basis_selector():
 
 
 def test_fisher_psf_features_require_psf_basis():
+    """Reject PSF nuisance fitting with no psf_basis defined."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"]["include_psf_nuisance"] = True
     config["modeling"]["fisher"]["compute_psf_mode_scan"] = False
@@ -316,6 +346,7 @@ def test_fisher_psf_features_require_psf_basis():
 
 
 def test_fisher_scan_requires_explicit_scan_selection():
+    """Reject a PSF mode scan with no scan_psf_mode_selection."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"].update({
         "include_psf_nuisance": True,
@@ -329,6 +360,7 @@ def test_fisher_scan_requires_explicit_scan_selection():
 
 
 def test_valid_fisher_psf_options_pass_validation():
+    """Accept a complete set of PSF nuisance and scan options."""
     config = _with_valid_fisher_block(_load_master_config())
     config["modeling"]["fisher"].update({
         "mask_mode": "source_snr",

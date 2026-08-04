@@ -35,6 +35,7 @@ detectable_area = module.detectable_area
 
 
 def test_no_nuisance_recovers_raw_information_exactly():
+    """Return the raw information unchanged when there is no nuisance."""
     signal = np.array([1.0, -2.0, 0.5, 3.0])
     result = compute_asimov_detectability(signal, sigma=np.ones(signal.size))
 
@@ -47,6 +48,7 @@ def test_no_nuisance_recovers_raw_information_exactly():
 
 
 def test_profiled_information_never_exceeds_raw():
+    """Keep profiled information non-negative and below the raw value."""
     signal = np.array([1.0, 2.0, -1.0, 0.0])
     nuisance = np.array(
         [
@@ -64,6 +66,7 @@ def test_profiled_information_never_exceeds_raw():
 
 
 def test_nuisance_basis_change_leaves_profiled_information_invariant():
+    """Leave profiled information invariant under a nuisance rotation."""
     rng = np.random.default_rng(42)
     signal = rng.normal(size=7)
     nuisance = rng.normal(size=(7, 3))
@@ -85,6 +88,7 @@ def test_nuisance_basis_change_leaves_profiled_information_invariant():
 
 
 def test_stronger_nuisance_priors_can_only_help_information():
+    """Increase profiled information monotonically with prior strength."""
     signal = np.array([1.0, -0.5, 2.0, 0.25, -1.0])
     nuisance = np.array(
         [
@@ -116,6 +120,7 @@ def test_stronger_nuisance_priors_can_only_help_information():
 
 
 def test_dense_covariance_matches_explicit_whitening():
+    """Match the dense-covariance path against explicit whitening."""
     signal = np.array([0.5, -1.2, 2.0])
     nuisance = np.array(
         [
@@ -146,6 +151,7 @@ def test_dense_covariance_matches_explicit_whitening():
 
 
 def test_signal_bank_matches_individual_calls():
+    """Match bank evaluation against one call per signal."""
     rng = np.random.default_rng(1)
     signals = rng.normal(size=(5, 8))
     nuisance = rng.normal(size=(8, 2))
@@ -163,6 +169,7 @@ def test_signal_bank_matches_individual_calls():
 
 
 def test_spurious_amplitude_matches_closed_form_without_nuisance():
+    """Match the spurious amplitude to its closed form with no nuisance."""
     signal = np.array([1.0, 2.0, -1.0])
     bias = np.array([0.3, -0.2, 0.5])
 
@@ -175,6 +182,7 @@ def test_spurious_amplitude_matches_closed_form_without_nuisance():
 
 
 def test_spurious_amplitude_is_undefined_for_zero_information_signal():
+    """Return NaN spurious quantities for a zero-information signal."""
     signal = np.zeros(3)
     bias = np.array([0.3, -0.2, 0.5])
 
@@ -188,6 +196,7 @@ def test_spurious_amplitude_is_undefined_for_zero_information_signal():
 
 
 def test_systematic_mode_scan_reports_expected_tolerances_and_rms():
+    """Report per-mode couplings, tolerances, and the RMS spurious z."""
     signal = np.array([1.0, 0.0, 0.0])
     modes = np.eye(3)
     mode_sigmas = np.array([0.5, 2.0, 1.0])
@@ -222,6 +231,7 @@ def test_systematic_mode_scan_reports_expected_tolerances_and_rms():
 
 
 def test_systematic_mode_scan_is_undefined_for_zero_information_signal():
+    """Return NaN scan quantities for a zero-information signal."""
     signal = np.zeros(3)
     modes = np.eye(3)
     mode_sigmas = np.array([0.5, 2.0, 1.0])
@@ -249,6 +259,7 @@ def test_systematic_mode_scan_is_undefined_for_zero_information_signal():
 
 
 def test_sidak_and_global_p_are_consistent():
+    """Invert the Sidak local p-value back to the global p-value."""
     global_p = 2.7e-3
     n_eff = 20
     local_p = sidak_local_p(global_p, n_eff)
@@ -259,12 +270,14 @@ def test_sidak_and_global_p_are_consistent():
 
 
 def test_detectable_area_counts_cells_above_threshold():
+    """Sum only the cell areas whose metric clears the threshold."""
     values = np.array([[1.0, 3.2], [5.1, 4.9]])
     area = detectable_area(values, cell_area=0.25, threshold=5.0)
     assert area == pytest.approx(0.25)
 
 
 def test_singular_nuisance_is_handled_by_pseudoinverse():
+    """Report the true rank of a singular nuisance Jacobian."""
     signal = np.array([1.0, -1.0, 0.0, 0.5])
     nuisance = np.array(
         [

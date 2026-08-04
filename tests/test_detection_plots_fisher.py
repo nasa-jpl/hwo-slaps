@@ -122,6 +122,7 @@ def _make_map_detection_data() -> FisherDetectionData:
 
 
 def test_fisher_local_summary_plot_written(tmp_path):
+    """Write the Fisher local summary figure to the modeling folder."""
     detection_data = _make_local_detection_data(with_psf_scan=False)
 
     plot_fisher_local_summary(detection_data=detection_data, plot_config=_base_plot_config(tmp_path))
@@ -130,6 +131,7 @@ def test_fisher_local_summary_plot_written(tmp_path):
 
 
 def test_fisher_psf_mode_scan_plot_written(tmp_path):
+    """Write the PSF mode scan figure to the modeling folder."""
     detection_data = _make_local_detection_data(with_psf_scan=True)
 
     plot_fisher_psf_mode_scan(detection_data=detection_data, plot_config=_base_plot_config(tmp_path))
@@ -138,6 +140,7 @@ def test_fisher_psf_mode_scan_plot_written(tmp_path):
 
 
 def test_fisher_map_plots_written(tmp_path):
+    """Write both Fisher map figures to the modeling folder."""
     detection_data = _make_map_detection_data()
 
     plot_fisher_detection_map_summary(detection_data=detection_data, plot_config=_base_plot_config(tmp_path))

@@ -107,6 +107,7 @@ def _source_snr_from_formula(
 
 
 def test_create_noise_map_matches_ccd_variance_formula():
+    """Match the noise map against the CCD variance formula."""
     source_eps = np.array([[0.0, 1.0], [2.0, 3.0]])
     exposure_time = 7.0
     detector = {
@@ -146,6 +147,7 @@ def test_create_noise_map_matches_ccd_variance_formula():
 )
 @pytest.mark.parametrize("noise_function", [create_noise_map, apply_detector_noise])
 def test_noise_functions_reject_nonphysical_detector_domain(detector_update, noise_function):
+    """Reject non-positive gain and negative noise parameters."""
     source_eps = np.ones((2, 2), dtype=float)
     detector = {
         "gain": 1.0,
@@ -160,6 +162,7 @@ def test_noise_functions_reject_nonphysical_detector_domain(detector_update, noi
 
 
 def test_apply_detector_noise_uses_local_rng_without_mutating_global_state():
+    """Draw noise from a local RNG without touching global state."""
     source_eps = np.ones((4, 4), dtype=float)
     detector = {
         "gain": 1.0,
@@ -179,6 +182,7 @@ def test_apply_detector_noise_uses_local_rng_without_mutating_global_state():
 
 
 def test_observation_source_snr_scales_with_exposure_depth():
+    """Raise the source SNR map monotonically with exposure time."""
     source_eps = np.array(
         [
             [0.2, 0.5, 1.0],
@@ -226,6 +230,7 @@ def test_observation_source_snr_scales_with_exposure_depth():
 
 
 def test_observation_throughput_scales_source_but_not_background():
+    """Scale source flux by throughput while leaving sky and dark."""
     source_eps = np.array(
         [
             [0.2, 0.5, 1.0],
@@ -296,6 +301,7 @@ def test_observation_throughput_scales_source_but_not_background():
 
 
 def test_detector_noise_monte_carlo_matches_expected_moments():
+    """Match sampled noise moments to the analytic mean and variance."""
     source_eps = np.full((128, 128), 2.0, dtype=float)
     exposure_time = 50.0
     detector = {
@@ -337,6 +343,7 @@ def test_detector_noise_monte_carlo_matches_expected_moments():
 
 
 def test_generate_observation_seed_controls_noise_only():
+    """Vary only the noise realization when the global seed changes."""
     lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
     psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
     observation_config = _observation_config(
@@ -378,6 +385,7 @@ def test_generate_observation_seed_controls_noise_only():
 
 
 def test_generate_observation_nontrivial_psf_convolution_centers_kernel():
+    """Centre a non-trivial PSF kernel on the delta-function source."""
     source_eps = np.zeros((7, 7), dtype=float)
     source_eps[3, 3] = 1.0
     kernel = np.array(
@@ -411,6 +419,7 @@ def test_generate_observation_nontrivial_psf_convolution_centers_kernel():
 
 
 def test_generate_observation_source_free_scene_has_zero_source_snr():
+    """Report zero source SNR for a scene with no source flux."""
     lensing = _make_lensing_data(image=np.zeros((5, 5)), pixel_scale=0.1)
     psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
 
@@ -433,6 +442,7 @@ def test_generate_observation_source_free_scene_has_zero_source_snr():
 
 
 def test_generate_observation_rejects_even_psf_kernel_instead_of_trimming():
+    """Reject an even-sized PSF kernel rather than trimming it."""
     lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
     psf_data = _make_psf_data(np.ones((4, 4)), pixel_scale=0.1)
 
@@ -446,6 +456,7 @@ def test_generate_observation_rejects_even_psf_kernel_instead_of_trimming():
 
 
 def test_generate_observation_rejects_unnormalized_odd_psf_kernel():
+    """Reject a PSF kernel whose values do not sum to one."""
     lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
     psf_data = _make_psf_data(np.array([[2.0]]), pixel_scale=0.1)
 
@@ -459,6 +470,7 @@ def test_generate_observation_rejects_unnormalized_odd_psf_kernel():
 
 
 def test_generate_observation_deep_copies_observation_config_provenance():
+    """Deep-copy the observation config into the stored provenance."""
     lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
     psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
     observation_config = _observation_config(gain=2.0)
@@ -484,6 +496,7 @@ def test_generate_observation_deep_copies_observation_config_provenance():
     ],
 )
 def test_generate_observation_reports_missing_full_config_requirements(full_config, match):
+    """Name the missing full_config key when one is absent."""
     lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
     psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
 

@@ -12,6 +12,7 @@ from hwoslaps.modeling.nonlinear.local_profile import (
 
 
 def test_multistart_least_squares_selects_best_profile_attempt():
+    """Keep every start and report the best least-squares attempt."""
     def residual_fn(x):
         return np.array([x[0] - 2.0, 2.0 * (x[1] + 1.0)])
 
@@ -31,5 +32,6 @@ def test_multistart_least_squares_selects_best_profile_attempt():
 
 
 def test_profile_likelihood_q_is_non_negative():
+    """Clip the profile-likelihood q at zero when the fit is worse."""
     assert profile_likelihood_q(smooth_chi2_min=12.0, subhalo_chi2_min=2.0) == 10.0
     assert profile_likelihood_q(smooth_chi2_min=2.0, subhalo_chi2_min=12.0) == 0.0

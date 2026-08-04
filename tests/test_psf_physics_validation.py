@@ -28,6 +28,7 @@ AIRY_ENCIRCLED_ENERGY_FIRST_NULL = 0.837784869
 
 @pytest.fixture()
 def compact_no_aberration_config() -> dict:
+    """Load master_config.yaml shrunk to a fast, unaberrated PSF."""
     with (PROJECT_ROOT / "configs" / "master_config.yaml").open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 

@@ -104,6 +104,7 @@ def _build_grid_config(tmp_dir: Path) -> dict:
 
 @pytest.fixture(scope="module")
 def grid_setup(tmp_path_factory):
+    """Build a tiny grid-map scene and its Fisher products once."""
     tmp_dir = tmp_path_factory.mktemp("fisher-grid")
     os.environ["NUMBA_CACHE_DIR"] = str(tmp_dir / "numba-cache")
     os.environ["MPLCONFIGDIR"] = str(tmp_dir / "mplconfig")
@@ -183,6 +184,7 @@ def _layout_stub(map_config: dict, lens_centre) -> FisherDetector:
 
 
 def test_grid_layout_geometry_centred_on_lens():
+    """Place grid nodes on a regular lattice centred on the lens."""
     detector = _layout_stub(
         {
             "type": "grid",
@@ -208,6 +210,7 @@ def test_grid_layout_geometry_centred_on_lens():
 
 
 def test_grid_layout_annulus_restricts_nodes():
+    """Evaluate only the nodes falling inside the requested annulus."""
     detector = _layout_stub(
         {
             "type": "grid",
@@ -232,6 +235,7 @@ def test_grid_layout_annulus_restricts_nodes():
 
 
 def test_grid_layout_rejects_empty_annulus():
+    """Reject an annulus that selects no grid node at all."""
     detector = _layout_stub(
         {
             "type": "grid",
@@ -254,6 +258,7 @@ def test_grid_layout_rejects_empty_annulus():
 
 
 def test_grid_map_schema_and_area(grid_setup):
+    """Check grid-map array shapes, masks, and detectable area."""
     grid_map = grid_setup["grid_map"]
     assert isinstance(grid_map, FisherGridMapData)
 
@@ -287,6 +292,7 @@ def test_grid_map_schema_and_area(grid_setup):
 
 
 def test_grid_map_matches_explicit_bank_path(grid_setup):
+    """Match grid-map values against the explicit position bank path."""
     grid_map = grid_setup["grid_map"]
     layout = grid_setup["detector"]._grid_layout()
 
@@ -312,6 +318,7 @@ def test_grid_map_matches_explicit_bank_path(grid_setup):
 
 
 def test_grid_map_node_matches_compute_local(grid_setup):
+    """Match the node at the true subhalo against compute_local."""
     grid_map = grid_setup["grid_map"]
     local = grid_setup["detector"].compute_local(
         observation_test=grid_setup["observation_test"],
@@ -331,6 +338,7 @@ def test_grid_map_node_matches_compute_local(grid_setup):
 
 
 def test_grid_map_annulus_marks_unevaluated_nodes(grid_setup):
+    """Mark nodes outside the annulus unevaluated and leave them NaN."""
     detector = _make_detector(
         grid_setup,
         {
@@ -361,6 +369,7 @@ def test_grid_map_annulus_marks_unevaluated_nodes(grid_setup):
 
 
 def test_grid_map_parallel_matches_serial(grid_setup):
+    """Produce identical grid maps with one and with two workers."""
     detector = _make_detector(
         grid_setup,
         {
@@ -391,6 +400,7 @@ def test_grid_map_parallel_matches_serial(grid_setup):
 
 
 def test_generator_dispatches_grid_map(grid_setup):
+    """Route a grid map config through perform_fisher_detection."""
     config = copy.deepcopy(grid_setup["config"])
     result = perform_fisher_detection(
         observation_baseline=grid_setup["observation_baseline"],
@@ -409,6 +419,7 @@ def test_generator_dispatches_grid_map(grid_setup):
 
 
 def test_grid_map_requires_grid_type(grid_setup):
+    """Reject compute_grid_map when map.type is not 'grid'."""
     detector = _make_detector(
         grid_setup,
         {
@@ -427,6 +438,7 @@ def test_grid_map_requires_grid_type(grid_setup):
 
 
 def test_grid_map_npz_roundtrip(grid_setup, tmp_path):
+    """Round-trip a grid map through its npz representation."""
     grid_map = grid_setup["grid_map"]
     npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "fisher_grid_map.npz")
 
@@ -452,6 +464,7 @@ def test_grid_map_npz_roundtrip(grid_setup, tmp_path):
 
 
 def test_grid_map_plot_writes_png(grid_setup, tmp_path):
+    """Write a grid-map figure to disk from FisherDetectionData."""
     detection_data = FisherDetectionData(
         mode="map",
         local=None,
@@ -499,6 +512,7 @@ def _make_jax_detector(grid_setup) -> FisherDetector:
 
 
 def test_jax_engine_template_matches_reference(grid_setup):
+    """Match the JAX signal template against the NumPy reference."""
     pytest.importorskip("jax")
     detector = _make_jax_detector(grid_setup)
     position = SUBHALO_POSITION
@@ -520,6 +534,7 @@ def test_jax_engine_template_matches_reference(grid_setup):
 
 
 def test_jax_engine_grid_map_matches_reference(grid_setup):
+    """Match the JAX grid map against the NumPy reference map."""
     pytest.importorskip("jax")
     detector = _make_jax_detector(grid_setup)
     jax_map = detector.compute_grid_map()

@@ -52,6 +52,7 @@ def _small_lensing_config():
 
 
 def test_lensing_data_config_is_immutable_snapshot_of_generation_config():
+    """Snapshot the generation config so later edits cannot reach it."""
     config = _small_lensing_config()
 
     lensing_data = generate_lensing_system(
@@ -69,6 +70,7 @@ def test_lensing_data_config_is_immutable_snapshot_of_generation_config():
 
 
 def test_nfw_concentration_provenance_is_recorded():
+    """Record the concentration model, inputs, and derived NFW terms."""
     config = _small_lensing_config()
     config["lensing"]["grid"]["shape"] = [120, 120]
     config["lensing"]["subhalo"]["mass"] = 1.0e9
@@ -113,6 +115,7 @@ def test_nfw_concentration_provenance_is_recorded():
 
 
 def test_pointmass_subhalo_einstein_radius_is_populated():
+    """Populate the Einstein radius for a point-mass subhalo."""
     config = _small_lensing_config()
 
     lensing_data = generate_lensing_system(

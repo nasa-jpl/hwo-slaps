@@ -39,6 +39,7 @@ def _set_observation_value(config: dict, path: tuple[str, ...], value) -> None:
 
 @pytest.mark.parametrize("bad_exposure_time", [True, float("nan"), float("inf")])
 def test_observation_rejects_non_finite_or_bool_exposure_time(bad_exposure_time):
+    """Reject a boolean or non-finite exposure time."""
     config = _load_master_config()
     bad_config = copy.deepcopy(config)
     bad_config["observation"]["exposure_time"] = bad_exposure_time
@@ -49,6 +50,7 @@ def test_observation_rejects_non_finite_or_bool_exposure_time(bad_exposure_time)
 
 @pytest.mark.parametrize("bad_exposure_time", [0.0, -1.0])
 def test_observation_rejects_non_positive_exposure_time(bad_exposure_time):
+    """Reject a zero or negative exposure time."""
     config = _load_master_config()
     bad_config = copy.deepcopy(config)
     bad_config["observation"]["exposure_time"] = bad_exposure_time
@@ -58,6 +60,7 @@ def test_observation_rejects_non_positive_exposure_time(bad_exposure_time):
 
 
 def test_observation_requires_throughput():
+    """Require an explicit observation.throughput value."""
     config = _load_master_config()
     bad_config = copy.deepcopy(config)
     del bad_config["observation"]["throughput"]
@@ -70,6 +73,7 @@ def test_observation_requires_throughput():
     "bad_throughput", [True, float("nan"), float("inf"), 0.0, -0.5]
 )
 def test_observation_rejects_nonphysical_throughput(bad_throughput):
+    """Reject a throughput that is not positive and finite."""
     config = _load_master_config()
     bad_config = copy.deepcopy(config)
     bad_config["observation"]["throughput"] = bad_throughput
@@ -101,6 +105,7 @@ def test_observation_rejects_nonphysical_throughput(bad_throughput):
     ],
 )
 def test_observation_rejects_nonphysical_detector_values(path, bad_value):
+    """Reject boolean, negative, or non-finite detector values."""
     config = _load_master_config()
     bad_config = copy.deepcopy(config)
     _set_observation_value(bad_config, path, bad_value)
@@ -120,6 +125,7 @@ def test_observation_rejects_nonphysical_detector_values(path, bad_value):
     ],
 )
 def test_observation_accepts_detector_boundary_values_that_are_physical(path, good_value):
+    """Accept unit gain and zero read noise, dark, and sky."""
     config = _load_master_config()
     good_config = copy.deepcopy(config)
     _set_observation_value(good_config, path, good_value)
@@ -129,6 +135,7 @@ def test_observation_accepts_detector_boundary_values_that_are_physical(path, go
 
 @pytest.mark.parametrize("bad_output_format", [None, "fits", ""])
 def test_observation_rejects_unsupported_output_format_when_declared(bad_output_format):
+    """Reject an output_format other than 'pyautolens_ready'."""
     config = _load_master_config()
     bad_config = copy.deepcopy(config)
     bad_config["observation"]["output_format"] = bad_output_format

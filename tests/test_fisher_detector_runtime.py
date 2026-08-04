@@ -95,6 +95,7 @@ def _build_runtime_config(tmp_dir: Path) -> dict:
 
 @pytest.fixture(scope="module")
 def runtime_setup(tmp_path_factory):
+    """Build a tiny end-to-end scene and its Fisher inputs once."""
     tmp_dir = tmp_path_factory.mktemp("fisher-runtime")
     os.environ["NUMBA_CACHE_DIR"] = str(tmp_dir / "numba-cache")
     os.environ["MPLCONFIGDIR"] = str(tmp_dir / "mplconfig")
@@ -158,6 +159,7 @@ def _detector_stub_with_map_config(map_config: dict):
 
 
 def test_fisher_detector_rejects_empty_explicit_map_positions():
+    """Reject an explicit map with an empty position list."""
     detector = _detector_stub_with_map_config(
         {
             "type": "explicit",
@@ -178,6 +180,7 @@ def test_fisher_detector_rejects_empty_explicit_map_positions():
     ],
 )
 def test_fisher_detector_rejects_malformed_explicit_map_positions(explicit_positions):
+    """Reject explicit positions that are not finite [y, x] pairs."""
     detector = _detector_stub_with_map_config(
         {
             "type": "explicit",
@@ -190,6 +193,7 @@ def test_fisher_detector_rejects_malformed_explicit_map_positions(explicit_posit
 
 
 def test_fisher_detector_runtime_local_executes(runtime_setup):
+    """Run the local Fisher path and return finite statistics."""
     detector = _make_detector(runtime_setup, mode="local")
     local = detector.compute_local(
         observation_test=runtime_setup["observation_test"],
@@ -204,6 +208,7 @@ def test_fisher_detector_runtime_local_executes(runtime_setup):
 
 
 def test_fisher_detector_runtime_map_executes(runtime_setup):
+    """Run the map Fisher path over every candidate position."""
     detector = _make_detector(runtime_setup, mode="map")
     result = detector.compute_map()
 
@@ -214,6 +219,7 @@ def test_fisher_detector_runtime_map_executes(runtime_setup):
 
 
 def test_fisher_detector_runtime_psf_fit_executes(runtime_setup):
+    """Fit one global Zernike as a PSF nuisance parameter."""
     detector = _make_detector(
         runtime_setup,
         mode="local",
@@ -236,6 +242,7 @@ def test_fisher_detector_runtime_psf_fit_executes(runtime_setup):
 
 
 def test_fisher_detector_runtime_psf_scan_executes(runtime_setup):
+    """Scan one global Zernike and report its spurious coupling."""
     detector = _make_detector(
         runtime_setup,
         mode="local",
@@ -262,6 +269,7 @@ def test_fisher_detector_runtime_psf_scan_executes(runtime_setup):
 
 
 def test_fisher_detector_runtime_psf_scan_executes_with_signed_derivative_kernel(runtime_setup):
+    """Scan PSF modes when the fiducial holds signed hexike terms."""
     config = copy.deepcopy(runtime_setup["config"])
     aberr = config["psf"]["aberrations"]
     aberr["enable_segment_hexikes"] = True

@@ -38,6 +38,7 @@ def _config() -> dict:
 
 
 def test_smooth_model_spec_uses_expected_profiles_and_priors():
+    """Build the smooth spec with the expected profiles and priors."""
     spec = smooth_model_spec_from_config(_config())
 
     assert spec.model_type == "smooth"
@@ -47,6 +48,7 @@ def test_smooth_model_spec_uses_expected_profiles_and_priors():
 
 
 def test_nfw_fixed_template_spec_preserves_forward_model_parameters():
+    """Fix the NFW template to the forward-model truth parameters."""
     trial = SubhaloTrial(
         case_id="nfw",
         mass_msun=1.0e7,
@@ -70,6 +72,7 @@ def test_nfw_fixed_template_spec_preserves_forward_model_parameters():
 
 
 def test_local_search_frees_only_the_subhalo_center_by_default():
+    """Free only the subhalo centre in local-search fit mode."""
     trial = SubhaloTrial(
         case_id="sis",
         mass_msun=1.0e7,
@@ -91,6 +94,7 @@ def test_local_search_frees_only_the_subhalo_center_by_default():
 
 
 def test_nfw_spec_requires_hwo_slaps_scale_parameters():
+    """Reject an NFW trial with no kappa_s or scale radius."""
     trial = SubhaloTrial(
         case_id="bad",
         mass_msun=1.0e7,

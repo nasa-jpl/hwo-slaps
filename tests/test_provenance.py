@@ -14,6 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_config_hash_is_stable_and_key_order_insensitive():
+    """Hash a config to 16 chars regardless of key order."""
     config_a = {"psf": {"wavelength": 5.0e-7}, "run_name": "demo"}
     config_b = {"run_name": "demo", "psf": {"wavelength": 5.0e-7}}
 
@@ -24,6 +25,7 @@ def test_config_hash_is_stable_and_key_order_insensitive():
 
 
 def test_capture_provenance_records_expected_fields():
+    """Record command, config hash, Python, packages, and git hash."""
     config = {"run_name": "demo"}
     command = ["runner.py", "--config", "demo.yaml"]
 
@@ -44,6 +46,7 @@ def test_capture_provenance_records_expected_fields():
 
 
 def test_package_versions_prefer_module_version():
+    """Prefer module __version__ over stale distribution metadata."""
     provenance = capture_provenance()
 
     # Module __version__ wins over distribution metadata, which is stale for
@@ -54,11 +57,13 @@ def test_package_versions_prefer_module_version():
 
 
 def test_capture_provenance_outside_repo_records_no_git_hash(tmp_path):
+    """Record a null git hash when run outside the repository."""
     provenance = capture_provenance(repo_dir=tmp_path)
     assert provenance["git_hash"] is None
 
 
 def test_write_provenance_round_trips_through_yaml(tmp_path):
+    """Round-trip the provenance record through its YAML file."""
     config = {"run_name": "demo", "global_seed": 11}
     path = tmp_path / "provenance.yaml"
 

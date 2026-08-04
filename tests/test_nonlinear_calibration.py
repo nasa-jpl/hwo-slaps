@@ -59,6 +59,7 @@ def _case(case_id: str, q_fisher: float, q_fit: float) -> NonlinearCaseResult:
 
 
 def test_pair_fisher_and_nonlinear_skips_cases_without_metrics():
+    """Pair only the cases that carry both Fisher and fit metrics."""
     data = NonlinearDetectionData(
         run_name="run",
         backend="pyautolens",
@@ -76,6 +77,7 @@ def test_pair_fisher_and_nonlinear_skips_cases_without_metrics():
 
 
 def test_fit_q_calibration_reports_ratios_and_threshold_confusion():
+    """Report q ratios, a linear slope, and the confusion counts."""
     data = NonlinearDetectionData(
         run_name="run",
         backend="pyautolens",

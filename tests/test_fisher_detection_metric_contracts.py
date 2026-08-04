@@ -33,6 +33,7 @@ def _load_master_config() -> dict:
 
 
 def test_master_config_uses_scdd_baseline_redshifts():
+    """Pin the SCDD baseline lens and source redshifts in the config."""
     config = _load_master_config()
 
     assert config["lensing"]["lens_galaxy"]["redshift"] == pytest.approx(0.2)
@@ -40,6 +41,7 @@ def test_master_config_uses_scdd_baseline_redshifts():
 
 
 def test_scdd_threshold_maps_to_fisher_q_and_local_z():
+    """Map the SCDD threshold between q, Z, and delta log-likelihood."""
     signal = np.array([np.sqrt(SCDD_Q_THRESHOLD), 0.0])
 
     result = compute_asimov_detectability(signal=signal, sigma=np.ones(signal.size))
@@ -52,6 +54,7 @@ def test_scdd_threshold_maps_to_fisher_q_and_local_z():
 
 
 def test_scdd_metric_uses_profiled_not_raw_fisher_information():
+    """Report the SCDD metric from profiled, not raw, information."""
     signal = np.array([2.0, 0.0])
     nuisance = np.array([[1.0], [0.0]])
     prior_precision = np.array([[1.0]])
@@ -71,6 +74,7 @@ def test_scdd_metric_uses_profiled_not_raw_fisher_information():
 
 
 def test_detectable_ring_fraction_uses_scdd_q_threshold():
+    """Count ring positions as detected using the SCDD q threshold."""
     signals = np.array(
         [
             [2.0, 0.0],
@@ -90,6 +94,7 @@ def test_detectable_ring_fraction_uses_scdd_q_threshold():
 
 
 def test_sparse_nonlinear_calibration_qfit_definition_matches_scdd_threshold():
+    """Define q_fit as twice the log-likelihood gap, as SCDD does."""
     log_l_smooth = -105.0
     log_l_subhalo = -100.0
 

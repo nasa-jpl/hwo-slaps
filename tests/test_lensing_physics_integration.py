@@ -58,6 +58,7 @@ def _build_lensing_config_for_model(model_name: str):
 
 @pytest.mark.parametrize("model_name", ["PointMass", "SIS", "NFW"])
 def test_env_02_smoke_generate_lensing_system_by_model(model_name: str):
+    """Generate a finite scene for each supported subhalo model."""
     generator_module = _load_lensing_generator_module()
     cfg = _build_lensing_config_for_model(model_name)
 
@@ -76,6 +77,7 @@ def test_env_02_smoke_generate_lensing_system_by_model(model_name: str):
 
 @pytest.mark.parametrize("model_name", ["PointMass", "SIS", "NFW"])
 def test_reg_04_optional_image_summary_anchors(model_name: str):
+    """Reproduce the stored image shape, flux, and peak anchors."""
     anchors = load_lensing_anchor_fixture()
     summary_anchors = anchors["integration_image_summary"]
     model_key = model_name.lower()

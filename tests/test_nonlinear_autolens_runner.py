@@ -13,6 +13,7 @@ from hwoslaps.modeling.nonlinear.autolens_runner import (
 
 
 def test_extract_max_log_likelihood_from_samples_callable():
+    """Read the max log-likelihood from the samples accessor."""
     sample = SimpleNamespace(log_likelihood=-123.0)
     result = SimpleNamespace(
         samples=SimpleNamespace(max_log_likelihood=lambda: sample),
@@ -26,6 +27,7 @@ def test_extract_max_log_likelihood_from_samples_callable():
 
 
 def test_extract_max_log_likelihood_falls_back_to_fit_figure_of_merit():
+    """Fall back to the fit figure of merit when samples lack it."""
     result = SimpleNamespace(
         samples=SimpleNamespace(),
         max_log_likelihood_fit=SimpleNamespace(figure_of_merit=-10.0),

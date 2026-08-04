@@ -1,3 +1,5 @@
+"""Unit tests for observation generation from lensing and PSF products."""
+
 import autolens as al
 import numpy as np
 import pytest
@@ -8,6 +10,7 @@ from hwoslaps.psf.utils import PSFData, make_pyauto_kernel
 
 
 def make_lensing_data(shape=(nine := 9, nine), pixel_scale=0.1) -> LensingData:
+    """Build LensingData holding a deterministic ramp image."""
     # Create a simple deterministic image pattern
     y, x = np.indices(shape)
     image = (y + x).astype(float) / (shape[0] + shape[1])
@@ -31,6 +34,7 @@ def make_lensing_data(shape=(nine := 9, nine), pixel_scale=0.1) -> LensingData:
 
 
 def make_psfdata_with_kernel(kernel, kernel_pixel_scale: float) -> PSFData:
+    """Build PSFData wrapping a given kernel with valid metadata."""
     # Construct a full PSFData object with minimal but valid values
     return PSFData(
         psf=None,
@@ -56,6 +60,7 @@ def make_psfdata_with_kernel(kernel, kernel_pixel_scale: float) -> PSFData:
 
 
 def test_generate_observation_identity_psf_end_to_end():
+    """Run an identity-PSF observation and check every output field."""
     shape = (9, 9)
     pixel_scale = 0.1
     lensing = make_lensing_data(shape=shape, pixel_scale=pixel_scale)
@@ -114,6 +119,7 @@ def test_generate_observation_identity_psf_end_to_end():
 
 
 def test_pixel_scale_mismatch_raises():
+    """Reject a PSF kernel whose pixel scale differs from the scene."""
     shape = (9, 9)
     lensing = make_lensing_data(shape=shape, pixel_scale=0.1)
 
@@ -142,6 +148,7 @@ def test_pixel_scale_mismatch_raises():
 
 
 def test_even_psf_is_rejected():
+    """Reject an even-sized PSF kernel with an ambiguous centre."""
     shape = (10, 10)
     pixel_scale = 0.05
     lensing = make_lensing_data(shape=shape, pixel_scale=pixel_scale)

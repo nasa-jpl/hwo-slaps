@@ -168,6 +168,7 @@ def _make_detector_stub():
 
 
 def test_science_fiducial_ignores_placeholder_coefficients_in_disabled_family():
+    """Zero placeholder coefficients in a disabled PSF family."""
     module, detector = _make_detector_stub()
     detector.full_config = {
         "psf": {
@@ -203,6 +204,7 @@ def test_science_fiducial_ignores_placeholder_coefficients_in_disabled_family():
 
 
 def test_segment_hexike_derivative_assignment_preserves_dict_shape_for_perfect_psf():
+    """Create the nested hexike dict when perturbing a perfect PSF."""
     module, detector = _make_detector_stub()
     config = {
         "psf": {
@@ -228,6 +230,7 @@ def test_segment_hexike_derivative_assignment_preserves_dict_shape_for_perfect_p
 
 
 def test_explicit_psf_basis_is_independent_of_yaml_occupancy():
+    """Build the PSF basis from the selector, not from YAML occupancy."""
     module, detector = _make_detector_stub()
     detector.full_config = {
         "psf": {
@@ -262,6 +265,7 @@ def test_explicit_psf_basis_is_independent_of_yaml_occupancy():
 
 
 def test_fit_and_scan_psf_bases_must_be_disjoint():
+    """Reject a scan basis that overlaps the PSF nuisance fit basis."""
     module, detector = _make_detector_stub()
     detector.full_config = {
         "psf": {

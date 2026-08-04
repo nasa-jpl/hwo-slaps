@@ -76,6 +76,7 @@ def _make_detector_stub(label: str):
 
 
 def test_pipeline_routes_detection_to_fisher(monkeypatch):
+    """Route a detection-mode run to the Fisher generator exactly once."""
     import hwoslaps.modeling.generator_fisher as fisher_generator
     import hwoslaps.pipeline as pipeline_module
 
@@ -140,6 +141,7 @@ def test_pipeline_routes_detection_to_fisher(monkeypatch):
 
 
 def test_generator_uses_fisher_detector(monkeypatch):
+    """Construct FisherDetector inside perform_fisher_detection."""
     import hwoslaps.modeling.generator_fisher as fisher_generator
 
     calls = []

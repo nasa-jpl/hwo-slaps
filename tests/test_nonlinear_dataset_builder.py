@@ -25,6 +25,7 @@ class _Observation:
 
 
 def test_exclude_psf_edge_pixels_removes_kernel_half_width_border():
+    """Drop a border of half the PSF kernel width from the mask."""
     use_mask = np.ones((7, 9), dtype=bool)
 
     safe_mask = _exclude_psf_edge_pixels(use_mask, psf_shape=(5, 3))
@@ -38,6 +39,7 @@ def test_exclude_psf_edge_pixels_removes_kernel_half_width_border():
 
 
 def test_validation_dataset_uses_rate_units_matching_pyautolens_model():
+    """Return electron rates matching the PyAutoLens model units."""
     observation = _Observation()
 
     source_rate = source_only_data_electron_rate(observation, dataset_kind="noisy")

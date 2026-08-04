@@ -32,6 +32,7 @@ def _moline_expected(mass_msun: float, x_sub: float, h: float) -> float:
 
 
 def test_moline_eq7_anchor_value():
+    """Return 19.9 at the Moline eq. 7 normalization anchor."""
     h = 0.6774
     mass_anchor = 1.0e8 / h
     value = mass_models.concentration_moline2017_eq7(mass_anchor, x_sub=1.0, h=h)
@@ -39,6 +40,7 @@ def test_moline_eq7_anchor_value():
 
 
 def test_moline_eq7_paper_regression_points():
+    """Reproduce published Moline eq. 7 values at reference points."""
     test_points = [
         (1.0e6, 1.0, 0.6774, 28.915897079765447),
         (1.0e8, 1.0, 0.6774, 20.560847592361515),
@@ -54,6 +56,7 @@ def test_moline_eq7_paper_regression_points():
 
 
 def test_moline_eq7_radial_monotonicity():
+    """Decrease Moline concentration with increasing host radius."""
     mass_msun = 1.0e9
     h = 0.6774
     c_inner = mass_models.concentration_moline2017_eq7(mass_msun, x_sub=0.3, h=h)
@@ -80,11 +83,13 @@ def test_moline_eq7_radial_monotonicity():
     ],
 )
 def test_moline_eq7_rejects_invalid_inputs(mass_msun, x_sub, h):
+    """Reject Moline inputs that are non-positive or out of domain."""
     with pytest.raises(ValueError):
         mass_models.concentration_moline2017_eq7(mass_msun, x_sub=x_sub, h=h)
 
 
 def test_dispatch_requires_moline_arguments():
+    """Require both x_sub and h for the Moline dispatch path."""
     with pytest.raises(ValueError, match="x_sub is required"):
         mass_models.concentration_mass_relation(1.0e9, model="moline2017_eq7", h=0.6774)
     with pytest.raises(ValueError, match="h is required"):
@@ -92,6 +97,7 @@ def test_dispatch_requires_moline_arguments():
 
 
 def test_power_law_parity():
+    """Reproduce the closed-form power-law concentration relation."""
     points = [
         (1.0e7, 0.2),
         (1.0e8, 0.5),

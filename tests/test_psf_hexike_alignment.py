@@ -44,6 +44,7 @@ else:
 
 @pytest.fixture(scope="module")
 def minimal_psf_config():
+    """Return a small telescope and high-res PSF config for hexikes."""
     return {
         "telescope": {
             "gap_size": 0.006,
@@ -64,12 +65,14 @@ def minimal_psf_config():
 
 @pytest.fixture(scope="module")
 def telescope_data(minimal_psf_config):
+    """Build the HCIPy telescope for the minimal PSF config."""
     if not HCIPY_AVAILABLE:
         pytest.skip("hcipy is not installed")
     return telescope_models.create_hcipy_telescope(minimal_psf_config)
 
 
 def test_segment_hexike_uses_hcipy_surface_for_noll_indexing(telescope_data):
+    """Apply segment hexikes through HCIPy with 1-based Noll indices."""
     wavelength = telescope_data["wavelength"]
     segment_hexikes_noll = {0: {1: 50.0, 3: -20.0}}
 
@@ -84,6 +87,7 @@ def test_segment_hexike_uses_hcipy_surface_for_noll_indexing(telescope_data):
 
 
 def test_segment_hexike_api_rejects_zero_based_mode_indices(telescope_data):
+    """Reject a zero-based hexike mode index at the API boundary."""
     wavelength = telescope_data["wavelength"]
 
     with pytest.raises(ValueError, match="1-based Noll"):
@@ -93,6 +97,7 @@ def test_segment_hexike_api_rejects_zero_based_mode_indices(telescope_data):
 
 
 def test_config_validation_rejects_zero_based_segment_hexike_modes():
+    """Reject a zero-based hexike mode index during validation."""
     config_path = PROJECT_ROOT / "configs" / "master_config.yaml"
     with config_path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
@@ -106,6 +111,7 @@ def test_config_validation_rejects_zero_based_segment_hexike_modes():
 
 
 def test_config_validation_accepts_one_based_segment_hexike_modes():
+    """Accept a 1-based hexike mode index during validation."""
     config_path = PROJECT_ROOT / "configs" / "master_config.yaml"
     with config_path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)

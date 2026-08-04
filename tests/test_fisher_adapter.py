@@ -52,6 +52,7 @@ scan_systematic_modes_from_images = adapter_module.scan_systematic_modes_from_im
 
 
 def test_flatten_masked_image_respects_mask():
+    """Flatten only the masked-in pixels in row-major order."""
     image = np.arange(9, dtype=float).reshape(3, 3)
     mask = np.array(
         [
@@ -65,6 +66,7 @@ def test_flatten_masked_image_respects_mask():
 
 
 def test_stack_masked_images_builds_design_matrix():
+    """Stack masked images into a column-per-image design matrix."""
     img1 = np.array([[1.0, 2.0], [3.0, 4.0]])
     img2 = np.array([[10.0, 20.0], [30.0, 40.0]])
     mask = np.array([[True, False], [True, True]])
@@ -80,6 +82,7 @@ def test_stack_masked_images_builds_design_matrix():
 
 
 def test_compute_asimov_from_images_matches_manual_vector_call():
+    """Match the image adapter against a manual vector call."""
     smooth = np.array([[1.0, 1.0], [1.0, 1.0]])
     subhalo = np.array([[2.0, 1.0], [1.0, 1.0]])
     sigma = np.ones_like(smooth)
@@ -107,6 +110,7 @@ def test_compute_asimov_from_images_matches_manual_vector_call():
 
 
 def test_signal_bank_from_images_is_vectorized_over_templates():
+    """Evaluate a bank of image templates in one vectorized call."""
     smooth = np.zeros((2, 2))
     templates = [
         np.array([[1.0, 0.0], [0.0, 0.0]]),
@@ -122,6 +126,7 @@ def test_signal_bank_from_images_is_vectorized_over_templates():
 
 
 def test_signal_bank_rejects_broadcastable_wrong_shape_template():
+    """Reject a template whose shape only broadcasts to the scene."""
     smooth = np.zeros((2, 2))
 
     with pytest.raises(ValueError, match="subhalo_mean_image"):
@@ -133,6 +138,7 @@ def test_signal_bank_rejects_broadcastable_wrong_shape_template():
 
 
 def test_compute_asimov_rejects_wrong_shape_sigma_image():
+    """Reject a sigma image that does not match the scene shape."""
     smooth = np.zeros((2, 2))
     subhalo = np.ones((2, 2))
 
@@ -145,6 +151,7 @@ def test_compute_asimov_rejects_wrong_shape_sigma_image():
 
 
 def test_compute_asimov_rejects_wrong_shape_nuisance_image_without_mask():
+    """Reject a nuisance image of the wrong shape with no mask given."""
     smooth = np.zeros((2, 2))
     subhalo = np.ones((2, 2))
 
@@ -158,6 +165,7 @@ def test_compute_asimov_rejects_wrong_shape_nuisance_image_without_mask():
 
 
 def test_spurious_adapter_rejects_wrong_shape_bias_image():
+    """Reject a bias image that does not match the scene shape."""
     smooth = np.zeros((2, 2))
     subhalo = np.ones((2, 2))
 
@@ -171,6 +179,7 @@ def test_spurious_adapter_rejects_wrong_shape_bias_image():
 
 
 def test_scan_systematic_modes_rejects_wrong_shape_mode_image_without_mask():
+    """Reject a systematic mode image of the wrong shape."""
     smooth = np.zeros((2, 2))
     subhalo = np.ones((2, 2))
 
@@ -184,6 +193,7 @@ def test_scan_systematic_modes_rejects_wrong_shape_mode_image_without_mask():
 
 
 def test_scan_systematic_modes_from_images_returns_named_modes():
+    """Return scan couplings labelled with the supplied mode names."""
     smooth = np.zeros((2, 2))
     subhalo = np.array([[1.0, 0.0], [0.0, 0.0]])
     systematic_modes = [

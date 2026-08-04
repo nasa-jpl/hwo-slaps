@@ -46,6 +46,7 @@ def _metadata() -> NonlinearDatasetMetadata:
 
 
 def test_case_result_serializes_to_json_safe_dictionary():
+    """Serialize a successful case to JSON and to the CSV columns."""
     case = NonlinearCaseResult(
         case_id="case",
         trial=_trial(),
@@ -81,6 +82,7 @@ def test_case_result_serializes_to_json_safe_dictionary():
 
 
 def test_failed_case_serializes_with_null_metric():
+    """Serialize a failed case with null metric fields."""
     case = NonlinearCaseResult(
         case_id="failed",
         trial=_trial(),

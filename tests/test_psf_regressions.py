@@ -34,6 +34,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture()
 def master_config() -> dict:
+    """Load the unmodified master_config.yaml."""
     with (PROJECT_ROOT / "configs" / "master_config.yaml").open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -61,11 +62,13 @@ def _compact_full_config(config: dict) -> dict:
 
 @pytest.fixture()
 def compact_config(master_config: dict) -> dict:
+    """Shrink master_config.yaml to a fast, unaberrated PSF run."""
     return _compact_full_config(master_config)
 
 
 @pytest.fixture()
 def compact_telescope(compact_config: dict) -> dict:
+    """Build the HCIPy telescope for the compact PSF config."""
     return create_hcipy_telescope(compact_config["psf"])
 
 

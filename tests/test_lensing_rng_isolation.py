@@ -1,3 +1,5 @@
+"""Tests for seed handling and RNG isolation in lensing generation."""
+
 import copy
 
 import numpy as np
@@ -44,6 +46,7 @@ def _make_lensing_config():
 
 
 def test_subhalo_random_position_reproducible_for_same_seed():
+    """Draw the same random subhalo position for one seed."""
     config = _make_lensing_config()
     full_config = {"global_seed": 123, "run_name": "rng-seed-a"}
 
@@ -54,12 +57,14 @@ def test_subhalo_random_position_reproducible_for_same_seed():
 
 
 def test_generate_lensing_system_requires_full_config_argument():
+    """Require full_config as an explicit argument."""
     config = _make_lensing_config()
     with pytest.raises(TypeError):
         generate_lensing_system(copy.deepcopy(config))
 
 
 def test_generate_lensing_system_requires_global_seed_key():
+    """Require a global_seed key inside full_config."""
     config = _make_lensing_config()
     with pytest.raises(ValueError, match="Missing required key 'global_seed'"):
         generate_lensing_system(
@@ -69,6 +74,7 @@ def test_generate_lensing_system_requires_global_seed_key():
 
 
 def test_generate_lensing_system_rejects_non_int_global_seed():
+    """Reject a boolean global_seed, which int accepts by subclassing."""
     config = _make_lensing_config()
     with pytest.raises(ValueError, match="full_config.global_seed must be an int"):
         generate_lensing_system(
@@ -78,6 +84,7 @@ def test_generate_lensing_system_rejects_non_int_global_seed():
 
 
 def test_subhalo_random_position_changes_with_seed():
+    """Draw a different subhalo position for a different seed."""
     config = _make_lensing_config()
 
     a = generate_lensing_system(
@@ -93,6 +100,7 @@ def test_subhalo_random_position_changes_with_seed():
 
 
 def test_lensing_generation_does_not_mutate_numpy_global_rng():
+    """Leave the NumPy global RNG untouched during generation."""
     config = _make_lensing_config()
     full_config = {"global_seed": 42, "run_name": "rng-isolation"}
 

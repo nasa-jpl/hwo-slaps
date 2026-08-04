@@ -26,6 +26,7 @@ def _trial(index: int, q_value: float) -> SubhaloTrial:
 
 
 def test_trial_from_lensing_truth_preserves_nfw_parameters():
+    """Carry the NFW profile parameters into the derived trial."""
     lensing = SimpleNamespace(
         has_subhalo=True,
         subhalo_model="NFW",
@@ -52,6 +53,7 @@ def test_trial_from_lensing_truth_preserves_nfw_parameters():
 
 
 def test_select_trials_prioritizes_extremes_and_near_threshold_cases():
+    """Keep the q extremes alongside near-threshold trials."""
     trials = [_trial(index, q_value) for index, q_value in enumerate([1.0, 4.0, 9.5, 10.5, 20.0])]
 
     selected = select_trials(
@@ -71,6 +73,7 @@ def test_select_trials_prioritizes_extremes_and_near_threshold_cases():
 
 
 def test_stratified_selection_is_deterministic():
+    """Return the same stratified selection for a fixed seed."""
     trials = [_trial(index, float(index)) for index in range(12)]
     config = TrialSelectionConfig(
         strategy="stratified",

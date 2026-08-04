@@ -61,6 +61,7 @@ def _nfw_lensing_terms(mass_msun: float, concentration: float, z_lens: float, z_
 
 
 def test_pm_01_positive_einstein_radius():
+    """Return a positive point-mass Einstein radius for study masses."""
     masses = [1.0e7, 1.0e8, 1.0e9]
     radii = [
         MASS_MODELS.einstein_radius_point_mass(mass, 0.2, 2.5, COSMOLOGY)
@@ -70,6 +71,7 @@ def test_pm_01_positive_einstein_radius():
 
 
 def test_pm_02_mass_scaling_sqrt10():
+    """Scale the point-mass Einstein radius as the square root of mass."""
     masses = [1.0e7, 1.0e8, 1.0e9]
     radii = [
         MASS_MODELS.einstein_radius_point_mass(mass, 0.2, 2.5, COSMOLOGY)
@@ -81,6 +83,7 @@ def test_pm_02_mass_scaling_sqrt10():
 
 
 def test_pm_03_redshift_sensitivity_positive():
+    """Change the point-mass Einstein radius when redshifts change."""
     radius_a = MASS_MODELS.einstein_radius_point_mass(1.0e8, 0.2, 2.5, COSMOLOGY)
     radius_b = MASS_MODELS.einstein_radius_point_mass(1.0e8, 0.5, 2.0, COSMOLOGY)
     assert radius_a > 0.0
@@ -89,6 +92,7 @@ def test_pm_03_redshift_sensitivity_positive():
 
 
 def test_sis_01_positive_sigma_v_and_einstein_radius():
+    """Return a positive SIS velocity dispersion and Einstein radius."""
     masses = [1.0e7, 1.0e8, 1.0e9]
     for mass in masses:
         sigma_v = MASS_MODELS.sigma_v_from_m200_sis(mass, 0.2, COSMOLOGY)
@@ -98,6 +102,7 @@ def test_sis_01_positive_sigma_v_and_einstein_radius():
 
 
 def test_sis_02_mass_scaling_ten_power_two_thirds():
+    """Scale the SIS Einstein radius as mass to the two-thirds power."""
     masses = [1.0e7, 1.0e8, 1.0e9]
     radii = [
         MASS_MODELS.einstein_radius_sis_m200(mass, 0.2, 2.5, COSMOLOGY)
@@ -109,6 +114,7 @@ def test_sis_02_mass_scaling_ten_power_two_thirds():
 
 
 def test_nfw_01_positive_physical_parameters_and_kappa_s():
+    """Return positive NFW scale parameters and scale convergence."""
     for mass in np.logspace(7, 10, 4):
         concentration = MASS_MODELS.concentration_mass_relation(
             mass,
@@ -130,6 +136,7 @@ def test_nfw_01_positive_physical_parameters_and_kappa_s():
 
 
 def test_nfw_02_scale_radius_monotonic_in_mass():
+    """Increase the NFW scale radius monotonically with halo mass."""
     masses = np.logspace(7, 10, 4)
     radii = []
     for mass in masses:
@@ -150,6 +157,7 @@ def test_nfw_02_scale_radius_monotonic_in_mass():
 
 
 def test_if_01_position_contract_is_canonical_yx():
+    """Return ring positions as (y, x) with outward positive offsets."""
     outward = LENSING_UTILS.get_einstein_ring_position(
         angle_deg=90.0,
         einstein_radius=1.0,
@@ -169,6 +177,7 @@ def test_if_01_position_contract_is_canonical_yx():
 
 
 def test_reg_01_point_mass_anchor():
+    """Reproduce the stored point-mass Einstein radius anchor."""
     anchors = load_lensing_anchor_fixture()
     inputs = anchors["inputs"]["point_mass"]
     expected = anchors["scalars"]["point_mass"]["theta_e_arcsec"]
@@ -182,6 +191,7 @@ def test_reg_01_point_mass_anchor():
 
 
 def test_reg_02_sis_anchor():
+    """Reproduce the stored SIS dispersion and Einstein radius anchors."""
     anchors = load_lensing_anchor_fixture()
     inputs = anchors["inputs"]["sis"]
     expected = anchors["scalars"]["sis"]
@@ -201,6 +211,7 @@ def test_reg_02_sis_anchor():
 
 
 def test_reg_03_nfw_anchor():
+    """Reproduce the stored NFW concentration and scale anchors."""
     anchors = load_lensing_anchor_fixture()
     inputs = anchors["inputs"]["nfw"]
     expected = anchors["scalars"]["nfw"]

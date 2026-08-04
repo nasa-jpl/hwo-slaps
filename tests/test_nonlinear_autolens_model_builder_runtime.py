@@ -44,6 +44,7 @@ def _config() -> dict:
 
 
 def test_runtime_autofit_model_conversion_for_smooth_and_nfw_subhalo():
+    """Convert smooth and NFW subhalo specs into AutoFit models."""
     trial = SubhaloTrial(
         case_id="nfw",
         mass_msun=1.0e7,

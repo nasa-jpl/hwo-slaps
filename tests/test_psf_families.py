@@ -46,6 +46,7 @@ def _flat_coefficients(segment_hexikes: dict) -> np.ndarray:
 
 
 def test_piston_family_draw_contract():
+    """Draw pistons with the common term removed and exact RMS."""
     target = 25.0
     draw = draw_segment_piston_family(np.random.default_rng(7), SEGMENTS, target)
 
@@ -60,6 +61,7 @@ def test_piston_family_draw_contract():
 
 
 def test_tiptilt_family_draw_contract():
+    """Draw tip/tilts normalized to target*sqrt(n_segments)."""
     target = 40.0
     draw = draw_segment_tiptilt_family(np.random.default_rng(11), SEGMENTS, target)
 
@@ -75,6 +77,7 @@ def test_tiptilt_family_draw_contract():
 
 
 def test_hexike_family_matches_reference_normalization():
+    """Match the hexike draw against the study-ensemble reference."""
     target = 10.0
     seed = 20260527
     draw = draw_segment_hexike_family(
@@ -100,6 +103,7 @@ def test_hexike_family_matches_reference_normalization():
 
 
 def test_global_zernike_family_draw_contract():
+    """Draw global Zernikes whose coefficient norm is the target."""
     target = 15.0
     modes = (4, 5, 6, 7, 8, 9, 10, 11)
     draw = draw_global_zernike_family(np.random.default_rng(3), modes, target)
@@ -110,6 +114,7 @@ def test_global_zernike_family_draw_contract():
 
 
 def test_family_draws_are_deterministic_per_seed():
+    """Reproduce a draw for one seed and differ across seeds."""
     draw_a = draw_segment_piston_family(np.random.default_rng(5), SEGMENTS, 20.0)
     draw_b = draw_segment_piston_family(np.random.default_rng(5), SEGMENTS, 20.0)
     draw_c = draw_segment_piston_family(np.random.default_rng(6), SEGMENTS, 20.0)
@@ -119,6 +124,7 @@ def test_family_draws_are_deterministic_per_seed():
 
 
 def test_zero_target_returns_empty_draw():
+    """Return an empty draw when the target RMS is zero."""
     rng = np.random.default_rng(1)
     assert draw_segment_piston_family(rng, SEGMENTS, 0.0) == {}
     assert draw_segment_tiptilt_family(rng, SEGMENTS, 0.0) == {}
@@ -137,6 +143,7 @@ def test_zero_target_returns_empty_draw():
     ],
 )
 def test_invalid_draw_inputs_raise(bad_call):
+    """Reject empty mode lists, bad Noll indices, and bad targets."""
     with pytest.raises(ValueError):
         bad_call(np.random.default_rng(2))
 
@@ -154,6 +161,7 @@ from hwoslaps.psf.generator import generate_psf_system  # noqa: E402
 
 @pytest.fixture()
 def compact_config() -> dict:
+    """Load master_config.yaml shrunk to a fast, unaberrated PSF."""
     with (PROJECT_ROOT / "configs" / "master_config.yaml").open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
@@ -191,6 +199,7 @@ def _config_with_family_draw(compact_config: dict, segment_hexikes: dict) -> dic
 
 
 def test_family_draws_pass_config_validation(compact_config):
+    """Accept piston and tip/tilt family draws as valid config."""
     rng = np.random.default_rng(13)
     cfg = _config_with_family_draw(
         compact_config, draw_segment_piston_family(rng, SEGMENTS, 20.0)
@@ -209,6 +218,7 @@ def test_family_draws_pass_config_validation(compact_config):
     ids=["segment_piston", "segment_tiptilt"],
 )
 def test_family_draw_reproduces_target_pupil_rms(compact_config, draw_family):
+    """Reproduce the target pupil RMS through the real generator."""
     target_rms_nm = 30.0
     draw = draw_family(np.random.default_rng(17), SEGMENTS, target_rms_nm)
     cfg = _config_with_family_draw(compact_config, draw)
@@ -236,6 +246,7 @@ def _config_with_global_draw(compact_config: dict, global_zernikes: dict) -> dic
 
 
 def test_renormalized_global_draw_hits_target_through_generator(compact_config):
+    """Hit the target aperture RMS after renormalizing a global draw."""
     target_rms_nm = 25.0
     raw = draw_global_zernike_family(np.random.default_rng(23),
                                      SPIE_GLOBAL_ZERNIKE_NOLLS, target_rms_nm)
@@ -253,6 +264,7 @@ def test_renormalized_global_draw_hits_target_through_generator(compact_config):
 
 
 def test_renormalized_combined_draw_hits_target_through_generator(compact_config):
+    """Hit the target RMS for a combined segment plus global draw."""
     target_rms_nm = 25.0
     split = target_rms_nm / np.sqrt(2.0)
     rng = np.random.default_rng(29)
@@ -271,6 +283,7 @@ def test_renormalized_combined_draw_hits_target_through_generator(compact_config
 
 
 def test_renormalize_zero_target_returns_empty():
+    """Return empty coefficient dicts for a zero target RMS."""
     seg, glob = renormalize_to_aperture_rms(None, 0.0,
                                             segment_hexikes={0: {1: 5.0}},
                                             global_zernikes={4: 5.0})
@@ -279,6 +292,7 @@ def test_renormalize_zero_target_returns_empty():
 
 
 def test_renormalize_rejects_zero_measured_and_bad_targets(compact_config):
+    """Reject renormalization with no coefficients or a bad target."""
     telescope_data = create_hcipy_telescope(compact_config["psf"])
     with pytest.raises(ValueError):
         renormalize_to_aperture_rms(telescope_data, 10.0)
