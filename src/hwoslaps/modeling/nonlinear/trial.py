@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
-
 PROFILE_CLASS_BY_MODEL = {
     "PointMass": "PointMass",
     "SIS": "IsothermalSph",

@@ -15,7 +15,6 @@ from .dataset_builder import NonlinearDatasetMetadata
 from .likelihood_metrics import LikelihoodRatioMetric
 from .trial import SubhaloTrial
 
-
 NONLINEAR_CASE_CSV_COLUMNS = (
     "run_name",
     "case_id",

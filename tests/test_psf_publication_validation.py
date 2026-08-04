@@ -22,7 +22,6 @@ from hwoslaps.constants import ARCSEC_PER_RAD
 from hwoslaps.psf.generator import generate_psf_system
 from hwoslaps.psf.utils import make_pyauto_convolver
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AIRY_FWHM_DIAMETER_LAMBDA_OVER_D = 1.028993969
 AIRY_FIRST_NULL_RADIUS_LAMBDA_OVER_D = 1.219669891
@@ -127,7 +126,7 @@ def _fft_circular_aperture_psf(
 
 
 def test_numpy_fft_circular_aperture_matches_analytic_airy_metrics():
-    """A non-HCIPy FFT oracle should reproduce Airy FWHM, first null, and energy."""
+    """A non-HCIPy FFT oracle reproduces Airy FWHM, first null, and energy."""
     psf, rho, rho_axis = _fft_circular_aperture_psf()
     center = psf.shape[0] // 2
     rho_positive = rho_axis[center:]
@@ -180,7 +179,7 @@ def test_detector_kernel_matches_binned_highres_branch(
     compact_no_aberration_config: dict,
     aberration_update: dict,
 ):
-    """Detector kernels should equal flux-conserving binning of high-res PSFs."""
+    """Detector kernels equal flux-conserving binning of high-res PSFs."""
     cfg = copy.deepcopy(compact_no_aberration_config)
     cfg["psf"]["aberrations"].update(aberration_update)
 
@@ -254,7 +253,7 @@ def test_generation_parameter_sweep_preserves_sampling_flux_and_diffraction_scal
     pixel_scale_arcsec: float,
     kernel_shape: list[int],
 ):
-    """Representative wavelength/pixel-scale/kernel choices should stay physical."""
+    """Representative wavelength/pixel-scale/kernel choices stay physical."""
     cfg = copy.deepcopy(compact_no_aberration_config)
     cfg["psf"]["hres_psf"]["wavelength"] = wavelength_m
     cfg["psf"]["hres_psf"]["num_airy"] = 5

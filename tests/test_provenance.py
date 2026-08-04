@@ -10,7 +10,6 @@ import yaml
 
 from hwoslaps.provenance import capture_provenance, config_hash, write_provenance
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 

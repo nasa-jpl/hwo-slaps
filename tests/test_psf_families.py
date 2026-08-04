@@ -29,7 +29,6 @@ from hwoslaps.psf.families import (
     renormalize_to_aperture_rms,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NUM_SEGMENTS = 19
 SEGMENTS = list(range(NUM_SEGMENTS))

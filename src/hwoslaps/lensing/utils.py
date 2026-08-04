@@ -5,23 +5,24 @@ This module provides the core data structures and helper functions used
 throughout the lensing module.
 """
 
-import numpy as np
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
-import autolens as al
 from datetime import datetime
+from typing import Dict, Optional, Tuple
+
+import autolens as al
+import numpy as np
 
 
 @dataclass
 class LensingData:
     """
     Complete lensing system data structure.
-    
+
     This class contains all products from the lensing system generation
     process in a unified structure with direct access to all key parameters.
-    Information is organized by importance with primary data, system parameters,
-    subhalo information, derived quantities, and provenance data.
-    
+    Information is organized by importance with primary data, system
+    parameters, subhalo information, derived quantities, and provenance data.
+
     Parameters
     ----------
     image : `numpy.ndarray`
@@ -43,7 +44,7 @@ class LensingData:
     subhalo_mass : `float`, optional
         Mass of the subhalo in solar masses. None if no subhalo present.
     subhalo_model : `str`, optional
-        Model type for the subhalo ('PointMass', 'SIS', or 'NFW'). 
+        Model type for the subhalo ('PointMass', 'SIS', or 'NFW').
         None if no subhalo present.
     subhalo_position : `tuple` of `float`, optional
         Position of the subhalo as (y, x) in arcseconds relative to lens
@@ -91,38 +92,39 @@ class LensingData:
         Complete configuration dictionary used to generate this lensing system.
     generation_timestamp : `str`
         ISO format timestamp of when the lensing system was generated.
-        
+
     Notes
     -----
     This unified structure eliminates the need for nested dictionaries and
     provides direct access to all lensing system parameters. The subhalo
     parameters are None when no subhalo is present, which can be checked
     using the `has_subhalo` property.
-    
+
     The coordinate convention follows PyAutoLens where the first coordinate
     is y (vertical) and the second is x (horizontal).
-    
+
     Examples
     --------
     Access basic system information:
-    
+
     >>> print(f"Lens at z={lensing_data.lens_redshift}")
     >>> print(f"Field of view: {lensing_data.field_of_view_arcsec}")
     >>> if lensing_data.has_subhalo:
     ...     print(f"Subhalo: {lensing_data.subhalo_mass:.1e} M_sun")
     """
+
     # === PRIMARY DATA ===
     image: np.ndarray
     grid: al.Grid2D
     tracer: al.Tracer
-    
+
     # === SYSTEM PARAMETERS ===
     pixel_scale: float
     lens_redshift: float
     source_redshift: float
     lens_einstein_radius: float
     cosmology_name: str
-    
+
     # === SUBHALO INFORMATION ===
     subhalo_mass: Optional[float] = None
     subhalo_model: Optional[str] = None
@@ -136,7 +138,7 @@ class LensingData:
     subhalo_kappa_s: Optional[float] = None
     subhalo_scale_radius_arcsec: Optional[float] = None
     subhalo_profile_parameters: Optional[Dict[str, float]] = None
-    
+
     # === GALAXY PARAMETERS ===
     lens_centre: Tuple[float, float] = (0.0, 0.0)
     lens_ellipticity: Tuple[float, float] = (0.0, 0.0)
@@ -144,31 +146,31 @@ class LensingData:
     source_ellipticity: Tuple[float, float] = (0.0, 0.0)
     source_intensity: float = 1.0
     source_effective_radius: float = 1.0
-    
+
     # === PROVENANCE ===
     config: Optional[Dict] = None
     generation_timestamp: Optional[str] = None
-    
+
     def __post_init__(self):
         """Set generation timestamp if not provided."""
         if self.generation_timestamp is None:
             self.generation_timestamp = datetime.now().isoformat()
-    
+
     @property
     def grid_shape(self):
         """Shape of the coordinate grid as (y_pixels, x_pixels).
-        
+
         Returns
         -------
         shape : `tuple` of `int`
             Grid shape as (y_pixels, x_pixels).
         """
         return self.grid.shape_native
-    
+
     @property
     def field_of_view_arcsec(self):
         """Field of view in arcseconds as (y_fov, x_fov).
-        
+
         Returns
         -------
         fov : `tuple` of `float`
@@ -177,33 +179,33 @@ class LensingData:
         y_fov = self.grid_shape[0] * self.pixel_scale
         x_fov = self.grid_shape[1] * self.pixel_scale
         return (y_fov, x_fov)
-    
+
     @property
     def has_subhalo(self):
         """Whether this lensing system contains a subhalo.
-        
+
         Returns
         -------
         has_subhalo : `bool`
             True if a subhalo is present, False otherwise.
         """
         return self.subhalo_mass is not None
-    
+
     @property
     def total_flux(self):
         """Total flux in the lensed image.
-        
+
         Returns
         -------
         flux : `float`
             Sum of all pixel values in the lensed image.
         """
         return float(np.sum(self.image))
-    
+
     @property
     def peak_intensity(self):
         """Peak intensity in the lensed image.
-        
+
         Returns
         -------
         intensity : `float`
@@ -236,10 +238,10 @@ def _require_positive_finite(value, name):
 def get_einstein_ring_position(angle_deg, einstein_radius, offset_pixels=0, pixel_scale=0.05):
     """
     Calculate position on or near the Einstein ring.
-    
+
     This function places a subhalo at a specified angle around the Einstein
     ring, with optional radial offset for placement studies.
-    
+
     Parameters
     ----------
     angle_deg : `float`
@@ -251,21 +253,21 @@ def get_einstein_ring_position(angle_deg, einstein_radius, offset_pixels=0, pixe
         outward, negative values inward. Default is 0.
     pixel_scale : `float`, optional
         Pixel scale in arcseconds per pixel. Default is 0.05.
-        
+
     Returns
     -------
     position : `tuple` of `float`
         Position (y, x) in arcseconds relative to lens center.
-        
+
     Notes
     -----
     The position is returned in PyAutoLens convention where the first
     coordinate is y (vertical) and second is x (horizontal).
-    
+
     Examples
     --------
     Place a subhalo at 45 degrees on the Einstein ring:
-    
+
     >>> pos = get_einstein_ring_position(45.0, 1.6)
     >>> print(f"Subhalo position: y={pos[0]:.3f}, x={pos[1]:.3f}")
     """
@@ -282,47 +284,51 @@ def get_einstein_ring_position(angle_deg, einstein_radius, offset_pixels=0, pixe
     y = r * np.sin(angle_rad)
     return (y, x)
 
+
 def print_lensing_data_summary(lensing_data):
     """
     Print a comprehensive summary of lensing system data.
-    
+
     Parameters
     ----------
     lensing_data : `LensingData`
         Lensing system data object.
-        
+
     Examples
     --------
     Print a complete lensing system summary:
-    
+
     >>> print_lensing_data_summary(lensing_data)
     === Lensing System Summary ===
     Pixel scale: 0.050000 arcsec/pixel
     ...
     """
     print("=== Lensing System Summary ===")
-    
+
     # System parameters
     print(f"Pixel scale: {lensing_data.pixel_scale:.6f} arcsec/pixel")
     print(f"Grid shape: {lensing_data.grid_shape}")
-    print(f"Field of view: {lensing_data.field_of_view_arcsec[0]:.2f} x {lensing_data.field_of_view_arcsec[1]:.2f} arcsec")
+    print(f"Field of view: {lensing_data.field_of_view_arcsec[0]:.2f} x "
+          f"{lensing_data.field_of_view_arcsec[1]:.2f} arcsec")
     print(f"Cosmology: {lensing_data.cosmology_name}")
-    
+
     # Lens galaxy
     print("\n=== Lens Galaxy ===")
     print(f"Redshift: {lensing_data.lens_redshift}")
     print(f"Einstein radius: {lensing_data.lens_einstein_radius:.6f} arcsec")
     print(f"Centre: ({lensing_data.lens_centre[0]:.6f}, {lensing_data.lens_centre[1]:.6f}) arcsec")
-    print(f"Ellipticity: e1={lensing_data.lens_ellipticity[0]:.3f}, e2={lensing_data.lens_ellipticity[1]:.3f}")
-    
+    print(f"Ellipticity: e1={lensing_data.lens_ellipticity[0]:.3f}, "
+          f"e2={lensing_data.lens_ellipticity[1]:.3f}")
+
     # Source galaxy
     print("\n=== Source Galaxy ===")
     print(f"Redshift: {lensing_data.source_redshift}")
     print(f"Centre: ({lensing_data.source_centre[0]:.6f}, {lensing_data.source_centre[1]:.6f}) arcsec")
-    print(f"Ellipticity: e1={lensing_data.source_ellipticity[0]:.3f}, e2={lensing_data.source_ellipticity[1]:.3f}")
+    print(f"Ellipticity: e1={lensing_data.source_ellipticity[0]:.3f}, "
+          f"e2={lensing_data.source_ellipticity[1]:.3f}")
     print(f"Effective radius: {lensing_data.source_effective_radius:.6f} arcsec")
     print(f"Intensity: {lensing_data.source_intensity:.6f}")
-    
+
     # Subhalo information
     if lensing_data.has_subhalo:
         print("\n=== Subhalo Properties ===")
@@ -332,8 +338,9 @@ def print_lensing_data_summary(lensing_data):
             print("Einstein radius: N/A for this subhalo model")
         else:
             print(f"Einstein radius: {lensing_data.subhalo_einstein_radius:.6f} arcsec")
-        print(f"Position: ({lensing_data.subhalo_position[0]:.6f}, {lensing_data.subhalo_position[1]:.6f}) arcsec")
-        
+        print(f"Position: ({lensing_data.subhalo_position[0]:.6f}, "
+              f"{lensing_data.subhalo_position[1]:.6f}) arcsec")
+
         # Distance from lens center
         dy = lensing_data.subhalo_position[0] - lensing_data.lens_centre[0]
         dx = lensing_data.subhalo_position[1] - lensing_data.lens_centre[1]
@@ -341,11 +348,11 @@ def print_lensing_data_summary(lensing_data):
         angle_deg = np.degrees(np.arctan2(dy, dx))
         print(f"Distance from lens: {distance:.6f} arcsec")
         print(f"Position angle: {angle_deg:.1f} degrees")
-        
+
         # Distance relative to Einstein radius
         einstein_ratio = distance / lensing_data.lens_einstein_radius
         print(f"Distance/Einstein radius: {einstein_ratio:.3f}")
-        
+
         # NFW-specific parameters
         if lensing_data.subhalo_model == 'NFW' and lensing_data.subhalo_concentration is not None:
             print(f"Concentration: {lensing_data.subhalo_concentration:.1f}")
@@ -360,7 +367,7 @@ def print_lensing_data_summary(lensing_data):
     else:
         print("\n=== Subhalo Properties ===")
         print("No subhalo in this system")
-    
+
     # Image statistics
     print("\n=== Image Statistics ===")
     print(f"Total flux: {lensing_data.total_flux:.6e}")
@@ -368,12 +375,12 @@ def print_lensing_data_summary(lensing_data):
     print(f"Min intensity: {np.min(lensing_data.image):.6e}")
     print(f"Mean intensity: {np.mean(lensing_data.image):.6e}")
     print(f"RMS: {np.sqrt(np.mean(lensing_data.image**2)):.6e}")
-    
+
     # Critical curves info (if available)
     if hasattr(lensing_data, 'critical_curves'):
         print("\n=== Critical Curves ===")
         print("Critical curve computation available")
-    
+
     # Provenance
     if hasattr(lensing_data, 'generation_timestamp'):
         print(f"\nGenerated: {lensing_data.generation_timestamp}")

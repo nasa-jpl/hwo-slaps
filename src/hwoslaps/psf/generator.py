@@ -11,23 +11,23 @@ import copy
 import os
 
 import numpy as np
-from hcipy.optics import Wavefront
 from hcipy.field import (
     make_focal_grid,
-    make_uniform_grid,
     make_supersampled_grid,
+    make_uniform_grid,
     subsample_field,
 )
+from hcipy.optics import Wavefront
 from hcipy.propagation import FraunhoferPropagator
-import autolens as al
-from .telescope_models import create_hcipy_telescope
+
 from ..constants import ARCSEC_PER_RAD
 from .aberration_models import (
+    apply_global_zernikes,
     apply_segment_pistons,
     apply_segment_tiptilts,
     apply_segment_zernikes,
-    apply_global_zernikes
 )
+from .telescope_models import create_hcipy_telescope
 from .utils import PSFData, make_pyauto_kernel, pyauto_kernel_pixel_scales
 
 
@@ -80,7 +80,7 @@ def generate_psf_system(config, full_config=None):
         kernel = psf_data.kernel
     """
     # Automatic sampling calculation and validation.
-    
+
     # Extract parameters from the config structure.
     # Config is the PSF config section, full_config contains everything.
     if full_config is not None and 'lensing' in full_config:
@@ -106,7 +106,7 @@ def generate_psf_system(config, full_config=None):
     # Prevent division by zero if res_element_arcsec is somehow zero.
     if res_element_arcsec <= 0:
         raise ValueError("Calculated resolution element size is not positive. "
-                        "Check wavelength and pupil diameter.")
+                         "Check wavelength and pupil diameter.")
 
     hres_pixel_scale_initial = res_element_arcsec / requested_sampling
     non_integer_factor = target_pixel_scale / hres_pixel_scale_initial
@@ -132,7 +132,7 @@ def generate_psf_system(config, full_config=None):
 
     # Create telescope model.
     telescope_data = create_hcipy_telescope(config)
-    
+
     # Extract aberration configurations (strict: all flags must be explicit)
     aberrations = psf_config['aberrations']
     # Apply toggle flags to aberrations.
@@ -140,36 +140,36 @@ def generate_psf_system(config, full_config=None):
     segment_tiptilts = aberrations['segment_tiptilts'] if aberrations['enable_segment_tiptilts'] else None
     segment_hexikes = aberrations['segment_hexikes'] if aberrations['enable_segment_hexikes'] else None
     global_zernikes = aberrations['global_zernikes'] if aberrations['enable_global_zernikes'] else None
-    
+
     # Implement the common trunk approach.
     # Create the pupil_grid and the aberrated pupil-plane Wavefront as the
     # single source of truth.
-    
+
     # Extract telescope components.
     aper = telescope_data['aper']
     hsm = telescope_data['hsm']
     segments = telescope_data['segments']
     wavelength = telescope_data['wavelength']
     num_segments = len(segments)
-    
+
     # Dictionary to store phase screens.
     phase_screens = {}
-    
+
     # Apply segment pistons and tip/tilts via segmented mirror.
     hsm.flatten()
-    
+
     if segment_pistons is not None:
         apply_segment_pistons(hsm, segment_pistons, wavelength, num_segments)
-        
+
     if segment_tiptilts is not None:
         apply_segment_tiptilts(hsm, segment_tiptilts, num_segments)
-    
+
     # Create initial wavefront from aperture.
     wf_pupil = Wavefront(aper, wavelength)
-    
+
     # Apply segmented mirror.
     wf_pupil = hsm(wf_pupil)
-    
+
     # Apply segment-level Zernikes (hexikes) as phase screen.
     if segment_hexikes is not None:
         phase_screen, hexike_surface = apply_segment_zernikes(
@@ -177,17 +177,17 @@ def generate_psf_system(config, full_config=None):
         )
         phase_screens['segment_hexikes'] = phase_screen
         wf_pupil = hexike_surface(wf_pupil)
-    
+
     # Apply global Zernikes as phase screen.
     if global_zernikes is not None:
         phase_screen = apply_global_zernikes(global_zernikes, telescope_data, wavelength)
         phase_screens['global_zernikes'] = phase_screen
         wf_pupil.electric_field *= np.exp(1j * np.array(phase_screen))
-    
+
     # Implement the single high-resolution propagation.
     # Define the high-resolution focal grid using parameters from
     # config['psf']['hres_psf'].
-    
+
     # Create the high-resolution focal grid in focal-plane meters.
     focal_grid_hres = make_focal_grid(
         q=sim_config['sampling'],
@@ -196,10 +196,10 @@ def generate_psf_system(config, full_config=None):
         focal_length=focal_length,
         reference_wavelength=wavelength,
     )
-    
+
     # Create the high-resolution propagator with the correct focal length.
     prop_hres = FraunhoferPropagator(telescope_data['pupil_grid'], focal_grid_hres, focal_length)
-    
+
     # Propagate the pupil wavefront to get one high-resolution PSF wavefront.
     wf_psf_hres = prop_hres(wf_pupil)
     wf_pupil_perfect = Wavefront(aper, wavelength)
@@ -219,16 +219,17 @@ def generate_psf_system(config, full_config=None):
             print(f"Saved high-resolution PSF intensity to {saved_highres_psf_path}")
         except Exception as e:
             print(f"Warning: Failed to save high-resolution PSF .npy: {e}")
-    
+
     # Implement branch A for metrics calculation.
     # Use wf_psf_hres to calculate all optical metrics (Strehl, FWHM, etc.).
     # This part operates on the explicitly high-resolution PSF.
-    
+
     # Calculate high-resolution pixel scale for metrics.
     pixel_scale_arcsec = (
-        telescope_data['wavelength'] / telescope_data['pupil_diameter'] * ARCSEC_PER_RAD / sim_config['sampling']
+        telescope_data['wavelength'] / telescope_data['pupil_diameter']
+        * ARCSEC_PER_RAD / sim_config['sampling']
     )
-    
+
     # Calculate PSF metrics using high-resolution PSF.
     from .psf_metrics import analyze_psf_quality
     quality_metrics = analyze_psf_quality(
@@ -238,27 +239,27 @@ def generate_psf_system(config, full_config=None):
         pupil_diameter=telescope_data['pupil_diameter'],
         sampling=sim_config['sampling']
     )
-    
+
     # Implement branch B for kernel generation via detector.
-    
+
     # Get target parameters and enforce odd kernel shape.
     autolens_pixel_scale = target_pixel_scale
     kernel_shape_native = psf_config['kernel']['shape_native'].copy()
-    
+
     # Enforce odd dimensions.
     original_shape = kernel_shape_native.copy()
     for i in range(len(kernel_shape_native)):
         if kernel_shape_native[i] % 2 == 0:
             kernel_shape_native[i] += 1
-    
+
     if kernel_shape_native != original_shape:
         print(f"Warning: Kernel shape changed from {original_shape} to {kernel_shape_native} "
               f"to ensure odd dimensions required for PyAutoLens convolution.")
-    
+
     # Get subsampling factor.
     # Use the integer subsampling factor N calculated above.
     subsampling_factor = N
-    
+
     # Define the detector grid in focal-plane meters.
     autolens_pixel_scale_rad = autolens_pixel_scale * np.pi / (180 * 3600)
     pixel_scale_m = focal_length * autolens_pixel_scale_rad
@@ -284,7 +285,7 @@ def generate_psf_system(config, full_config=None):
         new_grid=detector_grid_m,
         statistic='sum',
     )
-    
+
     # Normalize detector kernels to unit flux.
     psf_sum = float(np.sum(psf_downsampled))
     perfect_psf_sum = float(np.sum(psf_perfect_downsampled))
@@ -308,14 +309,14 @@ def generate_psf_system(config, full_config=None):
         if perfect_kernel_l2_norm > 0.0
         else None
     )
-    
+
     # Create the detector-sampled PyAuto kernel array.
     kernel = make_pyauto_kernel(
         # Use .shaped to get a 2D array.
         values=psf_downsampled_normalized.shaped,
         pixel_scales=autolens_pixel_scale
     )
-    
+
     # Verify pixel scale matching.
     if not np.allclose(pyauto_kernel_pixel_scales(kernel), autolens_pixel_scale, rtol=1e-10):
         raise ValueError(
@@ -323,7 +324,7 @@ def generate_psf_system(config, full_config=None):
             f"expected autolens_pixel_scale={autolens_pixel_scale}. "
             f"This indicates a fundamental problem in the downsampling logic."
         )
-    
+
     # Calculate proper total RMS wavefront error including all aberrations.
     # This combines the DM surface OPD (factor 2 on reflection) with OPD
     # implied by any applied phase screens (segment hexikes, global Zernikes).
@@ -348,7 +349,7 @@ def generate_psf_system(config, full_config=None):
     except Exception as e:
         print(f"Warning: Could not calculate total RMS including phase screens: {e}")
         total_rms_nm = 0.0
-    
+
     # Calculate individual aberration coefficient summaries for metadata.
     # These are not independent aperture-weighted RMS budget terms.
     # above is the physical OPD RMS over the illuminated pupil.
@@ -359,24 +360,24 @@ def generate_psf_system(config, full_config=None):
     # Calculate segment flat-to-flat from point-to-point.
     segment_point_to_point = telescope_config['segment_point_to_point']
     segment_flat_to_flat = segment_point_to_point * np.sqrt(3) / 2
-    
+
     if segment_pistons:
         segment_piston_rms_nm = np.std(list(segment_pistons.values()))
-        
+
     if segment_tiptilts:
         # RMS magnitude of tip/tilt vector across segments (μrad).
         # Shape is (N, 2).
         tiptilts_array = np.array(list(segment_tiptilts.values()))
         magsq = np.sum(tiptilts_array**2, axis=1)  # tip^2 + tilt^2 per segment
         segment_tiptilt_rms_urad = float(np.sqrt(np.mean(magsq)))
-        
+
     if global_zernikes:
         # Calculate RMS of global Zernikes.
         global_zernike_rms_nm = np.sqrt(np.sum([coeff**2 for coeff in global_zernikes.values()]))
-    
+
     # Update PSFData instantiation.
     # Populate the PSFData object with the results from both branches.
-    
+
     # Create unified PSFData object.
     psf_data = PSFData(
         # Primary data from both branches.
@@ -384,7 +385,7 @@ def generate_psf_system(config, full_config=None):
         wavefront=wf_pupil.copy(),  # Final aberrated pupil-plane wavefront.
         telescope_data=telescope_data,
         kernel=kernel,  # Physically downsampled kernel from Branch B.
-        
+
         # System parameters.
         wavelength_nm=sim_config['wavelength'] * 1e9,
         pupil_diameter_m=telescope_config['pupil_diameter'],
@@ -395,13 +396,13 @@ def generate_psf_system(config, full_config=None):
         used_sampling_factor=used_sampling,
         integer_subsampling_factor=N,
         num_segments=len(telescope_data['segments']),
-        
+
         # Telescope geometry.
         segment_flat_to_flat_m=segment_flat_to_flat,
         segment_point_to_point_m=telescope_config['segment_point_to_point'],
         gap_size_m=telescope_config['gap_size'],
         num_rings=telescope_config['num_rings'],
-        
+
         # Quality metrics (no default backups; optional keys may be absent)
         fwhm_arcsec=quality_metrics['fwhm_arcsec'] if 'fwhm_arcsec' in quality_metrics else None,
         fwhm_mas=(quality_metrics['fwhm_arcsec'] * 1000) if 'fwhm_arcsec' in quality_metrics else None,
@@ -411,28 +412,28 @@ def generate_psf_system(config, full_config=None):
         total_flux=quality_metrics['total_flux'],
         kernel_diff_l2_norm=kernel_diff_l2_norm,
         kernel_diff_l2_rel=kernel_diff_l2_rel,
-        
+
         # Aberration summary.
         total_rms_nm=total_rms_nm,
         segment_piston_rms_nm=float(segment_piston_rms_nm),
         segment_tiptilt_rms_urad=segment_tiptilt_rms_urad,
         global_zernike_rms_nm=global_zernike_rms_nm,
-        
+
         # Aberration flags.
         has_segment_pistons=segment_pistons is not None,
         has_segment_tiptilts=segment_tiptilts is not None,
         has_segment_hexikes=segment_hexikes is not None,
         has_global_zernikes=global_zernikes is not None,
-        
+
         # Kernel metadata.
         # Pixel scale of detector-generated kernel.
         kernel_pixel_scale=autolens_pixel_scale,
         highres_psf_npy_path=saved_highres_psf_path,
-        
+
         # Complex data.
         phase_screens=phase_screens,
         aberrations=aberrations,
         config=full_config
     )
-    
+
     return psf_data

@@ -7,7 +7,11 @@ from typing import List, Sequence
 
 import numpy as np
 
-from .trial import SubhaloTrial, trial_from_fisher_map_position, trial_from_lensing_truth
+from .trial import (
+    SubhaloTrial,
+    trial_from_fisher_map_position,
+    trial_from_lensing_truth,
+)
 
 
 @dataclass(frozen=True)

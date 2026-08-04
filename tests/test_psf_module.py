@@ -10,7 +10,7 @@ numerical correctness of key quantities.
 import copy
 import math
 import os
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 import pytest
@@ -21,8 +21,8 @@ from hwoslaps.psf import (
 )
 from hwoslaps.psf.psf_metrics import calculate_strehl_ratio
 
-
 # ---- Fixtures ----
+
 
 @pytest.fixture(scope="session")
 def config_path() -> str:
@@ -55,16 +55,18 @@ def psf_config(master_config: Dict[str, Any]) -> Dict[str, Any]:
 def psf_data(master_config: Dict[str, Any], psf_config: Dict[str, Any]):
     """Generate a PSF system using the configuration from master_config.yaml.
 
-    Source of inputs: all taken from `master_config` (PSF, lensing, and telescope).
+    Source of inputs: all taken from `master_config` (PSF, lensing, and
+    telescope).
     """
     return generate_psf_system(psf_config, full_config=master_config)
 
 
 @pytest.fixture(scope="session")
 def perfect_psf_data(master_config: Dict[str, Any]) -> Any:
-    """Generate a near-perfect PSF by disabling all aberrations in a copy of the config.
+    """Generate a near-perfect PSF by disabling all aberrations.
 
-    Source: same `master_config.yaml` with only `psf.aberrations.enable_* = False`.
+    Source: same `master_config.yaml` with only
+    `psf.aberrations.enable_* = False`.
     """
     cfg_perfect = copy.deepcopy(master_config)
     ab = cfg_perfect["psf"]["aberrations"]
@@ -167,18 +169,18 @@ def test_generate_psf_core_invariants(master_config: Dict[str, Any], psf_data):
     expected_shape = _odd_enforced(list(psf_cfg["kernel"]["shape_native"]))
     assert list(psf_data.kernel.shape_native) == expected_shape
 
-    # Kernel pixel scale must match lensing.grid.pixel_scale exactly (within tight tol)
+    # Kernel pixel scale must match lensing.grid.pixel_scale exactly
     cfg_pixel_scale = float(master_config["lensing"]["grid"]["pixel_scale"])
     assert math.isclose(float(psf_data.kernel_pixel_scale), cfg_pixel_scale, rel_tol=1e-12, abs_tol=0.0)
 
-    # Integer subsampling and used sampling must match the theoretical expectation
+    # Integer subsampling and used sampling must match theory
     N_exp, used_sampling_exp = _expected_integer_and_used_sampling(master_config)
     assert psf_data.integer_subsampling_factor == int(N_exp)
     assert math.isclose(float(psf_data.used_sampling_factor), float(used_sampling_exp), rel_tol=1e-12)
 
 
 def test_highres_psf_dimensions_from_sampling(master_config: Dict[str, Any], psf_data):
-    """The high‑res PSF grid dimensions equal floor(2 * num_airy * used_sampling).
+    """High-res PSF dimensions equal floor(2 * num_airy * used_sampling).
 
     Inputs: `num_airy` and auto-adjusted sampling from `master_config.yaml`.
     """
@@ -212,10 +214,14 @@ def test_aberration_flags_match_config(master_config: Dict[str, Any], psf_data):
     """
     ab = master_config["psf"]["aberrations"]
 
-    assert psf_data.has_segment_pistons == bool(ab.get("enable_segment_pistons", True) and ab.get("segment_pistons"))
-    assert psf_data.has_segment_tiptilts == bool(ab.get("enable_segment_tiptilts", True) and ab.get("segment_tiptilts"))
-    assert psf_data.has_segment_hexikes == bool(ab.get("enable_segment_hexikes", True) and ab.get("segment_hexikes"))
-    assert psf_data.has_global_zernikes == bool(ab.get("enable_global_zernikes", True) and ab.get("global_zernikes"))
+    assert psf_data.has_segment_pistons == bool(
+        ab.get("enable_segment_pistons", True) and ab.get("segment_pistons"))
+    assert psf_data.has_segment_tiptilts == bool(
+        ab.get("enable_segment_tiptilts", True) and ab.get("segment_tiptilts"))
+    assert psf_data.has_segment_hexikes == bool(
+        ab.get("enable_segment_hexikes", True) and ab.get("segment_hexikes"))
+    assert psf_data.has_global_zernikes == bool(
+        ab.get("enable_global_zernikes", True) and ab.get("global_zernikes"))
 
     # If enabled, the corresponding RMS summaries should be non-trivial
     if psf_data.has_segment_pistons:
@@ -229,7 +235,7 @@ def test_aberration_flags_match_config(master_config: Dict[str, Any], psf_data):
 def test_fwhm_physical_scale_sanity(psf_data):
     """FWHM must be positive and within a plausible multiple of λ/D.
 
-    Inputs: derived from generated PSF and telescope parameters embedded in PSFData.
+    Inputs: generated PSF and telescope parameters embedded in PSFData.
     """
     assert psf_data.fwhm_arcsec is not None and psf_data.fwhm_arcsec > 0
 
@@ -240,10 +246,10 @@ def test_fwhm_physical_scale_sanity(psf_data):
 
 
 def test_strehl_ratio_degrades_with_aberrations(psf_data, perfect_psf_data):
-    """Strehl ratio computed vs. a perfect PSF must not exceed unity and should be < 1.
+    """Strehl ratio against a perfect PSF must lie strictly below unity.
 
-    Inputs: aberrated PSF from `master_config.yaml`; perfect PSF from same config with
-    all `enable_*` toggles set to False.
+    Inputs: aberrated PSF from `master_config.yaml`; perfect PSF from the same
+    config with all `enable_*` toggles set to False.
     """
     strehl = float(calculate_strehl_ratio(psf_data.psf, perfect_psf_data.psf))
     assert 0.0 < strehl <= 1.0
@@ -254,7 +260,7 @@ def test_strehl_ratio_degrades_with_aberrations(psf_data, perfect_psf_data):
 def test_even_kernel_shape_is_enforced_to_odd(master_config: Dict[str, Any]):
     """If an even kernel shape is requested, implementation must bump to odd.
 
-    Inputs: cloned config from `master_config.yaml` with kernel.shape_native made even.
+    Inputs: cloned `master_config.yaml` with an even kernel.shape_native.
     """
     cfg = copy.deepcopy(master_config)
     # Make both dimensions even
@@ -262,7 +268,7 @@ def test_even_kernel_shape_is_enforced_to_odd(master_config: Dict[str, Any]):
         int(cfg["psf"]["kernel"]["shape_native"][0]) + 1,
         int(cfg["psf"]["kernel"]["shape_native"][1]) + 1,
     ]
-    # If they were already even, adding 1 makes them odd; make them even explicitly
+    # If they were already even, adding 1 makes them odd; force even here
     cfg["psf"]["kernel"]["shape_native"] = [
         v if v % 2 == 0 else v + 1 for v in cfg["psf"]["kernel"]["shape_native"]
     ]
@@ -273,14 +279,14 @@ def test_even_kernel_shape_is_enforced_to_odd(master_config: Dict[str, Any]):
 
 
 def test_single_global_zernike_rms_approx_matches_input(master_config: Dict[str, Any]):
-    """Applying a single 10 nm RMS global Zernike yields ~10 nm total wavefront RMS.
+    """A single 10 nm RMS global Zernike yields ~10 nm wavefront RMS.
 
     Source: `master_config.yaml` cloned with all segment terms disabled and
     `global_zernikes = {4: 10}` (focus). We assert that:
     - `psf_data.global_zernike_rms_nm ≈ 10 nm` (exact by construction), and
-    - `psf_data.total_rms_nm` measured over the hex pupil is approximately 10 nm
-      within a generous tolerance to allow for pupil-geometry and discretization
-      effects.
+    - `psf_data.total_rms_nm` measured over the hex pupil is approximately
+      10 nm within a generous tolerance to allow for pupil-geometry and
+      discretization effects.
     """
     cfg = copy.deepcopy(master_config)
     ab = cfg["psf"]["aberrations"]
@@ -299,5 +305,3 @@ def test_single_global_zernike_rms_approx_matches_input(master_config: Dict[str,
     # Measured total RMS across the hex pupil should be close to 10 nm.
     # Allow moderate tolerance for geometry/normalization and discretization.
     assert data.total_rms_nm == pytest.approx(10.0, rel=0.3)
-
-

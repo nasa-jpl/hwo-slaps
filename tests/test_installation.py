@@ -1,9 +1,9 @@
-# tests/test_installation.py
 #!/usr/bin/env python
 """Basic import tests for HWO-SLAPS core dependencies and package.
 
-This test file replaces a previous script-style checker with proper pytest tests
-to avoid parameterized function collection errors and to integrate with CI.
+This test file replaces a previous script-style checker with proper pytest
+tests to avoid parameterized function collection errors and to integrate with
+CI.
 """
 
 import importlib

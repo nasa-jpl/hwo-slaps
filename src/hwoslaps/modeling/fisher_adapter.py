@@ -1,9 +1,9 @@
 """Image-space adapters for the Fisher / Asimov core.
 
-These helpers convert 2D mean images, noise maps, and derivative images into the
-1D vectors required by :mod:`fisher_core`.  They are intentionally kept
-free of AutoLens-specific object types so they can be reused by multiple forward
-models.
+These helpers convert 2D mean images, noise maps, and derivative images into
+the 1D vectors required by :mod:`fisher_core`.  They are intentionally kept
+free of AutoLens-specific object types so they can be reused by multiple
+forward models.
 """
 
 from __future__ import annotations
@@ -14,15 +14,14 @@ import numpy as np
 
 from .fisher_core import (
     AsimovAmplitudeResult,
+    SignalBankResult,
     SpuriousAmplitudeResult,
     SystematicModeScanResult,
-    SignalBankResult,
     compute_asimov_detectability,
     compute_spurious_amplitude,
     evaluate_signal_bank,
     scan_systematic_modes,
 )
-
 
 Array2DLike = np.ndarray
 
@@ -101,7 +100,8 @@ def stack_masked_images(
     return np.column_stack(cols)
 
 
-def extract_masked_covariance(covariance: np.ndarray, mask: Optional[np.ndarray], image_shape: Tuple[int, int]) -> np.ndarray:
+def extract_masked_covariance(covariance: np.ndarray, mask: Optional[np.ndarray],
+                              image_shape: Tuple[int, int]) -> np.ndarray:
     """Extract the sub-covariance corresponding to the selected pixels."""
     cov = np.asarray(covariance, dtype=float)
     n_pix = int(np.prod(image_shape))

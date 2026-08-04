@@ -32,13 +32,13 @@ import io
 import multiprocessing
 import os
 import sys
-from time import perf_counter
 from copy import deepcopy
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
-import numpy as np
 import autolens as al
+import numpy as np
 
 try:
     from tqdm.auto import tqdm as _tqdm
@@ -274,7 +274,8 @@ class FisherDetector:
 
         if (self.include_psf_nuisance or self.compute_psf_mode_scan) and not self.psf_basis_config:
             raise ValueError(
-                "modeling.fisher.psf_basis is required when PSF nuisance fitting or PSF mode scanning is enabled"
+                "modeling.fisher.psf_basis is required when PSF nuisance "
+                "fitting or PSF mode scanning is enabled"
             )
         if self.compute_psf_mode_scan and not self.scan_psf_mode_selection:
             raise ValueError(
@@ -1200,7 +1201,8 @@ class FisherDetector:
         unsupported = sorted(set(selection_config.keys()) - supported)
         if unsupported:
             raise ValueError(
-                f"{context} contains unsupported PSF families: {unsupported}. Supported families are: {sorted(supported)}"
+                f"{context} contains unsupported PSF families: {unsupported}. "
+                f"Supported families are: {sorted(supported)}"
             )
 
         specs: List[_PsfModeSpec] = []
@@ -1357,7 +1359,8 @@ class FisherDetector:
         return config
 
     def _science_psf_base_value(self, spec: _PsfModeSpec) -> float:
-        enabled = bool(self._get_path_value_or_default(self.science_psf_config_template, spec.enable_flag_path, False))
+        enabled = bool(self._get_path_value_or_default(
+            self.science_psf_config_template, spec.enable_flag_path, False))
         if not enabled:
             return 0.0
         return float(self._get_path_value_or_default(self.science_psf_config_template, spec.path, 0.0))
@@ -1551,7 +1554,8 @@ class FisherDetector:
         seg_id = int(value)
         if seg_id < 0 or seg_id >= int(self.psf_data.num_segments):
             raise ValueError(
-                f"{context}={seg_id} is outside the available segment range [0, {int(self.psf_data.num_segments) - 1}]"
+                f"{context}={seg_id} is outside the available segment range "
+                f"[0, {int(self.psf_data.num_segments) - 1}]"
             )
         return seg_id
 
@@ -1580,7 +1584,8 @@ class FisherDetector:
         if isinstance(value, str):
             if value.lower() != "all":
                 raise ValueError(
-                    f"{context} for {family} must be 'all', a list of segment ids, or a dict with a 'segments' field."
+                    f"{context} for {family} must be 'all', a list of segment "
+                    "ids, or a dict with a 'segments' field."
                 )
             segment_ids = self._all_segment_ids()
         elif isinstance(value, (list, tuple)):
@@ -1590,7 +1595,8 @@ class FisherDetector:
             ]
         else:
             raise ValueError(
-                f"{context} for {family} must be 'all', a list of segment ids, or a dict with a 'segments' field."
+                f"{context} for {family} must be 'all', a list of segment ids, "
+                "or a dict with a 'segments' field."
             )
         return sorted(set(segment_ids))
 
@@ -1654,7 +1660,8 @@ class FisherDetector:
             return sorted(set(pairs))
 
         raise ValueError(
-            f"{context} must be either {{segments, mode_nolls}}, a mapping seg->modes, or a list of (segment, mode_noll) pairs."
+            f"{context} must be either {{segments, mode_nolls}}, a mapping "
+            "seg->modes, or a list of (segment, mode_noll) pairs."
         )
 
     # ------------------------------------------------------------------

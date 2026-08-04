@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from pathlib import Path
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,8 +15,8 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from hwoslaps.pipeline import Pipeline
 from hwoslaps.modeling.utils_fisher import FisherDetectionData, FisherLocalData
+from hwoslaps.pipeline import Pipeline
 
 
 def _make_fisher_config_with_required_fields() -> dict:
@@ -76,8 +76,8 @@ def _make_detector_stub(label: str):
 
 
 def test_pipeline_routes_detection_to_fisher(monkeypatch):
-    import hwoslaps.pipeline as pipeline_module
     import hwoslaps.modeling.generator_fisher as fisher_generator
+    import hwoslaps.pipeline as pipeline_module
 
     call_counts = {"fisher": 0}
 

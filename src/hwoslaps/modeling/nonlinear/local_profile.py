@@ -8,7 +8,6 @@ from typing import Callable, List, Optional, Sequence
 import numpy as np
 from scipy.optimize import least_squares
 
-
 ResidualFunction = Callable[[np.ndarray], np.ndarray]
 
 
@@ -26,6 +25,7 @@ class LocalFitAttempt:
     optimality: float
 
     def to_dict(self) -> dict:
+        """Return this attempt as a plain dictionary."""
         return asdict(self)
 
 
@@ -42,9 +42,11 @@ class LocalProfileFitResult:
 
     @property
     def chi2_min(self) -> float:
+        """Chi-squared of the best attempt (`float`, read-only)."""
         return float(self.best.chi2)
 
     def to_dict(self) -> dict:
+        """Return this fit result as a plain dictionary."""
         return asdict(self)
 
 

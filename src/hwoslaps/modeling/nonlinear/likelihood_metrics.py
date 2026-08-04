@@ -12,7 +12,6 @@ from typing import Dict
 
 import numpy as np
 
-
 SCDD_DELTA_LOG_L_THRESHOLD = 5.0
 """SCDD local-detection threshold in maximum log likelihood."""
 

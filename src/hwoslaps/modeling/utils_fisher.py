@@ -13,7 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Tuple, List, Any, Sequence, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+
 import numpy as np
 
 
@@ -215,22 +216,24 @@ class FisherDetectionData:
     grid_map: Optional[FisherGridMapData] = None
 
     def __post_init__(self):
+        """Stamp the generation timestamp when one was not supplied."""
         if self.generation_timestamp is None:
             self.generation_timestamp = datetime.now().isoformat()
 
     @property
     def has_local(self) -> bool:
+        """Whether a local result is present (`bool`, read-only)."""
         return self.local is not None
 
     @property
     def has_map(self) -> bool:
+        """Whether a map result is present (`bool`, read-only)."""
         return self.map is not None
 
     @property
     def has_grid_map(self) -> bool:
         """Whether a grid-map result is present (`bool`, read-only)."""
         return self.grid_map is not None
-
 
 
 def _format_mode_scan(mode_scan: FisherModeScanData, max_modes: int = 5) -> List[str]:
@@ -257,7 +260,6 @@ def _format_mode_scan(mode_scan: FisherModeScanData, max_modes: int = 5) -> List
     if mode_scan.rms_spurious_z is not None:
         lines.append(f"    RMS spurious z from supplied covariance: {mode_scan.rms_spurious_z:.4g}")
     return lines
-
 
 
 def print_fisher_summary(fisher_data: FisherDetectionData) -> None:

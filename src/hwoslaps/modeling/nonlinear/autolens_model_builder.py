@@ -14,7 +14,6 @@ from .model_specs import (
 )
 from .trial import SubhaloTrial
 
-
 DEFAULT_PRIOR_WIDTHS = {
     "lens_centre_sigma_arcsec": 0.005,
     "lens_einstein_radius_sigma": 0.01,

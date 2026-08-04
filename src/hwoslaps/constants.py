@@ -14,7 +14,6 @@ is approximately 3.08567758e22 meters per megaparsec.
 
 from astropy import units as u
 
-
 # Distance conversions
 PC_TO_M: float = float((1 * u.pc).to(u.m).value)
 """Meters per parsec (pc → m)."""
@@ -32,5 +31,3 @@ KM_TO_M: float = 1000.0
 
 ARCSEC_PER_RAD: float = float((1 * u.rad).to(u.arcsec).value)
 """Arcseconds per radian (rad → arcsec)."""
-
-

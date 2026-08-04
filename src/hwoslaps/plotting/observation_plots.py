@@ -3,18 +3,20 @@
 This module provides visualization tools for observation data.
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
-from typing import Optional, Tuple
 from pathlib import Path
+from typing import Optional, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 from ..lensing.utils import LensingData
-from ..psf.utils import PSFData, pyauto_kernel_native
 from ..observation.utils import ObservationData
+from ..psf.utils import PSFData, pyauto_kernel_native
 from .registry import plot_function
 
 
-@plot_function(module='observation', description="2x2 observation process: lensed image, PSF, noise, final observation")
+@plot_function(module='observation',
+               description="2x2 observation process: lensed image, PSF, noise, final observation")
 def plot_observation_comparison(
     lensing_data: LensingData,
     psf_data: PSFData,
@@ -23,13 +25,13 @@ def plot_observation_comparison(
     save_path: Optional[str] = None
 ) -> plt.Figure:
     """Create a 2x2 comparison plot of the observation process.
-    
+
     Shows:
     - Original lensed image
     - PSF
     - Noise map
     - Final observed image
-    
+
     Parameters
     ----------
     lensing_data : `LensingData`
@@ -42,14 +44,14 @@ def plot_observation_comparison(
         Figure size as (width, height).
     save_path : `str`, optional
         Path to save the figure.
-        
+
     Returns
     -------
     fig : `matplotlib.figure.Figure`
         The created figure.
     """
     fig, axes = plt.subplots(2, 2, figsize=figsize)
-    
+
     # 1. Original lensed image
     im1 = axes[0, 0].imshow(
         lensing_data.image,
@@ -58,7 +60,7 @@ def plot_observation_comparison(
     )
     axes[0, 0].set_title('Original Lensed Image')
     plt.colorbar(im1, ax=axes[0, 0], fraction=0.046)
-    
+
     # 2. PSF (log scale)
     psf_log = np.log10(pyauto_kernel_native(psf_data.kernel) + 1e-10)
     im2 = axes[0, 1].imshow(
@@ -71,7 +73,7 @@ def plot_observation_comparison(
     else:
         axes[0, 1].set_title('PSF (log10)')
     plt.colorbar(im2, ax=axes[0, 1], fraction=0.046)
-    
+
     # 3. Noise map
     im3 = axes[1, 0].imshow(
         obs_data.noise_map.native,
@@ -80,7 +82,7 @@ def plot_observation_comparison(
     )
     axes[1, 0].set_title('Noise Map (ADU)')
     plt.colorbar(im3, ax=axes[1, 0], fraction=0.046)
-    
+
     # 4. Final observed image
     im4 = axes[1, 1].imshow(
         obs_data.data.native,
@@ -89,11 +91,11 @@ def plot_observation_comparison(
     )
     axes[1, 1].set_title('Mock Observation')
     plt.colorbar(im4, ax=axes[1, 1], fraction=0.046)
-    
+
     plt.tight_layout()
-    
+
     if save_path:
         Path(save_path).parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(save_path, dpi=150, bbox_inches='tight')
-    
+
     return fig

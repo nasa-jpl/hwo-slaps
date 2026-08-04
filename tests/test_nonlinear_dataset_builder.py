@@ -49,6 +49,6 @@ def test_validation_dataset_uses_rate_units_matching_pyautolens_model():
     assert np.allclose(source_rate, [[5.0, 7.0]])
     assert np.allclose(source_rate_alias, source_rate)
     assert np.allclose(asimov, [[1.5, 2.5]])
-    # ADU -> electrons / second, then subtract known sky+dark in the same units.
+    # ADU -> electrons / second, then subtract known sky+dark in those units.
     assert np.allclose(noisy, [[3.8, 5.8]])
     assert np.allclose(noise, [[0.8, 1.2]])

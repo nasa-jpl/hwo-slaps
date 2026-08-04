@@ -9,11 +9,13 @@ optical quality metrics and detector-sampled kernels used for science
 applications.
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
 from hcipy.plotting import imshow_field, imshow_psf
 from matplotlib.colors import LogNorm
+
 from ..constants import ARCSEC_PER_RAD
 from ..psf.utils import pyauto_kernel_native, pyauto_kernel_shape_native
 from .registry import plot_function
@@ -21,10 +23,10 @@ from .registry import plot_function
 
 def _create_output_directory(base_output_dir, run_name, module_name):
     """Create structured output directory following the convention.
-    
+
     Creates output directories with the structure:
     {output_folder}/{run_name}/{module}
-    
+
     Parameters
     ----------
     base_output_dir : `str` or `Path`
@@ -33,7 +35,7 @@ def _create_output_directory(base_output_dir, run_name, module_name):
         Run identifier name.
     module_name : `str`
         Module name (e.g., 'psf', 'lensing').
-        
+
     Returns
     -------
     output_dir : `Path`
@@ -47,59 +49,59 @@ def _create_output_directory(base_output_dir, run_name, module_name):
 @plot_function(module='psf', description="3-panel PSF comparison: phase screen, wavefront, PSF")
 def plot_psf_comparison(psf_data, plot_config):
     """Plot PSF system comparison.
-    
+
     Creates a horizontal 3x1 plot showing:
     1. Phase screen (if available)
-    2. Total wavefront phase  
+    2. Total wavefront phase
     3. PSF
-    
+
     Parameters
     ----------
     psf_data : `PSFData`
         Complete PSF system data from the pipeline.
     plot_config : `dict`
         Plotting configuration including output directory and run name.
-        
+
     Notes
     -----
     The function generates a 3-panel comparison plot showing phase screens,
     total wavefront phase, and the final PSF with aberration information
     automatically extracted from the unified PSFData structure.
-    
+
     Examples
     --------
     Plot a PSF comparison:
-    
+
     >>> plot_config = {'output_dir': '/path/to/output'}
     >>> plot_psf_comparison(psf_data, plot_config)
     """
     # Get run name from config.
     config = psf_data.config
     run_name = config['run_name']
-    
+
     # Create structured output directory.
     output_dir = _create_output_directory(
-        plot_config['output_dir'], 
-        run_name, 
+        plot_config['output_dir'],
+        run_name,
         'psf'
     )
-    
+
     # Extract data using unified structure.
     wavelength_nm = psf_data.wavelength_nm
-    
+
     # Set up the plotting style.
     plt.style.use('default')
-    
+
     # Create the main comparison figure.
     plt.figure(figsize=(15, 5))
-    
+
     # Plot 1: Phase screen (if available).
     plt.subplot(131)
     if psf_data.phase_screens:
         # Get the first available phase screen.
         phase_screen_name = list(psf_data.phase_screens.keys())[0]
         phase_screen = psf_data.phase_screens[phase_screen_name]
-        
+
         if 'api' in phase_screen_name.lower():
             plt.title('Hexike Phase Screen (API)')
         elif 'segment' in phase_screen_name.lower():
@@ -108,20 +110,20 @@ def plot_psf_comparison(psf_data, plot_config):
             plt.title('Phase Screen (Global Zernikes)')
         else:
             plt.title('Phase Screen')
-            
+
         imshow_field(phase_screen, cmap='RdBu_r')
         plt.colorbar(label='Phase [rad]')
     else:
         plt.title('No Phase Screen Available')
-        plt.text(0.5, 0.5, 'No phase screens\navailable', 
-                transform=plt.gca().transAxes, ha='center', va='center')
-    
+        plt.text(0.5, 0.5, 'No phase screens\navailable',
+                 transform=plt.gca().transAxes, ha='center', va='center')
+
     # Plot 2: Total wavefront phase (pupil plane).
     plt.subplot(132)
     plt.title('Pupil Plane Wavefront Phase')
     imshow_field(np.angle(psf_data.wavefront.electric_field), cmap='RdBu_r')
     plt.colorbar(label='Phase [rad]')
-    
+
     # Plot 3: PSF.
     plt.subplot(133)
     aberration_types = []
@@ -133,30 +135,30 @@ def plot_psf_comparison(psf_data, plot_config):
         aberration_types.append('hexikes')
     if psf_data.has_global_zernikes:
         aberration_types.append('global')
-    
+
     if aberration_types:
         title = f"PSF with {', '.join(aberration_types)}"
     else:
         title = "Perfect PSF"
-    
+
     plt.title(title)
     imshow_psf(psf_data.psf, normalization='peak')
-    
+
     plt.tight_layout()
-    
+
     # Create meaningful filename.
     filename = f"psf_comparison_{wavelength_nm:.0f}nm.png"
     filepath = output_dir / filename
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Saved PSF comparison plot: {filepath}")
 
 
 @plot_function(module='psf', description="Zoomed PSF phase view for detailed analysis")
 def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
     """Plot zoomed view of PSF phase.
-    
+
     Parameters
     ----------
     psf_data : `PSFData`
@@ -165,41 +167,41 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
         Plotting configuration.
     zoom_mode : `str`, optional
         Zoom mode: 'full' for full aperture, 'corner' for corner detail.
-        
+
     Notes
     -----
     Creates a detailed zoom view of the wavefront phase with aperture
     boundaries clearly marked. Uses the unified PSFData structure for
     direct access to system parameters.
-    
+
     Examples
     --------
     Create zoom plots for different regions:
-    
+
     >>> plot_psf_zoom(psf_data, plot_config, zoom_mode='full')
     >>> plot_psf_zoom(psf_data, plot_config, zoom_mode='corner')
     """
     # Get run name from config.
     config = psf_data.config
     run_name = config['run_name']
-    
+
     # Create structured output directory.
     output_dir = _create_output_directory(
-        plot_config['output_dir'], 
-        run_name, 
+        plot_config['output_dir'],
+        run_name,
         'psf'
     )
-    
+
     wavelength_nm = psf_data.wavelength_nm
-    
+
     # Create zoom plot.
     plt.figure(figsize=(8, 6))
-    
+
     # Get the pupil-plane grid coordinates.
     pupil_grid = psf_data.wavefront.grid
     x = pupil_grid.coords[0]
     y = pupil_grid.coords[1]
-    
+
     # Define zoom region in pupil-plane coordinates.
     if zoom_mode == 'full':
         # Use the full pupil-plane extent.
@@ -213,34 +215,34 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
         zoom_ymin, zoom_ymax = y.min(), y.min() + extent_y * 0.4
     else:
         raise ValueError(f"Invalid zoom mode: {zoom_mode}")
-    
+
     # Mask for the zoomed region.
     zoom_mask = (x >= zoom_xmin) & (x <= zoom_xmax) & (y >= zoom_ymin) & (y <= zoom_ymax)
-    
+
     # Create a zoomed field for pixel-based visualization.
     zoom_indices = np.where(zoom_mask.reshape(pupil_grid.shape))
     y_indices, x_indices = zoom_indices
-    
+
     # Get the bounds of the zoom region in grid indices.
     y_min, y_max = y_indices.min(), y_indices.max() + 1
     x_min, x_max = x_indices.min(), x_indices.max() + 1
-    
+
     # Extract the zoomed phase data as 2D arrays.
     zoom_total_phase_2d = np.angle(psf_data.wavefront.electric_field).shaped[y_min:y_max, x_min:x_max]
-    
+
     # Create extent for proper axis scaling.
     extent = (zoom_xmin, zoom_xmax, zoom_ymin, zoom_ymax)
-    
+
     # The stored wavefront is already defined on the pupil-plane grid.
     zoom_phase_masked = zoom_total_phase_2d
-    
+
     # Plot: Pupil-plane wavefront phase.
     plt.title('Pupil Plane Wavefront Phase\n(Zoomed)')
-    im = plt.imshow(zoom_phase_masked, cmap='RdBu_r', interpolation='nearest', 
+    im = plt.imshow(zoom_phase_masked, cmap='RdBu_r', interpolation='nearest',
                     extent=extent, origin='lower', aspect='equal')
     plt.xlabel('x [m]')
     plt.ylabel('y [m]')
-    
+
     # Add colorbar with error handling for edge cases.
     try:
         plt.colorbar(im, label='Phase [rad]')
@@ -249,19 +251,20 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
         # Create a simple text label instead.
         valid_data = zoom_phase_masked[~np.isnan(zoom_phase_masked)]
         if len(valid_data) > 0:
-            plt.text(0.02, 0.98, f'Phase range: [{valid_data.min():.2f}, {valid_data.max():.2f}] rad', 
-                    transform=plt.gca().transAxes, va='top', bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-    
+            plt.text(0.02, 0.98, f'Phase range: [{valid_data.min():.2f}, {valid_data.max():.2f}] rad',
+                     transform=plt.gca().transAxes, va='top',
+                     bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
     plt.tight_layout()
-    
+
     # Save the plot.
     filename = f"psf_zoom_{zoom_mode}_{wavelength_nm:.0f}nm.png"
     filepath = output_dir / filename
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Saved PSF zoom plot: {filepath}")
-    
+
     # Print zoom info.
     print(f"Zoom region: x=[{zoom_xmin:.2f}, {zoom_xmax:.2f}], y=[{zoom_ymin:.2f}, {zoom_ymax:.2f}]")
     print(f"Zoomed array shape: {zoom_total_phase_2d.shape}")
@@ -272,55 +275,55 @@ def plot_psf_zoom(psf_data, plot_config, zoom_mode='full'):
 @plot_function(module='psf', description="Complete PSF system overview with comparison and zoom")
 def plot_psf_system_overview(psf_data, plot_config):
     """Create comprehensive PSF system plots.
-    
+
     This is the main plotting function that creates both the comparison plot
     and the zoomed view, including the main 3x1 plot.
-    
+
     Parameters
     ----------
     psf_data : `PSFData`
         Complete PSF system data.
     plot_config : `dict`
         Plotting configuration including output directory and run name.
-        
+
     Notes
     -----
     This function creates a complete set of PSF visualization plots and
     prints a comprehensive summary of PSF quality metrics using the
     unified data structure.
-    
+
     Examples
     --------
     Generate complete PSF analysis plots:
-    
+
     >>> plot_config = {'output_dir': '/path/to/output'}
     >>> plot_psf_system_overview(psf_data, plot_config)
     """
     # Create the main 3x1 comparison plot.
     plot_psf_comparison(psf_data, plot_config)
-    
+
     # Create the zoomed central section plot.
     plot_psf_zoom(psf_data, plot_config, zoom_mode='full')
-    
+
     # Optionally create corner zoom as well.
     plot_psf_zoom(psf_data, plot_config, zoom_mode='corner')
 
-        
+
 @plot_function(module='psf', description="Diverging path validation: high-res PSF vs detector kernel")
 def plot_diverging_path_comparison(psf_data, plot_config):
     """Visualize the diverging-path architecture showing both PSF products.
-    
+
     This function creates a comparison plot showing:
     1. High-resolution PSF for metrics
     2. Detector-sampled kernel for science
-    
+
     Parameters
     ----------
     psf_data : `PSFData`
         Complete PSF system data with diverging-path products.
     plot_config : `dict`
         Plotting configuration including output directory.
-        
+
     Notes
     -----
     This visualization helps verify that the detector downsampling is
@@ -331,15 +334,15 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     run_name = config['run_name']
     output_dir = Path(plot_config['output_dir']) / run_name / 'psf'
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Create a compact 1x2 figure (avoid unused subplot whitespace).
     # Use constrained_layout so colorbars and titles fit without extra margins.
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
-    
+
     # High-resolution PSF.
     ax = axes[0]
     psf_intensity = psf_data.psf.intensity
-    
+
     # Calculate extent for high-res PSF.
     #
     # HCIPy focal-plane grids from `make_focal_grid(..., focal_length=...)`
@@ -349,94 +352,95 @@ def plot_diverging_path_comparison(psf_data, plot_config):
     extent_m = [psf_grid.x.min(), psf_grid.x.max(),
                 psf_grid.y.min(), psf_grid.y.max()]
     extent_arcsec = [x / psf_data.focal_length_m * ARCSEC_PER_RAD for x in extent_m]
-    
+
     im = ax.imshow(psf_intensity.shaped, extent=extent_arcsec,
                    origin='lower', cmap='hot',
                    norm=LogNorm(vmin=psf_intensity.max()*1e-5,
-                               vmax=psf_intensity.max()))
+                                vmax=psf_intensity.max()))
     ax.set_title('High-Res PSF', fontsize=11)
     ax.set_xlabel('arcsec')
     ax.set_ylabel('arcsec')
     plt.colorbar(im, ax=ax, label='Log(Intensity)')
-    
+
     # Add text showing pixel scale.
     ax.text(0.05, 0.95, f'Pixel scale: {psf_data.pixel_scale_arcsec*1000:.3f} mas',
             transform=ax.transAxes, color='white', fontsize=9,
             bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.5))
-    
+
     # Detector-sampled kernel.
     ax = axes[1]
     kernel = psf_data.kernel
     kernel_native = pyauto_kernel_native(kernel)
     kernel_extent = np.array(pyauto_kernel_shape_native(kernel)) * psf_data.kernel_pixel_scale / 2
-    kernel_extent = [-kernel_extent[1], kernel_extent[1], 
+    kernel_extent = [-kernel_extent[1], kernel_extent[1],
                      -kernel_extent[0], kernel_extent[0]]
-    
+
     im = ax.imshow(kernel_native, extent=kernel_extent,
                    origin='lower', cmap='hot',
                    norm=LogNorm(vmin=kernel_native.max()*1e-5,
-                               vmax=kernel_native.max()))
+                                vmax=kernel_native.max()))
     ax.set_title('Detector Kernel', fontsize=11)
     ax.set_xlabel('arcsec')
     ax.set_ylabel('arcsec')
     plt.colorbar(im, ax=ax, label='Log(Intensity)')
-    
+
     # Add text showing pixel scale.
     ax.text(0.05, 0.95, f'Pixel scale: {psf_data.kernel_pixel_scale*1000:.3f} mas',
             transform=ax.transAxes, color='white', fontsize=9,
             bbox=dict(boxstyle='round,pad=0.3', facecolor='black', alpha=0.5))
-    
+
     fig.suptitle('PSF Downsampling', fontsize=14)
-    
+
     # Save.
     filepath = output_dir / 'diverging_path_comparison.png'
     fig.savefig(filepath, dpi=150, bbox_inches='tight')
     plt.close(fig)
-    
+
     print(f"Saved diverging path comparison: {filepath}")
 
 
 @plot_function(module='psf', description="Complete PSF analysis suite including all diagnostic plots")
 def plot_psf_complete_analysis(psf_data, plot_config):
     """Create complete PSF analysis including all diagnostic plots.
-    
+
     Parameters
     ----------
     psf_data : `PSFData`
         Complete PSF system data.
     plot_config : `dict`
         Plotting configuration.
-        
+
     Examples
     --------
     >>> plot_psf_complete_analysis(psf_data, plot_config)
     """
     # Original plots.
     plot_psf_system_overview(psf_data, plot_config)
-    
+
     # New diagnostic plots.
     plot_diverging_path_comparison(psf_data, plot_config)
-    
+
     print("\n=== Complete PSF analysis plots generated ===")
 
 
-@plot_function(module='psf', description="Side-by-side segmented pupil and diffraction-limited PSF for presentations")
+@plot_function(module='psf',
+               description="Side-by-side segmented pupil and diffraction-limited PSF for presentations")
 def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     """Plot segmented pupil and baseline PSF for presentation slides.
-    
+
     Creates a clean side-by-side layout showing:
     1. Segmented aperture mask with labeled segments
     2. Diffraction-limited PSF (log stretch)
-    
+
     Uses actual telescope configuration parameters from master_config.yaml.
-    
+
     Parameters
     ----------
     psf_data : `PSFData`
         Complete PSF system data from the pipeline.
     plot_config : `dict`
         Plotting configuration including output directory.
-        
+
     Notes
     -----
     This function demonstrates the PSF engine baseline:
@@ -444,25 +448,25 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     - Actual wavelength and sampling from config
     - High-res PSF generation
     - Baseline (no aberrations) reference
-    
+
     Examples
     --------
     Create segmented pupil baseline figure:
-    
+
     >>> plot_config = {'output_dir': '/path/to/output'}
     >>> plot_psf_segmented_pupil_baseline(psf_data, plot_config)
     """
     # Get run name from config
     config = psf_data.config
     run_name = config['run_name']
-    
+
     # Create structured output directory
     output_dir = _create_output_directory(
-        plot_config['output_dir'], 
-        run_name, 
+        plot_config['output_dir'],
+        run_name,
         'psf'
     )
-    
+
     # Extract telescope data and configuration parameters
     telescope_data = psf_data.telescope_data
     aperture = telescope_data['aper']
@@ -471,7 +475,7 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     psf_config = config['psf']
     telescope_config = psf_config['telescope']
     sim_config = psf_config['hres_psf']
-    
+
     # Extract actual values from config
     pupil_diameter_m = telescope_config['pupil_diameter']
     wavelength_m = sim_config['wavelength']
@@ -481,48 +485,48 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     segment_point_to_point_m = telescope_config['segment_point_to_point']
     focal_length_m = telescope_config['focal_length']
     sampling = psf_data.used_sampling_factor  # Use the auto-adjusted sampling
-    
+
     # Calculate derived parameters
     segment_flat_to_flat_m = segment_point_to_point_m * np.sqrt(3) / 2
     f_number = focal_length_m / pupil_diameter_m
-    
+
     # Create the presentation figure - 1x2 side-by-side layout
     plt.style.use('default')
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-    
+
     # Panel 1: Segmented aperture using HCIPy plotting (actual aperture)
     ax1 = axes[0]
-    
+
     # Use HCIPy's imshow_field to plot the actual aperture
     # Use white segments on black for contrast with red labels.
     imshow_field(aperture, ax=ax1, cmap='gray')
     ax1.set_title('Segmented Aperture', fontsize=14, fontweight='bold')
     ax1.set_xlabel('Position [m]', fontsize=12)
     ax1.set_ylabel('Position [m]', fontsize=12)
-    
+
     # Add faint segment labels using HCIPy coordinate system
     for i, segment in enumerate(segments):
         # Calculate centroid of each segment using HCIPy approach
         segment_coords = segment.grid.coords
         segment_values = segment.shaped
-        
+
         # Find weighted centroid
         total_weight = np.sum(segment_values)
         if total_weight > 0:
             x_center = np.sum(segment_coords[0] * segment_values.ravel()) / total_weight
             y_center = np.sum(segment_coords[1] * segment_values.ravel()) / total_weight
-            
+
             # Add faint segment number labels
-            ax1.text(x_center, y_center, str(i), 
-                    fontsize=8, color='red', alpha=0.7,
-                    ha='center', va='center', fontweight='bold')
-    
+            ax1.text(x_center, y_center, str(i),
+                     fontsize=8, color='red', alpha=0.7,
+                     ha='center', va='center', fontweight='bold')
+
     # Panel 2: Diffraction-limited PSF (log stretch)
     ax2 = axes[1]
-    
+
     # Get the PSF intensity (assuming this is the baseline perfect PSF)
     psf_intensity = psf_data.psf.intensity.shaped
-    
+
     # Calculate PSF extent in arcseconds.
     #
     # PSF coordinates are meters at the focal plane on the HCIPy grid.
@@ -531,13 +535,13 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     extent_m = [psf_grid.x.min(), psf_grid.x.max(),
                 psf_grid.y.min(), psf_grid.y.max()]
     extent_arcsec = [x / psf_data.focal_length_m * ARCSEC_PER_RAD for x in extent_m]
-    
+
     # Log stretch with proper normalization
     psf_log = np.log10(psf_intensity / np.max(psf_intensity) + 1e-6)
-    
-    im2 = ax2.imshow(psf_log, extent=extent_arcsec, origin='lower', 
+
+    im2 = ax2.imshow(psf_log, extent=extent_arcsec, origin='lower',
                      cmap='hot', vmin=-5, vmax=0)
-    
+
     ax2.set_xlabel('arcsec', fontsize=12)
     ax2.set_ylabel('arcsec', fontsize=12)
     title = 'PSF (log stretch)'
@@ -546,23 +550,23 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     else:
         title += "\n(Diffraction-limited)"
     ax2.set_title(title, fontsize=14, fontweight='bold')
-    
+
     # Add colorbar for PSF
     cbar2 = plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
     cbar2.set_label('Log₁₀(Normalized Intensity)', fontsize=10)
-    
+
     plt.tight_layout()
-    
+
     # Create filename
     filename = f"psf_segmented_pupil_baseline_{wavelength_nm:.0f}nm.png"
     filepath = output_dir / filename
-    
+
     # Save the plot
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Saved PSF segmented pupil baseline plot: {filepath}")
-    
+
     # Print configuration summary
     print("\nPSF Engine Configuration Summary:")
     print(f"Telescope: {pupil_diameter_m:.2f} m diameter, f/{f_number:.1f}")
@@ -573,11 +577,13 @@ def plot_psf_segmented_pupil_baseline(psf_data, plot_config):
     print(f"Segment flat-to-flat: {segment_flat_to_flat_m*1000:.1f} mm")
 
 
-@plot_function(module='psf', description="Optics chain: segmented pupil → pupil OPD (hexikes) → resulting PSF")
+@plot_function(module='psf',
+               description="Optics chain: segmented pupil → pupil OPD (hexikes) → resulting PSF")
 def plot_optics_chain(psf_data, plot_config):
     """Create a 3-panel optics chain figure for presentations.
 
-    The output file is saved as `optics_chain.png` under `{output_dir}/{run_name}/psf/`.
+    The output file is saved as `optics_chain.png` under
+    `{output_dir}/{run_name}/psf/`.
 
     Panels:
     1) Segmented pupil with segment IDs

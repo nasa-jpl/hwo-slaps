@@ -3,7 +3,6 @@ import copy
 import numpy as np
 import pytest
 
-
 pytest.importorskip("autolens")
 
 from hwoslaps.lensing.generator import generate_lensing_system

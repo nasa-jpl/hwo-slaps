@@ -26,7 +26,6 @@ from _lensing_physics_helpers import (
     load_mass_models_module,
 )
 
-
 COSMOLOGY = Planck15CosmologyAdapter()
 CONSTANTS = load_constants_module()
 MASS_MODELS = load_mass_models_module()

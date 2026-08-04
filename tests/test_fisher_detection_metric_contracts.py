@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 import yaml
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CORE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_core.py"
 SCDD_DELTA_LOG_L_THRESHOLD = 5.0

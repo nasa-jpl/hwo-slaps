@@ -109,7 +109,13 @@ def source_only_data_electron_rate(observation: Any, dataset_kind: str) -> np.nd
 
 
 def source_only_data_adu(observation: Any, dataset_kind: str) -> np.ndarray:
-    """Deprecated alias for `source_only_data_electron_rate`."""
+    """Return the source-only electron rate (deprecated alias).
+
+    Notes
+    -----
+    Deprecated alias for `source_only_data_electron_rate`; the name refers to
+    ADU for historical reasons but the returned values are electron rates.
+    """
     return source_only_data_electron_rate(observation, dataset_kind)
 
 
@@ -218,7 +224,6 @@ def _exclude_psf_edge_pixels(use_mask: np.ndarray, psf_shape: Tuple[int, int]) -
 
 def _kernel_from_any(psf_for_fit: Any, pixel_scale: float) -> Any:
     """Return a PyAuto convolver from an existing PSF object or array."""
-
     if hasattr(psf_for_fit, "convolved_image_via_real_space_from"):
         return psf_for_fit
     if hasattr(psf_for_fit, "native"):

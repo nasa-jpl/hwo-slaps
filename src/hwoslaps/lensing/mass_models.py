@@ -410,7 +410,7 @@ def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):
 def sigma_v_from_m200_sis(M200_msun, z_lens, cosmology):
     """Calculate velocity dispersion for an SIS truncated at r200.
 
-    This assumes the SIS profile extends to r200 where the average 
+    This assumes the SIS profile extends to r200 where the average
     density equals 200 times the critical density.
 
     Parameters

@@ -6,19 +6,20 @@ strong lensing systems with precisely known subhalo populations.
 
 from copy import deepcopy
 
-import numpy as np
 import autolens as al
-from ..constants import MPC_TO_M, KPC_TO_M, ARCSEC_PER_RAD
-from .utils import LensingData, get_einstein_ring_position
+import numpy as np
+from astropy import constants as const
+
+from ..constants import ARCSEC_PER_RAD, KPC_TO_M, MPC_TO_M
 from .mass_models import (
+    angular_diameter_distance_mpc,
+    angular_diameter_distance_z1z2_mpc,
+    concentration_mass_relation,
     einstein_radius_point_mass,
     einstein_radius_sis_m200,
     nfw_scale_parameters,
-    concentration_mass_relation,
-    angular_diameter_distance_mpc,
-    angular_diameter_distance_z1z2_mpc,
 )
-from astropy import constants as const
+from .utils import LensingData, get_einstein_ring_position
 
 
 def _coerce_positive_finite_redshift(value, key_path):
@@ -34,10 +35,10 @@ def _coerce_positive_finite_redshift(value, key_path):
 
 def generate_lensing_system(config, full_config):
     """Generate a complete lensing system from configuration.
-    
+
     This function creates a strong lensing system including grid creation,
     galaxy generation, subhalo injection, and ray-tracing.
-    
+
     Parameters
     ----------
     config : `dict`
@@ -46,23 +47,23 @@ def generate_lensing_system(config, full_config):
     full_config : `dict`
         Full top-level configuration dictionary. Must include
         ``global_seed`` for deterministic subhalo placement and provenance.
-        
+
     Returns
     -------
     lensing_data : `LensingData`
         Complete lensing system data with unified structure providing
         direct access to all system parameters.
-        
+
     Notes
     -----
     The returned LensingData object contains all information in a flat
     structure with direct property access, eliminating the need to navigate
     nested dictionaries for basic system information.
-    
+
     Examples
     --------
     Generate a lensing system and access key properties:
-    
+
     >>> full_config = {"global_seed": 1, "run_name": "example"}
     >>> lensing_data = generate_lensing_system(config, full_config=full_config)
     >>> print(f"Lens z={lensing_data.lens_redshift}")
@@ -79,7 +80,7 @@ def generate_lensing_system(config, full_config):
         raise ValueError("full_config.global_seed must be an int")
     # Create coordinate grid
     grid = _create_grid(config['grid'])
-    
+
     # Extract lens and source parameters for unified structure
     lens_config = config['lens_galaxy']
     source_config = config['source_galaxy']
@@ -100,7 +101,7 @@ def generate_lensing_system(config, full_config):
     # Create lens and source galaxies from validated redshifts.
     lens_galaxy = _create_lens_galaxy(lens_config)
     source_galaxy = _create_source_galaxy(source_config)
-    
+
     # Create cosmology (explicit in config) before any subhalo calculations
     cosmology = _get_cosmology(config['cosmology'])
 
@@ -135,7 +136,7 @@ def generate_lensing_system(config, full_config):
             mass=lens_galaxy.mass,
             subhalo=subhalo
         )
-        
+
         # Extract subhalo parameters from subhalo_info
         subhalo_mass = subhalo_info['mass_msun']
         subhalo_model = subhalo_info['model']
@@ -150,32 +151,32 @@ def generate_lensing_system(config, full_config):
         subhalo_kappa_s = subhalo_info.get('kappa_s')
         subhalo_scale_radius_arcsec = subhalo_info.get('scale_radius_arcsec')
         subhalo_profile_parameters = subhalo_info.get('profile_parameters')
-    
+
     # Create tracer
     tracer = al.Tracer(
         galaxies=[lens_galaxy, source_galaxy],
         cosmology=cosmology
     )
-    
+
     # Generate lensed image
     lensed_image = tracer.image_2d_from(grid=grid)
-    
+
     # Extract parameters for unified structure
     config_to_store = deepcopy(full_config)
-    
+
     return LensingData(
         # Primary data
         image=lensed_image.native,
         grid=grid,
         tracer=tracer,
-        
+
         # System parameters
         pixel_scale=config['grid']['pixel_scale'],
         lens_redshift=lens_redshift,
         source_redshift=source_redshift,
         lens_einstein_radius=lens_config['mass']['einstein_radius'],
         cosmology_name=config['cosmology'],
-        
+
         # Subhalo information (None if not present)
         subhalo_mass=subhalo_mass,
         subhalo_model=subhalo_model,
@@ -189,7 +190,7 @@ def generate_lensing_system(config, full_config):
         subhalo_kappa_s=subhalo_kappa_s,
         subhalo_scale_radius_arcsec=subhalo_scale_radius_arcsec,
         subhalo_profile_parameters=subhalo_profile_parameters,
-        
+
         # Galaxy parameters
         lens_centre=tuple(lens_config['mass']['centre']),
         lens_ellipticity=tuple(lens_config['mass']['ell_comps']),
@@ -197,7 +198,7 @@ def generate_lensing_system(config, full_config):
         source_ellipticity=tuple(source_config['light']['ell_comps']),
         source_intensity=source_config['light']['intensity'],
         source_effective_radius=source_config['light']['effective_radius'],
-        
+
         # Provenance
         config=config_to_store
     )
@@ -206,12 +207,12 @@ def generate_lensing_system(config, full_config):
 def _create_grid(grid_config):
     """
     Create PyAutoLens coordinate grid.
-    
+
     Parameters
     ----------
     grid_config : dict
         Grid configuration with 'shape' and 'pixel_scale' keys.
-        
+
     Returns
     -------
     grid : al.Grid2D
@@ -226,19 +227,19 @@ def _create_grid(grid_config):
 def _create_lens_galaxy(lens_config):
     """
     Create lens galaxy from configuration.
-    
+
     Parameters
     ----------
     lens_config : dict
         Lens galaxy configuration including redshift and mass profile.
-        
+
     Returns
     -------
     lens_galaxy : al.Galaxy
         PyAutoLens galaxy object representing the lens.
     """
     mass_config = lens_config['mass']
-    
+
     # Create mass profile
     if mass_config['type'] == 'Isothermal':
         lens_mass = al.mp.Isothermal(
@@ -248,7 +249,7 @@ def _create_lens_galaxy(lens_config):
         )
     else:
         raise ValueError(f"Unsupported mass profile type: {mass_config['type']}")
-    
+
     return al.Galaxy(
         redshift=lens_config['redshift'],
         mass=lens_mass
@@ -258,19 +259,19 @@ def _create_lens_galaxy(lens_config):
 def _create_source_galaxy(source_config):
     """
     Create source galaxy from configuration.
-    
+
     Parameters
     ----------
     source_config : dict
         Source galaxy configuration including redshift and light profile.
-        
+
     Returns
     -------
     source_galaxy : al.Galaxy
         PyAutoLens galaxy object representing the source.
     """
     light_config = source_config['light']
-    
+
     # Create light profile
     if light_config['type'] == 'Exponential':
         source_light = al.lp.Exponential(
@@ -281,7 +282,7 @@ def _create_source_galaxy(source_config):
         )
     else:
         raise ValueError(f"Unsupported light profile type: {light_config['type']}")
-    
+
     return al.Galaxy(
         redshift=source_config['redshift'],
         light=source_light
@@ -291,7 +292,7 @@ def _create_source_galaxy(source_config):
 def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, cosmology, global_seed=None):
     """
     Create subhalo mass profile and truth information.
-    
+
     Parameters
     ----------
     subhalo_config : dict
@@ -308,7 +309,7 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
         Global seed for randomization. If provided, subhalo placement uses
         ``global_seed + 1`` as a dedicated local RNG stream. If None, the
         placement RNG is initialized from entropy.
-        
+
     Returns
     -------
     subhalo : al.mp.MassProfile
@@ -327,11 +328,11 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
         'model': model,
         'einstein_radius_arcsec': None,
     }
-    
+
     # Determine position
     position_config = subhalo_config['position']
     position_type = position_config['type']
-    
+
     if position_type == 'random':
         # Use a local RNG stream to avoid mutating NumPy global RNG state.
         if global_seed is not None:
@@ -339,14 +340,14 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
             rng = np.random.default_rng(global_seed + 1)
         else:
             rng = np.random.default_rng()
-        
+
         # Random angle on Einstein ring
         lens_einstein_radius = lens_galaxy.mass.einstein_radius
         angle_deg = float(rng.uniform(0.0, 360.0))
-        
+
         # Get scatter in pixels
         scatter_pixels = position_config['scatter_pixels']
-        
+
         # Use existing function with random offset
         offset_pixels = float(rng.uniform(-scatter_pixels, scatter_pixels))
         subhalo_position = get_einstein_ring_position(
@@ -367,7 +368,7 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
             offset_pixels=offset_pixels,
             pixel_scale=pixel_scale
         )
-        
+
     elif position_type == 'direct':
         # Direct placement for specific tests
         subhalo_position = tuple(position_config['centre'])
@@ -375,7 +376,7 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
         raise ValueError(f"Unknown position type: {position_type}")
 
     subhalo_info['position_arcsec'] = subhalo_position
-    
+
     # Create PyAutoLens mass profile
     if model == 'PointMass':
         einstein_radius = einstein_radius_point_mass(mass, lens_z, source_z, cosmology)
@@ -408,36 +409,36 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
             lens_z=lens_z,
             cosmology=cosmology,
         )
-        
+
         # Get NFW parameters
         rs_kpc, rho_s = nfw_scale_parameters(mass, concentration, lens_z, cosmology)
-        
+
         D_l_m = angular_diameter_distance_mpc(cosmology, lens_z) * MPC_TO_M
         D_s_m = angular_diameter_distance_mpc(cosmology, source_z) * MPC_TO_M
         D_ls_m = (
             angular_diameter_distance_z1z2_mpc(cosmology, lens_z, source_z)
             * MPC_TO_M
         )
-        
+
         # Critical surface density calculated robustly in SI units
         c_SI = float(const.c.value)
         G_SI = float(const.G.value)
         Sigma_crit = (c_SI**2 / (4 * np.pi * G_SI)) * (D_s_m / (D_l_m * D_ls_m))
-        
+
         # Calculate kappa_s
         rs_m = rs_kpc * KPC_TO_M
         kappa_s = (rho_s * rs_m) / Sigma_crit
-        
+
         # Convert scale radius to arcsec
         scale_radius_arcsec = (rs_m / D_l_m) * ARCSEC_PER_RAD
-        
+
         # Create ACTUAL NFW subhalo
         subhalo = al.mp.NFWSph(
             centre=subhalo_position,
             kappa_s=kappa_s,
             scale_radius=scale_radius_arcsec
         )
-        
+
         # Add NFW-specific info to the dictionary
         subhalo_info['kappa_s'] = kappa_s
         subhalo_info['scale_radius_arcsec'] = scale_radius_arcsec
@@ -451,7 +452,7 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
         subhalo_info.update(concentration_meta)
     else:
         raise ValueError(f"Unsupported subhalo model: {model}")
-        
+
     return subhalo, subhalo_info
 
 
@@ -563,12 +564,12 @@ def _infer_reduced_h(cosmology):
 def _get_cosmology(cosmology_name):
     """
     Get PyAutoLens cosmology object.
-    
+
     Parameters
     ----------
     cosmology_name : str
         Name of the cosmology model.
-        
+
     Returns
     -------
     cosmology : al.cosmo object

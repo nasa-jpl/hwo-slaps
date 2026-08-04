@@ -1,13 +1,13 @@
-import numpy as np
 import autolens as al
+import numpy as np
 import pytest
 
-from hwoslaps.observation import generate_observation, ObservationData
 from hwoslaps.lensing.utils import LensingData
+from hwoslaps.observation import ObservationData, generate_observation
 from hwoslaps.psf.utils import PSFData, make_pyauto_kernel
 
 
-def make_lensing_data(shape=( nine := 9, nine ), pixel_scale=0.1) -> LensingData:
+def make_lensing_data(shape=(nine := 9, nine), pixel_scale=0.1) -> LensingData:
     # Create a simple deterministic image pattern
     y, x = np.indices(shape)
     image = (y + x).astype(float) / (shape[0] + shape[1])

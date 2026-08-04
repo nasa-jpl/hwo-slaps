@@ -7,9 +7,9 @@ validation tests and should remain fast, surgical checks against regressions.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import io
-import contextlib
 from pathlib import Path
 
 import hcipy
@@ -28,7 +28,6 @@ from hwoslaps.psf.aberration_models import (
 from hwoslaps.psf.generator import generate_psf_system
 from hwoslaps.psf.psf_metrics import calculate_raw_peak_ratio
 from hwoslaps.psf.telescope_models import create_hcipy_telescope
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -85,7 +84,7 @@ def test_raw_peak_ratio_rejects_zero_perfect_peak():
 
 
 def test_global_zernike_config_keys_are_one_based_noll_indices(compact_telescope: dict):
-    """Config key 4 should apply HCIPy's Noll Z4, not zero-based basis index 4."""
+    """Config key 4 applies HCIPy's Noll Z4, not zero-based basis index 4."""
     wavelength = compact_telescope["wavelength"]
     pupil_grid = compact_telescope["pupil_grid"]
     phase_screen = np.asarray(apply_global_zernikes({4: 1.0}, compact_telescope, wavelength))
@@ -101,7 +100,7 @@ def test_global_zernike_config_keys_are_one_based_noll_indices(compact_telescope
 
 
 def test_segment_hexike_uses_hcipy_surface_with_telescope_segments(compact_telescope: dict):
-    """Segment hexikes should be represented by HCIPy's surface on the telescope masks."""
+    """Segment hexikes use HCIPy's surface on the telescope segment masks."""
     wavelength = compact_telescope["wavelength"]
     segment_hexikes = {
         0: {1: 50.0, 3: -20.0},
@@ -120,7 +119,7 @@ def test_segment_hexike_uses_hcipy_surface_with_telescope_segments(compact_teles
 
 
 def test_telescope_data_contains_only_pupil_side_optics(compact_telescope: dict):
-    """Telescope setup should not expose stale focal-plane propagation objects."""
+    """Telescope setup does not expose stale focal-plane propagators."""
     assert "focal_grid" not in compact_telescope
     assert "prop" not in compact_telescope
     assert "pupil_grid" in compact_telescope
@@ -132,7 +131,7 @@ def test_telescope_data_contains_only_pupil_side_optics(compact_telescope: dict)
     [-1, 19],
 )
 def test_segment_pistons_reject_invalid_segment_ids(compact_telescope: dict, bad_segment: int):
-    """Segment pistons should fail fast instead of silently ignoring or wrapping IDs."""
+    """Segment pistons fail fast rather than ignore or wrap segment IDs."""
     with pytest.raises(ValueError, match="segment"):
         apply_segment_pistons(
             compact_telescope["hsm"],
@@ -147,7 +146,7 @@ def test_segment_pistons_reject_invalid_segment_ids(compact_telescope: dict, bad
     [-1, 19],
 )
 def test_segment_tiptilts_reject_invalid_segment_ids(compact_telescope: dict, bad_segment: int):
-    """Segment tip/tilts should fail fast instead of silently ignoring or wrapping IDs."""
+    """Segment tip/tilts fail fast rather than ignore or wrap segment IDs."""
     with pytest.raises(ValueError, match="segment"):
         apply_segment_tiptilts(
             compact_telescope["hsm"],
@@ -161,7 +160,7 @@ def test_segment_tiptilts_reject_invalid_segment_ids(compact_telescope: dict, ba
     [-1, 19],
 )
 def test_segment_hexikes_reject_invalid_segment_ids(compact_telescope: dict, bad_segment: int):
-    """Segment hexikes should fail fast instead of silently ignoring or wrapping IDs."""
+    """Segment hexikes fail fast rather than ignore or wrap segment IDs."""
     with pytest.raises(ValueError, match="segment index"):
         apply_segment_zernikes(
             {bad_segment: {1: 10.0}},
@@ -184,7 +183,7 @@ def test_enabled_aberration_families_must_have_coefficients(
     flag: str,
     coeff_key: str,
 ):
-    """Strict configs should not allow enabled aberration families with empty coefficient dicts."""
+    """Strict configs reject enabled families with empty coefficient dicts."""
     cfg = _compact_full_config(master_config)
     cfg["psf"]["aberrations"][flag] = True
     cfg["psf"]["aberrations"][coeff_key] = {}
@@ -194,7 +193,7 @@ def test_enabled_aberration_families_must_have_coefficients(
 
 
 def test_generate_psf_system_does_not_mutate_input_config(compact_config: dict):
-    """PSF generation should not rewrite caller-owned config/provenance in place."""
+    """PSF generation does not rewrite caller-owned config in place."""
     sampling_before = compact_config["psf"]["hres_psf"]["sampling"]
 
     _quiet_generate(compact_config)
@@ -203,7 +202,7 @@ def test_generate_psf_system_does_not_mutate_input_config(compact_config: dict):
 
 
 def test_perfect_psf_reports_unity_strehl(compact_config: dict):
-    """A generated perfect PSF should carry a Strehl ratio of one in PSFData."""
+    """A generated perfect PSF carries a Strehl ratio of one in PSFData."""
     psf_data = _quiet_generate(compact_config)
 
     assert psf_data.strehl_ratio == pytest.approx(1.0, rel=1e-12, abs=1e-12)
@@ -211,13 +210,13 @@ def test_perfect_psf_reports_unity_strehl(compact_config: dict):
 
 
 def test_generate_random_segment_aberrations_rejects_degenerate_segment_count():
-    """Random segment aberrations should not return NaN pistons for one segment."""
+    """Random segment aberrations never return NaN pistons for a segment."""
     with pytest.raises(ValueError, match="num_segments"):
         generate_random_segment_aberrations(10.0, num_segments=1, seed=1)
 
 
 def test_psfdata_wavefront_is_not_the_same_object_as_focal_plane_psf(compact_config: dict):
-    """PSFData.wavefront should describe the pupil-plane wavefront, not duplicate PSFData.psf."""
+    """PSFData.wavefront is the pupil-plane wavefront, not a copy of psf."""
     psf_data = _quiet_generate(compact_config)
 
     assert psf_data.wavefront is not psf_data.psf

@@ -29,6 +29,7 @@ class _Tee:
 
 
 def main():
+    """Run the pipeline for a config file, capturing run artifacts."""
     parser = argparse.ArgumentParser(description='Run HWO-SLAPS pipeline')
     parser.add_argument('--config', '-c', type=str, required=True,
                         help='Path to configuration file')
@@ -68,7 +69,7 @@ def main():
             write_provenance(provenance_path, config=config, command=sys.argv)
             print(f"Provenance: {provenance_path}")
 
-            # Run enhanced pipeline (automatically detects standard vs detection mode)
+            # Automatically detects standard vs detection mode.
             run_enhanced_pipeline(str(config_path), verbose=not args.quiet)
 
 

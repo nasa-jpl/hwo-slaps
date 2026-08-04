@@ -20,7 +20,6 @@ from hwoslaps.constants import ARCSEC_PER_RAD
 from hwoslaps.psf.generator import generate_psf_system
 from hwoslaps.psf.psf_metrics import measure_fwhm
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 AIRY_FWHM_DIAMETER_LAMBDA_OVER_D = 1.028993969
 AIRY_FIRST_NULL_RADIUS_LAMBDA_OVER_D = 1.219669891
@@ -116,7 +115,7 @@ def test_global_aberration_strehl_matches_marechal_limit(
     compact_no_aberration_config: dict,
     aberration_nm: float,
 ):
-    """Small OPD aberrations should follow the Marechal Strehl approximation."""
+    """Small OPD aberrations follow the Marechal Strehl approximation."""
     cfg = copy.deepcopy(compact_no_aberration_config)
     aberr = cfg["psf"]["aberrations"]
     aberr["enable_global_zernikes"] = True
@@ -134,7 +133,7 @@ def test_global_aberration_strehl_matches_marechal_limit(
 def test_segmented_no_aberration_psf_converges_with_pupil_sampling(
     compact_no_aberration_config: dict,
 ):
-    """No-aberration segmented PSF metrics should be stable as pupil sampling increases."""
+    """Unaberrated PSF metrics stay stable as pupil sampling increases."""
     results = []
     for num_pix in [96, 128, 192]:
         cfg = copy.deepcopy(compact_no_aberration_config)

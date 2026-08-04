@@ -3,10 +3,11 @@
 This module provides visualization functions for subhalo detection results.
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 from ..modeling.utils_fisher import FisherDetectionData
 from .registry import plot_function
@@ -51,7 +52,7 @@ def plot_fisher_local_summary(
     plot_config: Dict[str, Any],
     run_name: str = None,
 ) -> None:
-    """Create a compact local Fisher summary artifact for local or both modes."""
+    """Create a compact Fisher summary for local and both modes."""
     if not _fisher_detection_guard(detection_data, "Fisher local summary plot"):
         return
     if detection_data.local is None:
@@ -173,7 +174,8 @@ def plot_fisher_psf_mode_scan(
         dtype=float,
     )
     tolerance = np.asarray(
-        [np.nan if coupling.tolerance_for_zmax is None else coupling.tolerance_for_zmax for coupling in couplings],
+        [np.nan if coupling.tolerance_for_zmax is None else coupling.tolerance_for_zmax
+         for coupling in couplings],
         dtype=float,
     )
 
@@ -210,7 +212,8 @@ def plot_fisher_psf_mode_scan(
     fig.text(
         0.5,
         0.01,
-        "Mode amplitudes use the units configured for each PSF family; tolerance is the amplitude for the stated z budget.",
+        "Mode amplitudes use the units configured for each PSF family; "
+        "tolerance is the amplitude for the stated z budget.",
         ha="center",
         fontsize=8.5,
     )
@@ -222,6 +225,7 @@ def plot_fisher_psf_mode_scan(
 
     print(f"Saved Fisher PSF mode scan plot: {save_path}")
 
+
 @plot_function(
     module='detection',
     detection_mode_only=True,
@@ -232,7 +236,7 @@ def plot_fisher_detection_map_summary(
     plot_config: Dict[str, Any],
     run_name: str = None,
 ) -> None:
-    """Create a compact Fisher map summary plot when map output is available."""
+    """Create a compact Fisher map summary when map output is available."""
     if not _fisher_detection_guard(detection_data, "Fisher map plot"):
         return
     if detection_data.map is None:

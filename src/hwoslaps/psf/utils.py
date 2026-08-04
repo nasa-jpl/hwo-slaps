@@ -8,13 +8,15 @@ PSF system parameters, quality metrics, and aberration information in a flat
 structure for easy access and analysis.
 """
 
-import numpy as np
 import os
 from dataclasses import dataclass
-from typing import Dict, Optional, Any, List
-import autolens as al
-from ..constants import ARCSEC_PER_RAD
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import autolens as al
+import numpy as np
+
+from ..constants import ARCSEC_PER_RAD
 
 
 def make_pyauto_kernel(values, pixel_scales, normalize=True):
@@ -117,13 +119,13 @@ def pyauto_kernel_pixel_scales(kernel):
 @dataclass
 class PSFData:
     """Complete PSF system data structure.
-    
+
     This class contains all products from PSF generation in a unified structure
     with direct access to all key parameters, quality metrics, and aberration
     information. Information is organized by importance with primary data,
     system parameters, telescope geometry, pre-computed quality metrics,
     aberration summaries, and provenance data.
-    
+
     Parameters
     ----------
     psf : `hcipy.Field`
@@ -206,7 +208,7 @@ class PSFData:
         Full configuration dictionary used to generate the PSF.
     generation_timestamp : `str`
         ISO format timestamp of when the PSF was generated.
-        
+
     Notes
     -----
     This data structure provides a comprehensive view of the PSF system with
@@ -214,13 +216,14 @@ class PSFData:
     a single flat structure for easy access and analysis. The kernel field
     provides immediate access to PyAutoLens format for convolution operations.
     """
+
     # Primary data.
     psf: Any  # hcipy.Field - The high-resolution focal-plane PSF.
     wavefront: Any  # hcipy.Wavefront - The pupil-plane wavefront.
     telescope_data: Dict  # Dictionary with pupil-side HCIPy components.
     kernel: Any  # Detector-sampled PyAuto kernel array.
     kernel_pixel_scale: float  # Kernel pixel scale if different from PSF.
-    
+
     # System parameters.
     wavelength_nm: float
     pupil_diameter_m: float
@@ -232,13 +235,13 @@ class PSFData:
     used_sampling_factor: float
     integer_subsampling_factor: int   # The integer factor for the detector.
     num_segments: int
-    
+
     # Telescope geometry.
     segment_flat_to_flat_m: float
     segment_point_to_point_m: float
     gap_size_m: float
     num_rings: int
-    
+
     # Pre-computed quality metrics.
     fwhm_arcsec: Optional[float] = None
     fwhm_mas: Optional[float] = None
@@ -249,100 +252,100 @@ class PSFData:
     encircled_energy_50_arcsec: Optional[float] = None
     kernel_diff_l2_norm: Optional[float] = None
     kernel_diff_l2_rel: Optional[float] = None
-    
+
     # Aberration summary.
     total_rms_nm: float = 0.0
     segment_piston_rms_nm: float = 0.0
     segment_tiptilt_rms_urad: float = 0.0
     global_zernike_rms_nm: float = 0.0
-    
+
     # Aberration flags.
     has_segment_pistons: bool = False
     has_segment_tiptilts: bool = False
     has_segment_hexikes: bool = False
     has_global_zernikes: bool = False
-    
+
     # Complex data and diagnostics.
     phase_screens: Optional[Dict] = None
     phase_screen_types: Optional[List[str]] = None
     aberrations: Optional[Dict] = None
-    
+
     # Provenance.
     config: Optional[Dict] = None
     generation_timestamp: str = ""
     # Saved artifacts (optional paths to on-disk products)
     highres_psf_npy_path: Optional[str] = None
-    
+
     def __post_init__(self):
         """Post-initialization to compute derived values."""
         # Set timestamp if not provided.
         if not self.generation_timestamp:
             self.generation_timestamp = datetime.now().isoformat()
-            
+
         # Extract phase screen types if phase screens provided.
         if self.phase_screens and not self.phase_screen_types:
             self.phase_screen_types = list(self.phase_screens.keys())
-    
+
     # Derived properties.
     @property
     def wavelength_m(self):
         """Wavelength in meters.
-        
+
         Returns
         -------
         wavelength : `float`
             Wavelength in meters.
         """
         return self.wavelength_nm * 1e-9
-    
+
     @property
     def diffraction_limit_arcsec(self):
         """Theoretical diffraction limit (lambda/D) in arcseconds.
-        
+
         Returns
         -------
         diffraction_limit : `float`
             Diffraction limit in arcseconds.
         """
         return (self.wavelength_m / self.pupil_diameter_m) * ARCSEC_PER_RAD
-    
+
     @property
     def airy_disk_diameter_arcsec(self):
         """Airy disk diameter (2.44*lambda/D) in arcseconds.
-        
+
         Returns
         -------
         airy_diameter : `float`
             Airy disk diameter in arcseconds.
         """
         return 2.44 * self.diffraction_limit_arcsec
-    
+
     @property
     def f_number(self):
         """Telescope F-number (f/D).
-        
+
         Returns
         -------
         f_number : `float`
             F-number of the telescope.
         """
         return self.focal_length_m / self.pupil_diameter_m
-    
+
     @property
     def angular_resolution_mas(self):
         """Angular resolution in milliarcseconds.
-        
+
         Returns
         -------
         resolution : `float`
             Angular resolution in milliarcseconds.
         """
         return self.diffraction_limit_arcsec * 1000
-    
+
     @property
     def is_diffraction_limited(self):
         """Whether PSF is close to diffraction limit (Strehl > 0.8).
-        
+
         Returns
         -------
         is_diffraction_limited : `bool` or `None`
@@ -351,11 +354,11 @@ class PSFData:
         if self.strehl_ratio is None:
             return None
         return self.strehl_ratio > 0.8
-    
+
     @property
     def quality_grade(self):
         """Qualitative PSF assessment based on Strehl ratio.
-        
+
         Returns
         -------
         grade : `str`
@@ -371,16 +374,16 @@ class PSFData:
             return "Fair"
         else:
             return "Poor"
-    
+
     @property
     def aberration_budget_breakdown(self):
         """Breakdown of aberration types present.
-        
+
         Returns
         -------
         breakdown : `dict`
             Dictionary indicating which aberration types are present.
-            
+
         Notes
         -----
         Aberrations can interfere constructively or destructively, so the
@@ -398,20 +401,20 @@ class PSFData:
             breakdown['segment_hexikes'] = "Present"
         if self.has_global_zernikes:
             breakdown['global_zernikes'] = f"{self.global_zernike_rms_nm:.1f} nm coeff quadrature"
-            
+
         return breakdown
-    
+
     @property
     def has_aberrations(self):
         """Whether any aberrations are present.
-        
+
         Returns
         -------
         has_aberrations : `bool`
             True if any aberrations are applied, False otherwise.
         """
-        return (self.has_segment_pistons or self.has_segment_tiptilts or 
-                self.has_segment_hexikes or self.has_global_zernikes)
+        return (self.has_segment_pistons or self.has_segment_tiptilts
+                or self.has_segment_hexikes or self.has_global_zernikes)
 
     @property
     def has_saved_highres_psf(self) -> bool:
@@ -427,30 +430,30 @@ class PSFData:
 
 def print_psf_data_summary(psf_data):
     """Print a comprehensive summary of PSF data.
-    
+
     Parameters
     ----------
     psf_data : `PSFData`
         PSF data object.
-        
+
     Examples
     --------
     Print a complete PSF system summary:
-    
+
     >>> print_psf_data_summary(psf_data)
     === PSF System Summary ===
     Telescope diameter: 6.0 m
     ...
     """
     print("=== PSF System Summary ===")
-    
+
     # System parameters.
     print(f"Telescope diameter: {psf_data.pupil_diameter_m:.1f} m")
     print(f"Number of segments: {psf_data.num_segments}")
     print(f"Wavelength: {psf_data.wavelength_nm:.0f} nm")
     print(f"F-number: {psf_data.f_number:.1f}")
     print(f"Pixel scale: {psf_data.pixel_scale_arcsec:.6f} arcsec/pixel")
-    
+
     # Diverging-path sampling information.
     print("\n=== Diverging-Path Sampling ===")
     print(f"Requested sampling: {psf_data.requested_sampling_factor:.2f} pixels/λ/D")
@@ -458,13 +461,13 @@ def print_psf_data_summary(psf_data):
     print(f"Integer subsampling factor: {psf_data.integer_subsampling_factor}")
     print(f"High-res pixel scale: {psf_data.pixel_scale_arcsec*1000:.3f} mas")
     print(f"Detector pixel scale: {psf_data.kernel_pixel_scale*1000:.3f} mas")
-    
+
     # Physical scales.
     print("\n=== Physical Scales ===")
     print(f"Diffraction limit: {psf_data.diffraction_limit_arcsec:.6f} arcsec")
-    print(f"Angular resolution: {psf_data.angular_resolution_mas:.1f} mas") 
+    print(f"Angular resolution: {psf_data.angular_resolution_mas:.1f} mas")
     print(f"Airy disk diameter: {psf_data.airy_disk_diameter_arcsec:.6f} arcsec")
-    
+
     # PSF quality.
     print("\n=== PSF Quality ===")
     if psf_data.fwhm_arcsec is not None:
@@ -475,22 +478,22 @@ def print_psf_data_summary(psf_data):
         print(f"Diffraction limited: {psf_data.is_diffraction_limited}")
     print(f"Peak intensity: {psf_data.peak_intensity:.6e}")
     print(f"Total flux: {psf_data.total_flux:.6e}")
-    
+
     # Detailed kernel statistics.
     print("\n=== PyAutoLens Kernel Statistics ===")
     print(f"Kernel shape: {pyauto_kernel_shape_native(psf_data.kernel)}")
     print(f"Kernel pixel scale: {psf_data.kernel_pixel_scale:.6f} arcsec/pixel")
-    
+
     # Calculate kernel statistics
     kernel_array = pyauto_kernel_native(psf_data.kernel)
     kernel_sum = np.sum(kernel_array)
     kernel_max = np.max(kernel_array)
     kernel_min = np.min(kernel_array)
-    
+
     print(f"Total flux: {kernel_sum:.6f}")
     print(f"Peak value: {kernel_max:.6e}")
     print(f"Min value: {kernel_min:.6e}")
-    
+
     # Aberrations.
     if psf_data.has_aberrations:
         print("\n=== Aberration Summary ===")
@@ -499,7 +502,7 @@ def print_psf_data_summary(psf_data):
         print(f"Has segment tip/tilts: {psf_data.has_segment_tiptilts}")
         print(f"Has segment hexikes: {psf_data.has_segment_hexikes}")
         print(f"Has global Zernikes: {psf_data.has_global_zernikes}")
-        
+
         breakdown = psf_data.aberration_budget_breakdown
         if breakdown:
             print("Aberration types present:")
@@ -508,10 +511,10 @@ def print_psf_data_summary(psf_data):
     else:
         print("\n=== Aberrations ===")
         print("Perfect PSF (no aberrations)")
-    
+
     # Phase screens.
     if psf_data.phase_screen_types:
         print(f"\nPhase screens: {', '.join(psf_data.phase_screen_types)}")
-    
+
     # Provenance.
     print(f"\nGenerated: {psf_data.generation_timestamp}")

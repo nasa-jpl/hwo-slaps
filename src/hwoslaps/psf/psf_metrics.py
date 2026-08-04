@@ -6,11 +6,12 @@ and Strehl ratio calculations.
 
 import numpy as np
 from scipy.optimize import curve_fit
+
 from ..constants import ARCSEC_PER_RAD
 
 
 def measure_fwhm(psf_field, pixel_scale=None):
-    """Measure the Full Width at Half Maximum (FWHM) of a PSF via its radial profile.
+    """Measure the PSF Full Width at Half Maximum from its radial profile.
 
     This method is robust for diffraction-limited PSFs with complex features
     (e.g., Airy rings, diffraction spikes) where a simple Gaussian fit to the
@@ -50,18 +51,19 @@ def measure_fwhm(psf_field, pixel_scale=None):
     >>> fwhm_arcsec = measure_fwhm(psf, pixel_scale=0.2)
     """
     data = psf_field.intensity.shaped
-    
+
     # --- 1. Find the precise sub-pixel center of the PSF core ---
-    # We fit a 2D Gaussian to a small 7x7 cutout around the peak for a robust center.
+    # We fit a 2D Gaussian to a small 7x7 cutout around the peak for a robust
+    # center.
     peak_y, peak_x = np.unravel_index(np.argmax(data), data.shape)
-    
+
     # Ensure the cutout doesn't go out of bounds
     box_radius = 3
     x_min = max(0, peak_x - box_radius)
     x_max = min(data.shape[1], peak_x + box_radius + 1)
     y_min = max(0, peak_y - box_radius)
     y_max = min(data.shape[0], peak_y + box_radius + 1)
-    
+
     cutout = data[y_min:y_max, x_min:x_max]
     y_cut, x_cut = np.mgrid[:cutout.shape[0], :cutout.shape[1]]
 
@@ -70,7 +72,7 @@ def measure_fwhm(psf_field, pixel_scale=None):
         return background + amplitude * np.exp(
             -((x - x0)**2 / (2 * sigma_x**2) + (y - y0)**2 / (2 * sigma_y**2))
         )
-    
+
     try:
         popt, _ = curve_fit(
             gaussian_2d,
@@ -87,7 +89,7 @@ def measure_fwhm(psf_field, pixel_scale=None):
     # --- 2. Calculate radial distances from center ---
     y, x = np.indices(data.shape)
     r = np.sqrt((x - center_x)**2 + (y - center_y)**2)
-    
+
     # --- 3. Create radial profile using binning ---
     # Use finer binning for better precision, especially for sharp PSFs
     max_radius = min(min(data.shape) / 2.0, 50.0)  # Limit search to 50 pixels max
@@ -95,7 +97,7 @@ def measure_fwhm(psf_field, pixel_scale=None):
     n_bins = int(max_radius / bin_size)
     r_bins = np.linspace(0, max_radius, n_bins + 1)
     r_bin_centers = (r_bins[:-1] + r_bins[1:]) / 2
-    
+
     # Bin the intensity data by radius
     intensity_binned = np.zeros(n_bins)
     for i in range(n_bins):
@@ -104,24 +106,25 @@ def measure_fwhm(psf_field, pixel_scale=None):
             intensity_binned[i] = np.mean(data[mask])
         else:
             intensity_binned[i] = 0
-    
-    # Use a more lenient threshold for valid bins to avoid throwing away low-intensity regions
+
+    # Use a more lenient threshold for valid bins to avoid throwing away
+    # low-intensity regions
     peak_intensity = np.max(data)  # Use actual peak from original data
     intensity_threshold = peak_intensity * 1e-6  # Very small threshold
     valid_bins = intensity_binned > intensity_threshold
-    
+
     if not np.any(valid_bins):
         raise ValueError("No valid intensity data found in radial bins.")
-    
+
     r_valid = r_bin_centers[valid_bins]
     intensity_valid = intensity_binned[valid_bins]
-    
+
     # --- 4. Find half-maximum crossing using interpolation ---
     half_max_intensity = peak_intensity / 2.0
-    
+
     # Find the first crossing where intensity drops below half-maximum
     crossing_indices = np.where(intensity_valid < half_max_intensity)[0]
-    
+
     if len(crossing_indices) == 0:
         raise ValueError(
             f"No half-maximum crossing found within search radius of {max_radius:.2f} pixels. "
@@ -129,20 +132,20 @@ def measure_fwhm(psf_field, pixel_scale=None):
             f"This suggests either the PSF is broader than the search region or there's a "
             f"fundamental issue with the PSF data or analysis parameters."
         )
-    
+
     crossing_idx = crossing_indices[0]
-    
+
     if crossing_idx == 0:
         raise ValueError(
             f"Half-maximum crossing occurs at the first radial bin (r={r_valid[0]:.3f} pixels). "
             f"This suggests the PSF is extremely sharp or there's an issue with centering or "
             f"binning parameters. Consider using finer binning or checking PSF centering."
         )
-    
+
     # Linear interpolation between the two bins surrounding the crossing
     r1, I1 = r_valid[crossing_idx - 1], intensity_valid[crossing_idx - 1]
     r2, I2 = r_valid[crossing_idx], intensity_valid[crossing_idx]
-    
+
     # Validate interpolation inputs
     if I1 == I2:
         raise ValueError(
@@ -150,10 +153,10 @@ def measure_fwhm(psf_field, pixel_scale=None):
             f"r={r2:.3f} are identical ({I1:.6e}). This suggests numerical precision "
             f"issues or insufficient resolution in the radial profile."
         )
-    
+
     # Interpolate to find exact crossing point
     r_half = r1 + (r2 - r1) * (half_max_intensity - I1) / (I2 - I1)
-    
+
     fwhm_pixels = 2.0 * r_half
 
     # --- 5. Convert to physical units if pixel_scale is provided ---
@@ -260,7 +263,7 @@ def analyze_psf_quality(psf_field, perfect_psf=None, wavelength=None, pupil_diam
     -------
     results : `dict`
         Dictionary containing PSF quality metrics with keys:
-        
+
         ``pixel_scale_arcsec``
             Pixel scale in arcseconds (if parameters provided).
         ``fwhm_arcsec``
@@ -283,13 +286,13 @@ def analyze_psf_quality(psf_field, perfect_psf=None, wavelength=None, pupil_diam
     containing error messages.
     """
     results = {}
-    
+
     # Calculate pixel scale if parameters provided
     pixel_scale = None
     if wavelength is not None and pupil_diameter is not None and sampling is not None:
         pixel_scale = calculate_psf_pixel_scale(wavelength, pupil_diameter, sampling)
         results['pixel_scale_arcsec'] = pixel_scale
-    
+
     # Measure FWHM
     try:
         fwhm = measure_fwhm(psf_field, pixel_scale)
@@ -298,7 +301,7 @@ def analyze_psf_quality(psf_field, perfect_psf=None, wavelength=None, pupil_diam
             results['fwhm_mas'] = fwhm * 1000
     except Exception as e:
         results['fwhm_error'] = str(e)
-    
+
     # Calculate Strehl ratio if perfect PSF provided
     if perfect_psf is not None:
         try:
@@ -307,11 +310,11 @@ def analyze_psf_quality(psf_field, perfect_psf=None, wavelength=None, pupil_diam
             results['strehl_ratio'] = strehl
         except Exception as e:
             results['strehl_error'] = str(e)
-    
+
     # Basic PSF statistics
     intensity = psf_field.intensity
     results['peak_intensity'] = np.max(intensity)
     results['total_flux'] = np.sum(intensity)
     results['peak_to_total_ratio'] = results['peak_intensity'] / results['total_flux']
-    
+
     return results

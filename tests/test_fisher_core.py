@@ -12,11 +12,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_core.py"
 
 import sys
+
 spec = importlib.util.spec_from_file_location("hwoslaps_fisher_core", MODULE_PATH)
 module = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = module
@@ -77,7 +77,8 @@ def test_nuisance_basis_change_leaves_profiled_information_invariant():
     nuisance_rot = nuisance @ transform
 
     result_1 = compute_asimov_detectability(signal, nuisance_jacobian=nuisance, sigma=np.ones(signal.size))
-    result_2 = compute_asimov_detectability(signal, nuisance_jacobian=nuisance_rot, sigma=np.ones(signal.size))
+    result_2 = compute_asimov_detectability(signal, nuisance_jacobian=nuisance_rot,
+                                            sigma=np.ones(signal.size))
 
     assert result_1.fisher_profiled == pytest.approx(result_2.fisher_profiled, rel=1e-12, abs=1e-12)
     assert result_1.z_asimov_local == pytest.approx(result_2.z_asimov_local, rel=1e-12, abs=1e-12)

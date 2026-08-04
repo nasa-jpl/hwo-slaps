@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import os
+from copy import deepcopy
 from time import perf_counter
-from typing import Optional, Dict
+from typing import Dict, Optional
 
 from ..lensing.utils import LensingData
 from ..observation.utils import ObservationData
 from ..psf.utils import PSFData
-from .utils_fisher import FisherDetectionData
 from .fisher_detector import FisherDetector
+from .utils_fisher import FisherDetectionData
 
 
 def _fisher_timing_enabled() -> bool:
@@ -48,7 +48,8 @@ def perform_fisher_detection(
     psf_data
         PSF system object shared by baseline and test observations.
     detection_config
-        Full ``modeling`` config section containing the nested ``fisher`` block.
+        Full ``modeling`` config section containing the nested ``fisher``
+        block.
     full_config
         Full pipeline config for provenance.
     """

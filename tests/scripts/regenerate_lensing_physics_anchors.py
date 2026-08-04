@@ -13,7 +13,6 @@ from pathlib import Path
 import numpy as np
 from astropy import constants as const
 
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 TESTS_DIR = SCRIPT_DIR.parent
 if str(TESTS_DIR) not in sys.path:
@@ -23,8 +22,8 @@ from _lensing_physics_helpers import (  # noqa: E402
     Planck15CosmologyAdapter,
     bootstrap_hwoslaps_namespace,
     load_constants_module,
-    load_master_config,
     load_mass_models_module,
+    load_master_config,
     load_module,
 )
 

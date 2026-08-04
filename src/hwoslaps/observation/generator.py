@@ -31,10 +31,10 @@ def generate_observation(
     full_config: Optional[Dict] = None
 ) -> ObservationData:
     """Generate a realistic observation from lensing and PSF data.
-    
+
     This function takes a lensing system and PSF, applies convolution,
     and adds realistic detector noise to create a mock observation.
-    
+
     Parameters
     ----------
     lensing_data : `LensingData`
@@ -45,19 +45,19 @@ def generate_observation(
         Observation-specific configuration. If None, uses defaults.
     full_config : `dict`, optional
         Full configuration dictionary containing all module configs.
-        
+
     Returns
     -------
     observation_data : `ObservationData`
         Complete observation data including convolved image, noise,
         and all metadata.
-        
+
     Notes
     -----
     The observation simulation follows a two-step process:
     1. PSF convolution using PyAutoLens SimulatorImaging (noiseless)
     2. Application of realistic detector noise model
-    
+
     The noise model includes:
     - Poisson noise (photon shot noise)
     - Read noise
@@ -68,16 +68,16 @@ def generate_observation(
     if observation_config is None:
         raise ValueError("observation_config must be provided explicitly (no defaults)")
     full_config = _validate_full_config(full_config)
-    
+
     # Extract parameters
     exposure_time = observation_config['exposure_time']
     throughput = float(observation_config['throughput'])
     detector_config = observation_config['detector']
-    
+
     # Extract global seed from full_config
     global_seed = full_config['global_seed']
     noise_seed = global_seed
-    
+
     # Ensure PSF kernel has odd dimensions (required by PyAutoLens)
     psf_kernel = _ensure_odd_kernel(psf_data.kernel)
     psf_convolver = make_pyauto_convolver(psf_kernel)
@@ -90,7 +90,7 @@ def generate_observation(
                 f"Pixel scale mismatch: PSF kernel_pixel_scale={psf_data.kernel_pixel_scale} arcsec/pixel "
                 f"!= lensing pixel_scale={lensing_data.pixel_scale} arcsec/pixel."
             )
-    
+
     # Convert lensed image to PyAutoLens Array2D format
     mask = al.Mask2D.all_false(
         shape_native=lensing_data.image.shape,
@@ -100,7 +100,7 @@ def generate_observation(
         values=lensing_data.image,
         mask=mask
     )
-    
+
     # Step 1: Generate noiseless PSF-convolved image
     # Use SimulatorImaging with no noise to get pure convolution
     simulator_noiseless = al.SimulatorImaging(
@@ -111,13 +111,13 @@ def generate_observation(
         add_poisson_noise_to_data=False,
         noise_seed=noise_seed
     )
-    
+
     # Get noiseless but PSF-convolved image (units are electrons-per-second).
     # The end-to-end system throughput scales the source flux only; sky
     # background and dark current are configured as detected rates already.
     noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
     source_only_eps = noiseless_dataset.data.native * throughput  # e-/s
-    
+
     # Step 2: Apply realistic detector noise
     # This includes Poisson noise, read noise, dark current, and sky background
     final_image_adu, components = apply_detector_noise(
@@ -126,7 +126,7 @@ def generate_observation(
         detector_config=detector_config,
         seed=noise_seed
     )
-    
+
     # Step 3: Create proper noise map
     # The noise map represents total uncertainty in each pixel
     noise_map_adu = create_noise_map(
@@ -134,18 +134,18 @@ def generate_observation(
         exposure_time=exposure_time,
         detector_config=detector_config
     )
-    
+
     # Create PyAutoLens arrays for the final data
     data = al.Array2D(values=final_image_adu, mask=mask)
     noise_map = al.Array2D(values=noise_map_adu, mask=mask)
-    
+
     # Create the imaging dataset
     imaging_dataset = al.Imaging(
         data=data,
         noise_map=noise_map,
         psf=psf_convolver
     )
-    
+
     # Create metadata dictionary
     metadata = {
         'generated': datetime.now().isoformat(),
@@ -158,10 +158,10 @@ def generate_observation(
         'pixel_scale': lensing_data.pixel_scale,
         'field_of_view': lensing_data.field_of_view_arcsec
     }
-    
+
     # Add run name if provided
     metadata['run_name'] = full_config['run_name']
-    
+
     # Create and return ObservationData object
     return ObservationData(
         imaging=imaging_dataset,
@@ -207,12 +207,12 @@ def _validate_full_config(full_config: Optional[Dict]) -> Dict:
 
 def _ensure_odd_kernel(kernel):
     """Validate the PSF kernel for observation convolution.
-    
+
     Parameters
     ----------
     kernel : `object`
         Input PSF kernel.
-        
+
     Returns
     -------
     kernel : `object`

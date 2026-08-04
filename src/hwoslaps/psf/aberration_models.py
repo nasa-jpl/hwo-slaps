@@ -5,8 +5,8 @@ pistons, segment tip/tilts, segment hexikes, and global Zernike phase screens.
 Unless otherwise noted, nanometer amplitudes are wavefront OPD amplitudes.
 """
 
-import numpy as np
 import hcipy
+import numpy as np
 
 
 def _validate_segment_id(raw_seg_id, num_segments):
@@ -94,12 +94,12 @@ def nm_to_opd(nm_rms):
 
 def urad_to_rad(urad):
     """Convert microradians to radians.
-    
+
     Parameters
     ----------
     urad : `float`
         Angle in microradians.
-        
+
     Returns
     -------
     radians : `float`
@@ -140,7 +140,7 @@ def apply_segment_pistons(hsm, piston_dict, wavelength, num_segments):
 
 
 def apply_segment_tiptilts(hsm, tiptilt_dict, num_segments):
-    """Apply tip and tilt errors to individual segments while preserving piston.
+    """Apply per-segment tip and tilt errors while preserving piston.
 
     This function updates the tip and tilt actuator values for each segment in
     a segmented deformable mirror while keeping the existing piston value
@@ -186,7 +186,7 @@ def apply_segment_tiptilts(hsm, tiptilt_dict, num_segments):
 
 
 def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
-    """Apply segment-level hexike aberrations using HCIPy's segmented surface optic.
+    """Apply segment hexike aberrations via HCIPy's segmented surface optic.
 
     Parameters
     ----------
@@ -247,7 +247,8 @@ def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
     else:
         hexike_surface.flatten()
 
-    # Set per-segment coefficients using HCIPy Noll indexing and surface-height units.
+    # Set per-segment coefficients using HCIPy Noll indexing and
+    # surface-height units.
     for seg_id, mode_dict in normalized_segment_dict.items():
         if mode_dict:
             coeffs_m = {
@@ -286,12 +287,12 @@ def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):
         Raised if a dictionary key is not a supported 1-based Noll index.
     """
     pupil_grid = telescope_data['pupil_grid']
-    
+
     # Create Zernike basis for the full pupil.
     num_zernike_modes = 50
     pupil_diameter_for_zernike = pupil_grid.x.max() - pupil_grid.x.min()
     zernike_basis = hcipy.make_zernike_basis(num_zernike_modes, D=pupil_diameter_for_zernike, grid=pupil_grid)
-    
+
     phase_screen = pupil_grid.zeros()
 
     if isinstance(zernike_coeffs_nm, dict):
@@ -406,13 +407,15 @@ def generate_random_segment_aberrations(
     else:
         pistons_nm = pistons_raw * (piston_rms_target / piston_std)
 
-    # Convert tip/tilts to microradians (small-angle relation RMS_height ≈ slope*R/√3).
+    # Convert tip/tilts to microradians (small-angle relation
+    # RMS_height ≈ slope*R/√3).
     if tiptilt_rms_target == 0:
         tips_urad = np.zeros(num_segments)
         tilts_urad = np.zeros(num_segments)
     elif segment_flat_to_flat is not None:
         segment_radius = segment_flat_to_flat / 2
-        # Match the random vector RMS to the requested nm component before geometry.
+        # Match the random vector RMS to the requested nm component before
+        # applying geometry.
         tiptilt_variance = np.var(tips_raw) + np.var(tilts_raw)
         if tiptilt_variance == 0:
             raise ValueError('Could not generate non-degenerate tip/tilt perturbations.')
@@ -422,12 +425,13 @@ def generate_random_segment_aberrations(
         tips_urad = tips_raw * tiptilt_scale * geom
         tilts_urad = tilts_raw * tiptilt_scale * geom
     else:
-        # No segment size: generate dimensionally correct angles (µrad) with unit RMS.
-        # Rely on downstream numerical calibration to match the requested nm RMS.
+        # No segment size: generate dimensionally correct angles (µrad) with
+        # unit RMS.  Rely on downstream numerical calibration to match the
+        # requested nm RMS.
         tips_urad = tips_raw
         tilts_urad = tilts_raw
 
-    return ({i: pistons_nm[i] for i in range(num_segments)}, 
+    return ({i: pistons_nm[i] for i in range(num_segments)},
             {i: (tips_urad[i], tilts_urad[i]) for i in range(num_segments)})
 
 
@@ -437,7 +441,7 @@ def calculate_wavefront_rms(hsm, aper, wavelength):
     This helper measures only the OPD represented by the segmented deformable
     mirror surface. It does not include additional phase-screen optics such as
     segment hexikes or global Zernikes.
-    
+
     Parameters
     ----------
     hsm : `hcipy.SegmentedDeformableMirror`
@@ -447,7 +451,7 @@ def calculate_wavefront_rms(hsm, aper, wavelength):
     wavelength : `float`
         Wavelength in meters. This parameter is accepted for API compatibility
         and is not used in the surface-height calculation.
-        
+
     Returns
     -------
     rms_error : `float`

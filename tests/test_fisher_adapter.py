@@ -8,18 +8,19 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CORE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_core.py"
 ADAPTER_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_adapter.py"
 TEST_PACKAGE = "hwoslaps_fisher_adapter_testpkg"
 
-# Load core first so relative imports in the adapter resolve cleanly when imported by path.
+# Load core first so relative imports in the adapter resolve cleanly when
+# the module is imported by path.
 import sys
 import types
 
 # Build lightweight package placeholders in a private namespace so relative
-# imports resolve without polluting the real `hwoslaps` package for other tests.
+# imports resolve without polluting the real `hwoslaps` package for other
+# tests.
 test_pkg = sys.modules.setdefault(TEST_PACKAGE, types.ModuleType(TEST_PACKAGE))
 test_pkg.__path__ = []
 modeling_pkg_name = f"{TEST_PACKAGE}.modeling"

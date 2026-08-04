@@ -17,7 +17,6 @@ from typing import Any, Dict
 import yaml
 from astropy.cosmology import Planck15
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src" / "hwoslaps"
 
@@ -59,14 +58,14 @@ def load_constants_module():
 
 
 def load_mass_models_module():
-    """Load ``hwoslaps.lensing.mass_models`` without importing package ``__init__``."""
+    """Load ``hwoslaps.lensing.mass_models`` without the package init."""
     bootstrap_hwoslaps_namespace()
     load_constants_module()
     return load_module("lensing/mass_models.py", "hwoslaps.lensing.mass_models")
 
 
 def load_validation_module():
-    """Load ``hwoslaps.config.validation`` without importing package ``__init__``."""
+    """Load ``hwoslaps.config.validation`` without the package init."""
     bootstrap_hwoslaps_namespace()
     return load_module("config/validation.py", "hwoslaps.config.validation")
 

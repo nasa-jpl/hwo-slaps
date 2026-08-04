@@ -2,8 +2,8 @@
 
 These tests target the three design requirements called out in review:
 
-1. Derivatives must be anchored to the true science fiducial, not placeholder YAML
-   coefficients in disabled PSF families.
+1. Derivatives must be anchored to the true science fiducial, not placeholder
+   YAML coefficients in disabled PSF families.
 2. The instrument basis must be defined explicitly and therefore independent of
    which coefficients happen to be present/nonzero in the science config.
 3. The PSF nuisance-fit basis and PSF scan basis must be disjoint.
@@ -22,7 +22,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src" / "hwoslaps"

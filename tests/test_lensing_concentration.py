@@ -8,13 +8,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-
 TESTS_ROOT = Path(__file__).resolve().parent
 if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
 from _lensing_physics_helpers import load_mass_models_module  # noqa: E402
-
 
 mass_models = load_mass_models_module()
 

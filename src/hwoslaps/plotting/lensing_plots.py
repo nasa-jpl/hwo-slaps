@@ -4,20 +4,22 @@ This module contains plotting functions for visualizing lensing systems
 and subhalo effects.
 """
 
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import SymLogNorm
-import autolens as al
 from pathlib import Path
+
+import autolens as al
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.colors import SymLogNorm
+
 from .registry import plot_function
 
 
 def _create_output_directory(base_output_dir, run_name, module_name):
     """Create structured output directory following the convention.
-    
+
     Creates output directories with the structure:
     {output_folder}/{run_name}/{module}
-    
+
     Parameters
     ----------
     base_output_dir : `str` or `Path`
@@ -26,7 +28,7 @@ def _create_output_directory(base_output_dir, run_name, module_name):
         Run identifier name.
     module_name : `str`
         Module name (e.g., 'psf', 'lensing').
-        
+
     Returns
     -------
     output_dir : `Path`
@@ -44,62 +46,62 @@ def _format_mass_latex(mass):
     return rf"{m_val} \times 10^{{{m_exp}}} M_\odot"
 
 
-@plot_function(module='lensing', requires_subhalo=True, 
+@plot_function(module='lensing', requires_subhalo=True,
                description="2x2 comparison showing subhalo effects with log/linear scaling")
 def plot_lensing_comparison(lensing_data, plot_config):
     """Plot lensing system comparison showing subhalo effects.
-    
+
     This function creates a detailed comparison plot showing the lensing system
     with and without the subhalo, highlighting the difference caused by the
     subhalo's gravitational influence.
-    
+
     Parameters
     ----------
     lensing_data : `LensingData`
         Complete lensing system data from the pipeline.
     plot_config : `dict`
         Plotting configuration including output directory.
-        
+
     Notes
     -----
     The function generates a 2x2 comparison plot showing the full lensing
     system, baseline without subhalo, and difference images in both linear
     and logarithmic scaling. Quantitative metrics are printed to console.
-    
+
     Examples
     --------
     Plot a lensing comparison:
-    
+
     >>> plot_config = {'output_dir': '/path/to/output'}
     >>> plot_lensing_comparison(lensing_data, plot_config)
     """
     # Get run name from config
     config = lensing_data.config
     run_name = config['run_name']
-    
+
     # Create structured output directory
     output_dir = _create_output_directory(
-        plot_config['output_dir'], 
-        run_name, 
+        plot_config['output_dir'],
+        run_name,
         'lensing'
     )
-    
+
     # Extract data from lensing_data using unified structure
     grid = lensing_data.grid
     pixel_scale = lensing_data.pixel_scale
     re = lensing_data.lens_einstein_radius
-    
+
     # Check if subhalo is present
     if not lensing_data.has_subhalo:
         print("Warning: No subhalo present in lensing system. Cannot create comparison plot.")
         return
-    
+
     # Get subhalo information from unified structure
     subhalo_position = lensing_data.subhalo_position
     subhalo_model = lensing_data.subhalo_model
     subhalo_mass = lensing_data.subhalo_mass
     mass_latex = _format_mass_latex(subhalo_mass)
-    
+
     # Recreate lens galaxy without subhalo for baseline comparison
     # Create lens mass profile (without subhalo)
     lens_mass = al.mp.Isothermal(
@@ -107,7 +109,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
         einstein_radius=lensing_data.lens_einstein_radius,
         ell_comps=lensing_data.lens_ellipticity
     )
-    
+
     # Create source light profile
     source_light = al.lp.Exponential(
         centre=lensing_data.source_centre,
@@ -115,18 +117,18 @@ def plot_lensing_comparison(lensing_data, plot_config):
         intensity=lensing_data.source_intensity,
         effective_radius=lensing_data.source_effective_radius
     )
-    
+
     # Create galaxies without subhalo
     lens_galaxy_no_subhalo = al.Galaxy(
         redshift=lensing_data.lens_redshift,
         mass=lens_mass
     )
-    
+
     source_galaxy = al.Galaxy(
         redshift=lensing_data.source_redshift,
         light=source_light
     )
-    
+
     # Create tracer without subhalo for baseline
     # Use the same cosmology as used in the lensing run (from config)
     if lensing_data.cosmology_name == 'Planck15':
@@ -138,41 +140,42 @@ def plot_lensing_comparison(lensing_data, plot_config):
         galaxies=[lens_galaxy_no_subhalo, source_galaxy],
         cosmology=cosmo
     )
-    
+
     # Generate images
     image_with_subhalo = lensing_data.image
     image_no_subhalo = tracer_no_subhalo.image_2d_from(grid=grid)
     difference_image = image_with_subhalo - image_no_subhalo.native
-    
+
     # Set up the plotting style
     plt.style.use('default')
-    
+
     # Create the comparison figure - 2x2 layout
     plt.figure(figsize=(12, 10))
-    
+
     # Calculate normalized extent (x/RE, y/RE)
     fov_arcsec = grid.shape_native[0] * pixel_scale
     extent_norm = (-fov_arcsec/(2*re), fov_arcsec/(2*re), -fov_arcsec/(2*re), fov_arcsec/(2*re))
     subhalo_pos_norm = (subhalo_position[0]/re, subhalo_position[1]/re)
-    
+
     # Top left: Original image (no subhalo)
     ax1 = plt.subplot(2, 2, 1)
     im1 = ax1.imshow(image_no_subhalo.native, extent=extent_norm, origin='lower', cmap='viridis')
     ax1.set_title('Original Scene (No Subhalo)', fontsize=16)
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
-    
+
     # Top right: Full lensing system with subhalo
     ax2 = plt.subplot(2, 2, 2)
     im2 = ax2.imshow(image_with_subhalo, extent=extent_norm, origin='lower', cmap='viridis')
     ax2.set_title(f'Scene with Subhalo ({subhalo_model}, ${mass_latex}$)', fontsize=16)
-    ax2.scatter(subhalo_pos_norm[1], subhalo_pos_norm[0], c='red', s=100, marker='x', label='Injected Subhalo')
+    ax2.scatter(subhalo_pos_norm[1], subhalo_pos_norm[0], c='red', s=100,
+                marker='x', label='Injected Subhalo')
     ax2.legend(loc='upper right', fontsize=10)
     plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
-    
+
     # Calculate difference scaling
     max_diff = np.max(np.abs(difference_image))
     linthresh = max_diff * 1e-3 if max_diff > 0 else 1e-6
-    
+
     # Bottom left: Difference image with log scale
     ax3 = plt.subplot(2, 2, 3)
     im3 = ax3.imshow(difference_image, extent=extent_norm, origin='lower', cmap='RdBu_r',
@@ -180,7 +183,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     ax3.set_title(f'Difference (Log, ${mass_latex}$)', fontsize=16)
     ax3.scatter(subhalo_pos_norm[1], subhalo_pos_norm[0], c='black', s=100, marker='x')
     plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04, label='Difference (log scale)')
-    
+
     # Bottom right: Difference image with absolute scale
     ax4 = plt.subplot(2, 2, 4)
     im4 = ax4.imshow(difference_image, extent=extent_norm, origin='lower', cmap='RdBu_r',
@@ -188,28 +191,28 @@ def plot_lensing_comparison(lensing_data, plot_config):
     ax4.set_title(f'Difference (Linear, ${mass_latex}$)', fontsize=16)
     ax4.scatter(subhalo_pos_norm[1], subhalo_pos_norm[0], c='black', s=100, marker='x')
     plt.colorbar(im4, ax=ax4, fraction=0.046, pad=0.04, label='Difference (absolute scale)')
-    
+
     for ax in [ax1, ax2, ax3, ax4]:
         ax.set_xlabel(r'$x / R_E$')
         ax.set_ylabel(r'$y / R_E$')
-    
+
     plt.tight_layout()
-    
+
     # Create meaningful filename
     filename = "lensing_comparison.png"
     filepath = output_dir / filename
-    
+
     # Save the plot
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Saved lensing comparison plot: {filepath}")
-    
+
     # Print quantitative comparison
     peak_signal = np.max(np.abs(difference_image))
     total_signal = np.sum(np.abs(difference_image))
     signal_rms = np.sqrt(np.mean(difference_image**2))
-    
+
     print("\nSubhalo Effect Analysis:")
     print(f"Model: {subhalo_model}")
     print(f"Mass: {subhalo_mass:.1e} M_sun")
@@ -222,21 +225,21 @@ def plot_lensing_comparison(lensing_data, plot_config):
     print(f"Signal RMS: {signal_rms:.6e}")
 
 
-@plot_function(module='lensing', requires_subhalo=True, 
+@plot_function(module='lensing', requires_subhalo=True,
                description="3x1 baseline scene layout with fractional residual (Delta I / I)")
 def plot_lensing_fractional_comparison(lensing_data, plot_config):
     """Plot lensing system comparison showing fractional subhalo effects.
-    
-    This function matches the layout of `plot_lensing_baseline_scene`, but replaces
-    the residual panel with a fractional residual:
-    
+
+    This function matches the layout of `plot_lensing_baseline_scene`, but
+    replaces the residual panel with a fractional residual:
+
     - No-subhalo baseline (intensity)
     - With-subhalo image (intensity)
     - Fractional residual (Delta I / I), where I is the no-subhalo baseline
-    
-    The plot uses axes normalized by the Einstein radius (x/RE, y/RE) and uses a
+
+    The plot uses axes normalized by the Einstein radius (x/RE, y/RE) and a
     consistent intensity stretch for the first two panels.
-    
+
     Parameters
     ----------
     lensing_data : `LensingData`
@@ -247,55 +250,55 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
     # Get run name from config
     config = lensing_data.config
     run_name = config['run_name']
-    
+
     # Create structured output directory
     output_dir = _create_output_directory(
-        plot_config['output_dir'], 
-        run_name, 
+        plot_config['output_dir'],
+        run_name,
         'lensing'
     )
-    
+
     # Extract data from lensing_data
     grid = lensing_data.grid
     pixel_scale = lensing_data.pixel_scale
-    
+
     # Check if subhalo is present
     if not lensing_data.has_subhalo:
         return
-    
+
     # Get subhalo information
     subhalo_position = lensing_data.subhalo_position
     subhalo_mass = lensing_data.subhalo_mass
     mass_latex = _format_mass_latex(subhalo_mass)
-    
+
     # Recreate baseline without subhalo
     lens_mass = al.mp.Isothermal(
         centre=lensing_data.lens_centre,
         einstein_radius=lensing_data.lens_einstein_radius,
         ell_comps=lensing_data.lens_ellipticity
     )
-    
+
     source_light = al.lp.Exponential(
         centre=lensing_data.source_centre,
         ell_comps=lensing_data.source_ellipticity,
         intensity=lensing_data.source_intensity,
         effective_radius=lensing_data.source_effective_radius
     )
-    
+
     lens_galaxy_no_subhalo = al.Galaxy(redshift=lensing_data.lens_redshift, mass=lens_mass)
     source_galaxy = al.Galaxy(redshift=lensing_data.source_redshift, light=source_light)
-    
+
     if lensing_data.cosmology_name == 'Planck15':
         cosmo = al.cosmo.Planck15()
     else:
         raise ValueError(f"Unsupported cosmology: {lensing_data.cosmology_name}")
 
     tracer_no_subhalo = al.Tracer(galaxies=[lens_galaxy_no_subhalo, source_galaxy], cosmology=cosmo)
-    
+
     # Generate images
     image_with_subhalo = lensing_data.image
     image_no_subhalo = tracer_no_subhalo.image_2d_from(grid=grid).native
-    
+
     # Calculate fractional residual: (with - baseline) / baseline
     epsilon = 1e-10
     raw_diff = image_with_subhalo - image_no_subhalo
@@ -339,7 +342,7 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
         fontsize=12,
         bbox=dict(boxstyle='round,pad=0.25', facecolor='white', alpha=0.8),
     )
-    #ax1.scatter(*subhalo_position[::-1], c='red', s=80, marker='x', alpha=0.7)
+
     # Panel 2: With subhalo
     ax2 = axes[1]
     im2 = ax2.imshow(image_with_subhalo, extent=extent, origin='lower',
@@ -384,12 +387,12 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
 
     # `constrained_layout` handles spacing; avoid `tight_layout` which can
     # re-expand inter-panel spacing after adding colorbars.
-    
+
     filename = "lensing_fractional_comparison.png"
     filepath = output_dir / filename
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Saved fractional comparison plot (normalized axes): {filepath}")
     print(f"Peak |Delta I / I|: {max_frac_percent:.6e}%")
 
@@ -398,84 +401,84 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
                description="1x3 horizontal layout for presentation slides showing baseline scene")
 def plot_lensing_baseline_scene(lensing_data, plot_config):
     """Plot lensing baseline scene for presentation slides.
-    
+
     Creates a clean 1x3 horizontal layout showing:
     1. No-subhalo ring (smooth baseline)
-    2. With subhalo (tiny kink visible)  
+    2. With subhalo (tiny kink visible)
     3. Residual (difference image)
-    
+
     All panels use the same intensity stretch for direct comparison.
-    
+
     Parameters
     ----------
     lensing_data : `LensingData`
         Complete lensing system data from the pipeline.
     plot_config : `dict`
         Plotting configuration including output directory.
-        
+
     Notes
     -----
     This function is specifically designed for presentation slides showing
     the baseline lensing scene concept. It generates a clean, horizontal
     3-panel figure suitable for slide inclusion.
-    
+
     Examples
     --------
     Create presentation baseline scene figure:
-    
+
     >>> plot_config = {'output_dir': '/path/to/output'}
     >>> plot_lensing_baseline_scene(lensing_data, plot_config)
     """
     # Get run name from config
     config = lensing_data.config
     run_name = config['run_name']
-    
+
     # Create structured output directory
     output_dir = _create_output_directory(
-        plot_config['output_dir'], 
-        run_name, 
+        plot_config['output_dir'],
+        run_name,
         'lensing'
     )
-    
+
     # Extract data from lensing_data using unified structure
     grid = lensing_data.grid
     pixel_scale = lensing_data.pixel_scale
-    
+
     # Check if subhalo is present
     if not lensing_data.has_subhalo:
         print("Warning: No subhalo present in lensing system. Cannot create baseline scene plot.")
         return
-    
+
     # Get subhalo information
     subhalo_position = lensing_data.subhalo_position
     subhalo_mass = lensing_data.subhalo_mass
     mass_latex = _format_mass_latex(subhalo_mass)
-    
+
     # Recreate lens galaxy without subhalo for baseline comparison
     lens_mass = al.mp.Isothermal(
         centre=lensing_data.lens_centre,
         einstein_radius=lensing_data.lens_einstein_radius,
         ell_comps=lensing_data.lens_ellipticity
     )
-    
+
     source_light = al.lp.Exponential(
         centre=lensing_data.source_centre,
         ell_comps=lensing_data.source_ellipticity,
         intensity=lensing_data.source_intensity,
         effective_radius=lensing_data.source_effective_radius
     )
-    
+
     # Create galaxies without subhalo
     lens_galaxy_no_subhalo = al.Galaxy(
         redshift=lensing_data.lens_redshift,
         mass=lens_mass
     )
-    
+
     source_galaxy = al.Galaxy(
         redshift=lensing_data.source_redshift,
         light=source_light
     )
-    
+
     # Create tracer without subhalo for baseline
     if lensing_data.cosmology_name == 'Planck15':
         cosmo = al.cosmo.Planck15()
@@ -486,72 +489,72 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
         galaxies=[lens_galaxy_no_subhalo, source_galaxy],
         cosmology=cosmo
     )
-    
+
     # Generate images
     image_with_subhalo = lensing_data.image
     image_no_subhalo = tracer_no_subhalo.image_2d_from(grid=grid)
     difference_image = image_with_subhalo - image_no_subhalo.native
-    
+
     # Calculate extent in arcseconds
     fov_arcsec = grid.shape_native[0] * pixel_scale
     extent = (-fov_arcsec / 2, fov_arcsec / 2, -fov_arcsec / 2, fov_arcsec / 2)
-    
+
     # Set up consistent intensity scaling across all panels
     # Use the with-subhalo image for reference scaling
-    vmin = np.min(image_with_subhalo) 
+    vmin = np.min(image_with_subhalo)
     vmax = np.max(image_with_subhalo)
-    
+
     # Create the presentation figure - 1x3 horizontal layout
     plt.style.use('default')
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    
+
     # Panel 1: No-subhalo ring (baseline)
     ax1 = axes[0]
-    im1 = ax1.imshow(image_no_subhalo.native, extent=extent, origin='lower', 
+    im1 = ax1.imshow(image_no_subhalo.native, extent=extent, origin='lower',
                      cmap='viridis', vmin=vmin, vmax=vmax)
     ax1.set_title('No Subhalo', fontsize=14)
     # Mark subhalo position for reference
     ax1.scatter(*subhalo_position[::-1], c='red', s=80, marker='x', alpha=0.7)
-    
+
     # Panel 2: With subhalo (tiny kink)
-    ax2 = axes[1] 
+    ax2 = axes[1]
     im2 = ax2.imshow(image_with_subhalo, extent=extent, origin='lower',
                      cmap='viridis', vmin=vmin, vmax=vmax)
     ax2.set_title(f'With Subhalo (${mass_latex}$)', fontsize=14)
     # Mark subhalo position
     ax2.scatter(*subhalo_position[::-1], c='red', s=80, marker='x', alpha=0.7)
-    
+
     # Panel 3: Residual (difference)
     ax3 = axes[2]
     max_diff = np.max(np.abs(difference_image))
-    im3 = ax3.imshow(difference_image, extent=extent, origin='lower', 
+    im3 = ax3.imshow(difference_image, extent=extent, origin='lower',
                      cmap='RdBu_r', vmin=-max_diff, vmax=max_diff)
     ax3.set_title(f'Residual (${mass_latex}$)', fontsize=14)
     # Mark subhalo position in black for contrast
     ax3.scatter(*subhalo_position[::-1], c='black', s=80, marker='x', alpha=0.8)
-    
+
     for ax in [ax1, ax2, ax3]:
         ax.set_xlabel('arcsec')
         ax.set_ylabel('arcsec')
-    
+
     # Add colorbars
     plt.colorbar(im1, ax=ax1, fraction=0.046, pad=0.04)
-    plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04) 
+    plt.colorbar(im2, ax=ax2, fraction=0.046, pad=0.04)
     plt.colorbar(im3, ax=ax3, fraction=0.046, pad=0.04)
-    
+
     plt.tight_layout()
-    
+
     # Create filename for presentation figure
     mass_str = f"{subhalo_mass:.1e}".replace('+', '').replace('e0', 'e')
     filename = f"lensing_baseline_scene_{mass_str}Msun.png"
     filepath = output_dir / filename
-    
+
     # Save the plot
     plt.savefig(filepath, dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     print(f"Saved lensing baseline scene plot: {filepath}")
-    
+
     # Print summary for presentation context
     print("\nBaseline Scene Summary:")
     print(f"Subhalo mass: {subhalo_mass:.1e} M_sun")

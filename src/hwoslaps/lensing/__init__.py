@@ -18,7 +18,7 @@ __all__ = [
     'generate_lensing_system',
     'LensingData',
     'einstein_radius_point_mass',
-    'einstein_radius_sis_m200', 
+    'einstein_radius_sis_m200',
     'nfw_scale_parameters',
     'concentration_mass_relation',
 ]

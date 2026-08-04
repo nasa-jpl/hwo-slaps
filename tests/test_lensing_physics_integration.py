@@ -9,7 +9,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-
 pytest.importorskip("autolens")
 
 
@@ -23,7 +22,6 @@ from _lensing_physics_helpers import (
     load_master_config,
     load_module,
 )
-
 
 INTEGRATION_ANCHOR_MASSES = {
     "PointMass": 1.0e8,

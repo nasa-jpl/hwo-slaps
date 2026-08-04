@@ -18,7 +18,6 @@ from _lensing_physics_helpers import (  # noqa: E402
     load_mass_models_module,
 )
 
-
 COSMOLOGY = Planck15CosmologyAdapter()
 MASS_MODELS = load_mass_models_module()
 LENSING_UTILS = load_lensing_utils_module()

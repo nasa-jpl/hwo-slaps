@@ -31,8 +31,8 @@ local discovery metric is
 
 This is the local linear-Gaussian limit in which the score, Wald, and profile
 likelihood-ratio tests coincide asymptotically.  It is therefore the correct
-fast surrogate for likelihood-ratio sensitivity sweeps, provided it is validated
-against a sparse set of full nonlinear fits.
+fast surrogate for likelihood-ratio sensitivity sweeps, provided it is
+validated against a sparse set of full nonlinear fits.
 """
 
 from __future__ import annotations
@@ -185,6 +185,23 @@ class Whitener:
 
     @classmethod
     def identity(cls, size: int) -> "Whitener":
+        """Build a no-op whitener for already-whitened data of ``size``.
+
+        Parameters
+        ----------
+        size : `int`
+            Number of data points. Must be positive.
+
+        Returns
+        -------
+        whitener : `Whitener`
+            Whitener that leaves its input unchanged.
+
+        Raises
+        ------
+        ValueError
+            Raised if ``size`` is not positive.
+        """
         size = int(size)
         if size <= 0:
             raise ValueError("Whitener.identity requires a positive size.")
@@ -192,6 +209,25 @@ class Whitener:
 
     @classmethod
     def from_sigma(cls, sigma: ArrayLike) -> "Whitener":
+        """Build a diagonal whitener from per-pixel standard deviations.
+
+        Parameters
+        ----------
+        sigma : array-like
+            1D array of strictly positive, finite per-pixel standard
+            deviations.
+
+        Returns
+        -------
+        whitener : `Whitener`
+            Whitener that divides its input by ``sigma``.
+
+        Raises
+        ------
+        ValueError
+            Raised if ``sigma`` is not 1D, is empty, or contains non-finite
+            or non-positive values.
+        """
         sigma_arr = np.asarray(sigma, dtype=float)
         if sigma_arr.ndim != 1:
             raise ValueError("sigma must be a 1D array of per-pixel standard deviations.")
@@ -205,6 +241,24 @@ class Whitener:
 
     @classmethod
     def from_covariance(cls, covariance: MatrixLike) -> "Whitener":
+        """Build a dense whitener from a full noise covariance matrix.
+
+        Parameters
+        ----------
+        covariance : array-like
+            Square, finite, symmetric positive-definite covariance matrix.
+
+        Returns
+        -------
+        whitener : `Whitener`
+            Whitener backed by the Cholesky factor of ``covariance``.
+
+        Raises
+        ------
+        ValueError
+            Raised if ``covariance`` is not square, is empty, contains
+            non-finite values, or is not positive definite.
+        """
         cov = np.asarray(covariance, dtype=float)
         if cov.ndim != 2 or cov.shape[0] != cov.shape[1]:
             raise ValueError("covariance must be a square 2D array.")
@@ -403,7 +457,7 @@ class ProfileLikelihoodWorkspace:
         if s.ndim != 1:
             raise ValueError("signal_whitened must be a 1D array.")
         if self.n_data == 0:
-            # Establish n_data from the first signal if no nuisances were supplied.
+            # Establish n_data from the first signal if no nuisances given.
             self.n_data = s.size  # type: ignore[misc]
         elif s.size != self.n_data:
             raise ValueError(
@@ -427,7 +481,9 @@ class ProfileLikelihoodWorkspace:
             raise ValueError("signal_bank_whitened contains non-finite values.")
         return s_bank
 
-    def _profiled_information(self, signal_whitened: np.ndarray) -> Tuple[float, float, np.ndarray, float, float]:
+    def _profiled_information(
+        self, signal_whitened: np.ndarray
+    ) -> Tuple[float, float, np.ndarray, float, float]:
         raw = float(signal_whitened @ signal_whitened)
 
         if self.n_nuisance == 0:
@@ -610,15 +666,16 @@ class ProfileLikelihoodWorkspace:
         mode_names
             Optional names for systematic modes.
         mode_sigmas
-            Optional 1-sigma amplitudes for each systematic mode.  When provided,
-            the result reports the corresponding one-sigma spurious significance.
+            Optional 1-sigma amplitudes for each systematic mode.  When
+            provided, the result reports the corresponding one-sigma spurious
+            significance.
         z_tolerance
-            Optional significance budget used to convert each mode coupling into a
-            tolerance ``|delta a_k| < z_tolerance / |z_per_unit|``.
+            Optional significance budget used to convert each mode coupling
+            into a tolerance ``|delta a_k| < z_tolerance / |z_per_unit|``.
         systematic_covariance
-            Optional covariance of the systematic mode amplitudes.  When provided,
-            the result also reports the RMS spurious amplitude and significance
-            from the full covariance.
+            Optional covariance of the systematic mode amplitudes.  When
+            provided, the result also reports the RMS spurious amplitude and
+            significance from the full covariance.
         """
         signal = self._validate_signal(signal_whitened)
         modes = np.asarray(systematic_modes_whitened, dtype=float)
@@ -779,7 +836,7 @@ def compute_asimov_detectability(
     nuisance_names: Optional[Sequence[str]] = None,
     rcond: float = 1.0e-12,
 ) -> AsimovAmplitudeResult:
-    """Convenience wrapper for one unwhitened signal template."""
+    """Compute Asimov detectability for one unwhitened signal template."""
     signal_arr = _coerce_data_vector("signal", signal)
     nuisance_arr = _coerce_data_matrix("nuisance_jacobian", nuisance_jacobian, signal_arr.size)
     whitener = _build_whitener(signal_arr.size, sigma=sigma, covariance=covariance)
@@ -804,7 +861,7 @@ def evaluate_signal_bank(
     nuisance_names: Optional[Sequence[str]] = None,
     rcond: float = 1.0e-12,
 ) -> SignalBankResult:
-    """Convenience wrapper for a bank of unwhitened signal templates.
+    """Evaluate a bank of unwhitened signal templates.
 
     ``signal_bank`` must have shape ``(n_signals, n_data)``.
     """
@@ -839,7 +896,7 @@ def compute_spurious_amplitude(
     nuisance_names: Optional[Sequence[str]] = None,
     rcond: float = 1.0e-12,
 ) -> SpuriousAmplitudeResult:
-    """Convenience wrapper for one unwhitened systematic bias field."""
+    """Compute the spurious amplitude for one unwhitened bias field."""
     signal_arr = _coerce_data_vector("signal", signal)
     bias_arr = _coerce_data_vector("bias", bias)
     if bias_arr.size != signal_arr.size:
@@ -873,7 +930,7 @@ def scan_systematic_modes(
     progress: Optional[Callable[[Iterable[int]], Iterable[int]]] = None,
     rcond: float = 1.0e-12,
 ) -> SystematicModeScanResult:
-    """Convenience wrapper for systematic mode scans on unwhitened arrays."""
+    """Scan systematic modes given unwhitened arrays."""
     signal_arr = _coerce_data_vector("signal", signal)
     syst_arr = _coerce_data_matrix("systematic_modes", systematic_modes, signal_arr.size)
     nuisance_arr = _coerce_data_matrix("nuisance_jacobian", nuisance_jacobian, signal_arr.size)
@@ -933,7 +990,7 @@ def bonferroni_local_p(global_p: float, n_eff: int) -> float:
 
 
 def global_p_from_local(local_p: float, n_eff: int) -> float:
-    """Approximate global false-alarm rate from a local p-value and ``n_eff`` trials."""
+    """Approximate the global false-alarm rate over ``n_eff`` trials."""
     if not isinstance(local_p, (int, float)) or not isfinite(float(local_p)):
         raise ValueError("local_p must be a finite scalar.")
     local_p = float(local_p)
@@ -950,7 +1007,8 @@ def detectable_area(metric_values: ArrayLike, cell_area: float, threshold: float
     Parameters
     ----------
     metric_values
-        Array of local detectability values (e.g. ``Z_A`` or ``q_A``) per map cell.
+        Array of local detectability values (e.g. ``Z_A`` or ``q_A``) per map
+        cell.
     cell_area
         Physical or angular area represented by one map cell.
     threshold

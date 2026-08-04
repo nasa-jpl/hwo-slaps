@@ -6,8 +6,8 @@ the pipeline before any module code executes.
 
 Policy enforced (per user requirements):
 - Plotting: a global `plotting.enabled` boolean must be present (no defaults).
-- Aberrations: `psf.aberrations` must be present; if no aberrations are desired,
-  all `enable_*` flags must be set to False explicitly.
+- Aberrations: `psf.aberrations` must be present; if no aberrations are
+  desired, all `enable_*` flags must be set to False explicitly.
 - Random seed: a global `global_seed` must be present and is used everywhere.
 - Cosmology: `lensing.cosmology` must be explicitly defined.
 """
@@ -125,6 +125,18 @@ def _require_ell_comps(value: Any, key_path: str) -> tuple[float, float]:
 
 
 def validate_top_level(config: Dict[str, Any]) -> None:
+    """Validate the required top-level configuration sections.
+
+    Parameters
+    ----------
+    config : `dict`
+        Full pipeline configuration dictionary.
+
+    Raises
+    ------
+    ValueError
+        Raised if a required top-level key is missing or mistyped.
+    """
     # Top-level required keys
     run_name = _require(config, 'run_name', 'top-level')
     _require_type(run_name, str, 'run_name')
@@ -157,6 +169,19 @@ def validate_top_level(config: Dict[str, Any]) -> None:
 
 
 def validate_lensing_config(lensing: Dict[str, Any]) -> None:
+    """Validate the ``lensing`` configuration section.
+
+    Parameters
+    ----------
+    lensing : `dict`
+        The ``lensing`` section of the pipeline configuration.
+
+    Raises
+    ------
+    ValueError
+        Raised if the grid, lens galaxy, source galaxy, cosmology, or subhalo
+        block is missing, mistyped, or out of range.
+    """
     grid = _require(lensing, 'grid', 'lensing')
     _require_type(grid, dict, 'lensing.grid')
     shape = _require(grid, 'shape', 'lensing.grid')
@@ -311,6 +336,19 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
 
 
 def validate_psf_config(psf: Dict[str, Any]) -> None:
+    """Validate the ``psf`` configuration section.
+
+    Parameters
+    ----------
+    psf : `dict`
+        The ``psf`` section of the pipeline configuration.
+
+    Raises
+    ------
+    ValueError
+        Raised if the high-resolution PSF, telescope, aberration, or kernel
+        block is missing, mistyped, or out of range.
+    """
     hres = _require(psf, 'hres_psf', 'psf')
     _require_type(hres, dict, 'psf.hres_psf')
     for k in ('wavelength', 'num_pix', 'num_airy', 'sampling'):
@@ -320,7 +358,8 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
 
     tel = _require(psf, 'telescope', 'psf')
     _require_type(tel, dict, 'psf.telescope')
-    for k in ('pupil_diameter', 'focal_length', 'gap_size', 'segment_point_to_point', 'num_rings', 'supersampling_factor'):
+    for k in ('pupil_diameter', 'focal_length', 'gap_size',
+              'segment_point_to_point', 'num_rings', 'supersampling_factor'):
         _require(tel, k, 'psf.telescope')
 
     aberr = _require(psf, 'aberrations', 'psf')
@@ -398,6 +437,19 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
 
 
 def validate_observation_config(observation: Dict[str, Any]) -> None:
+    """Validate the ``observation`` configuration section.
+
+    Parameters
+    ----------
+    observation : `dict`
+        The ``observation`` section of the pipeline configuration.
+
+    Raises
+    ------
+    ValueError
+        Raised if the exposure time, throughput, detector block, or output
+        format is missing, mistyped, or out of range.
+    """
     exposure_time = _require(observation, 'exposure_time', 'observation')
     _require_positive_finite_number(exposure_time, 'observation.exposure_time')
 
@@ -420,6 +472,20 @@ def validate_observation_config(observation: Dict[str, Any]) -> None:
 
 
 def validate_modeling_config(modeling: Dict[str, Any]) -> None:
+    """Validate the ``modeling`` configuration section.
+
+    Parameters
+    ----------
+    modeling : `dict`
+        The ``modeling`` section of the pipeline configuration. Validation is
+        skipped when ``modeling.enabled`` is False.
+
+    Raises
+    ------
+    ValueError
+        Raised if the detection method or the nested ``fisher`` block is
+        missing, mistyped, or out of range.
+    """
     # modeling.enabled already checked at top-level
     if not modeling['enabled']:
         return
@@ -688,7 +754,10 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
             return
         if isinstance(value, str):
             if value.lower() != 'all':
-                raise ValueError(f"{path_name} must be 'all', a list of segment ids, or a dict with a 'segments' field")
+                raise ValueError(
+                    f"{path_name} must be 'all', a list of segment ids, or a "
+                    "dict with a 'segments' field"
+                )
             return
         if isinstance(value, dict):
             segments = value.get('segments')
@@ -697,7 +766,10 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
             _validate_segment_selection_block(segments, f"{path_name}.segments")
             return
         if not isinstance(value, (list, tuple)):
-            raise ValueError(f"{path_name} must be 'all', a list of segment ids, or a dict with a 'segments' field")
+            raise ValueError(
+                f"{path_name} must be 'all', a list of segment ids, or a dict "
+                "with a 'segments' field"
+            )
         for idx, seg_id in enumerate(value):
             if isinstance(seg_id, bool) or not isinstance(seg_id, int) or seg_id < 0:
                 raise ValueError(f"{path_name}[{idx}] must be a non-negative integer segment id")
@@ -707,7 +779,10 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
             return
         modes = value.get('mode_nolls') if isinstance(value, dict) else value
         if not isinstance(modes, (list, tuple)):
-            raise ValueError(f"{path_name} must be a list of 1-based Noll mode indices or a dict with mode_nolls")
+            raise ValueError(
+                f"{path_name} must be a list of 1-based Noll mode indices or a "
+                "dict with mode_nolls"
+            )
         for idx, mode_idx in enumerate(modes):
             if isinstance(mode_idx, bool) or not isinstance(mode_idx, int) or mode_idx < 1:
                 raise ValueError(f"{path_name}[{idx}] must be a 1-based integer Noll index")
@@ -717,7 +792,10 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
             return
         if isinstance(value, dict) and ('segments' in value or 'mode_nolls' in value):
             if 'segments' not in value or 'mode_nolls' not in value:
-                raise ValueError(f"{path_name} cross-product form must contain both 'segments' and 'mode_nolls'")
+                raise ValueError(
+                    f"{path_name} cross-product form must contain both "
+                    "'segments' and 'mode_nolls'"
+                )
             _validate_segment_selection_block(value['segments'], f"{path_name}.segments")
             _validate_global_mode_block(value['mode_nolls'], f"{path_name}.mode_nolls")
             return
@@ -729,7 +807,8 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
             return
         if not isinstance(value, (list, tuple)):
             raise ValueError(
-                f"{path_name} must be either {{segments, mode_nolls}}, a mapping seg->modes, or a list of (seg, mode) pairs"
+                f"{path_name} must be either {{segments, mode_nolls}}, a "
+                "mapping seg->modes, or a list of (seg, mode) pairs"
             )
         for idx, pair in enumerate(value):
             if not isinstance(pair, (list, tuple)) or len(pair) != 2:
@@ -755,7 +834,9 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                 _validate_global_mode_block(block, f"{path_name}.global_zernikes")
             else:
                 raise ValueError(
-                    f"{path_name} contains unsupported PSF family '{key}'. Supported families are: segment_pistons, segment_tiptilts, segment_hexikes, global_zernikes"
+                    f"{path_name} contains unsupported PSF family '{key}'. "
+                    "Supported families are: segment_pistons, "
+                    "segment_tiptilts, segment_hexikes, global_zernikes"
                 )
 
     if 'psf_mode_selection' in fisher:
@@ -784,7 +865,19 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
 
 
 def validate_or_raise(config: Dict[str, Any]) -> None:
-    """Validate complete configuration, or raise ValueError with a clear message."""
+    """Validate every section of a pipeline configuration.
+
+    Parameters
+    ----------
+    config : `dict`
+        Full pipeline configuration dictionary.
+
+    Raises
+    ------
+    ValueError
+        Raised if any section is missing, mistyped, or out of range. The
+        message names the offending configuration key path.
+    """
     validate_top_level(config)
     validate_lensing_config(config['lensing'])
     validate_psf_config(config['psf'])

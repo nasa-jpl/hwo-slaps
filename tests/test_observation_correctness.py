@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import copy
-
 import autolens as al
 import numpy as np
 import pytest

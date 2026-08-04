@@ -13,8 +13,10 @@ TESTS_ROOT = Path(__file__).resolve().parent
 if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
-from _lensing_physics_helpers import load_master_config, load_validation_module  # noqa: E402
-
+from _lensing_physics_helpers import (  # noqa: E402
+    load_master_config,
+    load_validation_module,
+)
 
 VALIDATION = load_validation_module()
 
