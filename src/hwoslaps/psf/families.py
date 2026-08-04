@@ -43,7 +43,12 @@ ensembles and must not change silently:
   every family and for joint (combined) draws.
 """
 
+from dataclasses import dataclass, field
+import math
+from numbers import Integral
+
 import numpy as np
+import yaml
 
 from .aberration_models import apply_global_zernikes, apply_segment_zernikes
 
@@ -59,6 +64,285 @@ SPIE_SEGMENT_HEXIKE_NOLLS = (2, 3, 4, 5, 6)
 
 SPIE_GLOBAL_ZERNIKE_NOLLS = (4, 5, 6, 7, 8, 9, 10, 11)
 """SPIE-default Noll modes of the global-Zernike family (`tuple` of `int`)."""
+
+
+def noll_to_radial_order(noll):
+    """Return the radial order of a 1-based Noll mode index.
+
+    Parameters
+    ----------
+    noll : `int`
+        1-based Noll mode index.
+
+    Returns
+    -------
+    radial_order : `int`
+        Radial order corresponding to ``noll``.
+
+    Raises
+    ------
+    ValueError
+        Raised if ``noll`` is not an integer or is below one.
+    """
+    if isinstance(noll, (bool, np.bool_)) or not isinstance(noll, Integral):
+        raise ValueError('noll must be a 1-based integer.')
+    noll = int(noll)
+    if noll < 1:
+        raise ValueError('noll must be a 1-based integer.')
+    return (math.isqrt(8 * noll - 7) - 1) // 2
+
+
+def _normalize_weight_dict(weights, field_name, minimum_mode):
+    """Validate and unit-normalize one side of a mode-weight prior."""
+    if not isinstance(weights, dict):
+        raise ValueError(f'{field_name} must be a dictionary.')
+
+    validated = {}
+    for mode, weight in weights.items():
+        if isinstance(mode, (bool, np.bool_)) or not isinstance(mode, Integral):
+            raise ValueError(f'{field_name} mode keys must be 1-based integers.')
+        mode = int(mode)
+        if mode < minimum_mode:
+            raise ValueError(
+                f'{field_name} mode keys must be >= {minimum_mode}.'
+            )
+        if isinstance(weight, (bool, np.bool_)):
+            raise ValueError(f'{field_name} weights must be finite and non-negative.')
+        try:
+            weight = float(weight)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f'{field_name} weights must be finite and non-negative.'
+            ) from exc
+        if not np.isfinite(weight) or weight < 0.0:
+            raise ValueError(f'{field_name} weights must be finite and non-negative.')
+        validated[mode] = weight
+
+    if not validated:
+        return {}
+    norm = float(np.linalg.norm(list(validated.values())))
+    if norm == 0.0:
+        raise ValueError(f'{field_name} must have a positive sum of squared weights.')
+    return {mode: validated[mode] / norm for mode in sorted(validated)}
+
+
+@dataclass(frozen=True)
+class ModeWeightPrior:
+    """Shape-only prior for global and segment mode coefficients.
+
+    Each non-empty weight dictionary is normalized independently to unit
+    sum of squared weights. Consequently, absolute input scales are
+    discarded and the prior describes only the relative mode mix.
+
+    Parameters
+    ----------
+    name : `str`
+        Non-empty prior name.
+    global_weights : `dict` [`int`, `float`]
+        Global Zernike Noll indices and non-negative weights. Global modes
+        1--3 are excluded by design.
+    segment_weights : `dict` [`int`, `float`]
+        Segment hexike Noll indices and non-negative weights.
+    segment_variance_fraction : `float`
+        Fraction of combined-draw coefficient variance assigned to the
+        segment side.
+    metadata : `dict`, optional
+        Free-form provenance metadata. It is stored but never interpreted.
+    """
+
+    name: str
+    global_weights: dict[int, float]
+    segment_weights: dict[int, float]
+    segment_variance_fraction: float
+    metadata: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        """Validate the prior and normalize both populated weight sides."""
+        if not isinstance(self.name, str) or not self.name.strip():
+            raise ValueError('name must be a non-empty string.')
+        global_weights = _normalize_weight_dict(
+            self.global_weights, 'global_weights', 4
+        )
+        segment_weights = _normalize_weight_dict(
+            self.segment_weights, 'segment_weights', 1
+        )
+        if not global_weights and not segment_weights:
+            raise ValueError(
+                'global_weights and segment_weights must not both be empty.'
+            )
+        if isinstance(self.segment_variance_fraction, (bool, np.bool_)):
+            raise ValueError(
+                'segment_variance_fraction must be finite and in [0, 1].'
+            )
+        try:
+            fraction = float(self.segment_variance_fraction)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                'segment_variance_fraction must be finite and in [0, 1].'
+            ) from exc
+        if not np.isfinite(fraction) or not 0.0 <= fraction <= 1.0:
+            raise ValueError(
+                'segment_variance_fraction must be finite and in [0, 1].'
+            )
+        if not isinstance(self.metadata, dict):
+            raise ValueError('metadata must be a dictionary.')
+
+        object.__setattr__(self, 'global_weights', global_weights)
+        object.__setattr__(self, 'segment_weights', segment_weights)
+        object.__setattr__(self, 'segment_variance_fraction', fraction)
+        object.__setattr__(self, 'metadata', dict(self.metadata))
+
+
+def _validate_mode_range(mode_range, field_name, minimum_mode):
+    """Validate an inclusive mode range and return integer bounds."""
+    if mode_range is None:
+        return None
+    if not isinstance(mode_range, (tuple, list)) or len(mode_range) != 2:
+        raise ValueError(f'{field_name} must be an inclusive (lo, hi) pair.')
+    lo, hi = mode_range
+    if any(
+        isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral)
+        for value in (lo, hi)
+    ):
+        raise ValueError(f'{field_name} bounds must be integers.')
+    lo = int(lo)
+    hi = int(hi)
+    if lo < minimum_mode:
+        raise ValueError(f'{field_name} lower bound must be >= {minimum_mode}.')
+    if hi < lo:
+        raise ValueError(f'{field_name} upper bound must be >= its lower bound.')
+    return lo, hi
+
+
+def make_power_law_prior(alpha, global_mode_range=(4, 55),
+                         segment_mode_range=(1, 10),
+                         segment_variance_fraction=0.5, name=None):
+    """Construct a radial-order power-law mode-weight prior.
+
+    Global weights follow ``n**(-alpha)``. Segment weights follow
+    ``(n + 1)**(-alpha)``; the added one is a placeholder convention that
+    avoids a singular weight for segment piston at radial order zero.
+
+    Parameters
+    ----------
+    alpha : `float`
+        Finite, non-negative power-law index.
+    global_mode_range : (`int`, `int`) or `None`, optional
+        Inclusive global-Zernike Noll range, or `None` to omit that side.
+    segment_mode_range : (`int`, `int`) or `None`, optional
+        Inclusive segment-hexike Noll range, or `None` to omit that side.
+    segment_variance_fraction : `float`, optional
+        Fraction of combined-draw variance assigned to segment modes.
+    name : `str`, optional
+        Prior name. Defaults to ``power_law_alpha_{alpha:g}``.
+
+    Returns
+    -------
+    prior : `ModeWeightPrior`
+        Normalized shape-only mode-weight prior.
+
+    Raises
+    ------
+    ValueError
+        Raised for invalid alpha, ranges, or variance fraction.
+    """
+    if isinstance(alpha, (bool, np.bool_)):
+        raise ValueError('alpha must be a finite non-negative number.')
+    try:
+        alpha = float(alpha)
+    except (TypeError, ValueError) as exc:
+        raise ValueError('alpha must be a finite non-negative number.') from exc
+    if not np.isfinite(alpha) or alpha < 0.0:
+        raise ValueError('alpha must be a finite non-negative number.')
+
+    global_range = _validate_mode_range(global_mode_range,
+                                        'global_mode_range', 4)
+    segment_range = _validate_mode_range(segment_mode_range,
+                                         'segment_mode_range', 1)
+    if global_range is None and segment_range is None:
+        raise ValueError(
+            'global_mode_range and segment_mode_range must not both be None.'
+        )
+
+    global_weights = {}
+    if global_range is not None:
+        global_weights = {
+            mode: noll_to_radial_order(mode)**(-alpha)
+            for mode in range(global_range[0], global_range[1] + 1)
+        }
+    segment_weights = {}
+    if segment_range is not None:
+        segment_weights = {
+            mode: (noll_to_radial_order(mode) + 1)**(-alpha)
+            for mode in range(segment_range[0], segment_range[1] + 1)
+        }
+    if name is None:
+        name = f'power_law_alpha_{alpha:g}'
+    metadata = {
+        'kind': 'power_law',
+        'alpha': alpha,
+        'global_mode_range': global_range,
+        'segment_mode_range': segment_range,
+    }
+    return ModeWeightPrior(
+        name=name,
+        global_weights=global_weights,
+        segment_weights=segment_weights,
+        segment_variance_fraction=segment_variance_fraction,
+        metadata=metadata,
+    )
+
+
+def load_mode_weight_prior(path):
+    """Load a mode-weight prior from a YAML table.
+
+    Parameters
+    ----------
+    path : path-like
+        YAML table path.
+
+    Returns
+    -------
+    prior : `ModeWeightPrior`
+        Validated and normalized mode-weight prior.
+
+    Raises
+    ------
+    ValueError
+        Raised if the document structure or prior values are invalid.
+    """
+    with open(path, 'r', encoding='utf-8') as stream:
+        try:
+            document = yaml.safe_load(stream)
+        except yaml.YAMLError as exc:
+            raise ValueError(f'Invalid mode-weight prior YAML: {exc}') from exc
+    if not isinstance(document, dict):
+        raise ValueError('Mode-weight prior document must be a mapping.')
+
+    allowed = {
+        'name',
+        'segment_variance_fraction',
+        'global_weights',
+        'segment_weights',
+        'metadata',
+    }
+    unknown = sorted(set(document) - allowed, key=str)
+    if unknown:
+        raise ValueError(f'Unknown top-level key: {unknown[0]}')
+    for required in ('name', 'segment_variance_fraction'):
+        if required not in document:
+            raise ValueError(f'Missing required field: {required}')
+    if 'global_weights' not in document and 'segment_weights' not in document:
+        raise ValueError(
+            'Missing required field: global_weights or segment_weights.'
+        )
+    return ModeWeightPrior(
+        name=document['name'],
+        global_weights=document.get('global_weights', {}),
+        segment_weights=document.get('segment_weights', {}),
+        segment_variance_fraction=document['segment_variance_fraction'],
+        metadata=document.get('metadata', {}),
+    )
 
 
 def _validate_draw_inputs(mode_nolls, target_rms_nm, name):
@@ -270,6 +554,190 @@ def draw_global_zernike_family(rng, mode_nolls, target_rms_nm):
         return {}
     coeffs = _normalize_vector(rng.standard_normal(len(modes)), target)
     return {mode: float(coeffs[idx]) for idx, mode in enumerate(modes)}
+
+
+def _validate_weighted_target(target_rms_nm, family_name):
+    """Validate a weighted-family target RMS."""
+    if isinstance(target_rms_nm, (bool, np.bool_)):
+        raise ValueError(
+            f'{family_name} target RMS must be a finite non-negative number.'
+        )
+    try:
+        target = float(target_rms_nm)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f'{family_name} target RMS must be a finite non-negative number.'
+        ) from exc
+    if not np.isfinite(target) or target < 0.0:
+        raise ValueError(
+            f'{family_name} target RMS must be a finite non-negative number.'
+        )
+    return target
+
+
+def draw_weighted_global_zernike_family(rng, prior, target_rms_nm):
+    """Draw weighted global-Zernike coefficients at a target norm.
+
+    This function performs coefficient-space normalization only. The caller
+    must use :func:`renormalize_to_aperture_rms` to realize the exact
+    piston-removed aperture wavefront RMS on its telescope pupil.
+
+    Parameters
+    ----------
+    rng : `numpy.random.Generator`
+        Random generator supplying the draw.
+    prior : `ModeWeightPrior`
+        Shape-only mode-weight prior with a populated global side.
+    target_rms_nm : `float`
+        Target coefficient-vector norm in nanometers OPD.
+
+    Returns
+    -------
+    global_zernikes : `dict`
+        Ascending mapping from global Noll mode to coefficient in
+        nanometers. Empty when the target is zero.
+
+    Raises
+    ------
+    ValueError
+        Raised for a bad target or an empty global side.
+    """
+    target = _validate_weighted_target(
+        target_rms_nm, 'weighted global Zernike family'
+    )
+    if target == 0.0:
+        return {}
+    if not prior.global_weights:
+        raise ValueError('prior.global_weights must not be empty.')
+
+    modes = sorted(prior.global_weights)
+    raw = rng.standard_normal(len(modes))
+    weights = np.array([prior.global_weights[mode] for mode in modes])
+    coeffs = _normalize_vector(raw * weights, target)
+    return {mode: float(coeffs[index]) for index, mode in enumerate(modes)}
+
+
+def draw_weighted_segment_hexike_family(
+    rng, segments, prior, target_rms_nm
+):
+    """Draw weighted per-segment hexikes at a target coefficient RMS.
+
+    When mode 1 is present, only its across-segment mean is removed. Common
+    segment tip or tilt is retained because it is a physical sawtooth rather
+    than an unobservable global ramp. This function performs coefficient-
+    space normalization only; the caller must use
+    :func:`renormalize_to_aperture_rms` for exact aperture wavefront RMS.
+
+    Parameters
+    ----------
+    rng : `numpy.random.Generator`
+        Random generator supplying the draw.
+    segments : sequence of `int`
+        Segment identifiers in the desired draw order.
+    prior : `ModeWeightPrior`
+        Shape-only mode-weight prior with a populated segment side.
+    target_rms_nm : `float`
+        Target equal-area segment coefficient RMS in nanometers OPD.
+
+    Returns
+    -------
+    segment_hexikes : `dict`
+        Mapping from segment to ascending ``{mode: coefficient_nm}``.
+        Empty when the target is zero.
+
+    Raises
+    ------
+    ValueError
+        Raised for a bad target, empty segment list or segment side, or a
+        mode-1 draw with fewer than two segments.
+    """
+    target = _validate_weighted_target(
+        target_rms_nm, 'weighted segment hexike family'
+    )
+    segment_ids = [int(segment) for segment in segments]
+    if not segment_ids:
+        raise ValueError('weighted segment hexike family segments must not be empty.')
+    if target == 0.0:
+        return {}
+    if not prior.segment_weights:
+        raise ValueError('prior.segment_weights must not be empty.')
+
+    modes = sorted(prior.segment_weights)
+    if 1 in modes and len(segment_ids) < 2:
+        raise ValueError('Segment mode 1 requires at least two segments.')
+    raw = rng.standard_normal((len(segment_ids), len(modes)))
+    weights = np.array([prior.segment_weights[mode] for mode in modes])
+    weighted = raw * weights[np.newaxis, :]
+    if 1 in modes:
+        piston_column = modes.index(1)
+        weighted[:, piston_column] -= np.mean(weighted[:, piston_column])
+    scaled = _normalize_vector(
+        weighted.ravel(), target * np.sqrt(len(segment_ids))
+    )
+    matrix = scaled.reshape((len(segment_ids), len(modes)))
+    return {
+        segment: {
+            mode: float(matrix[segment_index, mode_index])
+            for mode_index, mode in enumerate(modes)
+        }
+        for segment_index, segment in enumerate(segment_ids)
+    }
+
+
+def draw_weighted_combined_family(rng, segments, prior, target_rms_nm):
+    """Draw a weighted segment-plus-global coefficient family.
+
+    The segment side is drawn first. A side with exactly zero variance
+    budget is skipped without consuming random numbers. This function only
+    normalizes coefficients. For exact combined amplitude, the caller must
+    jointly renormalize both dictionaries with::
+
+        renormalize_to_aperture_rms(
+            telescope_data, target, segment_hexikes=segment_hexikes,
+            global_zernikes=global_zernikes)
+
+    Parameters
+    ----------
+    rng : `numpy.random.Generator`
+        Random generator supplying the draw.
+    segments : sequence of `int`
+        Segment identifiers in the desired draw order.
+    prior : `ModeWeightPrior`
+        Shape-only mode-weight prior and variance split.
+    target_rms_nm : `float`
+        Total coefficient-space RMS budget in nanometers OPD.
+
+    Returns
+    -------
+    segment_hexikes : `dict`
+        Segment-hexike coefficient mapping, or empty when skipped.
+    global_zernikes : `dict`
+        Global-Zernike coefficient mapping, or empty when skipped.
+
+    Raises
+    ------
+    ValueError
+        Raised for a bad target or a nonzero side with no weights.
+    """
+    target = _validate_weighted_target(target_rms_nm,
+                                       'weighted combined family')
+    if target == 0.0:
+        return {}, {}
+
+    fraction = prior.segment_variance_fraction
+    segment_budget = target * np.sqrt(fraction)
+    global_budget = target * np.sqrt(1.0 - fraction)
+    segment_hexikes = {}
+    global_zernikes = {}
+    if segment_budget != 0.0:
+        segment_hexikes = draw_weighted_segment_hexike_family(
+            rng, segments, prior, segment_budget
+        )
+    if global_budget != 0.0:
+        global_zernikes = draw_weighted_global_zernike_family(
+            rng, prior, global_budget
+        )
+    return segment_hexikes, global_zernikes
 
 
 def measure_aperture_rms_nm(telescope_data, segment_hexikes=None,

@@ -21,10 +21,17 @@ from .aberration_models import (
     apply_global_zernikes
 )
 from .families import (
+    ModeWeightPrior,
+    make_power_law_prior,
+    load_mode_weight_prior,
+    noll_to_radial_order,
     draw_segment_piston_family,
     draw_segment_tiptilt_family,
     draw_segment_hexike_family,
     draw_global_zernike_family,
+    draw_weighted_global_zernike_family,
+    draw_weighted_segment_hexike_family,
+    draw_weighted_combined_family,
     measure_aperture_rms_nm,
     renormalize_to_aperture_rms
 )
@@ -40,10 +47,17 @@ __all__ = [
     'apply_segment_tiptilts',
     'apply_segment_zernikes',
     'apply_global_zernikes',
+    'ModeWeightPrior',
+    'make_power_law_prior',
+    'load_mode_weight_prior',
+    'noll_to_radial_order',
     'draw_segment_piston_family',
     'draw_segment_tiptilt_family',
     'draw_segment_hexike_family',
     'draw_global_zernike_family',
+    'draw_weighted_global_zernike_family',
+    'draw_weighted_segment_hexike_family',
+    'draw_weighted_combined_family',
     'measure_aperture_rms_nm',
     'renormalize_to_aperture_rms',
     'plot_psf_complete_analysis'

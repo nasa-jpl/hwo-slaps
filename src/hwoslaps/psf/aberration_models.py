@@ -288,8 +288,16 @@ def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):
     """
     pupil_grid = telescope_data['pupil_grid']
 
-    # Create Zernike basis for the full pupil.
+    # Create Zernike basis for the full pupil, sized to the highest
+    # requested Noll mode.
     num_zernike_modes = 50
+    if isinstance(zernike_coeffs_nm, dict):
+        integer_modes = [
+            mode for mode in zernike_coeffs_nm
+            if isinstance(mode, int) and not isinstance(mode, bool)
+        ]
+        if integer_modes:
+            num_zernike_modes = max(num_zernike_modes, max(integer_modes))
     pupil_diameter_for_zernike = pupil_grid.x.max() - pupil_grid.x.min()
     zernike_basis = hcipy.make_zernike_basis(num_zernike_modes, D=pupil_diameter_for_zernike, grid=pupil_grid)
 
