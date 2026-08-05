@@ -590,19 +590,25 @@ Workstream 2 — PSF requirements:
         this doc and the canonical configs after advisor input, week 1.
 - P2 (A/G) `[ext]`: PSF coefficient priors; feed D2a and R2.
   - [x] Request the EAC1 pupil PSD or covariance model from HWO/JPL contacts
-        (emailed 2026-08-03; response pending, non-blocking).
+        (emailed 2026-08-03; declined 2026-08-05: HWO instrument-call
+        firewall bars release of project data, incl. the Case 3800
+        integrated-modeling series, to anyone outside the project.
+        External chase CLOSED; the JWST flight-derived tables are the
+        final documented prior for this study).
   - [x] Freeze documented parametric priors on mode coefficients (the default
         if no PSD arrives by mid-July). Frozen as JWST flight-derived
         mode-weight tables (`configs/psf_priors/jwst_wss_{static,drift}_v1.yaml`,
         599 WSS OPD maps 2022-07..2026-08) plus a power-law parametric
         placeholder; an EAC1 table can drop in later with no API change.
 - P3 (C): mode-family sweep.
-  - [ ] Add segment-piston and segment tip/tilt PSF families alongside the
+  - [x] Add segment-piston and segment tip/tilt PSF families alongside the
         existing hexike, global-Zernike, and combined families.
   - [ ] Run the family-by-amplitude-ladder Fisher grid.
 - R2 (C): graded PSF-knowledge-error sweep; anchors the requirement curves.
   - [ ] Implement delta-mismatch fitting: generate with the truth PSF, fit
-        with a PSF wrong by a controlled `delta`.
+        with a PSF wrong by a controlled `delta` (Fisher-side truth-vs-fit
+        split implemented; nonlinear side and the delta-draw orchestration
+        remain open).
   - [ ] Run the `delta` ladder per mode family; produce completeness and
         false-positive degradation curves.
 - D2a (C): prior-sampled PSF nuisance bank.
