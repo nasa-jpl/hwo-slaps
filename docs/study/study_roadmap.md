@@ -589,9 +589,13 @@ Workstream 2 — PSF requirements:
         mode family at fixed completeness and false-positive budget) into
         this doc and the canonical configs after advisor input, week 1.
 - P2 (A/G) `[ext]`: PSF coefficient priors; feed D2a and R2.
-  - [ ] Request the EAC1 pupil PSD or covariance model from HWO/JPL contacts.
-  - [ ] Freeze documented parametric priors on mode coefficients (the default
-        if no PSD arrives by mid-July).
+  - [x] Request the EAC1 pupil PSD or covariance model from HWO/JPL contacts
+        (emailed 2026-08-03; response pending, non-blocking).
+  - [x] Freeze documented parametric priors on mode coefficients (the default
+        if no PSD arrives by mid-July). Frozen as JWST flight-derived
+        mode-weight tables (`configs/psf_priors/jwst_wss_{static,drift}_v1.yaml`,
+        599 WSS OPD maps 2022-07..2026-08) plus a power-law parametric
+        placeholder; an EAC1 table can drop in later with no API change.
 - P3 (C): mode-family sweep.
   - [ ] Add segment-piston and segment tip/tilt PSF families alongside the
         existing hexike, global-Zernike, and combined families.
