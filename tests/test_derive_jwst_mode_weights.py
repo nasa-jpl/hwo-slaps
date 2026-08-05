@@ -110,6 +110,29 @@ def test_k_step_differences_return_expected_maps_and_pairs():
     )
 
 
+def test_drift_pair_keep_mask_excludes_correction_spanning_pairs():
+    """Drop drift pairs whose interval contains a commanded correction."""
+    flags = np.array([False, False, True, False, False, False])
+    series = np.zeros((6, 2, 2))
+
+    _, pairs_step1 = DERIVATION.difference_opd_series(series, step=1)
+    keep_step1 = DERIVATION.drift_pair_keep_mask(flags, pairs_step1)
+    np.testing.assert_array_equal(
+        keep_step1, np.array([True, False, True, True, True])
+    )
+
+    _, pairs_step2 = DERIVATION.difference_opd_series(series, step=2)
+    keep_step2 = DERIVATION.drift_pair_keep_mask(flags, pairs_step2)
+    np.testing.assert_array_equal(
+        keep_step2, np.array([False, False, True, True])
+    )
+
+    with pytest.raises(ValueError, match='one-dimensional'):
+        DERIVATION.drift_pair_keep_mask(flags[np.newaxis, :], pairs_step1)
+    with pytest.raises(ValueError, match='outside the flag series'):
+        DERIVATION.drift_pair_keep_mask(flags[:3], pairs_step1)
+
+
 def test_weight_aggregation_matches_hand_computed_rms():
     """Aggregate per-mode RMS and area-weighted variance by definition."""
     global_coefficients = np.array([[3.0, 4.0], [0.0, 8.0]])

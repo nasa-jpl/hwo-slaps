@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
-import inspect
 import math
 from pathlib import Path
 
@@ -225,6 +224,43 @@ def difference_opd_series(opd_maps_nm, step=1):
     return opd_maps_nm[step:] - opd_maps_nm[:-step], pairs
 
 
+def drift_pair_keep_mask(post_correction_flags, pairs):
+    """Return which difference pairs contain no commanded correction.
+
+    A pair ``(k, k + step)`` spans a mirror correction when any map with
+    index in ``(k, k + step]`` is flagged as a post-correction
+    measurement. The corresponding OPD difference measures a commanded
+    move rather than natural drift and must be excluded from the drift
+    statistic.
+
+    Parameters
+    ----------
+    post_correction_flags : `numpy.ndarray`
+        Boolean flag per map in the series, `True` for post-correction
+        measurements.
+    pairs : `numpy.ndarray`
+        Integer ``(k, k + step)`` pairs from
+        :func:`difference_opd_series`.
+
+    Returns
+    -------
+    keep : `numpy.ndarray`
+        Boolean mask with one entry per pair.
+    """
+    flags = np.asarray(post_correction_flags, dtype=bool)
+    pairs = np.asarray(pairs, dtype=int)
+    if flags.ndim != 1:
+        raise ValueError('post_correction_flags must be one-dimensional.')
+    if pairs.ndim != 2 or pairs.shape[1] != 2:
+        raise ValueError('pairs must have shape (n_pairs, 2).')
+    if pairs.size and (pairs.min() < 0 or pairs.max() >= flags.size):
+        raise ValueError('pairs reference indices outside the flag series.')
+    keep = np.ones(pairs.shape[0], dtype=bool)
+    for index, (start, stop) in enumerate(pairs):
+        keep[index] = not np.any(flags[start + 1:stop + 1])
+    return keep
+
+
 def aggregate_mode_statistics(global_coefficients, segment_coefficients,
                               segment_area_fractions):
     """Aggregate coefficient RMS weights and the segment variance fraction.
@@ -404,40 +440,6 @@ def build_raw_noll_basis(x_coordinates, y_coordinates, mask, mode_nolls):
     return np.asarray(modes)
 
 
-def connected_component_masks(mask):
-    """Split a pixel mask into four-connected component masks."""
-    mask = np.asarray(mask, dtype=bool)
-    if mask.ndim != 2:
-        raise ValueError('mask must be two-dimensional.')
-    unseen = np.array(mask, copy=True)
-    components = []
-    for row, column in np.argwhere(mask):
-        if not unseen[row, column]:
-            continue
-        component = np.zeros_like(mask)
-        stack = [(int(row), int(column))]
-        unseen[row, column] = False
-        while stack:
-            current_row, current_column = stack.pop()
-            component[current_row, current_column] = True
-            for next_row, next_column in (
-                (current_row - 1, current_column),
-                (current_row + 1, current_column),
-                (current_row, current_column - 1),
-                (current_row, current_column + 1),
-            ):
-                if (
-                    0 <= next_row < mask.shape[0]
-                    and 0 <= next_column < mask.shape[1]
-                    and unseen[next_row, next_column]
-                ):
-                    unseen[next_row, next_column] = False
-                    stack.append((next_row, next_column))
-        components.append(component)
-    components.sort(key=lambda component: tuple(np.mean(np.argwhere(component), axis=0)))
-    return np.asarray(components, dtype=bool)
-
-
 def _import_stpsf():
     """Import optional STPSF dependencies with an actionable error."""
     try:
@@ -450,131 +452,167 @@ def _import_stpsf():
     return stpsf
 
 
-def _resolve_stpsf_api(stpsf):
-    """Resolve and validate the installed STPSF WSS query/load API."""
+WSS_RESULT_PHASE_TO_NM = 1.0e3
+"""Conversion from WSS ``RESULT_PHASE`` values to nanometers OPD.
+
+WSS output files are in microns of OPD; the unit is absent from the FITS
+headers and documented only in ``stpsf.mast_wss.import_wss_opd``.
+"""
+
+
+def _resolve_mast_wss(stpsf):
+    """Resolve and validate the installed STPSF MAST WSS interface."""
     mast_wss = getattr(stpsf, 'mast_wss', None)
     if mast_wss is None:
         raise RuntimeError('Installed stpsf has no mast_wss module.')
-    query = getattr(mast_wss, 'query_wss_opds', None)
-    loader = getattr(stpsf, 'load_wss_opd_by_date', None)
-    if loader is None:
-        loader = getattr(mast_wss, 'load_wss_opd_by_date', None)
-    if query is None or loader is None:
+    required = ('retrieve_mast_opd_table', 'deduplicate_opd_table',
+                'filter_opd_table', 'mast_retrieve_opd')
+    missing = [name for name in required if not hasattr(mast_wss, name)]
+    if missing:
         version = getattr(stpsf, '__version__', 'unknown')
         public = sorted(name for name in dir(mast_wss) if 'opd' in name.lower())
         raise RuntimeError(
-            'Unsupported stpsf WSS API. Inspect the installed documentation '
-            f'and adapt only _resolve_stpsf_api (version={version}, OPD '
-            f'callables={public}). Required semantics are a date-range query '
-            'and load_wss_opd_by_date.'
+            f'Unsupported stpsf WSS API: missing {missing} (version='
+            f'{version}, OPD callables={public}); adapt the thin IO layer.'
         )
-    query_parameters = inspect.signature(query).parameters
-    if not {'start_date', 'end_date'} <= set(query_parameters):
-        raise RuntimeError(
-            'stpsf.mast_wss.query_wss_opds does not expose documented '
-            'start_date/end_date parameters; adapt the thin IO layer.'
-        )
-    return query, loader
+    return mast_wss
 
 
-def _table_dates(table):
-    """Extract an ordered date list from an STPSF WSS query table."""
-    names = getattr(table, 'colnames', ())
-    candidates = ('date', 'date_obs', 'observation_date', 'datetime')
-    column = next((name for name in candidates if name in names), None)
-    if column is None:
-        raise RuntimeError(
-            f'Cannot identify a date column in WSS query result: {list(names)}'
-        )
-    return [str(value) for value in table[column]]
+def _read_wss_result_phase(path):
+    """Read one WSS OPD FITS product as nanometers plus its pupil mask."""
+    from astropy.io import fits
 
-
-def _extract_opd_nm(opd_product):
-    """Extract an OPD array, mask, and unit from a loaded STPSF product."""
-    if hasattr(opd_product, '__iter__') and hasattr(opd_product, '__getitem__'):
-        candidate_hdus = list(opd_product)
-    else:
-        candidate_hdus = [opd_product]
-    data_hdu = next(
-        (hdu for hdu in candidate_hdus if getattr(hdu, 'data', None) is not None),
-        None,
-    )
-    if data_hdu is None:
-        raise RuntimeError('STPSF WSS loader returned no array data.')
-    opd = np.asarray(data_hdu.data, dtype=float).squeeze()
-    if opd.ndim != 2:
-        raise RuntimeError(f'Expected a two-dimensional OPD map, got {opd.shape}.')
-    unit = str(getattr(data_hdu, 'header', {}).get('BUNIT', '')).strip().lower()
-    unit_scales = {
-        'm': 1e9,
-        'meter': 1e9,
-        'meters': 1e9,
-        'um': 1e3,
-        'micron': 1e3,
-        'microns': 1e3,
-        'nm': 1.0,
-        'nanometer': 1.0,
-        'nanometers': 1.0,
-    }
-    if unit not in unit_scales:
-        raise RuntimeError(f'Unsupported or missing OPD BUNIT: {unit!r}.')
-    mask = np.isfinite(opd)
-    if np.all(mask):
-        raise RuntimeError(
-            'OPD product does not mark the aperture outside with nonfinite '
-            'pixels; adapt _extract_opd_nm to the installed STPSF product.'
-        )
-    return np.where(mask, opd * unit_scales[unit], 0.0), mask
+    with fits.open(path) as hdul:
+        names = [hdu.name for hdu in hdul]
+        if 'RESULT_PHASE' not in names or 'PUPIL_MASK' not in names:
+            raise RuntimeError(
+                f'WSS product {path} lacks RESULT_PHASE/PUPIL_MASK HDUs '
+                f'(found {names}); adapt the thin IO layer.'
+            )
+        opd = np.asarray(hdul['RESULT_PHASE'].data, dtype=float)
+        mask = np.asarray(hdul['PUPIL_MASK'].data) > 0
+    if opd.ndim != 2 or opd.shape != mask.shape:
+        raise RuntimeError(f'Unexpected WSS OPD array shapes in {path}.')
+    if not np.all(np.isfinite(opd[mask])):
+        raise RuntimeError(f'Nonfinite OPD inside the pupil mask in {path}.')
+    return np.where(mask, opd * WSS_RESULT_PHASE_TO_NM, 0.0), mask
 
 
 def load_wss_opd_series(start_date, end_date, opd_cache_dir=None,
                         max_maps=None):
-    """Query and load a bounded JWST WSS OPD series through STPSF."""
-    stpsf = _import_stpsf()
-    query, loader = _resolve_stpsf_api(stpsf)
-    table = query(start_date=start_date, end_date=end_date)
-    measurement_dates = _table_dates(table)
-    if max_maps is not None and len(measurement_dates) > max_maps:
-        indices = np.linspace(
-            0, len(measurement_dates) - 1, max_maps, dtype=int
-        )
-        measurement_dates = [measurement_dates[index] for index in indices]
+    """Query and load the deduplicated JWST WSS OPD series through STPSF.
 
-    loader_parameters = inspect.signature(loader).parameters
-    cache_keyword = None
-    for candidate in ('output_path', 'opd_cache_dir', 'cache_dir'):
-        if candidate in loader_parameters:
-            cache_keyword = candidate
-            break
-    if opd_cache_dir is not None and cache_keyword is None:
-        raise RuntimeError(
-            'Installed load_wss_opd_by_date has no documented cache-path '
-            'parameter; adapt the thin IO layer.'
+    Returns
+    -------
+    maps : `numpy.ndarray`
+        OPD maps in nanometers, zero outside the pupil mask.
+    aperture_mask : `numpy.ndarray`
+        Common boolean pupil mask.
+    measurement_dates : `list` of `str`
+        ISO measurement dates, ascending.
+    post_correction_flags : `numpy.ndarray`
+        Boolean flag per map, `True` for post-correction measurements.
+    stpsf_version : `str`
+        Installed STPSF version.
+    """
+    stpsf = _import_stpsf()
+    mast_wss = _resolve_mast_wss(stpsf)
+    table = mast_wss.retrieve_mast_opd_table()
+    table = mast_wss.deduplicate_opd_table(table)
+    if start_date is not None or end_date is not None:
+        table = mast_wss.filter_opd_table(
+            table, start_time=start_date, end_time=end_date
         )
+    if len(table) == 0:
+        raise RuntimeError('No WSS OPD maps matched the requested date range.')
+    table.sort('date_obs_mjd')
+    rows = list(table)
+    if max_maps is not None and len(rows) > max_maps:
+        indices = np.linspace(0, len(rows) - 1, max_maps, dtype=int)
+        rows = [rows[index] for index in indices]
+
     maps = []
     aperture_mask = None
-    for measurement_date in measurement_dates:
+    measurement_dates = []
+    post_correction_flags = []
+    for row in rows:
         keywords = {}
-        if cache_keyword is not None and opd_cache_dir is not None:
-            keywords[cache_keyword] = str(opd_cache_dir)
-        product = loader(measurement_date, **keywords)
-        opd_nm, current_mask = _extract_opd_nm(product)
+        if opd_cache_dir is not None:
+            keywords['output_path'] = str(opd_cache_dir)
+        path = mast_wss.mast_retrieve_opd(str(row['fileName']), **keywords)
+        opd_nm, current_mask = _read_wss_result_phase(path)
         if aperture_mask is None:
             aperture_mask = current_mask
         elif not np.array_equal(aperture_mask, current_mask):
-            raise RuntimeError('WSS OPD aperture masks differ across the series.')
+            raise RuntimeError('WSS OPD pupil masks differ across the series.')
         maps.append(opd_nm)
-    if not maps:
-        raise RuntimeError('No WSS OPD maps matched the requested date range.')
-    return np.asarray(maps), aperture_mask, measurement_dates, stpsf.__version__
+        measurement_dates.append(str(row['date']))
+        post_correction_flags.append(str(row['is_post_correction']) == 'True')
+    return (
+        np.asarray(maps),
+        aperture_mask,
+        measurement_dates,
+        np.asarray(post_correction_flags, dtype=bool),
+        stpsf.__version__,
+    )
 
 
-def _prepare_geometry(aperture_mask, global_max_noll, segment_max_noll):
-    """Build raw sampled bases and connected segment masks."""
-    segment_masks = connected_component_masks(aperture_mask)
-    if len(segment_masks) != 18:
+def load_jwst_segment_masks(stpsf, aperture_mask):
+    """Split the WSS pupil into segments via the stpsf label map.
+
+    The stpsf data package ships the RevW segment-label map at the native
+    WSS sampling and in the same pupil frame as the WSS OPD products.
+    Connected-component detection is unreliable here because
+    inter-segment gaps are sub-pixel in places at this sampling.
+
+    Returns
+    -------
+    segment_masks : `numpy.ndarray`
+        Boolean masks with shape ``(18, *aperture_mask.shape)``.
+    label_filename : `str`
+        Name of the label-map file, for provenance.
+    """
+    from astropy.io import fits
+
+    data_path = Path(stpsf.utils.get_stpsf_data_path())
+    label_path = data_path / (
+        f'JWpupil_segments_RevW_npix{aperture_mask.shape[0]}.fits'
+    )
+    if not label_path.exists():
         raise RuntimeError(
-            f'Expected 18 disconnected JWST segments, found {len(segment_masks)}.'
+            f'Segment label map {label_path} not found; adapt the thin '
+            'IO layer.'
+        )
+    with fits.open(label_path) as hdul:
+        labels = np.asarray(hdul[0].data)
+    if labels.shape != aperture_mask.shape:
+        raise RuntimeError(
+            'Segment label map shape does not match the WSS pupil mask.'
+        )
+    unlabeled = int(np.sum(aperture_mask & (labels == 0)))
+    if unlabeled > 0.02 * np.sum(aperture_mask):
+        raise RuntimeError(
+            'Segment label map misaligned with the WSS pupil: '
+            f'{unlabeled} unlabeled pupil pixels.'
+        )
+    segment_masks = np.asarray([
+        (labels == segment) & aperture_mask
+        for segment in range(1, int(labels.max()) + 1)
+    ])
+    if segment_masks.shape[0] != 18 or np.any(
+        np.sum(segment_masks, axis=(1, 2)) == 0
+    ):
+        raise RuntimeError('Expected 18 non-empty JWST segment masks.')
+    return segment_masks, label_path.name
+
+
+def _prepare_geometry(aperture_mask, segment_masks, global_max_noll,
+                      segment_max_noll):
+    """Build raw sampled global and per-segment bases."""
+    segment_masks = np.asarray(segment_masks, dtype=bool)
+    if segment_masks.shape[0] != 18:
+        raise RuntimeError(
+            f'Expected 18 JWST segment masks, found {segment_masks.shape[0]}.'
         )
     rows, columns = np.indices(aperture_mask.shape, dtype=float)
     global_modes = list(range(4, global_max_noll + 1))
@@ -598,17 +636,27 @@ def _prepare_geometry(aperture_mask, global_max_noll, segment_max_noll):
     )
 
 
-def _derive_document(opd_maps_nm, aperture_mask, statistic, step,
-                     global_max_noll, segment_max_noll, metadata):
+def _derive_document(opd_maps_nm, aperture_mask, segment_masks, statistic,
+                     step, global_max_noll, segment_max_noll, metadata,
+                     post_correction_flags=None):
     """Derive one static or drift weight document from loaded OPD maps."""
+    pairs_excluded = 0
     if statistic == 'drift':
-        maps_to_fit, _ = difference_opd_series(opd_maps_nm, step=step)
+        maps_to_fit, pairs = difference_opd_series(opd_maps_nm, step=step)
+        if post_correction_flags is not None:
+            keep = drift_pair_keep_mask(post_correction_flags, pairs)
+            pairs_excluded = int(np.sum(~keep))
+            maps_to_fit = maps_to_fit[keep]
+        if len(maps_to_fit) == 0:
+            raise RuntimeError(
+                'No correction-free drift pairs remain at this step.'
+            )
     elif statistic == 'static':
         maps_to_fit = opd_maps_nm
     else:
         raise ValueError("statistic must be 'static' or 'drift'.")
     geometry = _prepare_geometry(
-        aperture_mask, global_max_noll, segment_max_noll
+        aperture_mask, segment_masks, global_max_noll, segment_max_noll
     )
     (global_modes, segment_modes, segment_masks, global_basis,
      segment_bases, area_fractions) = geometry
@@ -631,6 +679,7 @@ def _derive_document(opd_maps_nm, aperture_mask, statistic, step,
     table_metadata.update({
         'statistic': statistic,
         count_field: int(len(maps_to_fit)),
+        'pairs_excluded_for_corrections': pairs_excluded,
         'step': int(step),
         'global_max_noll': int(global_max_noll),
         'segment_max_noll': int(segment_max_noll),
@@ -694,17 +743,22 @@ def main(argv=None):
     if args.segment_max_noll < 1:
         raise ValueError('--segment-max-noll must be at least one.')
 
-    maps, aperture_mask, measurement_dates, stpsf_version = load_wss_opd_series(
+    (maps, aperture_mask, measurement_dates, post_correction_flags,
+     stpsf_version) = load_wss_opd_series(
         args.start_date,
         args.end_date,
         opd_cache_dir=args.opd_cache_dir,
         max_maps=args.max_maps,
+    )
+    segment_masks, label_filename = load_jwst_segment_masks(
+        _import_stpsf(), aperture_mask
     )
     metadata = {
         'date_range': [args.start_date, args.end_date],
         'number_of_source_maps': int(len(maps)),
         'first_measurement': measurement_dates[0],
         'last_measurement': measurement_dates[-1],
+        'segment_label_map': label_filename,
         'stpsf_version': str(stpsf_version),
     }
     statistics = ('static', 'drift') if args.statistic == 'both' else (args.statistic,)
@@ -713,11 +767,13 @@ def main(argv=None):
         document = _derive_document(
             maps,
             aperture_mask,
+            segment_masks,
             statistic,
             args.step,
             args.global_max_noll,
             args.segment_max_noll,
             metadata,
+            post_correction_flags=post_correction_flags,
         )
         documents[statistic] = document
         output_path = Path(args.output_dir) / f'jwst_wss_{statistic}_v1.yaml'
@@ -728,11 +784,13 @@ def main(argv=None):
         baseline = _derive_document(
             maps,
             aperture_mask,
+            segment_masks,
             'drift',
             1,
             args.global_max_noll,
             args.segment_max_noll,
             metadata,
+            post_correction_flags=post_correction_flags,
         )
         print('\nDrift baseline cosine similarities against step 1')
         print('step     global     segment')
@@ -740,11 +798,13 @@ def main(argv=None):
             comparison = _derive_document(
                 maps,
                 aperture_mask,
+                segment_masks,
                 'drift',
                 step,
                 args.global_max_noll,
                 args.segment_max_noll,
                 metadata,
+                post_correction_flags=post_correction_flags,
             )
             global_similarity = cosine_similarity(
                 list(baseline['global_weights'].values()),
