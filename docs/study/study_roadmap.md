@@ -559,7 +559,7 @@ Workstream 1 — mass reach:
         `1e7 Msun` anchor (Moliné `x_sub` variation and the power-law
         concentration alternative already in the config schema).
 - L2a (C): clumpy sources.
-  - [ ] Implement the compact 2-5-component Sersic source and the rescaled
+  - [x] Implement the compact 2-5-component Sersic source and the rescaled
         spiral or irregular image-based source.
   - [ ] Run their injected-subhalo and no-subhalo ensemble grids.
 - L3a (A/C): complex macro lens.
