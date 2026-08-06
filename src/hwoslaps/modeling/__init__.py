@@ -27,6 +27,7 @@ from .utils_fisher import (
     FisherMapData,
     FisherModeCouplingData,
     FisherModeScanData,
+    load_fisher_grid_map_npz,
     print_fisher_summary,
     save_fisher_grid_map_npz,
 )
@@ -40,6 +41,7 @@ __all__ = [
     'FisherMapData',
     'FisherModeCouplingData',
     'FisherModeScanData',
+    'load_fisher_grid_map_npz',
     'print_fisher_summary',
     'save_fisher_grid_map_npz',
     'AsimovAmplitudeResult',

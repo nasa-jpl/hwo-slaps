@@ -27,6 +27,7 @@ def _write_asset(
     *,
     sb=None,
     pixel_scale=0.2,
+    pixel_scale_dtype=np.float64,
     metadata=None,
     omit_key=None,
     extra_key=False,
@@ -37,7 +38,7 @@ def _write_asset(
         metadata = {"format_version": 1, "provenance": {"kind": "synthetic"}}
     values = {
         "sb": sb,
-        "pixel_scale_arcsec": np.asarray(pixel_scale, dtype=np.float64),
+        "pixel_scale_arcsec": np.asarray(pixel_scale, dtype=pixel_scale_dtype),
         "metadata_json": np.asarray(json.dumps(metadata)),
     }
     if omit_key is not None:
@@ -216,6 +217,17 @@ def test_asset_loader_strict_types_and_boundaries(tmp_path):
     beyond_path = _write_asset(tmp_path / "beyond.npz", sb=sb * (1.0 + 1.0e-6))
     with pytest.raises(ValueError, match="normalized"):
         load_source_image_asset(beyond_path)
+
+
+@pytest.mark.parametrize("dtype", [np.float16, np.float32])
+def test_asset_loader_rejects_non_float64_pixel_scale(dtype, tmp_path):
+    """Reject floating pixel-scale scalars that are not native float64."""
+    path = _write_asset(
+        tmp_path / f"pixel-scale-{np.dtype(dtype).name}.npz",
+        pixel_scale_dtype=dtype,
+    )
+    with pytest.raises(ValueError, match="float64 scalar"):
+        load_source_image_asset(path)
 
 
 def test_image_source_from_asset_copies_asset_parameters(tmp_path):

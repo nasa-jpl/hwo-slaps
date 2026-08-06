@@ -832,6 +832,7 @@ class FisherDetector:
             max_z_spurious = float(np.nanmax(z_spurious))
 
         subhalo_config = self.full_config["lensing"]["subhalo"]
+        source_image_asset = self.lensing_baseline.source_image_asset or {}
 
         return FisherGridMapData(
             y_coords=layout.y_coords.copy(),
@@ -872,6 +873,8 @@ class FisherDetector:
             false_positive_area_arcsec2=false_positive_area_arcsec2,
             num_false_positive=num_false_positive,
             max_z_spurious=max_z_spurious,
+            source_image_asset_path=source_image_asset.get("asset_path"),
+            source_image_asset_sha256_16=source_image_asset.get("sha256_16"),
         )
 
     def _grid_signal_iterator(
@@ -934,6 +937,7 @@ class FisherDetector:
                 mu0_adu_2d=self.mu0_model_adu_2d,
                 mask_2d=self.mask_2d,
                 truth_psf_kernel_native=truth_kernel_native,
+                candidate_positions=positions,
             )
         yield from self._jax_grid_engine.signal_iterator(positions)
 

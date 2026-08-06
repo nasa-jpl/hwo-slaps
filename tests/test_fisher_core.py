@@ -405,3 +405,35 @@ def test_singular_nuisance_is_handled_by_pseudoinverse():
     assert result.nuisance_rank == 1
     assert result.fisher_profiled >= 0.0
     assert result.fisher_profiled <= result.fisher_raw + 1.0e-12
+
+
+def test_pseudoinverse_cutoff_is_invariant_to_nuisance_units():
+    """Keep profiled information unchanged under uniform nuisance rescaling."""
+    signal = np.array([1.0, 0.0])
+    for amplitude in (1.0e-6, 1.1e-6):
+        nuisance = np.array([[amplitude], [0.0]])
+        result = compute_asimov_detectability(signal, nuisance_jacobian=nuisance)
+        assert result.fisher_profiled == pytest.approx(0.0, abs=1.0e-12)
+
+    rng = np.random.default_rng(123)
+    generic_signal = rng.normal(size=8)
+    generic_nuisance = rng.normal(size=(8, 3))
+    generic_prior = np.diag([0.2, 1.0, 4.0])
+    reference = compute_asimov_detectability(
+        generic_signal,
+        nuisance_jacobian=generic_nuisance,
+        prior_precision=generic_prior,
+    )
+
+    for exponent in range(-12, 13, 3):
+        scale = 10.0**exponent
+        result = compute_asimov_detectability(
+            generic_signal,
+            nuisance_jacobian=generic_nuisance / scale,
+            prior_precision=generic_prior / scale**2,
+        )
+        assert result.fisher_profiled == pytest.approx(
+            reference.fisher_profiled,
+            rel=1.0e-9,
+            abs=1.0e-12,
+        )

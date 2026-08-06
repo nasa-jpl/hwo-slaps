@@ -7,6 +7,7 @@ scene; layout, persistence, and plotting tests run on synthetic data.
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import os
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ from hwoslaps.modeling.generator_fisher import perform_fisher_detection
 from hwoslaps.modeling.utils_fisher import (
     FisherDetectionData,
     FisherGridMapData,
+    load_fisher_grid_map_npz,
     print_fisher_summary,
     save_fisher_grid_map_npz,
 )
@@ -759,6 +761,28 @@ def test_grid_map_npz_roundtrip(grid_setup, tmp_path):
         assert int(data["num_positions_evaluated"]) == grid_map.num_positions_evaluated
         assert str(data["subhalo_model"]) == "PointMass"
 
+    loaded = load_fisher_grid_map_npz(npz_path)
+    assert loaded.source_image_asset_path is None
+    assert loaded.source_image_asset_sha256_16 is None
+
+
+def test_grid_map_npz_roundtrip_preserves_source_asset_identity(grid_setup, tmp_path):
+    """Round-trip optional source-image identity fields."""
+    grid_map = replace(
+        grid_setup["grid_map"],
+        source_image_asset_path="/tmp/source-image.npz",
+        source_image_asset_sha256_16="0123456789abcdef",
+    )
+    npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "image-source.npz")
+
+    with np.load(npz_path) as data:
+        assert str(data["source_image_asset_path"]) == "/tmp/source-image.npz"
+        assert str(data["source_image_asset_sha256_16"]) == "0123456789abcdef"
+
+    loaded = load_fisher_grid_map_npz(npz_path)
+    assert loaded.source_image_asset_path == grid_map.source_image_asset_path
+    assert loaded.source_image_asset_sha256_16 == grid_map.source_image_asset_sha256_16
+
 
 def test_mismatch_grid_map_npz_roundtrip(mismatch_setup, tmp_path):
     """Round-trip all optional mismatch fields through the NPZ archive."""
@@ -791,6 +815,20 @@ def test_mismatch_grid_map_npz_roundtrip(mismatch_setup, tmp_path):
         assert float(data["max_z_spurious"]) == pytest.approx(
             grid_map.max_z_spurious
         )
+
+    loaded = load_fisher_grid_map_npz(npz_path)
+    assert loaded.mismatch_enabled is True
+    for name in (
+        "amplitude_hat_2d",
+        "q_mismatch_2d",
+        "z_mismatch_2d",
+        "mismatch_detectable_mask_2d",
+        "amplitude_spurious_2d",
+        "q_spurious_2d",
+        "z_spurious_2d",
+        "false_positive_mask_2d",
+    ):
+        np.testing.assert_array_equal(getattr(loaded, name), getattr(grid_map, name))
 
 
 def test_grid_map_plot_writes_png(grid_setup, tmp_path):
@@ -1037,6 +1075,44 @@ def _write_jax_source_asset(path):
     return path
 
 
+def _write_tiny_jax_source_asset(path):
+    """Write a normalized image whose support is tiny relative to the field."""
+    import json
+
+    pixel_scale = 0.0025
+    sb = np.zeros((8, 8), dtype=np.float64)
+    sb[3, 4] = 1.0 / pixel_scale**2
+    np.savez(
+        path,
+        sb=sb,
+        pixel_scale_arcsec=np.asarray(pixel_scale, dtype=np.float64),
+        metadata_json=np.asarray(
+            json.dumps({"format_version": 1, "provenance": {"kind": "synthetic"}})
+        ),
+    )
+    return path
+
+
+def test_grid_map_carries_image_asset_identity(grid_setup, tmp_path):
+    """Source-image identity flows from LensingData into a grid map."""
+    asset_path = _write_jax_source_asset(tmp_path / "source.npz")
+    light = {
+        "type": "Image",
+        "asset_path": str(asset_path),
+        "centre": [0.0, 0.0],
+        "rotation_deg": 0.0,
+        "total_flux": 1.0,
+        "flux_scale": 1.0,
+        "size_scale": 1.0,
+    }
+    reference, _ = _source_type_detectors(grid_setup, light)
+
+    grid_map = reference.compute_grid_map()
+
+    assert grid_map.source_image_asset_path == str(asset_path)
+    assert len(grid_map.source_image_asset_sha256_16) == 16
+
+
 def test_jax_engine_clumpy_q_f_matches_reference(grid_setup):
     """Match reference q_F for a Sersic host with two compact clumps."""
     pytest.importorskip("jax")
@@ -1174,3 +1250,144 @@ def test_jax_engine_rejects_image_profile_convention_drift(grid_setup, tmp_path)
             mu0_adu_2d=np.zeros_like(broken.image),
             mask_2d=np.ones_like(broken.image, dtype=bool),
         )
+
+
+def test_jax_source_guard_hits_tiny_image_support(grid_setup, tmp_path, monkeypatch):
+    """Detect a convention error when random bbox probes all miss an image."""
+    pytest.importorskip("jax")
+    import autogalaxy as ag
+    import autolens as al
+
+    from hwoslaps.lensing.image_source import ImageSource
+    from hwoslaps.modeling.fisher_adapter import flatten_masked_image
+    from hwoslaps.modeling.fisher_grid_jax import JaxGridTemplateEngine
+    from hwoslaps.psf.utils import pyauto_kernel_native
+
+    baseline = grid_setup["lensing_baseline"]
+    over_sampled = np.asarray(baseline.grid.over_sampled, dtype=float)
+    deflections = np.asarray(
+        baseline.tracer.deflections_yx_2d_from(grid=baseline.grid.over_sampled),
+        dtype=float,
+    )
+    traced_macro = over_sampled - deflections
+    source_centre = tuple(float(value) for value in traced_macro[0])
+
+    asset_path = _write_tiny_jax_source_asset(tmp_path / "tiny-source.npz")
+    light = {
+        "type": "Image",
+        "asset_path": str(asset_path),
+        "centre": list(source_centre),
+        "rotation_deg": 31.0,
+        "total_flux": 0.7,
+        "flux_scale": 1.0,
+        "size_scale": 1.2,
+    }
+    reference, jax_detector = _source_type_detectors(grid_setup, light)
+    candidate_positions = jax_detector._grid_layout().positions_yx
+    engine = JaxGridTemplateEngine(
+        lensing_baseline=jax_detector.lensing_baseline,
+        map_config_template=copy.deepcopy(jax_detector.map_config_template),
+        psf_kernel_native=np.asarray(
+            pyauto_kernel_native(jax_detector.model_psf_data.kernel),
+            dtype=float,
+        ),
+        mu0_adu_2d=jax_detector.mu0_model_adu_2d,
+        mask_2d=jax_detector.mask_2d,
+        candidate_positions=candidate_positions,
+    )
+    position = (0.0, 0.0)
+    jax_signal = next(engine.signal_iterator([position]))
+    reference_image = reference._mean_adu_for_position(position)
+    reference_signal = flatten_masked_image(
+        reference_image - reference.mu0_adu_2d,
+        mask=reference.mask_2d,
+    )
+    np.testing.assert_allclose(jax_signal, reference_signal, rtol=1.0e-6, atol=1.0e-8)
+
+    image_profile = next(
+        profile
+        for galaxy in jax_detector.lensing_baseline.tracer.galaxies
+        for profile in galaxy.cls_list_from(cls=ag.LightProfile)
+        if isinstance(profile, ImageSource)
+    )
+    params = JaxGridTemplateEngine._image_params_from_profile(image_profile)
+    low = traced_macro.min(axis=0)
+    high = traced_macro.max(axis=0)
+    old_points = np.random.default_rng(0).uniform(
+        low,
+        high,
+        size=(128, 2),
+    )
+    old_reference = np.asarray(
+        image_profile.image_2d_from(
+            grid=al.Grid2DIrregular(values=old_points)
+        ),
+        dtype=float,
+    )
+    original_brightness = JaxGridTemplateEngine._image_brightness_np
+    old_analytic = original_brightness(params, old_points)
+    assert np.all(old_reference == 0.0)
+    np.testing.assert_allclose(old_analytic, old_reference, rtol=1.0e-9, atol=0.0)
+
+    def corrupted_brightness(cls, source_params, points):
+        values = original_brightness(source_params, points)
+        return np.where(values != 0.0, 1.01 * values, values)
+
+    monkeypatch.setattr(
+        JaxGridTemplateEngine,
+        "_image_brightness_np",
+        classmethod(corrupted_brightness),
+    )
+    with pytest.raises(ValueError, match="could not reproduce image profile"):
+        JaxGridTemplateEngine(
+            lensing_baseline=jax_detector.lensing_baseline,
+            map_config_template=copy.deepcopy(jax_detector.map_config_template),
+            psf_kernel_native=np.asarray(
+                pyauto_kernel_native(jax_detector.model_psf_data.kernel),
+                dtype=float,
+            ),
+            mu0_adu_2d=jax_detector.mu0_model_adu_2d,
+            mask_2d=jax_detector.mask_2d,
+            candidate_positions=candidate_positions,
+        )
+
+
+def test_jax_radial_table_covers_far_grid_and_guard_rejects_truncation(grid_setup):
+    """Cover candidate radii beyond the legacy table and reject truncation."""
+    pytest.importorskip("jax")
+    far_map = {
+        "type": "grid",
+        "grid": {
+            "spacing_arcsec": 4.0,
+            "half_width_arcsec": 12.0,
+            "annulus": None,
+        },
+        "detection_q_threshold": 10.0,
+        "num_workers": 1,
+        "engine": "jax",
+    }
+    reference_config = copy.deepcopy(far_map)
+    reference_config.pop("engine")
+    reference = _make_detector(grid_setup, reference_config)
+    jax_detector = _make_detector(grid_setup, far_map)
+    reference_map = reference.compute_grid_map()
+    jax_map = jax_detector.compute_grid_map()
+
+    np.testing.assert_allclose(
+        jax_map.q_asimov_2d,
+        reference_map.q_asimov_2d,
+        rtol=1.0e-6,
+        atol=0.0,
+    )
+    over_sampled = np.asarray(
+        grid_setup["lensing_baseline"].grid.over_sampled,
+        dtype=float,
+    )
+    legacy_r_max = 4.0 * float(
+        np.hypot(np.ptp(over_sampled[:, 0]), np.ptp(over_sampled[:, 1]))
+    )
+    assert jax_detector._jax_grid_engine._radial_r_max > legacy_r_max
+
+    jax_detector._jax_grid_engine._radial_r_max = 0.5
+    with pytest.raises(ValueError, match="radial deflection table is too small"):
+        next(jax_detector._jax_grid_engine.signal_iterator([(12.0, 12.0)]))

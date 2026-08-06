@@ -118,7 +118,7 @@ def _load_source_image_asset_absolute(path: str) -> SourceImageAsset:
             pixel_scale_array = np.asarray(data['pixel_scale_arcsec'])
             if (
                 pixel_scale_array.ndim != 0
-                or pixel_scale_array.dtype.kind != 'f'
+                or pixel_scale_array.dtype != np.dtype(np.float64)
             ):
                 raise ValueError(
                     f"Source image asset {path} pixel_scale_arcsec must be "

@@ -176,6 +176,8 @@ class FisherGridMapData:
     false_positive_area_arcsec2: Optional[float] = None
     num_false_positive: Optional[int] = None
     max_z_spurious: Optional[float] = None
+    source_image_asset_path: Optional[str] = None
+    source_image_asset_sha256_16: Optional[str] = None
 
 
 def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]) -> Path:
@@ -234,8 +236,123 @@ def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]
             num_false_positive=np.int64(grid_map.num_false_positive),
             max_z_spurious=np.float64(grid_map.max_z_spurious),
         )
+    if grid_map.source_image_asset_path is not None:
+        payload['source_image_asset_path'] = np.str_(grid_map.source_image_asset_path)
+    if grid_map.source_image_asset_sha256_16 is not None:
+        payload['source_image_asset_sha256_16'] = np.str_(
+            grid_map.source_image_asset_sha256_16
+        )
     np.savez_compressed(path, **payload)
     return path
+
+
+def load_fisher_grid_map_npz(path: Union[str, Path]) -> FisherGridMapData:
+    """Load a Fisher grid map from a compressed ``.npz`` archive.
+
+    Parameters
+    ----------
+    path : `str` or `pathlib.Path`
+        Archive written by :func:`save_fisher_grid_map_npz`.
+
+    Returns
+    -------
+    grid_map : `FisherGridMapData`
+        Reconstructed grid map. Mismatch and source-image asset fields are
+        optional, so archives written before those fields were introduced
+        remain readable.
+    """
+    path = Path(path)
+    with np.load(path, allow_pickle=False) as data:
+        files = set(data.files)
+
+        def optional_float(name):
+            if name not in files:
+                return None
+            value = float(data[name])
+            return None if np.isnan(value) else value
+
+        def optional_string(name):
+            if name not in files:
+                return None
+            return str(np.asarray(data[name]).item())
+
+        mismatch_present = 'q_mismatch_2d' in files
+        return FisherGridMapData(
+            y_coords=np.asarray(data['y_coords']),
+            x_coords=np.asarray(data['x_coords']),
+            spacing_arcsec=float(data['spacing_arcsec']),
+            centre_yx=tuple(np.asarray(data['centre_yx'], dtype=float)),
+            detection_q_threshold=float(data['detection_q_threshold']),
+            evaluated_mask_2d=np.asarray(data['evaluated_mask_2d']),
+            detectable_mask_2d=np.asarray(data['detectable_mask_2d']),
+            q_asimov_2d=np.asarray(data['q_asimov_2d']),
+            z_asimov_2d=np.asarray(data['z_asimov_2d']),
+            fisher_raw_2d=np.asarray(data['fisher_raw_2d']),
+            fisher_profiled_2d=np.asarray(data['fisher_profiled_2d']),
+            sigma_amplitude_profiled_2d=np.asarray(
+                data['sigma_amplitude_profiled_2d']
+            ),
+            degradation_2d=np.asarray(data['degradation_2d']),
+            absorbed_fraction_2d=np.asarray(data['absorbed_fraction_2d']),
+            num_positions_evaluated=int(data['num_positions_evaluated']),
+            num_detectable=int(data['num_detectable']),
+            detectable_area_arcsec2=float(data['detectable_area_arcsec2']),
+            max_z_asimov=float(data['max_z_asimov']),
+            median_z_asimov=float(data['median_z_asimov']),
+            subhalo_mass=optional_float('subhalo_mass'),
+            subhalo_model=optional_string('subhalo_model') or None,
+            lens_einstein_radius=optional_float('lens_einstein_radius'),
+            mismatch_enabled=(
+                bool(data['mismatch_enabled']) if 'mismatch_enabled' in files else False
+            ),
+            amplitude_hat_2d=(
+                np.asarray(data['amplitude_hat_2d']) if mismatch_present else None
+            ),
+            q_mismatch_2d=(
+                np.asarray(data['q_mismatch_2d']) if mismatch_present else None
+            ),
+            z_mismatch_2d=(
+                np.asarray(data['z_mismatch_2d']) if mismatch_present else None
+            ),
+            mismatch_detectable_mask_2d=(
+                np.asarray(data['mismatch_detectable_mask_2d'])
+                if mismatch_present
+                else None
+            ),
+            mismatch_detectable_area_arcsec2=optional_float(
+                'mismatch_detectable_area_arcsec2'
+            ),
+            num_mismatch_detectable=(
+                int(data['num_mismatch_detectable'])
+                if 'num_mismatch_detectable' in files
+                else None
+            ),
+            amplitude_spurious_2d=(
+                np.asarray(data['amplitude_spurious_2d']) if mismatch_present else None
+            ),
+            q_spurious_2d=(
+                np.asarray(data['q_spurious_2d']) if mismatch_present else None
+            ),
+            z_spurious_2d=(
+                np.asarray(data['z_spurious_2d']) if mismatch_present else None
+            ),
+            false_positive_mask_2d=(
+                np.asarray(data['false_positive_mask_2d'])
+                if mismatch_present
+                else None
+            ),
+            false_positive_area_arcsec2=optional_float('false_positive_area_arcsec2'),
+            num_false_positive=(
+                int(data['num_false_positive'])
+                if 'num_false_positive' in files
+                else None
+            ),
+            max_z_spurious=optional_float('max_z_spurious'),
+            source_image_asset_path=optional_string('source_image_asset_path'),
+            source_image_asset_sha256_16=optional_string(
+                'source_image_asset_sha256_16'
+            ),
+        )
 
 
 @dataclass

@@ -449,7 +449,11 @@ class ProfileLikelihoodWorkspace:
         sym = 0.5 * (matrix + matrix.T)
         eigvals, eigvecs = np.linalg.eigh(sym)
         max_abs = float(np.max(np.abs(eigvals))) if eigvals.size else 0.0
-        tol = max(rcond * max(max_abs, 1.0), 1.0e-15)
+        if max_abs == 0.0:
+            tol = 0.0
+        else:
+            dimension = sym.shape[0]
+            tol = max(rcond, dimension * np.finfo(float).eps) * max_abs
         keep = eigvals > tol
 
         pinv = np.zeros_like(sym)

@@ -48,6 +48,9 @@ _DEFAULT_BATCH_SIZE = 16
 _SOURCE_VERIFY_POINTS = 128
 _SOURCE_VERIFY_RTOL = 1.0e-10
 _IMAGE_SOURCE_VERIFY_RTOL = 1.0e-9
+_IMAGE_SUPPORT_GRID_SIZE = 16
+_RADIAL_TABLE_MARGIN_FRACTION = 1.0e-6
+_EXTENDED_RADIAL_SAMPLE_FACTOR = 4
 
 
 def _sersic_constant(sersic_index: float) -> float:
@@ -85,6 +88,9 @@ class JaxGridTemplateEngine:
         Baseline (no-subhalo) mean image in ADU on the native grid.
     mask_2d : `numpy.ndarray`
         Boolean mask selecting the pixels of the signal vector.
+    candidate_positions : sequence of `(float, float)`, optional
+        Candidate subhalo positions that the engine will evaluate.  The
+        positions determine the required radial-deflection table extent.
     batch_size : `int`, optional
         Number of grid positions evaluated per vmapped batch.
     """
@@ -98,6 +104,7 @@ class JaxGridTemplateEngine:
         mu0_adu_2d: np.ndarray,
         mask_2d: np.ndarray,
         truth_psf_kernel_native: Optional[np.ndarray] = None,
+        candidate_positions: Optional[Sequence[Tuple[float, float]]] = None,
         batch_size: int = _DEFAULT_BATCH_SIZE,
     ):
         import jax
@@ -131,6 +138,16 @@ class JaxGridTemplateEngine:
         )
         traced_macro = over_sampled - deflections_macro
 
+        self._query_centre_yx = self._reference_centre_yx(map_config_template)
+        candidate_positions_array = self._coerce_candidate_positions(
+            candidate_positions,
+            map_config_template,
+        )
+        self._image_radius_max = self._max_radius_from_centre(
+            over_sampled,
+            self._query_centre_yx,
+        )
+
         subhalo_profile = self._build_subhalo_profile(
             lensing_baseline=lensing_baseline,
             map_config_template=map_config_template,
@@ -143,7 +160,10 @@ class JaxGridTemplateEngine:
                 if truth_psf_kernel_native is not None
                 else _RADIAL_SAMPLES
             ),
+            candidate_positions=candidate_positions_array,
+            centre_yx=self._query_centre_yx,
         )
+        self._radial_r_max = float(radii[-1])
 
         source_profiles, image_profiles = self._extract_source_profiles(
             tracer=tracer,
@@ -249,20 +269,104 @@ class JaxGridTemplateEngine:
         return subhalo
 
     @staticmethod
+    def _reference_centre_yx(map_config_template: Dict[str, Any]) -> np.ndarray:
+        """Return the lens/grid centre used for radial extent bounds."""
+        try:
+            centre = map_config_template["lensing"]["lens_galaxy"]["mass"]["centre"]
+        except (KeyError, TypeError):
+            return np.zeros(2, dtype=float)
+        centre_array = np.asarray(centre, dtype=float)
+        if centre_array.shape != (2,) or not np.all(np.isfinite(centre_array)):
+            raise ValueError("Lens mass centre must be a finite length-2 coordinate.")
+        return centre_array
+
+    @staticmethod
+    def _max_radius_from_centre(points: np.ndarray, centre_yx: np.ndarray) -> float:
+        """Return the largest Euclidean radius of points around a centre."""
+        offsets = np.asarray(points, dtype=float) - centre_yx[None, :]
+        return float(np.max(np.hypot(offsets[:, 0], offsets[:, 1])))
+
+    @classmethod
+    def _coerce_candidate_positions(
+        cls,
+        candidate_positions: Optional[Sequence[Tuple[float, float]]],
+        map_config_template: Dict[str, Any],
+    ) -> np.ndarray:
+        """Coerce candidate positions, retaining a safe direct-use fallback."""
+        if candidate_positions is None:
+            candidate_positions = ()
+            try:
+                fisher_map = map_config_template["modeling"]["fisher"]["map"]
+                if str(fisher_map.get("type", "")).lower() == "grid":
+                    grid_config = fisher_map["grid"]
+                    spacing = float(grid_config["spacing_arcsec"])
+                    half_width = float(grid_config["half_width_arcsec"])
+                    n_half = int(np.floor(half_width / spacing + 1.0e-9))
+                    offsets = spacing * np.arange(-n_half, n_half + 1, dtype=float)
+                    lens_centre = cls._reference_centre_yx(map_config_template)
+                    yy, xx = np.meshgrid(
+                        lens_centre[0] + offsets,
+                        lens_centre[1] + offsets,
+                        indexing="ij",
+                    )
+                    candidate_positions = np.column_stack((yy.ravel(), xx.ravel()))
+            except (KeyError, TypeError, ValueError):
+                candidate_positions = ()
+
+        positions = np.asarray(candidate_positions, dtype=float)
+        if positions.size == 0:
+            return np.empty((0, 2), dtype=float)
+        if positions.ndim != 2 or positions.shape[1] != 2:
+            raise ValueError("candidate_positions must have shape (n_positions, 2).")
+        if not np.all(np.isfinite(positions)):
+            raise ValueError("candidate_positions contains non-finite values.")
+        return positions
+
+    @classmethod
     def _sample_radial_deflection(
+        cls,
         subhalo_profile,
         over_sampled: np.ndarray,
         num_samples: int,
+        candidate_positions: Optional[np.ndarray] = None,
+        centre_yx: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         import autolens as al
 
+        if centre_yx is None:
+            centre_yx = np.zeros(2, dtype=float)
+        centre_yx = np.asarray(centre_yx, dtype=float)
+        image_radius = cls._max_radius_from_centre(over_sampled, centre_yx)
+        candidate_radius = 0.0
+        if candidate_positions is not None and len(candidate_positions) > 0:
+            candidate_radius = cls._max_radius_from_centre(
+                candidate_positions,
+                centre_yx,
+            )
+
         span_y = float(np.ptp(over_sampled[:, 0]))
         span_x = float(np.ptp(over_sampled[:, 1]))
-        r_max = 4.0 * float(np.hypot(span_y, span_x))
+        base_r_max = 4.0 * float(np.hypot(span_y, span_x))
+        minimum_r_max = _RADIAL_R_MIN_ARCSEC * (1.0 + _RADIAL_TABLE_MARGIN_FRACTION)
+        base_r_max = max(base_r_max, minimum_r_max)
+        required_r_max = image_radius + candidate_radius
+        required_r_max += _RADIAL_TABLE_MARGIN_FRACTION * max(required_r_max, 1.0)
+        r_max = max(base_r_max, required_r_max, minimum_r_max)
+
+        sample_count = int(num_samples)
+        if r_max > base_r_max:
+            base_log_span = np.log(base_r_max / _RADIAL_R_MIN_ARCSEC)
+            required_log_span = np.log(r_max / _RADIAL_R_MIN_ARCSEC)
+            sample_count = int(
+                np.ceil(sample_count * required_log_span / base_log_span)
+            )
+            # Endpoint queries are the most sensitive to interpolation error;
+            # retain extra log-space density when the table is extended.
+            sample_count *= _EXTENDED_RADIAL_SAMPLE_FACTOR
         radii = np.logspace(
             np.log10(_RADIAL_R_MIN_ARCSEC),
             np.log10(r_max),
-            num_samples,
+            sample_count,
         )
         sample_grid = al.Grid2DIrregular(
             values=np.column_stack([np.zeros_like(radii), radii])
@@ -386,6 +490,54 @@ class JaxGridTemplateEngine:
             params["sb_padded"], rows, cols
         )
 
+    @staticmethod
+    def _image_support_points(params: Dict[str, Any]) -> np.ndarray:
+        """Build deterministic sky-plane probes for an image-source asset."""
+        sb = np.asarray(params["sb_padded"])[1:-1, 1:-1]
+        row_grid = np.linspace(
+            0,
+            sb.shape[0] - 1,
+            min(sb.shape[0], _IMAGE_SUPPORT_GRID_SIZE),
+            dtype=int,
+        )
+        col_grid = np.linspace(
+            0,
+            sb.shape[1] - 1,
+            min(sb.shape[1], _IMAGE_SUPPORT_GRID_SIZE),
+            dtype=int,
+        )
+        grid_rows, grid_cols = np.meshgrid(row_grid, col_grid, indexing="ij")
+        pixel_indices = np.column_stack((grid_rows.ravel(), grid_cols.ravel()))
+        grid_values = sb[pixel_indices[:, 0], pixel_indices[:, 1]]
+        supported_grid = pixel_indices[grid_values != 0.0]
+
+        first_nonzero = None
+        for row, values in enumerate(sb):
+            nonzero = np.flatnonzero(values != 0.0)
+            if nonzero.size:
+                first_nonzero = (row, int(nonzero[0]))
+                break
+        if first_nonzero is not None:
+            pixel_indices = np.vstack((supported_grid, first_nonzero))
+        elif supported_grid.size:
+            pixel_indices = supported_grid
+        pixel_indices = np.unique(pixel_indices, axis=0)
+
+        offsets = np.array(
+            [[0.0, 0.0], [-0.5, 0.0], [0.5, 0.0], [0.0, -0.5], [0.0, 0.5]],
+            dtype=float,
+        )
+        row_col = pixel_indices[:, None, :] + offsets[None, :, :]
+        row_col = row_col.reshape(-1, 2)
+        scale = params["pixel_scale_arcsec"] * params["size_scale"]
+        u = (row_col[:, 1] - params["col_c"]) * scale
+        v = (row_col[:, 0] - params["row_c"]) * scale
+        dx = u * params["rotation_cos"] - v * params["rotation_sin"]
+        dy = u * params["rotation_sin"] + v * params["rotation_cos"]
+        return np.column_stack(
+            (params["centre_y"] + dy, params["centre_x"] + dx)
+        )
+
     @classmethod
     def _extract_source_profiles(
         cls,
@@ -396,8 +548,9 @@ class JaxGridTemplateEngine:
 
         The analytic parametrization is verified numerically against the
         PyAutoLens profile on random points spanning the macro-traced
-        footprint, so any convention drift or unsupported profile type
-        raises at build time.
+        footprint, at deterministic macro-ray coordinates, and for image
+        profiles at deterministic asset-support probes.  Any convention drift
+        or unsupported profile type raises at build time.
         """
         import autogalaxy as ag
         import autolens as al
@@ -421,16 +574,25 @@ class JaxGridTemplateEngine:
         rng = np.random.default_rng(0)
         low = traced_macro.min(axis=0)
         high = traced_macro.max(axis=0)
-        points = rng.uniform(low, high, size=(_SOURCE_VERIFY_POINTS, 2))
-        sample_grid = al.Grid2DIrregular(values=points)
+        bbox_points = rng.uniform(low, high, size=(_SOURCE_VERIFY_POINTS, 2))
+        macro_step = max(1, int(np.ceil(traced_macro.shape[0] / 256)))
+        macro_points = traced_macro[::macro_step]
+        base_points = np.vstack((bbox_points, macro_points))
 
         for light in light_objects:
             if isinstance(light, ImageSource):
                 params = cls._image_params_from_profile(light)
+                points = np.vstack((base_points, cls._image_support_points(params)))
+                sample_grid = al.Grid2DIrregular(values=points)
                 reference = np.asarray(
                     light.image_2d_from(grid=sample_grid), dtype=float
                 )
                 analytic = cls._image_brightness_np(params, points)
+                if not np.any(reference != 0.0):
+                    raise ValueError(
+                        "JAX grid engine image profile verification sampled no "
+                        "nonzero reference brightness; source support was not hit."
+                    )
                 if not np.allclose(
                     analytic,
                     reference,
@@ -445,6 +607,8 @@ class JaxGridTemplateEngine:
                 image_profiles.append(params)
                 continue
             params = cls._sersic_params_from_profile(light)
+            points = base_points
+            sample_grid = al.Grid2DIrregular(values=points)
             reference = np.asarray(light.image_2d_from(grid=sample_grid), dtype=float)
             analytic = cls._sersic_brightness_np(params, points)
             if not np.allclose(
@@ -598,7 +762,25 @@ class JaxGridTemplateEngine:
         jnp = self._jnp
         positions_arr = np.asarray(positions, dtype=float)
         for start in range(0, positions_arr.shape[0], self.batch_size):
-            batch = jnp.asarray(positions_arr[start:start + self.batch_size])
+            batch_positions = positions_arr[start:start + self.batch_size]
+            if batch_positions.size:
+                position_radius = self._max_radius_from_centre(
+                    batch_positions,
+                    self._query_centre_yx,
+                )
+                possible_query_radius = position_radius + self._image_radius_max
+                table_r_max = min(
+                    self._radial_r_max,
+                    float(np.exp(np.asarray(self._log_radii[-1]))),
+                )
+                if possible_query_radius > table_r_max:
+                    raise ValueError(
+                        "JAX radial deflection table is too small for the requested "
+                        f"positions: possible query radius {possible_query_radius:.6g} "
+                        f"exceeds table maximum {table_r_max:.6g}; rebuild the "
+                        "engine with the complete candidate position set."
+                    )
+            batch = jnp.asarray(batch_positions)
             signals = np.asarray(self._batch_signals(batch))
             for row in signals:
                 yield row

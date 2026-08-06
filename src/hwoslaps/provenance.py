@@ -81,7 +81,7 @@ def config_hash(config):
 
 
 def _git_hash(repo_dir=None):
-    """Return the short git hash of ``repo_dir``, or `None` outside a repo.
+    """Return the full git hash of ``repo_dir``, or `None` outside a repo.
 
     Parameters
     ----------
@@ -91,18 +91,108 @@ def _git_hash(repo_dir=None):
     Returns
     -------
     git_hash : `str` or `None`
-        Short commit hash, or `None` when git or the repository is
+        Full commit hash, or `None` when git or the repository is
         unavailable.
     """
     try:
         return subprocess.check_output(
-            ['git', 'rev-parse', '--short', 'HEAD'],
+            ['git', 'rev-parse', 'HEAD'],
             cwd=None if repo_dir is None else str(repo_dir),
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
     except Exception:
         return None
+
+
+def _git_state(repo_dir=None):
+    """Return commit and tracked-tree state for ``repo_dir``.
+
+    Parameters
+    ----------
+    repo_dir : `str` or `pathlib.Path`, optional
+        Repository directory. Defaults to the current working directory.
+
+    Returns
+    -------
+    state : `tuple`
+        Full commit hash, dirty flag, sorted dirty tracked paths, and a
+        SHA-256 digest of ``git diff HEAD``. All four values are `None` when
+        the directory is not a usable git repository.
+    """
+    git_hash = _git_hash(repo_dir)
+    if git_hash is None:
+        return None, None, None, None
+    try:
+        status = subprocess.check_output(
+            [
+                'git',
+                'status',
+                '--porcelain',
+                '--no-renames',
+                '--untracked-files=no',
+            ],
+            cwd=None if repo_dir is None else str(repo_dir),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        dirty = bool(status)
+        dirty_paths = sorted(
+            line[3:]
+            for line in status.splitlines()
+            if line and len(line) >= 4
+        )
+        diff_sha256 = None
+        if dirty:
+            diff_output = subprocess.check_output(
+                ['git', 'diff', 'HEAD'],
+                cwd=None if repo_dir is None else str(repo_dir),
+                stderr=subprocess.DEVNULL,
+            )
+            diff_sha256 = hashlib.sha256(diff_output).hexdigest()
+        return git_hash, dirty, dirty_paths, diff_sha256
+    except Exception:
+        return None, None, None, None
+
+
+def _source_image_asset_provenance(config):
+    """Return persistent identity metadata for a configured Image source.
+
+    Parameters
+    ----------
+    config : `dict` or `None`
+        Full pipeline configuration.
+
+    Returns
+    -------
+    asset_provenance : `dict` or `None`
+        Resolved asset path, content hash, pixel scale, and image shape for
+        an Image source; `None` for other source light types.
+
+    Raises
+    ------
+    ValueError
+        Raised by the source-image loader when the configured asset is
+        missing or invalid.
+    """
+    if not isinstance(config, dict):
+        return None
+    lensing = config.get('lensing')
+    source_galaxy = lensing.get('source_galaxy') if isinstance(lensing, dict) else None
+    light = source_galaxy.get('light') if isinstance(source_galaxy, dict) else None
+    if not isinstance(light, dict) or light.get('type') != 'Image':
+        return None
+
+    asset_path = Path(light['asset_path']).expanduser().resolve()
+    from .lensing.image_source import load_source_image_asset
+
+    asset = load_source_image_asset(asset_path)
+    return {
+        'asset_path': str(asset_path),
+        'sha256_16': asset.sha256_16,
+        'pixel_scale_arcsec': float(asset.pixel_scale_arcsec),
+        'shape': [int(dimension) for dimension in asset.sb.shape],
+    }
 
 
 def capture_provenance(config=None, command=None, repo_dir=None):
@@ -122,20 +212,28 @@ def capture_provenance(config=None, command=None, repo_dir=None):
     Returns
     -------
     provenance : `dict`
-        Record with the command line, config hash, git hash, Python
-        version, and the versions of the packages in
-        ``_PROVENANCE_PACKAGES``.
+        Record with the command line, config hash, git state, optional
+        source-image identity, Python version, and the versions of the
+        packages in ``_PROVENANCE_PACKAGES``.
     """
     if repo_dir is None:
         repo_dir = Path(__file__).resolve().parent
     versions = {name: _package_version(name) for name in _PROVENANCE_PACKAGES}
-    return {
+    git_hash, git_dirty, git_dirty_paths, git_diff_sha256 = _git_state(repo_dir)
+    provenance = {
         'command': None if command is None else list(command),
         'config_hash': None if config is None else config_hash(config),
-        'git_hash': _git_hash(repo_dir),
+        'git_hash': git_hash,
+        'git_dirty': git_dirty,
+        'git_dirty_paths': git_dirty_paths,
+        'git_diff_sha256': git_diff_sha256,
         'python': platform.python_version(),
         'package_versions': versions,
     }
+    source_image_asset = _source_image_asset_provenance(config)
+    if source_image_asset is not None:
+        provenance['source_image_asset'] = source_image_asset
+    return provenance
 
 
 def write_provenance(path, config=None, command=None, repo_dir=None):
