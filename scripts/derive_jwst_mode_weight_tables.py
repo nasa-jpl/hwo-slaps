@@ -10,94 +10,26 @@ from __future__ import annotations
 
 import argparse
 from datetime import date
-import math
 from pathlib import Path
 
 import numpy as np
 import yaml
 
+from hwoslaps.psf.opd_basis import (
+    _zernike_radial as zernike_radial,
+    build_raw_noll_basis,
+    fit_orthonormal_basis,
+    noll_to_zernike,
+    orthonormalize_basis,
+)
+
+_noll_to_zernike = noll_to_zernike
+_zernike_radial = zernike_radial
+
 
 DECOMPOSITION_METHOD = 'sequential_global_then_segment_qr_orthonormal'
 SCRIPT_NAME = 'derive_jwst_mode_weight_tables.py'
 SCRIPT_VERSION = '1'
-
-
-def orthonormalize_basis(raw_basis, mask):
-    """Orthonormalize a sampled basis over selected aperture pixels.
-
-    Parameters
-    ----------
-    raw_basis : `numpy.ndarray`
-        Basis with shape ``(n_modes, *map_shape)``.
-    mask : `numpy.ndarray`
-        Boolean aperture mask with shape ``map_shape``.
-
-    Returns
-    -------
-    basis : `numpy.ndarray`
-        Basis with the same shape as ``raw_basis`` and unit mean square per
-        mode over ``mask``.
-    """
-    raw_basis = np.asarray(raw_basis, dtype=float)
-    mask = np.asarray(mask, dtype=bool)
-    if raw_basis.ndim != mask.ndim + 1 or raw_basis.shape[1:] != mask.shape:
-        raise ValueError('raw_basis shape must be (n_modes, *mask.shape).')
-    if raw_basis.shape[0] == 0:
-        raise ValueError('raw_basis must contain at least one mode.')
-    values = raw_basis[:, mask].T
-    if values.shape[0] < values.shape[1]:
-        raise ValueError('mask must contain at least as many pixels as modes.')
-    if not np.all(np.isfinite(values)):
-        raise ValueError('raw_basis must be finite on mask.')
-
-    q_matrix, r_matrix = np.linalg.qr(values, mode='reduced')
-    diagonal = np.abs(np.diag(r_matrix))
-    tolerance = np.finfo(float).eps * max(values.shape) * np.linalg.norm(
-        r_matrix, ord=np.inf
-    )
-    if np.any(diagonal <= tolerance):
-        raise ValueError('raw_basis is rank-deficient on mask.')
-    signs = np.where(np.diag(r_matrix) < 0.0, -1.0, 1.0)
-    q_matrix = q_matrix * signs[np.newaxis, :]
-
-    result = np.zeros_like(raw_basis, dtype=float)
-    result[:, mask] = (q_matrix * np.sqrt(values.shape[0])).T
-    return result
-
-
-def fit_orthonormal_basis(opd_nm, mask, basis):
-    """Least-squares fit an orthonormal sampled basis to one OPD map.
-
-    Parameters
-    ----------
-    opd_nm : `numpy.ndarray`
-        Wavefront OPD map in nanometers.
-    mask : `numpy.ndarray`
-        Boolean fit mask.
-    basis : `numpy.ndarray`
-        Orthonormal basis returned by :func:`orthonormalize_basis`.
-
-    Returns
-    -------
-    coefficients : `numpy.ndarray`
-        Mode coefficients in nanometers RMS.
-    model : `numpy.ndarray`
-        Fitted OPD map, zero outside ``mask``.
-    """
-    opd_nm = np.asarray(opd_nm, dtype=float)
-    mask = np.asarray(mask, dtype=bool)
-    basis = np.asarray(basis, dtype=float)
-    if opd_nm.shape != mask.shape:
-        raise ValueError('opd_nm and mask must have identical shapes.')
-    if basis.ndim != mask.ndim + 1 or basis.shape[1:] != mask.shape:
-        raise ValueError('basis shape must be (n_modes, *mask.shape).')
-    if not np.all(np.isfinite(opd_nm[mask])):
-        raise ValueError('opd_nm must be finite on mask.')
-
-    coefficients = np.mean(basis[:, mask] * opd_nm[mask], axis=1)
-    model = np.zeros_like(opd_nm, dtype=float)
-    model[mask] = coefficients @ basis[:, mask]
-    return coefficients, model
 
 
 def decompose_opd_map(opd_nm, aperture_mask, global_raw_basis,
@@ -353,6 +285,8 @@ def make_weight_document(name, global_mode_nolls, global_weights,
         raise ValueError('global mode and weight counts must match.')
     if len(segment_mode_nolls) != len(segment_weights):
         raise ValueError('segment mode and weight counts must match.')
+    metadata = dict(metadata)
+    metadata['basis_convention'] = 'sequential_orthonormal_aperture'
     return {
         'name': str(name),
         'segment_variance_fraction': float(segment_variance_fraction),
@@ -364,7 +298,7 @@ def make_weight_document(name, global_mode_nolls, global_weights,
             mode: float(weight)
             for mode, weight in zip(segment_mode_nolls, segment_weights)
         },
-        'metadata': dict(metadata),
+        'metadata': metadata,
     }
 
 
@@ -374,70 +308,6 @@ def write_weight_table(path, document):
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open('w', encoding='utf-8') as stream:
         yaml.safe_dump(document, stream, sort_keys=False)
-
-
-def _noll_to_zernike(noll):
-    """Convert one Noll index to signed radial and azimuthal orders."""
-    radial = int(np.sqrt(2 * noll - 1) + 0.5) - 1
-    if radial % 2:
-        azimuthal = 2 * int((2 * (noll + 1) - radial * (radial + 1)) // 4) - 1
-    else:
-        azimuthal = 2 * int((2 * noll + 1 - radial * (radial + 1)) // 4)
-    return radial, azimuthal * (-1)**(noll % 2)
-
-
-def _zernike_radial(radial_order, azimuthal_order, radius):
-    """Evaluate the radial component of a Zernike polynomial."""
-    azimuthal_order = abs(azimuthal_order)
-    result = np.zeros_like(radius, dtype=float)
-    half_difference = (radial_order - azimuthal_order) // 2
-    for index in range(half_difference + 1):
-        coefficient = (
-            (-1)**index
-            * math.factorial(radial_order - index)
-            / (
-                math.factorial(index)
-                * math.factorial((radial_order + azimuthal_order) // 2 - index)
-                * math.factorial((radial_order - azimuthal_order) // 2 - index)
-            )
-        )
-        result += coefficient * radius**(radial_order - 2 * index)
-    return result
-
-
-def build_raw_noll_basis(x_coordinates, y_coordinates, mask, mode_nolls):
-    """Evaluate raw Noll-ordered Zernikes on a masked sampled aperture.
-
-    Coordinates are centered on the selected pixels and scaled by their
-    maximum radius. Applied to one segment at a time, subsequent QR
-    orthonormalization produces the corresponding sampled hexike span.
-    """
-    x_coordinates = np.asarray(x_coordinates, dtype=float)
-    y_coordinates = np.asarray(y_coordinates, dtype=float)
-    mask = np.asarray(mask, dtype=bool)
-    if x_coordinates.shape != mask.shape or y_coordinates.shape != mask.shape:
-        raise ValueError('coordinate arrays and mask must have identical shapes.')
-    if not np.any(mask):
-        raise ValueError('mask must contain illuminated pixels.')
-    x_local = x_coordinates - np.mean(x_coordinates[mask])
-    y_local = y_coordinates - np.mean(y_coordinates[mask])
-    scale = np.max(np.hypot(x_local[mask], y_local[mask]))
-    if scale == 0.0:
-        raise ValueError('mask coordinates must span a nonzero radius.')
-    radius = np.hypot(x_local, y_local) / scale
-    angle = np.arctan2(y_local, x_local)
-    modes = []
-    for noll in mode_nolls:
-        radial_order, azimuthal_order = _noll_to_zernike(int(noll))
-        radial = _zernike_radial(radial_order, azimuthal_order, radius)
-        if azimuthal_order == 0:
-            mode = radial
-        elif azimuthal_order > 0:
-            mode = radial * np.cos(azimuthal_order * angle)
-        else:
-            mode = radial * np.sin(abs(azimuthal_order) * angle)
-        modes.append(np.where(mask, mode, 0.0))
-    return np.asarray(modes)
 
 
 def _import_stpsf():

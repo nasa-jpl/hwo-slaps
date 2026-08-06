@@ -600,6 +600,10 @@ Workstream 2 — PSF requirements:
         mode-weight tables (`configs/psf_priors/jwst_wss_{static,drift}_v1.yaml`,
         599 WSS OPD maps 2022-07..2026-08) plus a power-law parametric
         placeholder; an EAC1 table can drop in later with no API change.
+        Table weights are defined in the sequentially orthonormalized
+        aperture basis; runtime realizes them through the cached
+        `ApertureBasisTransform` change of basis before HCIPy application
+        (external-review fix, 2026-08-06).
 - P3 (C): mode-family sweep.
   - [x] Add segment-piston and segment tip/tilt PSF families alongside the
         existing hexike, global-Zernike, and combined families.

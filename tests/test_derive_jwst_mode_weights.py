@@ -187,3 +187,7 @@ def test_weight_table_writer_round_trips_through_public_loader(tmp_path):
     assert prior.segment_weights == pytest.approx({1: 5 / 13, 2: 12 / 13})
     assert prior.segment_variance_fraction == pytest.approx(0.37)
     assert prior.metadata['decomposition_method'] == DERIVATION.DECOMPOSITION_METHOD
+    assert (
+        prior.metadata['basis_convention']
+        == 'sequential_orthonormal_aperture'
+    )

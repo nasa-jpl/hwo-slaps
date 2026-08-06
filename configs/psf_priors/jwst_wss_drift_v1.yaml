@@ -65,6 +65,7 @@ segment_weights:
   9: 0.1571230288553518
   10: 0.16588800492563446
 metadata:
+  basis_convention: sequential_orthonormal_aperture
   date_range:
   - '2022-07-16'
   - null

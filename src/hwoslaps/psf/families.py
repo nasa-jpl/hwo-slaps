@@ -1,10 +1,12 @@
 """Named PSF perturbation families for random ensemble draws.
 
 This module defines the sampled mode families used by study ensembles and
-the random-draw functions that realize them at a target wavefront RMS. Each
-draw returns config-ready aberration dictionaries in the units of
-``psf.aberrations``: nanometers of wavefront OPD, keyed by 1-based Noll
-indices.
+the random-draw functions that realize them at a target wavefront RMS.
+Non-weighted draws return config-ready aberration dictionaries in the units
+of ``psf.aberrations``: nanometers of wavefront OPD, keyed by 1-based Noll
+indices. Weighted draws return coefficients in the prior's sequentially
+orthonormalized aperture basis and must pass through
+:func:`realize_weighted_draw` before being handed to HCIPy.
 
 Families
 --------
@@ -51,6 +53,7 @@ import numpy as np
 import yaml
 
 from .aberration_models import apply_global_zernikes, apply_segment_zernikes
+from .opd_basis import ApertureBasisTransform
 
 SEGMENT_PISTON_NOLLS = (1,)
 """Hexike Noll modes of the segment-piston family (`tuple` of `int`)."""
@@ -128,11 +131,16 @@ def _normalize_weight_dict(weights, field_name, minimum_mode):
 
 @dataclass(frozen=True)
 class ModeWeightPrior:
-    """Shape-only prior for global and segment mode coefficients.
+    """Shape-only prior in sequential orthonormal aperture bases.
 
     Each non-empty weight dictionary is normalized independently to unit
     sum of squared weights. Consequently, absolute input scales are
-    discarded and the prior describes only the relative mode mix.
+    discarded and the prior describes only the relative mode mix. The
+    weights scale coefficients in sequentially QR-orthonormalized aperture
+    bases, not raw HCIPy Noll modes. Exact-RMS conditioning of every draw
+    means the realized marginal variance fractions differ from the squared
+    table weights; the measured difference reaches 15% per mode for the
+    committed JWST drift table.
 
     Parameters
     ----------
@@ -294,7 +302,12 @@ def make_power_law_prior(alpha, global_mode_range=(4, 55),
 
 
 def load_mode_weight_prior(path):
-    """Load a mode-weight prior from a YAML table.
+    """Load an orthonormal-aperture mode-weight prior from a YAML table.
+
+    Table weights are directional scales in sequentially
+    QR-orthonormalized aperture bases. They are not realized marginal
+    variance fractions: exact-RMS conditioning changes the second moments
+    by up to 15% per mode for the committed JWST drift table.
 
     Parameters
     ----------
@@ -576,11 +589,15 @@ def _validate_weighted_target(target_rms_nm, family_name):
 
 
 def draw_weighted_global_zernike_family(rng, prior, target_rms_nm):
-    """Draw weighted global-Zernike coefficients at a target norm.
+    """Draw orthonormal-aperture global coefficients at a target norm.
 
     This function performs coefficient-space normalization only. The caller
-    must use :func:`renormalize_to_aperture_rms` to realize the exact
-    piston-removed aperture wavefront RMS on its telescope pupil.
+    must convert the result with :class:`ApertureBasisTransform` before raw
+    HCIPy application. Exact-RMS conditioning changes the realized marginal
+    variance fractions from the squared directional weights by up to 15%
+    per mode for the committed JWST drift table. Use
+    :func:`realize_weighted_draw` to convert and realize the exact
+    piston-removed aperture wavefront RMS on a telescope pupil.
 
     Parameters
     ----------
@@ -620,13 +637,16 @@ def draw_weighted_global_zernike_family(rng, prior, target_rms_nm):
 def draw_weighted_segment_hexike_family(
     rng, segments, prior, target_rms_nm
 ):
-    """Draw weighted per-segment hexikes at a target coefficient RMS.
+    """Draw orthonormal-aperture segment modes at a target coefficient RMS.
 
     When mode 1 is present, only its across-segment mean is removed. Common
     segment tip or tilt is retained because it is a physical sawtooth rather
     than an unobservable global ramp. This function performs coefficient-
-    space normalization only; the caller must use
-    :func:`renormalize_to_aperture_rms` for exact aperture wavefront RMS.
+    space normalization only; the caller must convert with
+    :class:`ApertureBasisTransform`. Exact-RMS conditioning changes realized
+    marginal variance fractions from the squared directional weights by up
+    to 15% per mode for the committed JWST drift table. Use
+    :func:`realize_weighted_draw` for conversion and exact aperture RMS.
 
     Parameters
     ----------
@@ -685,16 +705,19 @@ def draw_weighted_segment_hexike_family(
 
 
 def draw_weighted_combined_family(rng, segments, prior, target_rms_nm):
-    """Draw a weighted segment-plus-global coefficient family.
+    """Draw an orthonormal-aperture segment-plus-global family.
 
     The segment side is drawn first. A side with exactly zero variance
     budget is skipped without consuming random numbers. This function only
-    normalizes coefficients. For exact combined amplitude, the caller must
-    jointly renormalize both dictionaries with::
+    normalizes orthonormal-basis coefficients. Exact-RMS conditioning makes
+    realized marginal variance fractions differ from squared directional
+    weights by up to 15% per mode for the committed JWST drift table. For
+    exact combined amplitude, convert and jointly renormalize with::
 
-        renormalize_to_aperture_rms(
-            telescope_data, target, segment_hexikes=segment_hexikes,
-            global_zernikes=global_zernikes)
+        realize_weighted_draw(
+            telescope_data, basis_transform, target,
+            segment_coefficients=segment_hexikes,
+            global_coefficients=global_zernikes)
 
     Parameters
     ----------
@@ -738,6 +761,50 @@ def draw_weighted_combined_family(rng, segments, prior, target_rms_nm):
             rng, prior, global_budget
         )
     return segment_hexikes, global_zernikes
+
+
+def realize_weighted_draw(telescope_data, basis_transform, target_rms_nm,
+                          segment_coefficients=None,
+                          global_coefficients=None):
+    """Convert one weighted draw to raw HCIPy coefficients and normalize it.
+
+    This is the canonical consumption path for all weighted families:
+    orthonormal-basis draw, cached change of basis, then exact physical RMS
+    renormalization. Reuse one transform for every draw made with the same
+    telescope configuration and mode ranges.
+
+    Parameters
+    ----------
+    telescope_data : `dict`
+        Pupil-side telescope data used to construct ``basis_transform``.
+    basis_transform : `ApertureBasisTransform`
+        Cached transform for exactly the modes present in the draw.
+    target_rms_nm : `float`
+        Target piston-removed aperture wavefront RMS in nanometers OPD.
+    segment_coefficients : `dict`, optional
+        Orthonormal-basis per-segment coefficient dictionaries.
+    global_coefficients : `dict`, optional
+        Orthonormal-basis global coefficient dictionary.
+
+    Returns
+    -------
+    segment_raw : `dict`
+        Renormalized raw per-segment HCIPy coefficients.
+    global_raw : `dict`
+        Renormalized raw global HCIPy coefficients.
+    """
+    if not isinstance(basis_transform, ApertureBasisTransform):
+        raise TypeError('basis_transform must be an ApertureBasisTransform.')
+    segment_raw, global_raw = basis_transform.to_raw(
+        segment_coefficients=segment_coefficients,
+        global_coefficients=global_coefficients,
+    )
+    return renormalize_to_aperture_rms(
+        telescope_data,
+        target_rms_nm,
+        segment_hexikes=segment_raw,
+        global_zernikes=global_raw,
+    )
 
 
 def measure_aperture_rms_nm(telescope_data, segment_hexikes=None,

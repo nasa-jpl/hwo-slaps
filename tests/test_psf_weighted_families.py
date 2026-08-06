@@ -22,8 +22,9 @@ from hwoslaps.psf.families import (
     load_mode_weight_prior,
     make_power_law_prior,
     noll_to_radial_order,
-    renormalize_to_aperture_rms,
+    realize_weighted_draw,
 )
+from hwoslaps.psf.opd_basis import ApertureBasisTransform
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -140,6 +141,20 @@ def test_mode_weight_prior_loads_and_normalizes_yaml(tmp_path):
     assert prior.global_weights == pytest.approx({4: 0.6, 5: 0.8})
     assert prior.segment_weights == pytest.approx({1: 5 / 13, 2: 12 / 13})
     assert prior.metadata == {'source': 'offline-test'}
+
+
+@pytest.mark.parametrize('statistic', ['drift', 'static'])
+def test_committed_jwst_prior_declares_orthonormal_basis(statistic):
+    """Declare the coefficient basis in every committed JWST prior."""
+    prior = load_mode_weight_prior(
+        PROJECT_ROOT / 'configs' / 'psf_priors'
+        / f'jwst_wss_{statistic}_v1.yaml'
+    )
+
+    assert (
+        prior.metadata['basis_convention']
+        == 'sequential_orthonormal_aperture'
+    )
 
 
 def test_mode_weight_prior_loading_is_idempotent(tmp_path):
@@ -503,23 +518,29 @@ def test_weighted_draw_renormalizes_to_exact_aperture_rms(
     target = 25.0
     rng = np.random.default_rng(91)
     if family == 'global':
-        segment_raw = {}
-        global_raw = draw_weighted_global_zernike_family(rng, prior, target)
+        segment_ortho = {}
+        global_ortho = draw_weighted_global_zernike_family(rng, prior, target)
     elif family == 'segment':
-        segment_raw = draw_weighted_segment_hexike_family(
+        segment_ortho = draw_weighted_segment_hexike_family(
             rng, SEGMENTS, prior, target
         )
-        global_raw = {}
+        global_ortho = {}
     else:
-        segment_raw, global_raw = draw_weighted_combined_family(
+        segment_ortho, global_ortho = draw_weighted_combined_family(
             rng, SEGMENTS, prior, target
         )
     telescope_data = create_hcipy_telescope(compact_config['psf'])
-    segment, global_modes = renormalize_to_aperture_rms(
+    transform = ApertureBasisTransform(
         telescope_data,
+        sorted(prior.global_weights) if global_ortho else (),
+        sorted(prior.segment_weights) if segment_ortho else (),
+    )
+    segment, global_modes = realize_weighted_draw(
+        telescope_data,
+        transform,
         target,
-        segment_hexikes=segment_raw,
-        global_zernikes=global_raw,
+        segment_coefficients=segment_ortho,
+        global_coefficients=global_ortho,
     )
 
     psf_data = _generate_with_draw(compact_config, segment, global_modes)

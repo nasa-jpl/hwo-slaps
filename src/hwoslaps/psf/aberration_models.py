@@ -9,6 +9,27 @@ import hcipy
 import numpy as np
 
 
+def _make_segmented_hexike_surface(telescope_data, num_modes):
+    """Construct the segmented hexike surface used by runtime application."""
+    return hcipy.SegmentedHexikeSurface(
+        segments=telescope_data['segments'],
+        segment_centers=telescope_data['segment_centers'],
+        segment_circum_diameter=telescope_data['segment_point_to_point'],
+        pupil_grid=telescope_data['pupil_grid'],
+        num_modes=num_modes,
+        hexagon_angle=np.pi / 2,
+    )
+
+
+def _make_global_zernike_basis(telescope_data, num_modes):
+    """Construct the global Zernike basis used by runtime application."""
+    pupil_grid = telescope_data['pupil_grid']
+    pupil_diameter = pupil_grid.x.max() - pupil_grid.x.min()
+    return hcipy.make_zernike_basis(
+        num_modes, D=pupil_diameter, grid=pupil_grid
+    )
+
+
 def _validate_segment_id(raw_seg_id, num_segments):
     """Validate a zero-based segment identifier.
 
@@ -213,8 +234,6 @@ def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
     """
     pupil_grid = telescope_data['pupil_grid']
     segments = telescope_data['segments']
-    segment_centers = telescope_data['segment_centers']
-    segment_circum_diameter = telescope_data['segment_point_to_point']
     normalized_segment_dict = _normalize_segment_hexike_dict(segment_hexike_dict, len(segments))
 
     # Determine how many modes per segment are required.
@@ -229,13 +248,8 @@ def apply_segment_zernikes(segment_hexike_dict, telescope_data, wavelength):
     expected_shape = (len(segments), num_modes)
     if (hexike_surface is None or hexike_surface.input_grid is not pupil_grid
             or hexike_surface.coefficients.shape != expected_shape):
-        hexike_surface = hcipy.SegmentedHexikeSurface(
-            segments=segments,
-            segment_centers=segment_centers,
-            segment_circum_diameter=segment_circum_diameter,
-            pupil_grid=pupil_grid,
-            num_modes=num_modes,
-            hexagon_angle=np.pi / 2  # Flat-top orientation.
+        hexike_surface = _make_segmented_hexike_surface(
+            telescope_data, num_modes
         )
 
         if hexike_surface.coefficients.shape[0] != len(segments):
@@ -298,8 +312,9 @@ def apply_global_zernikes(zernike_coeffs_nm, telescope_data, wavelength):
         ]
         if integer_modes:
             num_zernike_modes = max(num_zernike_modes, max(integer_modes))
-    pupil_diameter_for_zernike = pupil_grid.x.max() - pupil_grid.x.min()
-    zernike_basis = hcipy.make_zernike_basis(num_zernike_modes, D=pupil_diameter_for_zernike, grid=pupil_grid)
+    zernike_basis = _make_global_zernike_basis(
+        telescope_data, num_zernike_modes
+    )
 
     phase_screen = pupil_grid.zeros()
 
