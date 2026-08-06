@@ -13,6 +13,7 @@ Policy enforced (per user requirements):
 """
 
 import math
+import os
 from typing import Any, Dict
 
 MOLINE_EQ7_MIN_MASS_MSUN = 1.0e6
@@ -124,6 +125,50 @@ def _require_ell_comps(value: Any, key_path: str) -> tuple[float, float]:
     return e1, e2
 
 
+def _reject_unknown_keys(config: Dict[str, Any], supported: set[str], key_path: str):
+    """Reject keys outside an explicitly supported configuration schema."""
+    unsupported = sorted(set(config) - supported)
+    if unsupported:
+        raise ValueError(
+            f"{key_path} contains unsupported keys: " + ", ".join(unsupported)
+        )
+
+
+def _validate_sersic_component(component: Dict[str, Any], key_path: str) -> None:
+    """Validate one explicit Sersic source-light component."""
+    _require_type(component, dict, key_path)
+    supported = {
+        'centre',
+        'ell_comps',
+        'intensity',
+        'effective_radius',
+        'sersic_index',
+    }
+    _reject_unknown_keys(component, supported, key_path)
+    _require_finite_pair(
+        _require(component, 'centre', key_path),
+        f'{key_path}.centre',
+    )
+    _require_ell_comps(
+        _require(component, 'ell_comps', key_path),
+        f'{key_path}.ell_comps',
+    )
+    _require_positive_finite_number(
+        _require(component, 'intensity', key_path),
+        f'{key_path}.intensity',
+    )
+    _require_positive_finite_number(
+        _require(component, 'effective_radius', key_path),
+        f'{key_path}.effective_radius',
+    )
+    _require_bounded_positive_number(
+        _require(component, 'sersic_index', key_path),
+        f'{key_path}.sersic_index',
+        0.3,
+        10.0,
+    )
+
+
 def validate_top_level(config: Dict[str, Any]) -> None:
     """Validate the required top-level configuration sections.
 
@@ -217,20 +262,103 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(light, dict, 'lensing.source_galaxy.light')
     light_type = _require(light, 'type', 'lensing.source_galaxy.light')
     _require_type(light_type, str, 'lensing.source_galaxy.light.type')
-    if light_type != 'Exponential':
-        raise ValueError("Only 'Exponential' light profile is supported for source_galaxy.light.type")
-    _require_finite_pair(
-        _require(light, 'centre', 'lensing.source_galaxy.light'),
-        'lensing.source_galaxy.light.centre',
-    )
-    _require_ell_comps(
-        _require(light, 'ell_comps', 'lensing.source_galaxy.light'),
-        'lensing.source_galaxy.light.ell_comps',
-    )
-    intensity = _require(light, 'intensity', 'lensing.source_galaxy.light')
-    _require_positive_finite_number(intensity, "lensing.source_galaxy.light.intensity")
-    eff_r = _require(light, 'effective_radius', 'lensing.source_galaxy.light')
-    _require_positive_finite_number(eff_r, "lensing.source_galaxy.light.effective_radius")
+    supported_light_types = ('Exponential', 'Sersic', 'Clumpy', 'Image')
+    if light_type not in supported_light_types:
+        raise ValueError(
+            "source_galaxy.light.type must be one of: "
+            + ", ".join(f"'{value}'" for value in supported_light_types)
+        )
+
+    light_path = 'lensing.source_galaxy.light'
+    if light_type == 'Exponential':
+        if 'sersic_index' in light:
+            raise ValueError(
+                "lensing.source_galaxy.light.sersic_index is not supported "
+                "for Exponential sources"
+            )
+        _require_finite_pair(
+            _require(light, 'centre', light_path),
+            f'{light_path}.centre',
+        )
+        _require_ell_comps(
+            _require(light, 'ell_comps', light_path),
+            f'{light_path}.ell_comps',
+        )
+        _require_positive_finite_number(
+            _require(light, 'intensity', light_path),
+            f'{light_path}.intensity',
+        )
+        _require_positive_finite_number(
+            _require(light, 'effective_radius', light_path),
+            f'{light_path}.effective_radius',
+        )
+    elif light_type == 'Sersic':
+        component = {key: value for key, value in light.items() if key != 'type'}
+        _validate_sersic_component(component, light_path)
+    elif light_type == 'Clumpy':
+        _reject_unknown_keys(
+            light,
+            {'type', 'host', 'clumps', 'flux_scale', 'size_scale'},
+            light_path,
+        )
+        host = _require(light, 'host', light_path)
+        _validate_sersic_component(host, f'{light_path}.host')
+        clumps = _require(light, 'clumps', light_path)
+        _require_type(clumps, list, f'{light_path}.clumps')
+        if len(clumps) == 0:
+            raise ValueError(
+                "lensing.source_galaxy.light.clumps must contain at least "
+                "one clump; a zero-clump Clumpy is a Sersic"
+            )
+        if len(clumps) > 4:
+            raise ValueError(
+                "lensing.source_galaxy.light.clumps must contain at most 4 clumps"
+            )
+        for index, clump in enumerate(clumps):
+            _validate_sersic_component(
+                clump,
+                f'{light_path}.clumps[{index}]',
+            )
+        for key in ('flux_scale', 'size_scale'):
+            _require_positive_finite_number(
+                _require(light, key, light_path),
+                f'{light_path}.{key}',
+            )
+    else:
+        _reject_unknown_keys(
+            light,
+            {
+                'type',
+                'asset_path',
+                'centre',
+                'rotation_deg',
+                'total_flux',
+                'flux_scale',
+                'size_scale',
+            },
+            light_path,
+        )
+        asset_path = _require(light, 'asset_path', light_path)
+        _require_type(asset_path, str, f'{light_path}.asset_path')
+        resolved_asset_path = os.path.abspath(os.path.expanduser(asset_path))
+        if not os.path.isfile(resolved_asset_path):
+            raise ValueError(
+                "lensing.source_galaxy.light.asset_path does not exist: "
+                f"{resolved_asset_path}"
+            )
+        _require_finite_pair(
+            _require(light, 'centre', light_path),
+            f'{light_path}.centre',
+        )
+        _require_finite_number(
+            _require(light, 'rotation_deg', light_path),
+            f'{light_path}.rotation_deg',
+        )
+        for key in ('total_flux', 'flux_scale', 'size_scale'):
+            _require_positive_finite_number(
+                _require(light, key, light_path),
+                f'{light_path}.{key}',
+            )
     source_redshift_val = _require(source_galaxy, 'redshift', 'lensing.source_galaxy')
     lens_redshift = _require_positive_finite_number(
         lens_redshift_val,

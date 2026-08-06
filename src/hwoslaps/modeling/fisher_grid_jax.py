@@ -17,10 +17,11 @@ Build-time extraction (all exact, evaluated once):
 - the subhalo's radial deflection profile, sampled from the PyAutoLens
   mass profile on a dense logarithmic radius table (profile parameters are
   position-independent; position enters only as the profile centre);
-- the source light profiles' Sersic parameters, whose analytic JAX
-  evaluation is verified against the PyAutoLens profiles at build time on
-  random points, so unsupported profile types fail loudly instead of
-  silently diverging.
+- all source light profiles in deterministic galaxy/profile order, using
+  analytic Sersic parameters or zero-padded image samples.  Both evaluators
+  are verified against the PyAutoLens profiles at build time on random
+  points, so unsupported profile types fail loudly instead of silently
+  diverging.
 
 Per node the kernel computes: subhalo deflection by 1D interpolation of
 the radius table, traced coordinates, analytic source brightness,
@@ -37,6 +38,7 @@ from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
 import numpy as np
 
 from ..lensing.generator import _create_subhalo
+from ..lensing.image_source import ImageSource
 from ..lensing.utils import LensingData
 
 _RADIAL_SAMPLES = 8192
@@ -45,6 +47,7 @@ _RADIAL_R_MIN_ARCSEC = 1.0e-6
 _DEFAULT_BATCH_SIZE = 16
 _SOURCE_VERIFY_POINTS = 128
 _SOURCE_VERIFY_RTOL = 1.0e-10
+_IMAGE_SOURCE_VERIFY_RTOL = 1.0e-9
 
 
 def _sersic_constant(sersic_index: float) -> float:
@@ -142,7 +145,7 @@ class JaxGridTemplateEngine:
             ),
         )
 
-        source_profiles = self._extract_source_profiles(
+        source_profiles, image_profiles = self._extract_source_profiles(
             tracer=tracer,
             traced_macro=traced_macro,
         )
@@ -179,6 +182,13 @@ class JaxGridTemplateEngine:
         self._log_radii = jnp.asarray(np.log(radii))
         self._alpha_radial = jnp.asarray(alpha_radial)
         self._source_profiles = tuple(source_profiles)
+        self._image_profiles = tuple(
+            {
+                **params,
+                "sb_padded": jnp.asarray(params["sb_padded"]),
+            }
+            for params in image_profiles
+        )
         self._kernel_fft = jnp.asarray(kernel_fft)
         self._truth_kernel_fft = None
         self._truth_fft_shape = None
@@ -301,27 +311,110 @@ class JaxGridTemplateEngine:
             )
         )
 
+    @staticmethod
+    def _image_params_from_profile(light_profile) -> Dict[str, Any]:
+        """Extract one ImageSource into immutable JAX-kernel parameters."""
+        sb = np.asarray(light_profile.sb, dtype=float)
+        theta = np.deg2rad(float(light_profile.rotation_deg))
+        return {
+            "sb_padded": np.pad(sb, 1, mode="constant"),
+            "pixel_scale_arcsec": float(light_profile.pixel_scale_arcsec),
+            "size_scale": float(light_profile.size_scale),
+            "amplitude": float(light_profile.total_flux * light_profile.flux_scale),
+            "centre_y": float(light_profile.centre[0]),
+            "centre_x": float(light_profile.centre[1]),
+            "rotation_cos": float(np.cos(theta)),
+            "rotation_sin": float(np.sin(theta)),
+            "row_c": (sb.shape[0] - 1) / 2.0,
+            "col_c": (sb.shape[1] - 1) / 2.0,
+        }
+
+    @staticmethod
+    def _bilinear_gather_np(
+        array: np.ndarray,
+        rows: np.ndarray,
+        cols: np.ndarray,
+    ) -> np.ndarray:
+        """Evaluate a padded array bilinearly with exact zero outside."""
+        in_bounds = (
+            (rows >= 0.0)
+            & (rows <= array.shape[0] - 1)
+            & (cols >= 0.0)
+            & (cols <= array.shape[1] - 1)
+        )
+        row0 = np.floor(rows).astype(int)
+        col0 = np.floor(cols).astype(int)
+        row1 = row0 + 1
+        col1 = col0 + 1
+        row0_clip = np.clip(row0, 0, array.shape[0] - 1)
+        row1_clip = np.clip(row1, 0, array.shape[0] - 1)
+        col0_clip = np.clip(col0, 0, array.shape[1] - 1)
+        col1_clip = np.clip(col1, 0, array.shape[1] - 1)
+        row_weight = rows - row0
+        col_weight = cols - col0
+        values = (
+            (1.0 - row_weight)
+            * (1.0 - col_weight)
+            * array[row0_clip, col0_clip]
+            + (1.0 - row_weight)
+            * col_weight
+            * array[row0_clip, col1_clip]
+            + row_weight
+            * (1.0 - col_weight)
+            * array[row1_clip, col0_clip]
+            + row_weight
+            * col_weight
+            * array[row1_clip, col1_clip]
+        )
+        return np.where(in_bounds, values, 0.0)
+
+    @classmethod
+    def _image_brightness_np(
+        cls,
+        params: Dict[str, Any],
+        points: np.ndarray,
+    ) -> np.ndarray:
+        """Evaluate the image-source convention in pure NumPy."""
+        dy = points[:, 0] - params["centre_y"]
+        dx = points[:, 1] - params["centre_x"]
+        u = dx * params["rotation_cos"] + dy * params["rotation_sin"]
+        v = -dx * params["rotation_sin"] + dy * params["rotation_cos"]
+        scale = params["pixel_scale_arcsec"] * params["size_scale"]
+        cols = u / scale + params["col_c"] + 1.0
+        rows = v / scale + params["row_c"] + 1.0
+        return params["amplitude"] * cls._bilinear_gather_np(
+            params["sb_padded"], rows, cols
+        )
+
     @classmethod
     def _extract_source_profiles(
         cls,
         tracer,
         traced_macro: np.ndarray,
-    ) -> List[Dict[str, float]]:
-        """Extract Sersic parameters for every source light profile.
+    ) -> Tuple[List[Dict[str, float]], List[Dict[str, Any]]]:
+        """Extract every analytic and image source light profile.
 
         The analytic parametrization is verified numerically against the
         PyAutoLens profile on random points spanning the macro-traced
         footprint, so any convention drift or unsupported profile type
         raises at build time.
         """
+        import autogalaxy as ag
         import autolens as al
 
         profiles = []
-        light_objects = [
-            galaxy.light
-            for galaxy in tracer.galaxies
-            if getattr(galaxy, "light", None) is not None
-        ]
+        image_profiles = []
+        light_objects = []
+        for galaxy in tracer.galaxies:
+            if hasattr(galaxy, "cls_list_from"):
+                galaxy_profiles = galaxy.cls_list_from(cls=ag.LightProfile)
+            else:
+                galaxy_profiles = [
+                    value
+                    for value in galaxy.__dict__.values()
+                    if isinstance(value, ag.LightProfile)
+                ]
+            light_objects.extend(galaxy_profiles)
         if not light_objects:
             raise ValueError("Baseline tracer has no galaxy with a light profile.")
 
@@ -332,6 +425,25 @@ class JaxGridTemplateEngine:
         sample_grid = al.Grid2DIrregular(values=points)
 
         for light in light_objects:
+            if isinstance(light, ImageSource):
+                params = cls._image_params_from_profile(light)
+                reference = np.asarray(
+                    light.image_2d_from(grid=sample_grid), dtype=float
+                )
+                analytic = cls._image_brightness_np(params, points)
+                if not np.allclose(
+                    analytic,
+                    reference,
+                    rtol=_IMAGE_SOURCE_VERIFY_RTOL,
+                    atol=0.0,
+                ):
+                    raise ValueError(
+                        "JAX grid engine could not reproduce image profile "
+                        f"{type(light).__name__} bilinearly; unsupported "
+                        "profile type or convention drift."
+                    )
+                image_profiles.append(params)
+                continue
             params = cls._sersic_params_from_profile(light)
             reference = np.asarray(light.image_2d_from(grid=sample_grid), dtype=float)
             analytic = cls._sersic_brightness_np(params, points)
@@ -344,7 +456,7 @@ class JaxGridTemplateEngine:
                     "type or convention drift."
                 )
             profiles.append(params)
-        return profiles
+        return profiles, image_profiles
 
     # ------------------------------------------------------------------
     # Per-node kernel
@@ -381,6 +493,41 @@ class JaxGridTemplateEngine:
                     ** (1.0 / params["sersic_index"])
                     - 1.0
                 )
+            )
+
+        for params in self._image_profiles:
+            dy = traced[:, 0] - params["centre_y"]
+            dx = traced[:, 1] - params["centre_x"]
+            u = dx * params["rotation_cos"] + dy * params["rotation_sin"]
+            v = -dx * params["rotation_sin"] + dy * params["rotation_cos"]
+            scale = params["pixel_scale_arcsec"] * params["size_scale"]
+            cols = u / scale + params["col_c"] + 1.0
+            rows = v / scale + params["row_c"] + 1.0
+            array = params["sb_padded"]
+            in_bounds = (
+                (rows >= 0.0)
+                & (rows <= array.shape[0] - 1)
+                & (cols >= 0.0)
+                & (cols <= array.shape[1] - 1)
+            )
+            row0 = jnp.floor(rows).astype(jnp.int32)
+            col0 = jnp.floor(cols).astype(jnp.int32)
+            row1 = row0 + 1
+            col1 = col0 + 1
+            row0 = jnp.clip(row0, 0, array.shape[0] - 1)
+            row1 = jnp.clip(row1, 0, array.shape[0] - 1)
+            col0 = jnp.clip(col0, 0, array.shape[1] - 1)
+            col1 = jnp.clip(col1, 0, array.shape[1] - 1)
+            row_weight = rows - jnp.floor(rows)
+            col_weight = cols - jnp.floor(cols)
+            interpolated = (
+                (1.0 - row_weight) * (1.0 - col_weight) * array[row0, col0]
+                + (1.0 - row_weight) * col_weight * array[row0, col1]
+                + row_weight * (1.0 - col_weight) * array[row1, col0]
+                + row_weight * col_weight * array[row1, col1]
+            )
+            brightness = brightness + params["amplitude"] * jnp.where(
+                in_bounds, interpolated, 0.0
             )
 
         n_pix = self._shape_native[0] * self._shape_native[1]

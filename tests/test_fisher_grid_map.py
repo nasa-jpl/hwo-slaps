@@ -431,7 +431,11 @@ def test_identical_explicit_fit_psf_recovers_matched_limit(grid_setup):
         expected = getattr(matched_local, name)
         actual = getattr(local, name)
         if isinstance(expected, float):
-            np.testing.assert_allclose(actual, expected, rtol=1.0e-12)
+            # The mismatch arm regenerates the fit PSF independently; that
+            # regeneration is not guaranteed bitwise-reproducible (one-ULP
+            # FFT differences from process state), so the matched limit is
+            # exact only to roundoff amplified through the Fisher solves.
+            np.testing.assert_allclose(actual, expected, rtol=1.0e-10)
         else:
             assert actual == expected
 
@@ -453,7 +457,7 @@ def test_identical_explicit_fit_psf_recovers_matched_limit(grid_setup):
         np.testing.assert_allclose(
             getattr(grid_map, name),
             getattr(matched_grid_map, name),
-            rtol=1.0e-12,
+            rtol=1.0e-10,
         )
     np.testing.assert_array_equal(
         grid_map.detectable_mask_2d,
@@ -976,3 +980,197 @@ def test_jax_engine_mismatch_grid_map_matches_reference(grid_setup, mismatch_set
         jax_map.false_positive_mask_2d,
         reference.false_positive_mask_2d,
     )
+
+
+def _source_type_detectors(grid_setup, light):
+    config = copy.deepcopy(grid_setup["config"])
+    config["lensing"]["source_galaxy"]["light"] = copy.deepcopy(light)
+    config["modeling"]["fisher"]["map"].pop("engine", None)
+    baseline_config = copy.deepcopy(config)
+    baseline_config["lensing"]["subhalo"]["enabled"] = False
+    lensing_baseline = generate_lensing_system(
+        baseline_config["lensing"], full_config=baseline_config
+    )
+    observation_baseline = generate_observation(
+        lensing_baseline,
+        grid_setup["psf_data"],
+        observation_config=baseline_config["observation"],
+        full_config=baseline_config,
+    )
+    reference = FisherDetector(
+        observation_baseline=observation_baseline,
+        lensing_baseline=lensing_baseline,
+        psf_data=grid_setup["psf_data"],
+        full_config=config,
+        fisher_config=copy.deepcopy(config["modeling"]["fisher"]),
+    )
+    jax_config = copy.deepcopy(config)
+    jax_config["modeling"]["fisher"]["map"]["engine"] = "jax"
+    jax_detector = FisherDetector(
+        observation_baseline=observation_baseline,
+        lensing_baseline=lensing_baseline,
+        psf_data=grid_setup["psf_data"],
+        full_config=jax_config,
+        fisher_config=copy.deepcopy(jax_config["modeling"]["fisher"]),
+    )
+    return reference, jax_detector
+
+
+def _write_jax_source_asset(path):
+    import json
+
+    pixel_scale = 0.1
+    rows, cols = np.indices((32, 32), dtype=float)
+    sb = np.exp(
+        -0.5 * (((rows - 13.3) / 3.4) ** 2 + ((cols - 18.2) / 4.1) ** 2)
+    )
+    sb += 1.0e-4
+    sb /= pixel_scale**2 * sb.sum()
+    np.savez(
+        path,
+        sb=sb.astype(np.float64),
+        pixel_scale_arcsec=np.asarray(pixel_scale, dtype=np.float64),
+        metadata_json=np.asarray(
+            json.dumps({"format_version": 1, "provenance": {"kind": "synthetic"}})
+        ),
+    )
+    return path
+
+
+def test_jax_engine_clumpy_q_f_matches_reference(grid_setup):
+    """Match reference q_F for a Sersic host with two compact clumps."""
+    pytest.importorskip("jax")
+    component = {
+        "centre": [0.0, 0.0],
+        "ell_comps": [0.03, -0.01],
+        "intensity": 5.0,
+        "effective_radius": 0.2,
+        "sersic_index": 1.3,
+    }
+    light = {
+        "type": "Clumpy",
+        "host": component,
+        "clumps": [
+            {
+                **component,
+                "centre": [0.06, -0.04],
+                "intensity": 0.8,
+                "effective_radius": 0.035,
+                "sersic_index": 0.8,
+            },
+            {
+                **component,
+                "centre": [-0.07, 0.05],
+                "intensity": 0.5,
+                "effective_radius": 0.028,
+                "sersic_index": 1.1,
+            },
+        ],
+        "flux_scale": 1.1,
+        "size_scale": 1.15,
+    }
+    reference, jax_detector = _source_type_detectors(grid_setup, light)
+
+    reference_map = reference.compute_grid_map()
+    jax_map = jax_detector.compute_grid_map()
+
+    assert np.all(np.isfinite(reference_map.q_asimov_2d))
+    assert np.any(reference_map.q_asimov_2d > 0.0)
+    np.testing.assert_allclose(
+        jax_map.q_asimov_2d,
+        reference_map.q_asimov_2d,
+        rtol=1.0e-6,
+        atol=0.0,
+    )
+
+
+def test_jax_engine_image_q_f_matches_reference(grid_setup, tmp_path):
+    """Match reference q_F for a synthetic bilinear image source."""
+    pytest.importorskip("jax")
+    asset_path = _write_jax_source_asset(tmp_path / "source.npz")
+    light = {
+        "type": "Image",
+        "asset_path": str(asset_path),
+        "centre": [0.04, -0.06],
+        "rotation_deg": 19.0,
+        "total_flux": 0.7,
+        "flux_scale": 1.1,
+        "size_scale": 0.9,
+    }
+    reference, jax_detector = _source_type_detectors(grid_setup, light)
+
+    reference_map = reference.compute_grid_map()
+    jax_map = jax_detector.compute_grid_map()
+
+    assert np.all(np.isfinite(reference_map.q_asimov_2d))
+    assert np.any(reference_map.q_asimov_2d > 0.0)
+    np.testing.assert_allclose(
+        jax_map.q_asimov_2d,
+        reference_map.q_asimov_2d,
+        rtol=1.0e-6,
+        atol=0.0,
+    )
+
+
+def test_jax_engine_rejects_image_profile_convention_drift(grid_setup, tmp_path):
+    """Raise when an ImageSource subclass perturbs reference evaluation."""
+    pytest.importorskip("jax")
+    from dataclasses import replace
+
+    import autolens as al
+
+    from hwoslaps.lensing.image_source import ImageSource, load_source_image_asset
+    from hwoslaps.modeling.fisher_grid_jax import JaxGridTemplateEngine
+    from hwoslaps.psf.utils import pyauto_kernel_native
+
+    class BrokenImageSource(ImageSource):
+        def image_2d_from(self, grid, **kwargs):
+            return 1.01 * super().image_2d_from(grid=grid, **kwargs)
+
+    asset_path = _write_jax_source_asset(tmp_path / "source.npz")
+    light = {
+        "type": "Image",
+        "asset_path": str(asset_path),
+        "centre": [0.0, 0.0],
+        "rotation_deg": 19.0,
+        "total_flux": 0.7,
+        "flux_scale": 1.0,
+        "size_scale": 1.0,
+    }
+    config = copy.deepcopy(grid_setup["config"])
+    config["lensing"]["source_galaxy"]["light"] = light
+    baseline_config = copy.deepcopy(config)
+    baseline_config["lensing"]["subhalo"]["enabled"] = False
+    normal = generate_lensing_system(
+        baseline_config["lensing"], full_config=baseline_config
+    )
+    asset = load_source_image_asset(asset_path)
+    broken_profile = BrokenImageSource.from_asset(
+        asset,
+        centre=(0.0, 0.0),
+        rotation_deg=19.0,
+        total_flux=0.7,
+        flux_scale=1.0,
+        size_scale=1.0,
+    )
+    source = al.Galaxy(redshift=normal.source_redshift, light=broken_profile)
+    tracer = al.Tracer(
+        galaxies=[normal.tracer.galaxies[0], source],
+        cosmology=normal.tracer.cosmology,
+    )
+    broken = replace(
+        normal,
+        tracer=tracer,
+        image=tracer.image_2d_from(grid=normal.grid).native,
+    )
+
+    with pytest.raises(ValueError, match="could not reproduce image profile"):
+        JaxGridTemplateEngine(
+            lensing_baseline=broken,
+            map_config_template=config,
+            psf_kernel_native=np.asarray(
+                pyauto_kernel_native(grid_setup["psf_data"].kernel), dtype=float
+            ),
+            mu0_adu_2d=np.zeros_like(broken.image),
+            mask_2d=np.ones_like(broken.image, dtype=bool),
+        )

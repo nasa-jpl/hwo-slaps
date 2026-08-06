@@ -15,7 +15,8 @@ Key features
   configuration used by the codebase.
 - Computes a spurious-subhalo susceptibility scan for PSF modes.
 - Reuses the forward-model conventions already present in the pipeline
-  (`generate_lensing_system`, `generate_psf_system`, `SimulatorImaging`).
+  (`generate_lensing_system`, `generate_psf_system`, the PyAutoLens
+  convolver).
 
 Caveats
 -------
@@ -160,16 +161,18 @@ def _mean_adu_images_from_lensing_arrays(
     dark_e = dark_current * exposure_time
     images = []
     for psf_kernel in psf_kernels:
-        simulator_noiseless = al.SimulatorImaging(
-            exposure_time=exposure_time,
-            psf=make_pyauto_convolver(psf_kernel),
-            background_sky_level=0.0,
-            normalize_psf=False,
-            add_poisson_noise_to_data=False,
-            noise_seed=0,
+        # Direct noiseless convolution; SimulatorImaging is not used because
+        # it evaluates Poisson noise internally even with noise disabled,
+        # which rejects the epsilon-scale FFT-roundoff negatives produced
+        # where a compactly supported source is exactly zero. These mean
+        # images are deterministic and enter the Fisher algebra linearly,
+        # so the roundoff negatives are kept as-is (clamping them would
+        # break bit-level agreement with the truth-template convolutions).
+        convolved_eps = make_pyauto_convolver(psf_kernel).convolved_image_from(
+            image=lensed_image,
+            blurring_image=None,
         )
-        noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
-        source_only_eps = noiseless_dataset.data.native * throughput
+        source_only_eps = np.asarray(convolved_eps.native) * throughput
         source_e = source_only_eps * exposure_time
         images.append((source_e + sky_e + dark_e) / gain)
     return tuple(images)
@@ -1336,6 +1339,35 @@ class FisherDetector:
     # ------------------------------------------------------------------
 
     def _build_scalar_nuisance_specs(self) -> List[_ScalarNuisanceSpec]:
+        """Build scalar nuisance specifications for the source-light schema.
+
+        Image sources omit the two source ellipticity directions because the
+        profile has no ellipticity.  With the optional background direction,
+        Image scenes therefore have 10 scalar nuisances instead of 12.
+
+        Prior-sigma caveat: for Clumpy and Image the `source.intensity` and
+        `source.effective_radius` directions perturb the dimensionless
+        `flux_scale` / `size_scale`, so any configured prior sigmas for
+        these names are fractional there, while for Exponential and Sersic
+        they are in the parameter's own units.
+        """
+        light_type = self.full_config["lensing"]["source_galaxy"]["light"][
+            "type"
+        ]
+        light_root = ("lensing", "source_galaxy", "light")
+        if light_type == "Clumpy":
+            centre_root = light_root + ("host", "centre")
+            ell_comps_root = light_root + ("host", "ell_comps")
+        else:
+            centre_root = light_root + ("centre",)
+            ell_comps_root = light_root + ("ell_comps",)
+        if light_type in {"Clumpy", "Image"}:
+            intensity_path = light_root + ("flux_scale",)
+            effective_radius_path = light_root + ("size_scale",)
+        else:
+            intensity_path = light_root + ("intensity",)
+            effective_radius_path = light_root + ("effective_radius",)
+
         specs = [
             _ScalarNuisanceSpec(
                 name="lens.centre_y",
@@ -1374,47 +1406,62 @@ class FisherDetector:
             ),
             _ScalarNuisanceSpec(
                 name="source.centre_y",
-                path=("lensing", "source_galaxy", "light", "centre", 0),
+                path=centre_root + (0,),
                 step_mode="additive",
                 step_key="centre_arcsec",
                 prior_sigma=self._lookup_prior_sigma("source.centre_y"),
             ),
             _ScalarNuisanceSpec(
                 name="source.centre_x",
-                path=("lensing", "source_galaxy", "light", "centre", 1),
+                path=centre_root + (1,),
                 step_mode="additive",
                 step_key="centre_arcsec",
                 prior_sigma=self._lookup_prior_sigma("source.centre_x"),
             ),
-            _ScalarNuisanceSpec(
-                name="source.ell_comp_1",
-                path=("lensing", "source_galaxy", "light", "ell_comps", 0),
-                step_mode="additive",
-                step_key="ell_comp",
-                prior_sigma=self._lookup_prior_sigma("source.ell_comp_1"),
-            ),
-            _ScalarNuisanceSpec(
-                name="source.ell_comp_2",
-                path=("lensing", "source_galaxy", "light", "ell_comps", 1),
-                step_mode="additive",
-                step_key="ell_comp",
-                prior_sigma=self._lookup_prior_sigma("source.ell_comp_2"),
-            ),
-            _ScalarNuisanceSpec(
-                name="source.intensity",
-                path=("lensing", "source_galaxy", "light", "intensity"),
-                step_mode="multiplicative",
-                step_key="source_intensity_frac",
-                prior_sigma=self._lookup_prior_sigma("source.intensity"),
-            ),
-            _ScalarNuisanceSpec(
-                name="source.effective_radius",
-                path=("lensing", "source_galaxy", "light", "effective_radius"),
-                step_mode="multiplicative",
-                step_key="source_reff_frac",
-                prior_sigma=self._lookup_prior_sigma("source.effective_radius"),
-            ),
         ]
+        if light_type != "Image":
+            specs.extend(
+                [
+                    _ScalarNuisanceSpec(
+                        name="source.ell_comp_1",
+                        path=ell_comps_root + (0,),
+                        step_mode="additive",
+                        step_key="ell_comp",
+                        prior_sigma=self._lookup_prior_sigma(
+                            "source.ell_comp_1"
+                        ),
+                    ),
+                    _ScalarNuisanceSpec(
+                        name="source.ell_comp_2",
+                        path=ell_comps_root + (1,),
+                        step_mode="additive",
+                        step_key="ell_comp",
+                        prior_sigma=self._lookup_prior_sigma(
+                            "source.ell_comp_2"
+                        ),
+                    ),
+                ]
+            )
+        specs.extend(
+            [
+                _ScalarNuisanceSpec(
+                    name="source.intensity",
+                    path=intensity_path,
+                    step_mode="multiplicative",
+                    step_key="source_intensity_frac",
+                    prior_sigma=self._lookup_prior_sigma("source.intensity"),
+                ),
+                _ScalarNuisanceSpec(
+                    name="source.effective_radius",
+                    path=effective_radius_path,
+                    step_mode="multiplicative",
+                    step_key="source_reff_frac",
+                    prior_sigma=self._lookup_prior_sigma(
+                        "source.effective_radius"
+                    ),
+                ),
+            ]
+        )
         if self.include_background_offset:
             specs.append(
                 _ScalarNuisanceSpec(
@@ -1473,6 +1520,18 @@ class FisherDetector:
 
         self._set_path_value_create(plus_config, spec.path, base_value + step)
         self._set_path_value_create(minus_config, spec.path, base_value - step)
+        light = plus_config["lensing"]["source_galaxy"]["light"]
+        if light["type"] == "Clumpy" and spec.name in {
+            "source.centre_y",
+            "source.centre_x",
+        }:
+            coordinate_index = int(spec.path[-1])
+            for clump in light["clumps"]:
+                clump["centre"][coordinate_index] += step
+            for clump in minus_config["lensing"]["source_galaxy"]["light"][
+                "clumps"
+            ]:
+                clump["centre"][coordinate_index] -= step
         return float(step)
 
     # ------------------------------------------------------------------

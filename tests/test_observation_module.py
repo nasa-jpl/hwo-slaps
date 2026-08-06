@@ -175,3 +175,71 @@ def test_even_psf_is_rejected():
             observation_config={'exposure_time': 100.0, 'throughput': 1.0, 'detector': detector},
             full_config={'global_seed': 7, 'run_name': 'unit_test_observation'}
         )
+
+
+def test_compactly_supported_image_convolves_to_non_negative_rates():
+    """Clamp convolution roundoff negatives for an exact-zero background."""
+    shape = (64, 64)
+    pixel_scale = 0.1
+    lensing = make_lensing_data(shape=shape, pixel_scale=pixel_scale)
+    y, x = np.indices(shape, dtype=float)
+    blob = np.exp(-0.5 * (((y - 30.0) / 2.0) ** 2 + ((x - 33.0) / 2.5) ** 2))
+    lensing.image[:] = np.where(blob > 1.0e-3, blob, 0.0)
+
+    kernel_axis = np.linspace(-3.0, 3.0, 21)
+    ky, kx = np.meshgrid(kernel_axis, kernel_axis, indexing='ij')
+    kernel_values = np.exp(-0.5 * (ky**2 + kx**2))
+    psf_kernel = make_pyauto_kernel(
+        values=kernel_values / kernel_values.sum(),
+        pixel_scales=pixel_scale,
+        normalize=False,
+    )
+    psf_data = make_psfdata_with_kernel(psf_kernel, kernel_pixel_scale=pixel_scale)
+
+    detector = {
+        'gain': 1.0,
+        'read_noise': 0.2,
+        'dark_current': 0.002,
+        'sky_background': 0.5,
+    }
+    obs = generate_observation(
+        lensing_data=lensing,
+        psf_data=psf_data,
+        observation_config={'exposure_time': 100.0, 'throughput': 1.0, 'detector': detector},
+        full_config={'global_seed': 5, 'run_name': 'unit_test_observation'}
+    )
+
+    assert np.all(np.isfinite(obs.noiseless_source_eps))
+    roundoff_tol = 1.0e-10 * float(np.max(np.abs(obs.noiseless_source_eps)))
+    assert float(np.min(obs.noiseless_source_eps)) >= -roundoff_tol
+    assert np.all(np.isfinite(obs.data))
+    assert np.all(obs.noise_map.native > 0.0)
+
+
+def test_negative_lensed_image_beyond_roundoff_raises():
+    """Reject genuinely negative convolved rates as an input error."""
+    shape = (9, 9)
+    pixel_scale = 0.1
+    lensing = make_lensing_data(shape=shape, pixel_scale=pixel_scale)
+    lensing.image[4, 4] = -0.5
+
+    psf_kernel = make_pyauto_kernel(
+        values=np.array([[1.0]]),
+        pixel_scales=pixel_scale,
+        normalize=False,
+    )
+    psf_data = make_psfdata_with_kernel(psf_kernel, kernel_pixel_scale=pixel_scale)
+
+    detector = {
+        'gain': 1.0,
+        'read_noise': 0.2,
+        'dark_current': 0.0,
+        'sky_background': 0.0,
+    }
+    with pytest.raises(ValueError, match="roundoff"):
+        generate_observation(
+            lensing_data=lensing,
+            psf_data=psf_data,
+            observation_config={'exposure_time': 100.0, 'throughput': 1.0, 'detector': detector},
+            full_config={'global_seed': 9, 'run_name': 'unit_test_observation'}
+        )

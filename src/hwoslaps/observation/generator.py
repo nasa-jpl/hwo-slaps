@@ -55,7 +55,7 @@ def generate_observation(
     Notes
     -----
     The observation simulation follows a two-step process:
-    1. PSF convolution using PyAutoLens SimulatorImaging (noiseless)
+    1. Noiseless PSF convolution using the PyAutoLens convolver
     2. Application of realistic detector noise model
 
     The noise model includes:
@@ -101,27 +101,41 @@ def generate_observation(
         mask=mask
     )
 
-    # Step 1: Generate noiseless PSF-convolved image
-    # Use SimulatorImaging with no noise to get pure convolution
-    simulator_noiseless = al.SimulatorImaging(
-        exposure_time=exposure_time,
-        psf=psf_convolver,
-        background_sky_level=0.0,  # No background yet
-        normalize_psf=False,
-        add_poisson_noise_to_data=False,
-        noise_seed=noise_seed
+    # Step 1: Generate the noiseless PSF-convolved image by direct
+    # convolution. SimulatorImaging is not used here because it evaluates
+    # Poisson noise internally even with noise disabled, which rejects the
+    # roundoff-negative pixels clamped below.
+    # The convolved image is in electrons-per-second. The end-to-end system
+    # throughput scales the source flux only; sky background and dark
+    # current are configured as detected rates already.
+    convolved_eps = psf_convolver.convolved_image_from(
+        image=lensed_image,
+        blurring_image=None,
     )
+    source_only_eps = np.asarray(convolved_eps.native) * throughput  # e-/s
 
-    # Get noiseless but PSF-convolved image (units are electrons-per-second).
-    # The end-to-end system throughput scales the source flux only; sky
-    # background and dark current are configured as detected rates already.
-    noiseless_dataset = simulator_noiseless.via_image_from(image=lensed_image)
-    source_only_eps = noiseless_dataset.data.native * throughput  # e-/s
+    # Convolution of the non-negative image with the non-negative kernel is
+    # non-negative, but FFT evaluation leaves epsilon-scale negatives where
+    # a compactly supported source is exactly zero. Anything beyond
+    # roundoff scale is a genuine input error and stays loud. The stored
+    # noiseless rate keeps the raw convolution output (bit-identical to
+    # downstream re-convolutions of the same scene); only the noise draw
+    # and noise map below use the clamped copy, since Poisson rates must
+    # be non-negative.
+    roundoff_tol = 1.0e-10 * float(np.max(np.abs(source_only_eps), initial=0.0))
+    min_eps = float(np.min(source_only_eps, initial=0.0))
+    if min_eps < -roundoff_tol:
+        raise ValueError(
+            "PSF-convolved source image has negative values beyond FFT "
+            f"roundoff scale: min {min_eps} e-/s against tolerance "
+            f"{roundoff_tol} e-/s"
+        )
+    source_eps_for_noise = np.maximum(source_only_eps, 0.0)
 
     # Step 2: Apply realistic detector noise
     # This includes Poisson noise, read noise, dark current, and sky background
     final_image_adu, components = apply_detector_noise(
-        source_eps=source_only_eps,
+        source_eps=source_eps_for_noise,
         exposure_time=exposure_time,
         detector_config=detector_config,
         seed=noise_seed
@@ -130,7 +144,7 @@ def generate_observation(
     # Step 3: Create proper noise map
     # The noise map represents total uncertainty in each pixel
     noise_map_adu = create_noise_map(
-        source_eps=source_only_eps,
+        source_eps=source_eps_for_noise,
         exposure_time=exposure_time,
         detector_config=detector_config
     )

@@ -110,23 +110,18 @@ def plot_lensing_comparison(lensing_data, plot_config):
         ell_comps=lensing_data.lens_ellipticity
     )
 
-    # Create source light profile
-    source_light = al.lp.Exponential(
-        centre=lensing_data.source_centre,
-        ell_comps=lensing_data.source_ellipticity,
-        intensity=lensing_data.source_intensity,
-        effective_radius=lensing_data.source_effective_radius
+    # Rebuild the source from the stored config so every source light type
+    # (Exponential, Sersic, Clumpy, Image) gets its exact truth profile.
+    from ..lensing.generator import _create_source_galaxy
+
+    source_galaxy = _create_source_galaxy(
+        lensing_data.config['lensing']['source_galaxy']
     )
 
     # Create galaxies without subhalo
     lens_galaxy_no_subhalo = al.Galaxy(
         redshift=lensing_data.lens_redshift,
         mass=lens_mass
-    )
-
-    source_galaxy = al.Galaxy(
-        redshift=lensing_data.source_redshift,
-        light=source_light
     )
 
     # Create tracer without subhalo for baseline
@@ -278,15 +273,12 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
         ell_comps=lensing_data.lens_ellipticity
     )
 
-    source_light = al.lp.Exponential(
-        centre=lensing_data.source_centre,
-        ell_comps=lensing_data.source_ellipticity,
-        intensity=lensing_data.source_intensity,
-        effective_radius=lensing_data.source_effective_radius
-    )
+    from ..lensing.generator import _create_source_galaxy
 
     lens_galaxy_no_subhalo = al.Galaxy(redshift=lensing_data.lens_redshift, mass=lens_mass)
-    source_galaxy = al.Galaxy(redshift=lensing_data.source_redshift, light=source_light)
+    source_galaxy = _create_source_galaxy(
+        lensing_data.config['lensing']['source_galaxy']
+    )
 
     if lensing_data.cosmology_name == 'Planck15':
         cosmo = al.cosmo.Planck15()
@@ -461,12 +453,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
         ell_comps=lensing_data.lens_ellipticity
     )
 
-    source_light = al.lp.Exponential(
-        centre=lensing_data.source_centre,
-        ell_comps=lensing_data.source_ellipticity,
-        intensity=lensing_data.source_intensity,
-        effective_radius=lensing_data.source_effective_radius
-    )
+    from ..lensing.generator import _create_source_galaxy
 
     # Create galaxies without subhalo
     lens_galaxy_no_subhalo = al.Galaxy(
@@ -474,9 +461,8 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
         mass=lens_mass
     )
 
-    source_galaxy = al.Galaxy(
-        redshift=lensing_data.source_redshift,
-        light=source_light
+    source_galaxy = _create_source_galaxy(
+        lensing_data.config['lensing']['source_galaxy']
     )
 
     # Create tracer without subhalo for baseline
