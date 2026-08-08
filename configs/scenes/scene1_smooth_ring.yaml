@@ -1,0 +1,148 @@
+# Scene 1 of 5 (Item 6 / roadmap L1a): legacy smooth ring.
+#
+# The SPIE canonical scene, unchanged: SIE lens + smooth Exponential source.
+# Calibration anchor tying the RASTI ensemble to the submitted baseline
+# (canonical detectable area 0.57 arcsec^2 at 1e7 Msun, q_F >= 10).
+# Scenes 2-4 change ONLY the source light against this file; scene 5 changes
+# ONLY the macro lens. Canonical source total flux (all scenes match it):
+# F_tot = 2*pi*e^b1/b1^2 * intensity * effective_radius^2 = 0.289151264.
+#
+# The subhalo block and the fisher map block are single-run placeholders;
+# stage-two manifests override subhalo mass/position and map settings.
+# PSF is perfect by definition; PSF states are sweep axes, never scene
+# properties.
+
+run_name: scene1_smooth_ring
+global_seed: 11
+
+plotting:
+  enabled: true
+  output_dir: outputs
+
+lensing:
+  grid:
+    shape: [500, 500]
+    pixel_scale: 0.00716  # arcsec/pixel
+
+  lens_galaxy:
+    redshift: 0.2
+    mass:
+      type: Isothermal
+      einstein_radius: 1.0  # arcsec
+      centre: [0.0, 0.0]
+      ell_comps: [0.1, 0.0]
+
+  source_galaxy:
+    redshift: 0.6
+    light:
+      type: Exponential
+      centre: [-0.03, 0.08]
+      ell_comps: [0.14516129, 0.25142673]
+      intensity: 2.0
+      effective_radius: 0.11
+
+  subhalo:
+    enabled: true
+    mass: 1.0e7  # Solar masses
+    model: NFW
+    concentration:
+      model: moline2017_eq7
+      x_sub: 1.0
+      h: null
+    position:
+      type: 'angle'
+      angle: 90.0
+      offset_pixels: 0
+
+  cosmology: Planck15
+
+psf:
+  telescope:
+    gap_size: 0.006  # m
+    segment_point_to_point: 1.65  # m
+    pupil_diameter: 7.225765  # m
+    num_rings: 2
+    focal_length: 144.0  # m
+    supersampling_factor: 4
+
+  hres_psf:
+    num_pix: 512
+    wavelength: 5.0e-7  # m
+    num_airy: 12
+    sampling: 5
+    save_highres_psf_npy: false
+
+  kernel:
+    shape_native: [51, 51]
+
+  # Perfect PSF: the scene definition carries no wavefront error.
+  aberrations:
+    enable_segment_pistons: false
+    enable_segment_tiptilts: false
+    enable_segment_hexikes: false
+    enable_global_zernikes: false
+
+observation:
+  exposure_time: 900.0  # seconds
+  throughput: 1.0
+  output_format: "pyautolens_ready"
+
+  detector:
+    gain: 1.0           # e-/ADU
+    read_noise: 0.2     # e-/pixel
+    dark_current: 0.002 # e-/pixel/s
+    sky_background: 1.0 # e-/pixel/s
+
+modeling:
+  enabled: true
+  detection: 'fisher'
+  fisher:
+    mode: both
+    snr_threshold: 3.0
+    include_background_offset: true
+    finite_diff:
+      centre_arcsec: 1.0e-3
+      einstein_radius_arcsec: 1.0e-3
+      ell_comp: 1.0e-3
+      slope: 1.0e-3
+      multipole_comp: 1.0e-3
+      shear_comp: 1.0e-3
+      source_intensity_frac: 1.0e-2
+      source_reff_frac: 1.0e-2
+    mask_mode: source_snr
+    include_psf_nuisance: false
+    compute_psf_mode_scan: false
+    mode_scan_z_tolerance: 1.0
+    psf_mode_steps:
+      segment_pistons: 1.0
+      segment_tiptilts: 0.1
+      segment_hexikes: 1.0
+      global_zernikes: 1.0
+    psf_mode_prior_sigmas:
+      segment_hexikes: 5.0
+      global_zernikes: 5.0
+    psf_basis:
+      segment_hexikes:
+        segments: all
+        mode_nolls: [1, 2]
+      global_zernikes:
+        mode_nolls: [4, 5, 6, 7, 8]
+    scan_psf_mode_selection:
+      segment_hexikes:
+        segments: all
+        mode_nolls: [1, 2]
+      global_zernikes:
+        mode_nolls: [4, 5, 6, 7, 8]
+    map:
+      type: grid
+      ring:
+        num_angles: 24
+        offset_pixels: 0.0
+      grid:
+        spacing_arcsec: 0.05
+        half_width_arcsec: 1.5
+        annulus: null
+      explicit_positions_yx: null
+      detection_q_threshold: 10.0
+      num_workers: 1
+      engine: jax
