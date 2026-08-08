@@ -46,6 +46,31 @@ def _format_mass_latex(mass):
     return rf"{m_val} \times 10^{{{m_exp}}} M_\odot"
 
 
+def _no_subhalo_tracer(lensing_data):
+    """Rebuild the exact configured macro lens and source without a subhalo."""
+    from ..lensing.generator import (
+        _create_lens_galaxy,
+        _create_source_galaxy,
+    )
+
+    lens_galaxy = _create_lens_galaxy(
+        lensing_data.config['lensing']['lens_galaxy']
+    )
+    source_galaxy = _create_source_galaxy(
+        lensing_data.config['lensing']['source_galaxy']
+    )
+    if lensing_data.cosmology_name == 'Planck15':
+        cosmo = al.cosmo.Planck15()
+    else:
+        raise ValueError(
+            f"Unsupported cosmology in plotting: {lensing_data.cosmology_name}"
+        )
+    return al.Tracer(
+        galaxies=[lens_galaxy, source_galaxy],
+        cosmology=cosmo,
+    )
+
+
 @plot_function(module='lensing', requires_subhalo=True,
                description="2x2 comparison showing subhalo effects with log/linear scaling")
 def plot_lensing_comparison(lensing_data, plot_config):
@@ -102,39 +127,7 @@ def plot_lensing_comparison(lensing_data, plot_config):
     subhalo_mass = lensing_data.subhalo_mass
     mass_latex = _format_mass_latex(subhalo_mass)
 
-    # Recreate lens galaxy without subhalo for baseline comparison
-    # Create lens mass profile (without subhalo)
-    lens_mass = al.mp.Isothermal(
-        centre=lensing_data.lens_centre,
-        einstein_radius=lensing_data.lens_einstein_radius,
-        ell_comps=lensing_data.lens_ellipticity
-    )
-
-    # Rebuild the source from the stored config so every source light type
-    # (Exponential, Sersic, Clumpy, Image) gets its exact truth profile.
-    from ..lensing.generator import _create_source_galaxy
-
-    source_galaxy = _create_source_galaxy(
-        lensing_data.config['lensing']['source_galaxy']
-    )
-
-    # Create galaxies without subhalo
-    lens_galaxy_no_subhalo = al.Galaxy(
-        redshift=lensing_data.lens_redshift,
-        mass=lens_mass
-    )
-
-    # Create tracer without subhalo for baseline
-    # Use the same cosmology as used in the lensing run (from config)
-    if lensing_data.cosmology_name == 'Planck15':
-        cosmo = al.cosmo.Planck15()
-    else:
-        raise ValueError(f"Unsupported cosmology in plotting: {lensing_data.cosmology_name}")
-
-    tracer_no_subhalo = al.Tracer(
-        galaxies=[lens_galaxy_no_subhalo, source_galaxy],
-        cosmology=cosmo
-    )
+    tracer_no_subhalo = _no_subhalo_tracer(lensing_data)
 
     # Generate images
     image_with_subhalo = lensing_data.image
@@ -266,26 +259,7 @@ def plot_lensing_fractional_comparison(lensing_data, plot_config):
     subhalo_mass = lensing_data.subhalo_mass
     mass_latex = _format_mass_latex(subhalo_mass)
 
-    # Recreate baseline without subhalo
-    lens_mass = al.mp.Isothermal(
-        centre=lensing_data.lens_centre,
-        einstein_radius=lensing_data.lens_einstein_radius,
-        ell_comps=lensing_data.lens_ellipticity
-    )
-
-    from ..lensing.generator import _create_source_galaxy
-
-    lens_galaxy_no_subhalo = al.Galaxy(redshift=lensing_data.lens_redshift, mass=lens_mass)
-    source_galaxy = _create_source_galaxy(
-        lensing_data.config['lensing']['source_galaxy']
-    )
-
-    if lensing_data.cosmology_name == 'Planck15':
-        cosmo = al.cosmo.Planck15()
-    else:
-        raise ValueError(f"Unsupported cosmology: {lensing_data.cosmology_name}")
-
-    tracer_no_subhalo = al.Tracer(galaxies=[lens_galaxy_no_subhalo, source_galaxy], cosmology=cosmo)
+    tracer_no_subhalo = _no_subhalo_tracer(lensing_data)
 
     # Generate images
     image_with_subhalo = lensing_data.image
@@ -446,35 +420,7 @@ def plot_lensing_baseline_scene(lensing_data, plot_config):
     subhalo_mass = lensing_data.subhalo_mass
     mass_latex = _format_mass_latex(subhalo_mass)
 
-    # Recreate lens galaxy without subhalo for baseline comparison
-    lens_mass = al.mp.Isothermal(
-        centre=lensing_data.lens_centre,
-        einstein_radius=lensing_data.lens_einstein_radius,
-        ell_comps=lensing_data.lens_ellipticity
-    )
-
-    from ..lensing.generator import _create_source_galaxy
-
-    # Create galaxies without subhalo
-    lens_galaxy_no_subhalo = al.Galaxy(
-        redshift=lensing_data.lens_redshift,
-        mass=lens_mass
-    )
-
-    source_galaxy = _create_source_galaxy(
-        lensing_data.config['lensing']['source_galaxy']
-    )
-
-    # Create tracer without subhalo for baseline
-    if lensing_data.cosmology_name == 'Planck15':
-        cosmo = al.cosmo.Planck15()
-    else:
-        raise ValueError(f"Unsupported cosmology in plotting: {lensing_data.cosmology_name}")
-
-    tracer_no_subhalo = al.Tracer(
-        galaxies=[lens_galaxy_no_subhalo, source_galaxy],
-        cosmology=cosmo
-    )
+    tracer_no_subhalo = _no_subhalo_tracer(lensing_data)
 
     # Generate images
     image_with_subhalo = lensing_data.image

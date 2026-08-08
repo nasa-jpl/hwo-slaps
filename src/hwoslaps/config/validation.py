@@ -134,6 +134,72 @@ def _reject_unknown_keys(config: Dict[str, Any], supported: set[str], key_path: 
         )
 
 
+def _validate_lens_mass(mass: Dict[str, Any], key_path: str) -> None:
+    """Validate one truth- or fit-side macro mass specification.
+
+    The supported PowerLaw slope interval is the model/prior domain used by
+    HWO-SLAPS: slope greater than one gives a declining physical profile and
+    slope less than three gives finite enclosed central projected mass.  This
+    does not imply finite central multipole deflection for every allowed slope.
+    """
+    _require_type(mass, dict, key_path)
+    mass_type = _require(mass, 'type', key_path)
+    _require_type(mass_type, str, f'{key_path}.type')
+    if mass_type == 'Isothermal':
+        supported = {'type', 'centre', 'ell_comps', 'einstein_radius'}
+    elif mass_type == 'PowerLaw':
+        supported = {
+            'type',
+            'centre',
+            'ell_comps',
+            'einstein_radius',
+            'slope',
+            'multipoles',
+        }
+    else:
+        raise ValueError(
+            f"{key_path}.type must be one of: 'Isothermal', 'PowerLaw'"
+        )
+    _reject_unknown_keys(mass, supported, key_path)
+    _require_finite_pair(
+        _require(mass, 'centre', key_path),
+        f'{key_path}.centre',
+    )
+    _require_positive_finite_number(
+        _require(mass, 'einstein_radius', key_path),
+        f'{key_path}.einstein_radius',
+    )
+    _require_ell_comps(
+        _require(mass, 'ell_comps', key_path),
+        f'{key_path}.ell_comps',
+    )
+    if mass_type == 'Isothermal':
+        return
+
+    slope = _require_finite_number(
+        _require(mass, 'slope', key_path),
+        f'{key_path}.slope',
+    )
+    if not 1.0 < slope < 3.0:
+        raise ValueError(f'{key_path}.slope must be strictly between 1 and 3')
+    if 'multipoles' not in mass:
+        return
+    multipoles = mass['multipoles']
+    _require_type(multipoles, dict, f'{key_path}.multipoles')
+    if not multipoles:
+        raise ValueError(f'{key_path}.multipoles must be non-empty when present')
+    _reject_unknown_keys(
+        multipoles,
+        {'m3', 'm4'},
+        f'{key_path}.multipoles',
+    )
+    for order, components in multipoles.items():
+        _require_finite_pair(
+            components,
+            f'{key_path}.multipoles.{order}',
+        )
+
+
 def _validate_sersic_component(component: Dict[str, Any], key_path: str) -> None:
     """Validate one explicit Sersic source-light component."""
     _require_type(component, dict, key_path)
@@ -238,22 +304,20 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
 
     lens_galaxy = _require(lensing, 'lens_galaxy', 'lensing')
     _require_type(lens_galaxy, dict, 'lensing.lens_galaxy')
-    mass = _require(lens_galaxy, 'mass', 'lensing.lens_galaxy')
-    _require_type(mass, dict, 'lensing.lens_galaxy.mass')
-    mass_type = _require(mass, 'type', 'lensing.lens_galaxy.mass')
-    _require_type(mass_type, str, 'lensing.lens_galaxy.mass.type')
-    if mass_type != 'Isothermal':
-        raise ValueError("Only 'Isothermal' mass profile is supported for lens_galaxy.mass.type")
-    _require_finite_pair(
-        _require(mass, 'centre', 'lensing.lens_galaxy.mass'),
-        'lensing.lens_galaxy.mass.centre',
+    _reject_unknown_keys(
+        lens_galaxy,
+        {'redshift', 'mass', 'shear'},
+        'lensing.lens_galaxy',
     )
-    einstein_radius = _require(mass, 'einstein_radius', 'lensing.lens_galaxy.mass')
-    _require_positive_finite_number(einstein_radius, "lensing.lens_galaxy.mass.einstein_radius")
-    _require_ell_comps(
-        _require(mass, 'ell_comps', 'lensing.lens_galaxy.mass'),
-        'lensing.lens_galaxy.mass.ell_comps',
+    _validate_lens_mass(
+        _require(lens_galaxy, 'mass', 'lensing.lens_galaxy'),
+        'lensing.lens_galaxy.mass',
     )
+    if 'shear' in lens_galaxy:
+        _require_finite_pair(
+            lens_galaxy['shear'],
+            'lensing.lens_galaxy.shear',
+        )
     lens_redshift_val = _require(lens_galaxy, 'redshift', 'lensing.lens_galaxy')
 
     source_galaxy = _require(lensing, 'source_galaxy', 'lensing')
@@ -648,6 +712,50 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
             except ValueError as exc:
                 raise ValueError(f"modeling.fit_psf.psf is invalid: {exc}") from exc
 
+    if 'fit_lens' in modeling:
+        fit_lens = modeling['fit_lens']
+        _require_type(fit_lens, dict, 'modeling.fit_lens')
+        fit_lens_mode = _require(fit_lens, 'mode', 'modeling.fit_lens')
+        _require_type(fit_lens_mode, str, 'modeling.fit_lens.mode')
+        fit_lens_mode = fit_lens_mode.lower()
+        if fit_lens_mode not in {'matched', 'explicit'}:
+            raise ValueError(
+                "modeling.fit_lens.mode must be one of: 'matched', 'explicit'"
+            )
+        supported_fit_lens = (
+            {'mode'} if fit_lens_mode == 'matched' else {'mode', 'lens_galaxy'}
+        )
+        _reject_unknown_keys(fit_lens, supported_fit_lens, 'modeling.fit_lens')
+        if fit_lens_mode == 'explicit':
+            fit_lens_galaxy = _require(
+                fit_lens,
+                'lens_galaxy',
+                'modeling.fit_lens',
+            )
+            _require_type(
+                fit_lens_galaxy,
+                dict,
+                'modeling.fit_lens.lens_galaxy',
+            )
+            _reject_unknown_keys(
+                fit_lens_galaxy,
+                {'mass', 'shear'},
+                'modeling.fit_lens.lens_galaxy',
+            )
+            _validate_lens_mass(
+                _require(
+                    fit_lens_galaxy,
+                    'mass',
+                    'modeling.fit_lens.lens_galaxy',
+                ),
+                'modeling.fit_lens.lens_galaxy.mass',
+            )
+            if 'shear' in fit_lens_galaxy:
+                _require_finite_pair(
+                    fit_lens_galaxy['shear'],
+                    'modeling.fit_lens.lens_galaxy.shear',
+                )
+
     detection = _require(modeling, 'detection', 'modeling')
     _require_type(detection, str, 'modeling.detection')
     detection = detection.lower()
@@ -675,6 +783,9 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         'centre_arcsec',
         'einstein_radius_arcsec',
         'ell_comp',
+        'slope',
+        'multipole_comp',
+        'shear_comp',
         'source_intensity_frac',
         'source_reff_frac',
     ):

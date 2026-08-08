@@ -906,13 +906,16 @@ def test_mismatch_summary_prints_local_and_grid_statistics(
         n_nuisance=mismatch_setup["detector"].n_nuisance,
         gram_condition_number=1.0,
         pixel_scale=0.1,
+        config=mismatch_setup["detector"].full_config,
         grid_map=mismatch_setup["grid_map"],
+        psf_mismatch_enabled=True,
     )
 
     print_fisher_summary(detection_data)
 
     output = capsys.readouterr().out
-    assert "Fit PSF mode: explicit" in output
+    assert "Model mismatch:" in output
+    assert "fit_psf mode: explicit" in output
     assert "q_mismatch" in output
     assert "q_spurious" in output
     assert "Mismatch-detectable area" in output

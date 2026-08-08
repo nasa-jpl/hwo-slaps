@@ -6,6 +6,7 @@ from typing import Any
 
 from .autolens_model_builder import (
     autofit_model_from_spec,
+    guard_flexible_lens_nonlinear,
     smooth_model_spec_from_config,
     subhalo_model_spec_from_trial,
 )
@@ -53,6 +54,7 @@ class NonlinearMetricValidator:
         result : `NonlinearCaseResult`
             Validation result.
         """
+        guard_flexible_lens_nonlinear(full_config)
         fit_mode = "fixed_template"
         analysis = self.runner.make_analysis(dataset)
         smooth_spec = smooth_model_spec_from_config(

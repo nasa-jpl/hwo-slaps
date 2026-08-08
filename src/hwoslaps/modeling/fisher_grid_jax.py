@@ -82,8 +82,12 @@ class JaxGridTemplateEngine:
     psf_kernel_native : `numpy.ndarray`
         Native-resolution PSF kernel; both dimensions must be odd.
     truth_psf_kernel_native : `numpy.ndarray`, optional
-        Truth-side PSF kernel.  When supplied, the engine applies both kernels
-        to the same node scene and yields fit-template/truth-residual pairs.
+        Truth-side PSF kernel. When supplied, the engine yields fit-template /
+        truth-residual pairs, using separate node scenes when a fit baseline
+        is also supplied for lens mismatch.
+    lensing_baseline_fit : `~hwoslaps.lensing.utils.LensingData`, optional
+        Retained fit-side no-subhalo scene for macro-lens mismatch. Its grid
+        geometry and source must match ``lensing_baseline`` exactly.
     mu0_adu_2d : `numpy.ndarray`
         Baseline (no-subhalo) mean image in ADU on the native grid.
     mask_2d : `numpy.ndarray`
@@ -91,6 +95,8 @@ class JaxGridTemplateEngine:
     candidate_positions : sequence of `(float, float)`, optional
         Candidate subhalo positions that the engine will evaluate.  The
         positions determine the required radial-deflection table extent.
+    truth_lens_centre_yx : `(float, float)`, optional
+        Truth/data lens centre defining candidate-position geometry.
     batch_size : `int`, optional
         Number of grid positions evaluated per vmapped batch.
     """
@@ -99,12 +105,14 @@ class JaxGridTemplateEngine:
         self,
         *,
         lensing_baseline: LensingData,
+        lensing_baseline_fit: Optional[LensingData] = None,
         map_config_template: Dict[str, Any],
         psf_kernel_native: np.ndarray,
         mu0_adu_2d: np.ndarray,
         mask_2d: np.ndarray,
         truth_psf_kernel_native: Optional[np.ndarray] = None,
         candidate_positions: Optional[Sequence[Tuple[float, float]]] = None,
+        truth_lens_centre_yx: Optional[Tuple[float, float]] = None,
         batch_size: int = _DEFAULT_BATCH_SIZE,
     ):
         import jax
@@ -138,7 +146,55 @@ class JaxGridTemplateEngine:
         )
         traced_macro = over_sampled - deflections_macro
 
-        self._query_centre_yx = self._reference_centre_yx(map_config_template)
+        deflections_macro_fit = deflections_macro
+        traced_macro_fit = traced_macro
+        if lensing_baseline_fit is not None:
+            fit_grid = lensing_baseline_fit.grid
+            fit_shape_native = tuple(
+                int(s) for s in lensing_baseline_fit.image.shape
+            )
+            if fit_shape_native != shape_native:
+                raise ValueError(
+                    "Truth and fit baselines must share native grid shape."
+                )
+            if float(lensing_baseline_fit.pixel_scale) != float(
+                lensing_baseline.pixel_scale
+            ):
+                raise ValueError(
+                    "Truth and fit baselines must share grid pixel scale."
+                )
+            fit_over_sampled = np.asarray(fit_grid.over_sampled, dtype=float)
+            fit_sub_per_pix = fit_over_sampled.shape[0] // n_pix
+            fit_uniform = bool(
+                np.all(np.asarray(fit_grid.over_sampler.sub_is_uniform))
+            )
+            if (
+                fit_over_sampled.shape[0] != n_pix * fit_sub_per_pix
+                or not fit_uniform
+                or fit_sub_per_pix != sub_per_pix
+            ):
+                raise ValueError(
+                    "Truth and fit baselines must share uniform over-sampling."
+                )
+            if not np.array_equal(fit_over_sampled, over_sampled):
+                raise ValueError(
+                    "Truth and fit baselines must share over-sampled grid geometry."
+                )
+            fit_tracer = lensing_baseline_fit.tracer
+            deflections_macro_fit = np.asarray(
+                fit_tracer.deflections_yx_2d_from(grid=fit_grid.over_sampled),
+                dtype=float,
+            )
+            traced_macro_fit = fit_over_sampled - deflections_macro_fit
+
+        if truth_lens_centre_yx is None:
+            self._query_centre_yx = self._reference_centre_yx(
+                map_config_template
+            )
+        else:
+            self._query_centre_yx = self._coerce_centre_yx(
+                truth_lens_centre_yx
+            )
         candidate_positions_array = self._coerce_candidate_positions(
             candidate_positions,
             map_config_template,
@@ -169,6 +225,32 @@ class JaxGridTemplateEngine:
             tracer=tracer,
             traced_macro=traced_macro,
         )
+        if lensing_baseline_fit is not None:
+            truth_plane_redshifts = self._plane_redshift_sequence(tracer)
+            fit_plane_redshifts = self._plane_redshift_sequence(
+                lensing_baseline_fit.tracer
+            )
+            if truth_plane_redshifts != fit_plane_redshifts:
+                raise ValueError(
+                    "Truth and fit baseline plane redshifts must be identical; "
+                    f"truth={truth_plane_redshifts}, "
+                    f"fit={fit_plane_redshifts}."
+                )
+            fit_source_profiles, fit_image_profiles = (
+                self._extract_source_profiles(
+                    tracer=lensing_baseline_fit.tracer,
+                    traced_macro=traced_macro_fit,
+                )
+            )
+            if not self._source_profile_sets_identical(
+                source_profiles,
+                image_profiles,
+                fit_source_profiles,
+                fit_image_profiles,
+            ):
+                raise ValueError(
+                    "Truth and fit baselines must contain identical source profiles."
+                )
 
         observation_config = map_config_template["observation"]
         detector_config = observation_config["detector"]
@@ -198,7 +280,9 @@ class JaxGridTemplateEngine:
         self._fft_shape = fft_shape
 
         self._coords = jnp.asarray(over_sampled)
-        self._alpha_macro = jnp.asarray(deflections_macro)
+        self._alpha_macro_fit = jnp.asarray(deflections_macro_fit)
+        self._alpha_macro_truth = jnp.asarray(deflections_macro)
+        self._lens_mismatch_enabled = lensing_baseline_fit is not None
         self._log_radii = jnp.asarray(np.log(radii))
         self._alpha_radial = jnp.asarray(alpha_radial)
         self._source_profiles = tuple(source_profiles)
@@ -275,6 +359,11 @@ class JaxGridTemplateEngine:
             centre = map_config_template["lensing"]["lens_galaxy"]["mass"]["centre"]
         except (KeyError, TypeError):
             return np.zeros(2, dtype=float)
+        return JaxGridTemplateEngine._coerce_centre_yx(centre)
+
+    @staticmethod
+    def _coerce_centre_yx(centre) -> np.ndarray:
+        """Return one finite length-two lens centre."""
         centre_array = np.asarray(centre, dtype=float)
         if centre_array.shape != (2,) or not np.all(np.isfinite(centre_array)):
             raise ValueError("Lens mass centre must be a finite length-2 coordinate.")
@@ -622,22 +711,47 @@ class JaxGridTemplateEngine:
             profiles.append(params)
         return profiles, image_profiles
 
+    @staticmethod
+    def _plane_redshift_sequence(tracer) -> Tuple[float, ...]:
+        """Return the ordered plane redshifts carried by a tracer."""
+        return tuple(float(plane[0].redshift) for plane in tracer.planes)
+
+    @staticmethod
+    def _source_profile_sets_identical(
+        source_profiles: Sequence[Dict[str, float]],
+        image_profiles: Sequence[Dict[str, Any]],
+        fit_source_profiles: Sequence[Dict[str, float]],
+        fit_image_profiles: Sequence[Dict[str, Any]],
+    ) -> bool:
+        """Return whether truth and fit extracted sources are identical."""
+        if len(source_profiles) != len(fit_source_profiles):
+            return False
+        if len(image_profiles) != len(fit_image_profiles):
+            return False
+        for truth, fit in zip(source_profiles, fit_source_profiles):
+            if truth != fit:
+                return False
+        for truth, fit in zip(image_profiles, fit_image_profiles):
+            if set(truth) != set(fit):
+                return False
+            for key in truth:
+                truth_value = truth[key]
+                fit_value = fit[key]
+                if isinstance(truth_value, np.ndarray):
+                    if not np.array_equal(truth_value, fit_value):
+                        return False
+                elif truth_value != fit_value:
+                    return False
+        return True
+
     # ------------------------------------------------------------------
     # Per-node kernel
     # ------------------------------------------------------------------
 
-    def _signal_for_position(self, position_yx):
+    def _render_for_macro(self, alpha_macro, alpha_sub):
+        """Render the common source through one macro deflection field."""
         jnp = self._jnp
-
-        delta = self._coords - position_yx[None, :]
-        radius = jnp.sqrt(delta[:, 0] ** 2 + delta[:, 1] ** 2)
-        radius_safe = jnp.clip(radius, jnp.exp(self._log_radii[0]), None)
-        alpha_r = jnp.interp(
-            jnp.log(radius_safe), self._log_radii, self._alpha_radial
-        )
-        alpha_sub = alpha_r[:, None] * delta / radius_safe[:, None]
-
-        traced = self._coords - self._alpha_macro - alpha_sub
+        traced = self._coords - alpha_macro - alpha_sub
         brightness = jnp.zeros(traced.shape[0])
         for params in self._source_profiles:
             y = traced[:, 0] - params["centre_y"]
@@ -696,7 +810,19 @@ class JaxGridTemplateEngine:
 
         n_pix = self._shape_native[0] * self._shape_native[1]
         image = brightness.reshape(n_pix, self._sub_per_pix).mean(axis=1)
-        image = image.reshape(self._shape_native)
+        return image.reshape(self._shape_native)
+
+    def _signal_for_position(self, position_yx):
+        jnp = self._jnp
+
+        delta = self._coords - position_yx[None, :]
+        radius = jnp.sqrt(delta[:, 0] ** 2 + delta[:, 1] ** 2)
+        radius_safe = jnp.clip(radius, jnp.exp(self._log_radii[0]), None)
+        alpha_r = jnp.interp(
+            jnp.log(radius_safe), self._log_radii, self._alpha_radial
+        )
+        alpha_sub = alpha_r[:, None] * delta / radius_safe[:, None]
+        image = self._render_for_macro(self._alpha_macro_fit, alpha_sub)
 
         image_fft = jnp.fft.rfft2(image, s=self._fft_shape)
         convolved_model = jnp.fft.irfft2(
@@ -722,7 +848,13 @@ class JaxGridTemplateEngine:
         assert truth_fft_shape is not None
         assert truth_crop_y is not None
         assert truth_crop_x is not None
-        truth_image_fft = jnp.fft.rfft2(image, s=truth_fft_shape)
+        truth_image = image
+        if self._lens_mismatch_enabled:
+            truth_image = self._render_for_macro(
+                self._alpha_macro_truth,
+                alpha_sub,
+            )
+        truth_image_fft = jnp.fft.rfft2(truth_image, s=truth_fft_shape)
         convolved_truth = jnp.fft.irfft2(
             truth_image_fft * self._truth_kernel_fft,
             s=truth_fft_shape,

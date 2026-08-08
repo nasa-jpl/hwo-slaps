@@ -508,7 +508,7 @@ def plot_fisher_detection_grid_map(
         "" if grid.subhalo_mass is None else f", M={grid.subhalo_mass:.2e} M_sun"
     )
     ax.set_title(
-        "PSF-Mismatch Spurious Significance\n"
+        "Model-Mismatch Spurious Significance\n"
         f"false-positive area {grid.false_positive_area_arcsec2:.3f} arcsec$^2$ "
         f"(q >= {grid.detection_q_threshold:.1f}){mass_label}",
         fontsize=10,

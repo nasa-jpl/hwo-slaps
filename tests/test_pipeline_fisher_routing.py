@@ -57,6 +57,8 @@ def _make_detector_stub(label: str):
             self.n_psf_scan_modes = 0
             self.psf_fit_mode_names = []
             self.psf_scan_mode_names = []
+            self.psf_mismatch_enabled = False
+            self.lens_mismatch_enabled = False
 
         def compute_local(self, observation_test, lensing_test):
             return FisherLocalData(
@@ -165,3 +167,5 @@ def test_generator_uses_fisher_detector(monkeypatch):
 
     assert calls == ["fisher"]
     assert result.mode == "local"
+    assert result.psf_mismatch_enabled is False
+    assert result.lens_mismatch_enabled is False

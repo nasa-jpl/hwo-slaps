@@ -102,6 +102,15 @@ class LensingData:
     source_image_asset : `dict`, optional
         Validated asset and profile provenance for an Image source. None for
         analytic source types.
+    lens_mass_type : `str`, optional
+        Configured macro mass type, either ``'Isothermal'`` or ``'PowerLaw'``.
+    lens_slope : `float`, optional
+        Power-law density slope. None for an Isothermal lens.
+    lens_multipoles : `dict`, optional
+        Configured m3/m4 component pairs. The executable convention is
+        ``phi_m = atan2(comp0, comp1) / m``.
+    lens_shear : `tuple` of `float`, optional
+        External shear components ``(gamma_1, gamma_2)``.
     config : `dict`
         Complete configuration dictionary used to generate this lensing system.
     generation_timestamp : `str`
@@ -167,6 +176,12 @@ class LensingData:
     # === PROVENANCE ===
     config: Optional[Dict] = None
     generation_timestamp: Optional[str] = None
+
+    # === FLEXIBLE MACRO LENS TRUTH ===
+    lens_mass_type: Optional[str] = None
+    lens_slope: Optional[float] = None
+    lens_multipoles: Optional[Dict[str, Tuple[float, float]]] = None
+    lens_shear: Optional[Tuple[float, float]] = None
 
     def __post_init__(self):
         """Set generation timestamp if not provided."""
@@ -336,6 +351,19 @@ def print_lensing_data_summary(lensing_data):
     print(f"Centre: ({lensing_data.lens_centre[0]:.6f}, {lensing_data.lens_centre[1]:.6f}) arcsec")
     print(f"Ellipticity: e1={lensing_data.lens_ellipticity[0]:.3f}, "
           f"e2={lensing_data.lens_ellipticity[1]:.3f}")
+    print(f"Mass type: {lensing_data.lens_mass_type}")
+    if lensing_data.lens_slope is not None:
+        print(f"Slope: {lensing_data.lens_slope:g}")
+    if lensing_data.lens_multipoles is not None:
+        print(
+            "Multipoles: "
+            + ", ".join(
+                f"{order}={components}"
+                for order, components in lensing_data.lens_multipoles.items()
+            )
+        )
+    if lensing_data.lens_shear is not None:
+        print(f"Shear: {lensing_data.lens_shear}")
 
     # Source galaxy
     print("\n=== Source Galaxy ===")

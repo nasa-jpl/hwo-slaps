@@ -200,6 +200,7 @@ def _grid_worker_init(
     mask_2d: np.ndarray,
     truth_kernel_native: Optional[np.ndarray] = None,
     truth_kernel_pixel_scales=None,
+    truth_config_template: Optional[Dict[str, Any]] = None,
 ) -> None:
     _GRID_WORKER_STATE["config_template"] = config_template
     _GRID_WORKER_STATE["kernel"] = make_pyauto_kernel(
@@ -209,6 +210,7 @@ def _grid_worker_init(
     )
     _GRID_WORKER_STATE["mu0"] = mu0_adu_2d
     _GRID_WORKER_STATE["mask"] = mask_2d
+    _GRID_WORKER_STATE["truth_config_template"] = truth_config_template
     if truth_kernel_native is None:
         _GRID_WORKER_STATE["truth_kernel"] = None
     else:
@@ -226,22 +228,50 @@ def _grid_worker_signal(position_yx: Tuple[float, float]) -> np.ndarray:
         "centre": [float(position_yx[0]), float(position_yx[1])],
     }
     lensing_data = generate_lensing_system(config["lensing"], full_config=config)
-    kernels = [_GRID_WORKER_STATE["kernel"]]
-    if _GRID_WORKER_STATE["truth_kernel"] is not None:
-        kernels.append(_GRID_WORKER_STATE["truth_kernel"])
-    mu1_images = _mean_adu_images_from_lensing_arrays(
-        lensing_data=lensing_data,
-        observation_config=config["observation"],
-        psf_kernels=kernels,
-    )
+    model_kernel = _GRID_WORKER_STATE["kernel"]
+    truth_kernel = _GRID_WORKER_STATE["truth_kernel"]
+    if truth_kernel is None:
+        model_image = _mean_adu_images_from_lensing_arrays(
+            lensing_data=lensing_data,
+            observation_config=config["observation"],
+            psf_kernels=(model_kernel,),
+        )[0]
+        return flatten_masked_image(
+            model_image - _GRID_WORKER_STATE["mu0"],
+            mask=_GRID_WORKER_STATE["mask"],
+        )
+    truth_config_template = _GRID_WORKER_STATE["truth_config_template"]
+    if truth_config_template is None:
+        model_image, truth_image = _mean_adu_images_from_lensing_arrays(
+            lensing_data=lensing_data,
+            observation_config=config["observation"],
+            psf_kernels=(model_kernel, truth_kernel),
+        )
+    else:
+        model_image = _mean_adu_images_from_lensing_arrays(
+            lensing_data=lensing_data,
+            observation_config=config["observation"],
+            psf_kernels=(model_kernel,),
+        )[0]
+        truth_config = deepcopy(truth_config_template)
+        truth_config["lensing"]["subhalo"]["position"] = {
+            "type": "direct",
+            "centre": [float(position_yx[0]), float(position_yx[1])],
+        }
+        truth_lensing_data = generate_lensing_system(
+            truth_config["lensing"], full_config=truth_config
+        )
+        truth_image = _mean_adu_images_from_lensing_arrays(
+            lensing_data=truth_lensing_data,
+            observation_config=truth_config["observation"],
+            psf_kernels=(truth_kernel,),
+        )[0]
     model_signal = flatten_masked_image(
-        mu1_images[0] - _GRID_WORKER_STATE["mu0"],
+        model_image - _GRID_WORKER_STATE["mu0"],
         mask=_GRID_WORKER_STATE["mask"],
     )
-    if len(mu1_images) == 1:
-        return model_signal
     data_residual = flatten_masked_image(
-        mu1_images[1] - _GRID_WORKER_STATE["mu0"],
+        truth_image - _GRID_WORKER_STATE["mu0"],
         mask=_GRID_WORKER_STATE["mask"],
     )
     return np.stack((model_signal, data_residual), axis=0)
@@ -279,21 +309,38 @@ class FisherDetector:
         self.fisher_config = deepcopy(fisher_config)
 
         fit_psf_config = self.full_config["modeling"].get("fit_psf")
-        self.mismatch_enabled = bool(
+        fit_lens_config = self.full_config["modeling"].get("fit_lens")
+        self.psf_mismatch_enabled = bool(
             fit_psf_config is not None
             and str(fit_psf_config.get("mode", "")).lower() == "explicit"
         )
-        if self.mismatch_enabled:
-            self.fit_full_config = deepcopy(self.full_config)
+        self.lens_mismatch_enabled = bool(
+            fit_lens_config is not None
+            and str(fit_lens_config.get("mode", "")).lower() == "explicit"
+        )
+        self.mismatch_enabled = (
+            self.psf_mismatch_enabled or self.lens_mismatch_enabled
+        )
+        self.fit_full_config = deepcopy(self.full_config)
+        if self.psf_mismatch_enabled:
+            assert fit_psf_config is not None
             self.fit_full_config["psf"] = deepcopy(fit_psf_config["psf"])
             self.fit_psf_data = self._quiet_generate_psf_system(
                 self.fit_full_config
             )
             self.model_psf_data = self.fit_psf_data
         else:
-            self.fit_full_config = self.full_config
             self.fit_psf_data = None
             self.model_psf_data = self.psf_data
+        if self.lens_mismatch_enabled:
+            assert fit_lens_config is not None
+            fit_lens_galaxy = fit_lens_config["lens_galaxy"]
+            target = self.fit_full_config["lensing"]["lens_galaxy"]
+            target["mass"] = deepcopy(fit_lens_galaxy["mass"])
+            if "shear" in fit_lens_galaxy:
+                target["shear"] = deepcopy(fit_lens_galaxy["shear"])
+            else:
+                target.pop("shear", None)
 
         self.include_background_offset = bool(self.fisher_config["include_background_offset"])
         self.snr_threshold = float(self.fisher_config["snr_threshold"])
@@ -354,12 +401,18 @@ class FisherDetector:
             self.full_covariance = None
 
         # Template configs for deterministic mean-image generation.
-        self.baseline_config_template = deepcopy(self.full_config)
+        self.baseline_config_template = deepcopy(self.fit_full_config)
         self.baseline_config_template["lensing"]["subhalo"]["enabled"] = False
 
-        self.map_config_template = deepcopy(self.full_config)
+        self.map_config_template = deepcopy(self.fit_full_config)
         self.map_config_template["lensing"]["subhalo"]["enabled"] = True
         self.map_config_template["lensing"]["subhalo"]["position"] = {
+            "type": "direct",
+            "centre": [0.0, 0.0],
+        }
+        self.map_config_template_truth = deepcopy(self.full_config)
+        self.map_config_template_truth["lensing"]["subhalo"]["enabled"] = True
+        self.map_config_template_truth["lensing"]["subhalo"]["position"] = {
             "type": "direct",
             "centre": [0.0, 0.0],
         }
@@ -375,7 +428,17 @@ class FisherDetector:
         )
 
         self.mu0_adu_2d = self._mean_adu_from_observation(self.observation_baseline)
-        if self.mismatch_enabled:
+        self.lensing_baseline_fit = None
+        if self.lens_mismatch_enabled:
+            self.lensing_baseline_fit = generate_lensing_system(
+                self.baseline_config_template["lensing"],
+                full_config=self.baseline_config_template,
+            )
+            self.mu0_model_adu_2d = self._mean_adu_from_lensing(
+                lensing_data=self.lensing_baseline_fit,
+                observation_config=self.baseline_config_template["observation"],
+            )
+        elif self.psf_mismatch_enabled:
             self.mu0_model_adu_2d = self._mean_adu_from_config(
                 self.baseline_config_template
             )
@@ -506,17 +569,27 @@ class FisherDetector:
     ) -> FisherLocalData:
         """Compute local profiled Asimov detectability.
 
-        The calculation uses the injected position.  Existing Fisher fields
-        describe the fit-side template alone.  With an explicit fit PSF, the
-        optional mismatch fields project truth-side data and the smooth
-        truth-minus-fit residual onto that profiled template.
+        The calculation uses the injected position. Existing Fisher fields
+        describe the fit-side template alone. With an explicit fit PSF or fit
+        lens, optional mismatch fields project truth-side data and the smooth
+        truth-minus-fit residual onto that profiled template. Lens mismatch
+        requires separate truth- and fit-side ray traces.
         """
         mu1_adu_2d = self._mean_adu_from_observation(observation_test)
         if self.mismatch_enabled:
-            mu1_model_adu_2d = self._mean_adu_from_lensing(
-                lensing_data=lensing_test,
-                observation_config=self.full_config["observation"],
-            )
+            if self.lens_mismatch_enabled:
+                if lensing_test.subhalo_position is None:
+                    raise ValueError(
+                        "Lens-mismatch local evaluation requires a subhalo position."
+                    )
+                mu1_model_adu_2d = self._mean_adu_for_position(
+                    lensing_test.subhalo_position
+                )
+            else:
+                mu1_model_adu_2d = self._mean_adu_from_lensing(
+                    lensing_data=lensing_test,
+                    observation_config=self.full_config["observation"],
+                )
             smooth_mean_image = self.mu0_model_adu_2d
             subhalo_mean_image = mu1_model_adu_2d
         else:
@@ -613,8 +686,8 @@ class FisherDetector:
         """Compute a signal-bank detectability map over candidate positions."""
         if self.mismatch_enabled:
             raise ValueError(
-                "PSF mismatch is unsupported for legacy bank maps; use "
-                "map.type: grid for mismatch runs."
+                "fit_psf and fit_lens mismatch are unsupported for legacy "
+                "bank maps; use map.type: grid for mismatch runs."
             )
         positions_yx = self._candidate_positions()
         build_start = perf_counter()
@@ -683,9 +756,10 @@ class FisherDetector:
         worker processes; the statistical evaluation always runs in the
         parent against the workspace built at construction time.
 
-        Existing Fisher arrays describe fit-side templates.  With an explicit
-        fit PSF, paired truth-side data residuals are evaluated in the same
-        streaming batches and populate the optional mismatch arrays.
+        Existing Fisher arrays describe fit-side templates. With an explicit
+        fit PSF or fit lens, paired truth-side data residuals are evaluated in
+        the same streaming batches and populate the optional mismatch arrays.
+        Lens mismatch costs about twice the per-node ray-tracing work.
         """
         if self.map_type != "grid":
             raise ValueError("compute_grid_map requires modeling.fisher.map.type: 'grid'.")
@@ -932,12 +1006,14 @@ class FisherDetector:
                 )
             self._jax_grid_engine = JaxGridTemplateEngine(
                 lensing_baseline=self.lensing_baseline,
+                lensing_baseline_fit=self.lensing_baseline_fit,
                 map_config_template=deepcopy(self.map_config_template),
                 psf_kernel_native=np.asarray(pyauto_kernel_native(kernel), dtype=float),
                 mu0_adu_2d=self.mu0_model_adu_2d,
                 mask_2d=self.mask_2d,
                 truth_psf_kernel_native=truth_kernel_native,
                 candidate_positions=positions,
+                truth_lens_centre_yx=self._grid_layout().centre_yx,
             )
         yield from self._jax_grid_engine.signal_iterator(positions)
 
@@ -964,6 +1040,11 @@ class FisherDetector:
             np.asarray(self.mask_2d, dtype=bool),
             truth_kernel_native,
             truth_kernel_pixel_scales,
+            (
+                deepcopy(self.map_config_template_truth)
+                if self.lens_mismatch_enabled
+                else None
+            ),
         )
         saved_env = {key: os.environ.get(key) for key in _GRID_WORKER_ENV}
         os.environ.update(_GRID_WORKER_ENV)
@@ -1186,6 +1267,7 @@ class FisherDetector:
                 "modeling.fisher.map.grid.half_width_arcsec must be finite and >= spacing_arcsec."
             )
 
+        # Candidate geometry is defined by the truth/data lens centre.
         lens_centre = self.full_config["lensing"]["lens_galaxy"]["mass"]["centre"]
         centre_y = float(lens_centre[0])
         centre_x = float(lens_centre[1])
@@ -1244,7 +1326,11 @@ class FisherDetector:
         self,
         position_yx: Tuple[float, float],
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Generate fit- and truth-PSF images from one ray-traced scene."""
+        """Generate fit- and truth-side node images.
+
+        PSF-only mismatch shares one ray trace. Lens mismatch regenerates both
+        macro models and therefore costs about twice the per-node work.
+        """
         config = deepcopy(self.map_config_template)
         config["lensing"]["subhalo"]["position"] = {
             "type": "direct",
@@ -1256,11 +1342,32 @@ class FisherDetector:
         )
         model_kernel = self._ensure_odd_kernel(self.model_psf_data.kernel)
         truth_kernel = self._ensure_odd_kernel(self.psf_data.kernel)
-        model_image, truth_image = _mean_adu_images_from_lensing_arrays(
-            lensing_data=lensing_data,
-            observation_config=config["observation"],
-            psf_kernels=(model_kernel, truth_kernel),
-        )
+        if self.lens_mismatch_enabled:
+            model_image = _mean_adu_images_from_lensing_arrays(
+                lensing_data=lensing_data,
+                observation_config=config["observation"],
+                psf_kernels=(model_kernel,),
+            )[0]
+            truth_config = deepcopy(self.map_config_template_truth)
+            truth_config["lensing"]["subhalo"]["position"] = {
+                "type": "direct",
+                "centre": [float(position_yx[0]), float(position_yx[1])],
+            }
+            truth_lensing_data = generate_lensing_system(
+                truth_config["lensing"],
+                full_config=truth_config,
+            )
+            truth_image = _mean_adu_images_from_lensing_arrays(
+                lensing_data=truth_lensing_data,
+                observation_config=truth_config["observation"],
+                psf_kernels=(truth_kernel,),
+            )[0]
+        else:
+            model_image, truth_image = _mean_adu_images_from_lensing_arrays(
+                lensing_data=lensing_data,
+                observation_config=config["observation"],
+                psf_kernels=(model_kernel, truth_kernel),
+            )
         return model_image, truth_image
 
     def _mean_adu_from_config(self, config: Dict[str, Any]) -> np.ndarray:
@@ -1306,19 +1413,25 @@ class FisherDetector:
         source_e = observation_data.noiseless_source_eps * observation_data.exposure_time
         return source_e / observation_data.gain
 
-    def _source_adu_from_kernel(self, kernel) -> np.ndarray:
+    def _source_adu_from_kernel(
+        self,
+        kernel,
+        lensing_baseline: Optional[LensingData] = None,
+    ) -> np.ndarray:
         """Apply a PSF kernel to the baseline source.
 
         The kernel may be a derivative kernel.
         """
         psf_kernel = self._ensure_odd_kernel(kernel)
         psf_convolver = make_pyauto_convolver(psf_kernel)
+        if lensing_baseline is None:
+            lensing_baseline = self.lensing_baseline
 
         mask = al.Mask2D.all_false(
-            shape_native=self.lensing_baseline.image.shape,
-            pixel_scales=self.lensing_baseline.pixel_scale,
+            shape_native=lensing_baseline.image.shape,
+            pixel_scales=lensing_baseline.pixel_scale,
         )
-        lensed_image = al.Array2D(values=self.lensing_baseline.image, mask=mask)
+        lensed_image = al.Array2D(values=lensing_baseline.image, mask=mask)
         # PSF derivative kernels are signed and therefore cannot pass through
         # the simulator's Poisson-count path. Use the raw linear convolution.
         source_only_eps = (
@@ -1355,9 +1468,10 @@ class FisherDetector:
         these names are fractional there, while for Exponential and Sersic
         they are in the parameter's own units.
         """
-        light_type = self.full_config["lensing"]["source_galaxy"]["light"][
-            "type"
-        ]
+        analysis_config = getattr(self, "fit_full_config", self.full_config)
+        light_type = analysis_config["lensing"]["source_galaxy"]["light"]["type"]
+        analysis_lens = analysis_config["lensing"]["lens_galaxy"]
+        analysis_mass = analysis_lens["mass"]
         light_root = ("lensing", "source_galaxy", "light")
         if light_type == "Clumpy":
             centre_root = light_root + ("host", "centre")
@@ -1408,21 +1522,73 @@ class FisherDetector:
                 step_key="ell_comp",
                 prior_sigma=self._lookup_prior_sigma("lens.ell_comp_2"),
             ),
-            _ScalarNuisanceSpec(
-                name="source.centre_y",
-                path=centre_root + (0,),
-                step_mode="additive",
-                step_key="centre_arcsec",
-                prior_sigma=self._lookup_prior_sigma("source.centre_y"),
-            ),
-            _ScalarNuisanceSpec(
-                name="source.centre_x",
-                path=centre_root + (1,),
-                step_mode="additive",
-                step_key="centre_arcsec",
-                prior_sigma=self._lookup_prior_sigma("source.centre_x"),
-            ),
         ]
+        if analysis_mass["type"] == "PowerLaw":
+            specs.append(
+                _ScalarNuisanceSpec(
+                    name="lens.slope",
+                    path=("lensing", "lens_galaxy", "mass", "slope"),
+                    step_mode="additive",
+                    step_key="slope",
+                    prior_sigma=self._lookup_prior_sigma("lens.slope"),
+                )
+            )
+            for order in ("m3", "m4"):
+                if order not in analysis_mass.get("multipoles", {}):
+                    continue
+                for component_index in (0, 1):
+                    name = f"lens.multipole_{order}_{component_index + 1}"
+                    specs.append(
+                        _ScalarNuisanceSpec(
+                            name=name,
+                            path=(
+                                "lensing",
+                                "lens_galaxy",
+                                "mass",
+                                "multipoles",
+                                order,
+                                component_index,
+                            ),
+                            step_mode="additive",
+                            step_key="multipole_comp",
+                            prior_sigma=self._lookup_prior_sigma(name),
+                        )
+                    )
+        if "shear" in analysis_lens:
+            for component_index in (0, 1):
+                name = f"lens.shear_{component_index + 1}"
+                specs.append(
+                    _ScalarNuisanceSpec(
+                        name=name,
+                        path=(
+                            "lensing",
+                            "lens_galaxy",
+                            "shear",
+                            component_index,
+                        ),
+                        step_mode="additive",
+                        step_key="shear_comp",
+                        prior_sigma=self._lookup_prior_sigma(name),
+                    )
+                )
+        specs.extend(
+            [
+                _ScalarNuisanceSpec(
+                    name="source.centre_y",
+                    path=centre_root + (0,),
+                    step_mode="additive",
+                    step_key="centre_arcsec",
+                    prior_sigma=self._lookup_prior_sigma("source.centre_y"),
+                ),
+                _ScalarNuisanceSpec(
+                    name="source.centre_x",
+                    path=centre_root + (1,),
+                    step_mode="additive",
+                    step_key="centre_arcsec",
+                    prior_sigma=self._lookup_prior_sigma("source.centre_x"),
+                ),
+            ]
+        )
         if light_type != "Image":
             specs.extend(
                 [
@@ -1521,6 +1687,16 @@ class FisherDetector:
 
         if step <= 0.0 or not np.isfinite(step):
             raise ValueError(f"Invalid finite-difference step for nuisance {spec.name}: {step}")
+
+        if spec.name == "lens.slope":
+            lower_slope = base_value - step
+            upper_slope = base_value + step
+            if lower_slope <= 1.0 or upper_slope >= 3.0:
+                raise ValueError(
+                    "PowerLaw slope finite difference violates the supported "
+                    f"bounds (1, 3): slope={base_value}, step={step}, "
+                    f"perturbed interval=[{lower_slope}, {upper_slope}]."
+                )
 
         self._set_path_value_create(plus_config, spec.path, base_value + step)
         self._set_path_value_create(minus_config, spec.path, base_value - step)
@@ -1775,7 +1951,14 @@ class FisherDetector:
             pixel_scales=pyauto_kernel_pixel_scales(kernel_plus),
             normalize=False,
         )
-        return self._source_adu_from_kernel(derivative_kernel_obj)
+        lensing_baseline = self.lensing_baseline
+        if role == "fit" and self.lens_mismatch_enabled:
+            assert self.lensing_baseline_fit is not None
+            lensing_baseline = self.lensing_baseline_fit
+        return self._source_adu_from_kernel(
+            derivative_kernel_obj,
+            lensing_baseline=lensing_baseline,
+        )
 
     @staticmethod
     def _ensure_psf_derivative_container(config: Dict[str, Any], spec: _PsfModeSpec) -> None:

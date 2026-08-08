@@ -118,4 +118,6 @@ def perform_fisher_detection(
         n_psf_scan_modes=int(getattr(detector, "n_psf_scan_modes", 0)),
         psf_fit_mode_names=list(getattr(detector, "psf_fit_mode_names", []) or []),
         psf_scan_mode_names=list(getattr(detector, "psf_scan_mode_names", []) or []),
+        psf_mismatch_enabled=detector.psf_mismatch_enabled,
+        lens_mismatch_enabled=detector.lens_mismatch_enabled,
     )

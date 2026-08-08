@@ -27,6 +27,34 @@ DEFAULT_PRIOR_WIDTHS = {
 """Default local prior widths for validation fits."""
 
 
+def guard_flexible_lens_nonlinear(full_config: Dict[str, Any]) -> None:
+    """Reject flexible truth or fit lens models in the nonlinear layer.
+
+    Parameters
+    ----------
+    full_config : `dict`
+        Full HWO-SLAPS run configuration.
+
+    Raises
+    ------
+    NotImplementedError
+        Raised when the truth macro mass is not Isothermal or an explicit
+        ``modeling.fit_lens`` override is configured. Nonlinear support for
+        those models belongs to Items 7/9.
+    """
+    mass_type = full_config["lensing"]["lens_galaxy"]["mass"]["type"]
+    fit_lens = full_config.get("modeling", {}).get("fit_lens")
+    fit_lens_explicit = bool(
+        fit_lens is not None
+        and str(fit_lens.get("mode", "")).lower() == "explicit"
+    )
+    if mass_type != "Isothermal" or fit_lens_explicit:
+        raise NotImplementedError(
+            "Nonlinear flexible-lens fitting is not implemented; Items 7/9 "
+            "must add truth PowerLaw and explicit fit_lens support."
+        )
+
+
 def _widths(priors_config: Optional[Dict[str, Any]]) -> Dict[str, float]:
     """Merge user-supplied prior widths with defaults."""
     widths = dict(DEFAULT_PRIOR_WIDTHS)
@@ -69,6 +97,7 @@ def smooth_model_spec_from_config(
     spec : `ModelSpec`
         Smooth lens/source model specification.
     """
+    guard_flexible_lens_nonlinear(full_config)
     widths = _widths(priors_config)
     lens_config = full_config["lensing"]["lens_galaxy"]
     source_config = full_config["lensing"]["source_galaxy"]

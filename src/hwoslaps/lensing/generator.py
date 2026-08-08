@@ -4,6 +4,7 @@ This module provides the primary API for generating realistic galaxy-galaxy
 strong lensing systems with precisely known subhalo populations.
 """
 
+from collections import OrderedDict
 from copy import deepcopy
 import os
 
@@ -102,6 +103,7 @@ def generate_lensing_system(config, full_config):
 
     # Create lens and source galaxies from validated redshifts.
     lens_galaxy = _create_lens_galaxy(lens_config)
+    macro_profiles = _macro_profile_mapping(lens_galaxy, lens_config)
     source_galaxy = _create_source_galaxy(source_config)
     source_light_type, source_components, source_image_asset = (
         _source_truth_metadata(source_config, source_galaxy)
@@ -138,8 +140,8 @@ def generate_lensing_system(config, full_config):
         # Add subhalo to lens galaxy
         lens_galaxy = al.Galaxy(
             redshift=lens_redshift,
-            mass=lens_galaxy.mass,
-            subhalo=subhalo
+            **macro_profiles,
+            subhalo=subhalo,
         )
 
         # Extract subhalo parameters from subhalo_info
@@ -217,6 +219,24 @@ def generate_lensing_system(config, full_config):
         # Galaxy parameters
         lens_centre=tuple(lens_config['mass']['centre']),
         lens_ellipticity=tuple(lens_config['mass']['ell_comps']),
+        lens_mass_type=lens_config['mass']['type'],
+        lens_slope=(
+            float(lens_config['mass']['slope'])
+            if lens_config['mass']['type'] == 'PowerLaw'
+            else None
+        ),
+        lens_multipoles=(
+            {
+                order: tuple(components)
+                for order, components in lens_config['mass'].get(
+                    'multipoles', {}
+                ).items()
+            }
+            or None
+        ),
+        lens_shear=(
+            tuple(lens_config['shear']) if 'shear' in lens_config else None
+        ),
         source_centre=source_centre,
         source_ellipticity=source_ellipticity,
         source_intensity=source_intensity,
@@ -264,22 +284,61 @@ def _create_lens_galaxy(lens_config):
     lens_galaxy : al.Galaxy
         PyAutoLens galaxy object representing the lens.
     """
-    mass_config = lens_config['mass']
+    return al.Galaxy(
+        redshift=lens_config['redshift'],
+        **_create_macro_profiles(lens_config),
+    )
 
-    # Create mass profile
+
+def _create_macro_profiles(lens_config):
+    """Build the ordered macro-profile mapping for a lens configuration."""
+    mass_config = lens_config['mass']
+    profiles = OrderedDict()
     if mass_config['type'] == 'Isothermal':
-        lens_mass = al.mp.Isothermal(
+        profiles['mass'] = al.mp.Isothermal(
             centre=tuple(mass_config['centre']),
             einstein_radius=mass_config['einstein_radius'],
             ell_comps=tuple(mass_config['ell_comps'])
         )
+    elif mass_config['type'] == 'PowerLaw':
+        shared = {
+            'centre': tuple(mass_config['centre']),
+            'einstein_radius': mass_config['einstein_radius'],
+            'slope': mass_config['slope'],
+        }
+        profiles['mass'] = al.mp.PowerLaw(
+            ell_comps=tuple(mass_config['ell_comps']),
+            **shared,
+        )
+        for order_name in sorted(mass_config.get('multipoles', {})):
+            order = int(order_name[1:])
+            profiles[f'multipole_{order_name}'] = al.mp.PowerLawMultipole(
+                m=order,
+                multipole_comps=tuple(
+                    mass_config['multipoles'][order_name]
+                ),
+                **shared,
+            )
     else:
         raise ValueError(f"Unsupported mass profile type: {mass_config['type']}")
+    if 'shear' in lens_config:
+        profiles['shear'] = al.mp.ExternalShear(
+            gamma_1=lens_config['shear'][0],
+            gamma_2=lens_config['shear'][1],
+        )
+    return profiles
 
-    return al.Galaxy(
-        redshift=lens_config['redshift'],
-        mass=lens_mass
+
+def _macro_profile_mapping(lens_galaxy, lens_config):
+    """Return the ordered macro profiles attached to a built lens galaxy."""
+    names = ['mass']
+    names.extend(
+        f'multipole_{order}'
+        for order in sorted(lens_config['mass'].get('multipoles', {}))
     )
+    if 'shear' in lens_config:
+        names.append('shear')
+    return OrderedDict((name, getattr(lens_galaxy, name)) for name in names)
 
 
 def _create_source_galaxy(source_config):

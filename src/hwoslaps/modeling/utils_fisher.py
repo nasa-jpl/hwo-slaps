@@ -359,7 +359,7 @@ def load_fisher_grid_map_npz(path: Union[str, Path]) -> FisherGridMapData:
 class FisherDetectionData:
     """Top-level Fisher result payload for pipeline integration.
 
-    Local and grid payloads optionally include truth-vs-fit PSF mismatch
+    Local and grid payloads optionally include truth-vs-fit model mismatch
     statistics while their existing fields retain fit-template semantics.
     """
 
@@ -387,6 +387,8 @@ class FisherDetectionData:
     psf_fit_mode_names: Optional[List[str]] = None
     psf_scan_mode_names: Optional[List[str]] = None
     grid_map: Optional[FisherGridMapData] = None
+    psf_mismatch_enabled: bool = False
+    lens_mismatch_enabled: bool = False
 
     def __post_init__(self):
         """Stamp the generation timestamp when one was not supplied."""
@@ -507,8 +509,15 @@ def print_fisher_summary(fisher_data: FisherDetectionData) -> None:
         and fisher_data.grid_map.mismatch_enabled
     )
     if local_mismatch or grid_mismatch:
-        print("\nPSF mismatch:")
-        print("  Fit PSF mode: explicit")
+        print("\nModel mismatch:")
+        if fisher_data.psf_mismatch_enabled:
+            print("  fit_psf mode: explicit")
+        if fisher_data.lens_mismatch_enabled:
+            print("  fit_lens mode: explicit")
+            print(
+                "  Reference/pool lens mismatch uses ~2x per-node "
+                "ray-tracing work."
+            )
         if local_mismatch:
             local = fisher_data.local
             assert local is not None
