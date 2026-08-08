@@ -563,7 +563,7 @@ Workstream 1 — mass reach:
         spiral or irregular image-based source.
   - [ ] Run their injected-subhalo and no-subhalo ensemble grids.
 - L3a (A/C): complex macro lens.
-  - [ ] Select and implement one flexible macro-lens truth model for the fifth
+  - [x] Select and implement one flexible macro-lens truth model for the fifth
         scene, such as an elliptical power law with angular multipoles or a
         decomposed stellar-plus-dark-matter model.
   - [ ] Fit the fifth scene with the correct flexible model for the main scene
