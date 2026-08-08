@@ -543,7 +543,7 @@ Workstream 1 — mass reach:
 
 - L1a (C): structured scene ensemble. The archived canonical-scene curve
   covers `10^6.5` to `10^7.5 Msun`; broaden it, do not repeat it.
-  - [ ] Define the five candidate scenes: the legacy smooth ring; a source
+  - [x] Define the five candidate scenes: the legacy smooth ring; a source
         with 2-5 compact Sersic clumps; a low-symmetry bow-and-dot partial-arc
         configuration; a rescaled spiral or irregular source; and a complex
         macro-lens scene with the source held fixed relative to the legacy
