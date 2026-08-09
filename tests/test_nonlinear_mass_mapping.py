@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import replace
 import multiprocessing
 import pickle
 
@@ -133,8 +132,8 @@ def _explicit_context(model, relation="moline2017_eq7", h=0.6774):
 
 @pytest.mark.parametrize("relation", ["moline2017_eq7", "power_law"])
 @pytest.mark.parametrize("model", ["NFW", "SIS", "PointMass"])
-def test_mapping_table_meets_direct_accuracy_contract(model, relation):
-    """Keep PCHIP profile scales within 1e-11 of direct calculations."""
+def test_closed_form_mapping_meets_direct_accuracy_contract(model, relation):
+    """Keep closed-form profile scales within 1e-11 of legacy calculations."""
     context = _explicit_context(model, relation)
     cosmology = al.cosmo.Planck15()
     random = np.random.default_rng(17)
@@ -218,13 +217,9 @@ def test_context_h_resolution_and_explicit_hash_equivalence():
     assert inferred.h == pytest.approx(0.6774)
     assert explicit.h == pytest.approx(0.6774)
     assert alternate.h == pytest.approx(0.7)
-    relative_difference = np.max(
-        np.abs(
-            np.asarray(alternate.table_kappa_s)
-            / np.asarray(inferred.table_kappa_s)
-            - 1.0
-        )
-    )
+    inferred_kappa_s = evaluate_mass_mapping(inferred, 7.0)["kappa_s"]
+    alternate_kappa_s = evaluate_mass_mapping(alternate, 7.0)["kappa_s"]
+    relative_difference = abs(alternate_kappa_s / inferred_kappa_s - 1.0)
     assert relative_difference > 1.0e-6
     assert config_context.context_hash == inferred.context_hash
 
@@ -292,18 +287,3 @@ def test_mass_adapters_match_direct_profile_parameters(model, adapter):
     wrong = _explicit_context("SIS" if model != "SIS" else "PointMass")
     with pytest.raises(ValueError, match="requires"):
         adapter(log10_m200=7.0, mapping_context=wrong)
-
-
-def test_interpolator_cache_rejects_stale_context_hash():
-    """Reject altered tables that reuse an already cached context hash."""
-    context = _explicit_context("NFW")
-    evaluate_mass_mapping(context, 7.0)
-    altered = replace(
-        context,
-        table_kappa_s=tuple(2.0 * value for value in context.table_kappa_s),
-    )
-    with pytest.raises(
-        ValueError,
-        match="context hash matches a different context",
-    ):
-        evaluate_mass_mapping(altered, 7.0)

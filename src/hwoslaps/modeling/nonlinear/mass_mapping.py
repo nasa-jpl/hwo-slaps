@@ -8,13 +8,18 @@ import hashlib
 from typing import Any, Dict, Optional, Tuple, TYPE_CHECKING
 
 import numpy as np
-from scipy.interpolate import PchipInterpolator
 
 from ...lensing.mass_models import (
-    concentration_mass_relation,
-    einstein_radius_point_mass,
-    einstein_radius_sis_m200,
-    nfw_lensing_parameters,
+    LensingGeometryScalars,
+    MOLINE_EQ7_MAX_MASS_MSUN,
+    MOLINE_EQ7_MAX_X_SUB,
+    MOLINE_EQ7_MIN_MASS_MSUN,
+    concentration_moline2017_eq7_xp,
+    concentration_power_law_xp,
+    einstein_radius_point_mass_xp,
+    einstein_radius_sis_m200_xp,
+    lensing_geometry_scalars,
+    nfw_lensing_parameters_xp,
 )
 
 
@@ -23,10 +28,7 @@ _PROFILE_CLASS_NAMES = {
     "SISMCRSubhalo",
     "PointMassMCRSubhalo",
 }
-_INTERPOLATOR_CACHE: Dict[
-    str,
-    Tuple[Any, Tuple[PchipInterpolator, ...]],
-] = {}
+MASS_MAPPING_CONTEXT_SCHEMA_VERSION = 2
 
 if TYPE_CHECKING:
     NFWMCRSubhaloSph: Any
@@ -55,17 +57,11 @@ class MassMappingContext:
     cosmology_name : `str`
         Configured cosmology label.
     log10_m200_lower : `float`
-        Lower log-mass table boundary.
+        Lower closed-form mapping boundary.
     log10_m200_upper : `float`
-        Upper log-mass table boundary.
-    table_log10_m200 : `tuple` [`float`, ...]
-        Uniform log-mass interpolation nodes.
-    table_kappa_s : `tuple` [`float`, ...], optional
-        NFW scale-convergence table.
-    table_scale_radius_arcsec : `tuple` [`float`, ...], optional
-        NFW angular scale-radius table.
-    table_einstein_radius_arcsec : `tuple` [`float`, ...], optional
-        SIS or point-mass Einstein-radius table.
+        Upper closed-form mapping boundary.
+    geometry : `LensingGeometryScalars`
+        Eagerly resolved scalar lensing geometry and physical constants.
     context_hash : `str`
         First 16 hexadecimal characters of the canonical context SHA-256.
     """
@@ -79,10 +75,7 @@ class MassMappingContext:
     cosmology_name: str
     log10_m200_lower: float
     log10_m200_upper: float
-    table_log10_m200: Tuple[float, ...]
-    table_kappa_s: Optional[Tuple[float, ...]]
-    table_scale_radius_arcsec: Optional[Tuple[float, ...]]
-    table_einstein_radius_arcsec: Optional[Tuple[float, ...]]
+    geometry: LensingGeometryScalars
     context_hash: str
 
 
@@ -112,91 +105,90 @@ def _infer_reduced_h(cosmology: Any) -> float:
     return 0.6774
 
 
-def _concentration(
-    mass_msun: float,
-    concentration_model: str,
-    x_sub: Optional[float],
-    h: Optional[float],
-    z_lens: float,
-) -> float:
-    """Evaluate the configured concentration relation."""
-    if concentration_model == "moline2017_eq7":
-        return concentration_mass_relation(
-            mass_msun,
-            model=concentration_model,
-            x_sub=x_sub,
-            h=h,
-        )
-    return concentration_mass_relation(
-        mass_msun,
-        model=concentration_model,
-        z=z_lens,
+def _canonical_context_hash(fields: Tuple[Any, ...]) -> str:
+    """Return the short SHA-256 of canonical context fields."""
+    return hashlib.sha256(repr(fields).encode("utf-8")).hexdigest()[:16]
+
+
+def _validate_geometry(geometry: LensingGeometryScalars) -> None:
+    """Reject nonfinite or nonpositive resolved geometry before tracing."""
+    values = (
+        geometry.z_lens,
+        geometry.z_source,
+        geometry.d_l_m,
+        geometry.d_s_m,
+        geometry.d_ls_m,
+        geometry.rho_crit_z_lens_kg_m3,
+        geometry.sigma_crit_kg_m2,
+        geometry.msun_kg,
+        geometry.g_si,
+        geometry.c_si,
     )
+    if not all(np.isfinite(value) for value in values):
+        raise ValueError("mass-mapping geometry values must all be finite")
+    if not all(value > 0.0 for value in values):
+        raise ValueError("mass-mapping geometry values must all be positive")
+    if geometry.z_source <= geometry.z_lens:
+        raise ValueError("mass-mapping geometry source must be behind lens")
 
 
-def _direct_mapping_values(
-    *,
+def _validate_context_inputs(
     subhalo_model: str,
     concentration_model: Optional[str],
     x_sub: Optional[float],
     h: Optional[float],
     z_lens: float,
     z_source: float,
-    cosmology: Any,
-    log10_m200: np.ndarray,
-) -> Tuple[np.ndarray, ...]:
-    """Evaluate direct mass conversions on a log-mass grid."""
-    outputs = []
-    for log_mass in log10_m200:
-        mass_msun = 10.0 ** float(log_mass)
-        if subhalo_model == "NFW":
-            c200 = _concentration(
-                mass_msun,
-                concentration_model,
-                x_sub,
-                h,
-                z_lens,
-            )
-            outputs.append(
-                nfw_lensing_parameters(
-                    mass_msun,
-                    c200,
-                    z_lens,
-                    z_source,
-                    cosmology,
-                )
-            )
-        elif subhalo_model == "SIS":
-            outputs.append(
-                (
-                    einstein_radius_sis_m200(
-                        mass_msun,
-                        z_lens,
-                        z_source,
-                        cosmology,
-                    ),
-                )
-            )
-        else:
-            outputs.append(
-                (
-                    einstein_radius_point_mass(
-                        mass_msun,
-                        z_lens,
-                        z_source,
-                        cosmology,
-                    ),
-                )
-            )
-    return tuple(
-        np.asarray(values, dtype=float)
-        for values in zip(*outputs)
+    log10_m200_lower: float,
+    log10_m200_upper: float,
+) -> None:
+    """Validate every static mass-mapping condition before tracing."""
+    if subhalo_model not in {"NFW", "SIS", "PointMass"}:
+        raise ValueError("subhalo_model must be 'NFW', 'SIS', or 'PointMass'")
+    scalar_values = (
+        z_lens,
+        z_source,
+        log10_m200_lower,
+        log10_m200_upper,
     )
+    if not all(np.isfinite(value) for value in scalar_values):
+        raise ValueError("mass-mapping scalar inputs must all be finite")
+    if z_lens <= 0.0 or z_source <= z_lens:
+        raise ValueError("z_source must be greater than positive z_lens")
+    if log10_m200_lower >= log10_m200_upper:
+        raise ValueError("log10_m200_range must contain finite ordered bounds")
 
+    if subhalo_model != "NFW":
+        if concentration_model is not None or x_sub is not None or h is not None:
+            raise ValueError(
+                "SIS and PointMass contexts do not accept concentration inputs"
+            )
+        return
+    if concentration_model not in {"moline2017_eq7", "power_law"}:
+        raise ValueError(
+            "NFW concentration_model must be 'moline2017_eq7' or "
+            "'power_law'"
+        )
+    if concentration_model == "power_law":
+        if x_sub is not None or h is not None:
+            raise ValueError("power_law contexts do not accept x_sub or h")
+        return
 
-def _canonical_context_hash(fields: Tuple[Any, ...]) -> str:
-    """Return the short SHA-256 of canonical context fields."""
-    return hashlib.sha256(repr(fields).encode("utf-8")).hexdigest()[:16]
+    if x_sub is None or not np.isfinite(x_sub) or not 0.0 < x_sub <= MOLINE_EQ7_MAX_X_SUB:
+        raise ValueError(
+            f"x_sub must satisfy 0 < x_sub <= {MOLINE_EQ7_MAX_X_SUB:g}"
+        )
+    if h is None or not np.isfinite(h) or h <= 0.0:
+        raise ValueError("h must be a finite positive number")
+    supported_lower = np.log10(MOLINE_EQ7_MIN_MASS_MSUN)
+    supported_upper = np.log10(MOLINE_EQ7_MAX_MASS_MSUN)
+    if (
+        log10_m200_lower < supported_lower
+        or log10_m200_upper > supported_upper
+    ):
+        raise ValueError(
+            "moline2017_eq7 mass range lies outside its supported domain"
+        )
 
 
 @lru_cache(maxsize=None)
@@ -211,73 +203,22 @@ def _build_context(
     log10_m200_lower: float,
     log10_m200_upper: float,
 ) -> MassMappingContext:
-    """Construct and validate one cached mapping context."""
+    """Construct and validate one cached closed-form mapping context."""
+    _validate_context_inputs(
+        subhalo_model,
+        concentration_model,
+        x_sub,
+        h,
+        z_lens,
+        z_source,
+        log10_m200_lower,
+        log10_m200_upper,
+    )
     cosmology = _cosmology_from_name(cosmology_name)
-    node_count = 2049
-    maximum_nodes = 32769
-    tolerance = 1.0e-11
-
-    while True:
-        nodes = np.linspace(
-            log10_m200_lower,
-            log10_m200_upper,
-            node_count,
-        )
-        table_outputs = _direct_mapping_values(
-            subhalo_model=subhalo_model,
-            concentration_model=concentration_model,
-            x_sub=x_sub,
-            h=h,
-            z_lens=z_lens,
-            z_source=z_source,
-            cosmology=cosmology,
-            log10_m200=nodes,
-        )
-        probes = np.linspace(
-            log10_m200_lower,
-            log10_m200_upper,
-            4 * node_count,
-        )
-        direct_outputs = _direct_mapping_values(
-            subhalo_model=subhalo_model,
-            concentration_model=concentration_model,
-            x_sub=x_sub,
-            h=h,
-            z_lens=z_lens,
-            z_source=z_source,
-            cosmology=cosmology,
-            log10_m200=probes,
-        )
-        errors = []
-        for table, direct in zip(table_outputs, direct_outputs):
-            interpolated = PchipInterpolator(nodes, table)(probes)
-            errors.append(
-                float(np.max(np.abs(interpolated - direct) / np.abs(direct)))
-            )
-        if max(errors) <= tolerance:
-            break
-        if node_count == maximum_nodes:
-            raise ValueError(
-                "Mass-mapping interpolation could not meet the 1e-11 "
-                "relative-error contract"
-            )
-        node_count = min(2 * node_count, maximum_nodes)
-
-    table_log10_m200 = tuple(float(value) for value in nodes)
-    if subhalo_model == "NFW":
-        table_kappa_s = tuple(float(value) for value in table_outputs[0])
-        table_scale_radius_arcsec = tuple(
-            float(value) for value in table_outputs[1]
-        )
-        table_einstein_radius_arcsec = None
-    else:
-        table_kappa_s = None
-        table_scale_radius_arcsec = None
-        table_einstein_radius_arcsec = tuple(
-            float(value) for value in table_outputs[0]
-        )
-
-    fields = (
+    geometry = lensing_geometry_scalars(z_lens, z_source, cosmology)
+    _validate_geometry(geometry)
+    context_fields = (
+        MASS_MAPPING_CONTEXT_SCHEMA_VERSION,
         subhalo_model,
         concentration_model,
         x_sub,
@@ -287,12 +228,30 @@ def _build_context(
         cosmology_name,
         log10_m200_lower,
         log10_m200_upper,
-        table_log10_m200,
-        table_kappa_s,
-        table_scale_radius_arcsec,
-        table_einstein_radius_arcsec,
+        geometry.z_lens,
+        geometry.z_source,
+        geometry.d_l_m,
+        geometry.d_s_m,
+        geometry.d_ls_m,
+        geometry.rho_crit_z_lens_kg_m3,
+        geometry.sigma_crit_kg_m2,
+        geometry.msun_kg,
+        geometry.g_si,
+        geometry.c_si,
     )
-    return MassMappingContext(*fields, context_hash=_canonical_context_hash(fields))
+    return MassMappingContext(
+        subhalo_model=subhalo_model,
+        concentration_model=concentration_model,
+        x_sub=x_sub,
+        h=h,
+        z_lens=z_lens,
+        z_source=z_source,
+        cosmology_name=cosmology_name,
+        log10_m200_lower=log10_m200_lower,
+        log10_m200_upper=log10_m200_upper,
+        geometry=geometry,
+        context_hash=_canonical_context_hash(context_fields),
+    )
 
 
 def build_mass_mapping_context(
@@ -306,7 +265,7 @@ def build_mass_mapping_context(
     full_config : `dict`
         Full HWO-SLAPS configuration with an enabled subhalo block.
     log10_m200_range : `tuple` [`float`, `float`], optional
-        Closed log10 M200 interpolation range.
+        Closed log10 M200 mapping range.
 
     Returns
     -------
@@ -368,42 +327,22 @@ def build_mass_mapping_context_explicit(
     cosmology_name : `str`
         Supported cosmology label.
     log10_m200_range : `tuple` [`float`, `float`], optional
-        Closed log10 M200 interpolation range.
+        Closed log10 M200 mapping range.
 
     Returns
     -------
     context : `MassMappingContext`
         Resolved mass conversion context.
     """
-    if subhalo_model not in {"NFW", "SIS", "PointMass"}:
-        raise ValueError("subhalo_model must be 'NFW', 'SIS', or 'PointMass'")
     lower, upper = (float(value) for value in log10_m200_range)
-    if not np.isfinite(lower) or not np.isfinite(upper) or lower >= upper:
-        raise ValueError("log10_m200_range must contain finite ordered bounds")
     z_lens = float(z_lens)
     z_source = float(z_source)
-    if z_lens <= 0.0 or z_source <= z_lens:
-        raise ValueError("z_source must be greater than positive z_lens")
-
-    if subhalo_model == "NFW":
-        if concentration_model not in {"moline2017_eq7", "power_law"}:
-            raise ValueError(
-                "NFW concentration_model must be 'moline2017_eq7' or "
-                "'power_law'"
-            )
-        if concentration_model == "moline2017_eq7":
-            if x_sub is None:
-                raise ValueError("x_sub is required for moline2017_eq7")
-            x_sub = float(x_sub)
-            cosmology = _cosmology_from_name(str(cosmology_name))
-            h = _infer_reduced_h(cosmology) if h is None else float(h)
-        else:
-            x_sub = None
-            h = None
+    x_sub = None if x_sub is None else float(x_sub)
+    if subhalo_model == "NFW" and concentration_model == "moline2017_eq7":
+        cosmology = _cosmology_from_name(str(cosmology_name))
+        h = _infer_reduced_h(cosmology) if h is None else float(h)
     else:
-        concentration_model = None
-        x_sub = None
-        h = None
+        h = None if h is None else float(h)
 
     return _build_context(
         subhalo_model,
@@ -416,30 +355,6 @@ def build_mass_mapping_context_explicit(
         lower,
         upper,
     )
-
-
-def _interpolators(context: MassMappingContext) -> Tuple[PchipInterpolator, ...]:
-    """Return cached PCHIP interpolators for a context."""
-    cached = _INTERPOLATOR_CACHE.get(context.context_hash)
-    if cached is not None:
-        cached_context, interpolators = cached
-        if cached_context is context or cached_context == context:
-            return interpolators
-        raise ValueError(
-            "mass-mapping context hash matches a different context"
-        )
-    nodes = np.asarray(context.table_log10_m200, dtype=float)
-    if context.subhalo_model == "NFW":
-        interpolators = (
-            PchipInterpolator(nodes, context.table_kappa_s),
-            PchipInterpolator(nodes, context.table_scale_radius_arcsec),
-        )
-    else:
-        interpolators = (
-            PchipInterpolator(nodes, context.table_einstein_radius_arcsec),
-        )
-    _INTERPOLATOR_CACHE[context.context_hash] = (context, interpolators)
-    return interpolators
 
 
 def evaluate_mass_mapping(
@@ -474,21 +389,45 @@ def evaluate_mass_mapping(
         raise ValueError(
             "log10_m200 lies outside the mass-mapping context range"
         )
-    values = _interpolators(context)
+    mass_msun = 10.0**log_mass
     if context.subhalo_model == "NFW":
-        c200 = _concentration(
-            10.0**log_mass,
-            context.concentration_model,
-            context.x_sub,
-            context.h,
-            context.z_lens,
+        if context.concentration_model == "moline2017_eq7":
+            c200 = concentration_moline2017_eq7_xp(
+                mass_msun,
+                context.x_sub,
+                context.h,
+                np,
+            )
+        else:
+            c200 = concentration_power_law_xp(
+                mass_msun,
+                context.z_lens,
+                np,
+            )
+        kappa_s, scale_radius = nfw_lensing_parameters_xp(
+            mass_msun,
+            c200,
+            context.geometry,
+            np,
         )
         return {
             "c200": float(c200),
-            "kappa_s": float(values[0](log_mass)),
-            "scale_radius_arcsec": float(values[1](log_mass)),
+            "kappa_s": float(kappa_s),
+            "scale_radius_arcsec": float(scale_radius),
         }
-    return {"einstein_radius_arcsec": float(values[0](log_mass))}
+    if context.subhalo_model == "SIS":
+        einstein_radius = einstein_radius_sis_m200_xp(
+            mass_msun,
+            context.geometry,
+            np,
+        )
+    else:
+        einstein_radius = einstein_radius_point_mass_xp(
+            mass_msun,
+            context.geometry,
+            np,
+        )
+    return {"einstein_radius_arcsec": float(einstein_radius)}
 
 
 def _build_profile_classes() -> None:

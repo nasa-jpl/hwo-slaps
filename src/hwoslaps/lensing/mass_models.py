@@ -6,6 +6,8 @@ used in subhalo lensing studies: Point Mass, Singular Isothermal Sphere (SIS),
 and Navarro-Frenk-White (NFW) profiles.
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 from astropy import constants as const
 from astropy import units as u
@@ -20,6 +22,22 @@ MOLINE_EQ7_B = -0.54
 MOLINE_EQ7_MIN_MASS_MSUN = 1.0e6
 MOLINE_EQ7_MAX_MASS_MSUN = 1.0e12
 MOLINE_EQ7_MAX_X_SUB = 1.5
+
+
+@dataclass(frozen=True)
+class LensingGeometryScalars:
+    """Resolved scalar geometry and constants for mass-to-lens mappings."""
+
+    z_lens: float
+    z_source: float
+    d_l_m: float
+    d_s_m: float
+    d_ls_m: float
+    rho_crit_z_lens_kg_m3: float
+    sigma_crit_kg_m2: float
+    msun_kg: float
+    g_si: float
+    c_si: float
 
 
 def _require_positive_finite(value, name):
@@ -184,6 +202,114 @@ def hubble_parameter_km_s_mpc(cosmology, redshift):
     om0 = float(cosmology.Om0)
     ode0 = float(getattr(cosmology, "Ode0", 1.0 - om0))
     return h0 * np.sqrt(om0 * (1.0 + redshift) ** 3 + ode0)
+
+
+def lensing_geometry_scalars(z_lens, z_source, cosmology):
+    """Resolve cosmology-dependent lensing geometry to plain floats."""
+    z_lens = float(z_lens)
+    z_source = float(z_source)
+    d_l_m = angular_diameter_distance_mpc(cosmology, z_lens) * MPC_TO_M
+    d_s_m = angular_diameter_distance_mpc(cosmology, z_source) * MPC_TO_M
+    d_ls_m = (
+        angular_diameter_distance_z1z2_mpc(cosmology, z_lens, z_source)
+        * MPC_TO_M
+    )
+    g_si = float(const.G.value)
+    c_si = float(const.c.value)
+    h_z_si = (
+        hubble_parameter_km_s_mpc(cosmology, z_lens) * KM_TO_M / MPC_TO_M
+    )
+    rho_crit = 3 * h_z_si**2 / (8 * np.pi * g_si)
+    sigma_crit = (c_si**2 / (4 * np.pi * g_si)) * (
+        d_s_m / (d_l_m * d_ls_m)
+    )
+    return LensingGeometryScalars(
+        z_lens=z_lens,
+        z_source=z_source,
+        d_l_m=float(d_l_m),
+        d_s_m=float(d_s_m),
+        d_ls_m=float(d_ls_m),
+        rho_crit_z_lens_kg_m3=float(rho_crit),
+        sigma_crit_kg_m2=float(sigma_crit),
+        msun_kg=float((1 * u.Msun).to(u.kg).value),
+        g_si=g_si,
+        c_si=c_si,
+    )
+
+
+def concentration_moline2017_eq7_xp(m200_msun, x_sub, h, xp):
+    """Evaluate Moline et al. (2017) Eq. 7 with an array namespace."""
+    log_mass_term = xp.log10((m200_msun * h) / 1.0e8)
+    polynomial = (
+        1.0
+        + (MOLINE_EQ7_A1 * log_mass_term)
+        + (MOLINE_EQ7_A2 * log_mass_term) ** 2
+        + (MOLINE_EQ7_A3 * log_mass_term) ** 3
+    )
+    radial_factor = 1.0 + MOLINE_EQ7_B * xp.log10(x_sub)
+    return MOLINE_EQ7_C0 * polynomial * radial_factor
+
+
+def concentration_power_law_xp(m200_msun, z, xp):
+    """Evaluate the legacy power-law concentration with an array namespace."""
+    c0 = 19.9
+    m0 = 1.0e8
+    alpha = -0.195
+    beta = -0.54
+    return (
+        c0
+        * xp.float_power(m200_msun / m0, alpha)
+        * xp.float_power(1.0 + z, beta)
+    )
+
+
+def nfw_lensing_parameters_xp(m200_msun, c200, geometry, xp):
+    """Return NFW lensing parameters using resolved scalar geometry."""
+    m200_kg = m200_msun * geometry.msun_kg
+    r200_m = (
+        (3 * m200_kg)
+        / (4 * xp.pi * 200 * geometry.rho_crit_z_lens_kg_m3)
+    ) ** (1 / 3)
+    rs_m = r200_m / c200
+    f_c = xp.log(1 + c200) - c200 / (1 + c200)
+    rho_s = (
+        geometry.rho_crit_z_lens_kg_m3
+        * (200.0 / 3.0)
+        * c200**3
+        / f_c
+    )
+    kappa_s = (rho_s * rs_m) / geometry.sigma_crit_kg_m2
+    scale_radius_arcsec = (rs_m / geometry.d_l_m) * ARCSEC_PER_RAD
+    return kappa_s, scale_radius_arcsec
+
+
+def einstein_radius_sis_m200_xp(m200_msun, geometry, xp):
+    """Return the SIS Einstein radius using resolved scalar geometry."""
+    m200_kg = m200_msun * geometry.msun_kg
+    r200_m = (
+        (3 * m200_kg)
+        / (4 * xp.pi * 200 * geometry.rho_crit_z_lens_kg_m3)
+    ) ** (1 / 3)
+    sigma_v_squared = geometry.g_si * m200_kg / (2 * r200_m)
+    sigma_v_m_s = xp.sqrt(sigma_v_squared)
+    theta_e_rad = (
+        4.0
+        * xp.pi
+        * (sigma_v_m_s / geometry.c_si) ** 2
+        * (geometry.d_ls_m / geometry.d_s_m)
+    )
+    return theta_e_rad * ARCSEC_PER_RAD
+
+
+def einstein_radius_point_mass_xp(m200_msun, geometry, xp):
+    """Return the point-mass Einstein radius using resolved geometry."""
+    m200_kg = m200_msun * geometry.msun_kg
+    theta_e_rad_squared = (
+        4 * geometry.g_si * m200_kg * geometry.d_ls_m
+    ) / (
+        geometry.c_si**2 * geometry.d_l_m * geometry.d_s_m
+    )
+    return xp.sqrt(theta_e_rad_squared) * ARCSEC_PER_RAD
 
 
 def einstein_radius_point_mass(mass_msun, z_lens, z_source, cosmology):

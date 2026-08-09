@@ -896,13 +896,21 @@ def subhalo_model_spec_from_trial(
             mass_context,
         )
         window = widths["subhalo_freed_centre_window_arcsec"]
+        mass_prior = uniform(
+            mass_context.log10_m200_lower,
+            mass_context.log10_m200_upper,
+        )
+        if (
+            mass_prior.lower < mass_context.log10_m200_lower
+            or mass_prior.upper > mass_context.log10_m200_upper
+        ):
+            raise ValueError(
+                "log10_m200 prior support lies outside mass_context bounds"
+            )
         parameters = {
             "centre_0": _uniform_around(y0, window),
             "centre_1": _uniform_around(x0, window),
-            "log10_m200": uniform(
-                mass_context.log10_m200_lower,
-                mass_context.log10_m200_upper,
-            ),
+            "log10_m200": mass_prior,
             "mapping_context": fixed(mass_context),
         }
         class_name = {
