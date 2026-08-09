@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import builtins
 from dataclasses import FrozenInstanceError, fields, replace
+import importlib.util
 import multiprocessing
+from pathlib import Path
 import pickle
 import sys
 from types import SimpleNamespace
@@ -882,7 +884,46 @@ def test_t12_requested_effective_disagreement_fails_before_search_fit(
     )
     assert summary.status == "failed"
     assert "effective JAX execution" in summary.error
+    assert summary.use_jax_effective is None
+    assert summary.jax_n_batch_effective is None
     assert fit_called == []
+
+
+def test_t12_failure_after_effective_verification_retains_provenance(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch loss of verified JAX provenance after a later fit failure."""
+    import autofit as af
+
+    class FailingEffectiveNautilus:
+        """Expose effective JAX state, then fail inside search execution."""
+
+        def __init__(self, **kwargs):
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+
+        def fit(self, model, analysis):
+            raise RuntimeError("synthetic search failure after verification")
+
+    monkeypatch.setattr(af, "Nautilus", FailingEffectiveNautilus)
+    runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True, jax_n_batch=32),
+        output_dir=tmp_path,
+    )
+    summary = runner.run_model(
+        model=SimpleNamespace(total_free_parameters=2),
+        analysis=SimpleNamespace(_use_jax=True),
+        role="subhalo",
+        fit_mode="freed",
+        case_id="case",
+        n_live=5,
+        analysis_key="analysis",
+    )
+    assert summary.status == "failed"
+    assert "synthetic search failure" in summary.error
+    assert summary.use_jax_effective is True
+    assert summary.jax_n_batch_effective == 32
 
 
 def test_t12_x64_helper_is_idempotent():
@@ -1036,6 +1077,35 @@ def test_t6_smooth_engine_mismatch_is_informational_and_exact():
     assert mixed.subhalo_fit.status == "success"
 
 
+def test_t6_legacy_unknown_engine_reuse_does_not_flag_cpu_mismatch():
+    """Catch treating absent legacy provenance as a known CPU disagreement."""
+    config, trial = _freed_config_and_trial()
+    dataset, metadata = _validator_dataset_and_metadata()
+    initial = NonlinearMetricValidator(
+        _IdentityRunner(use_jax=False)
+    ).validate_case(
+        dataset=dataset,
+        dataset_metadata=metadata,
+        full_config=config,
+        trial=trial,
+    )
+    legacy_smooth = replace(
+        initial.smooth_fit,
+        use_jax_requested=None,
+    )
+    reused = NonlinearMetricValidator(
+        _IdentityRunner(use_jax=False)
+    ).validate_case(
+        dataset=dataset,
+        dataset_metadata=metadata,
+        full_config=config,
+        trial=trial,
+        smooth_result=legacy_smooth,
+    )
+    assert "smooth_reused" in reused.quality_flags
+    assert "smooth_engine_mismatch" not in reused.quality_flags
+
+
 def test_t12_effective_provenance_serializes_and_old_payloads_default_null():
     """Catch omitted JSON/CSV fields or incompatible legacy construction."""
     legacy = NonlinearFitSummary("smooth", "fixed_template", "success")
@@ -1073,6 +1143,71 @@ def test_t12_effective_provenance_serializes_and_old_payloads_default_null():
     assert row["jax_n_batch_effective"] == 100
     assert row["smooth_engine_mismatch"] is True
     assert set(row) == set(NONLINEAR_CASE_CSV_COLUMNS)
+
+
+def _load_two_gpu_launcher():
+    """Load the ignored-path V7 launcher as an importable test module."""
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "scratch/item7b_probes/run_two_gpu_smoke.py"
+    )
+    spec = importlib.util.spec_from_file_location("item7b_v7_launcher", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_v7_launch_failure_terminates_reaps_and_closes_partial_children(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch an orphaned first GPU fit when the second child cannot start."""
+    launcher = _load_two_gpu_launcher()
+    arguments = SimpleNamespace(
+        config=["first.yaml", "second.yaml"],
+        gpu=["0", "1"],
+        python="python",
+        runner="runner.py",
+        log_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(launcher, "_arguments", lambda: arguments)
+
+    class PartialChild:
+        """Record cleanup calls for the one successfully started process."""
+
+        pid = 1234
+
+        def __init__(self):
+            self.terminated = False
+            self.waited = False
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self):
+            self.waited = True
+            return -15
+
+    child = PartialChild()
+    handles = []
+
+    def popen(command, **kwargs):
+        handles.append(kwargs["stdout"])
+        if len(handles) == 1:
+            return child
+        raise OSError("synthetic second-child launch failure")
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", popen)
+    with pytest.raises(OSError, match="second-child launch failure"):
+        launcher.main()
+    assert child.terminated is True
+    assert child.waited is True
+    assert len(handles) == 2
+    assert all(handle.closed for handle in handles)
 
 
 def test_t7_xp_selector_finds_nested_jax_arrays_and_tracers():

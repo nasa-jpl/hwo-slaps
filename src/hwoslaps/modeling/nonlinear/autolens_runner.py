@@ -637,6 +637,8 @@ class AutoLensFitRunner:
             Fit summary.
         """
         start = time.time()
+        use_jax_effective = None
+        jax_n_batch_effective = None
         try:
             search = self._make_search(
                 case_id=case_id,
@@ -689,6 +691,8 @@ class AutoLensFitRunner:
                 runtime_s=runtime_s,
                 error=str(exc),
                 use_jax_requested=self.settings.use_jax,
+                use_jax_effective=use_jax_effective,
+                jax_n_batch_effective=jax_n_batch_effective,
                 search_engine=self.settings.engine,
                 n_live=n_live,
                 analysis_key=analysis_key,

@@ -62,36 +62,56 @@ def main() -> int:
     log_dir.mkdir(parents=True, exist_ok=True)
     children = []
 
-    for index, (config, gpu) in enumerate(
-        zip(arguments.config, arguments.gpu),
-        start=1,
-    ):
-        environment = os.environ.copy()
-        environment["CUDA_VISIBLE_DEVICES"] = str(gpu)
-        log_path = log_dir / f"child_{index}_gpu_{gpu}.log"
-        log_handle = log_path.open("w", encoding="utf-8")
-        command = [
-            arguments.python,
-            arguments.runner,
-            "--config",
-            config,
-        ]
-        process = subprocess.Popen(
-            command,
-            env=environment,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-        )
-        children.append((process, log_handle, log_path, gpu))
-        print(
-            f"started pid={process.pid} gpu={gpu} log={log_path}",
-            flush=True,
-        )
+    try:
+        for index, (config, gpu) in enumerate(
+            zip(arguments.config, arguments.gpu),
+            start=1,
+        ):
+            environment = os.environ.copy()
+            environment["CUDA_VISIBLE_DEVICES"] = str(gpu)
+            log_path = log_dir / f"child_{index}_gpu_{gpu}.log"
+            log_handle = log_path.open("w", encoding="utf-8")
+            command = [
+                arguments.python,
+                arguments.runner,
+                "--config",
+                config,
+            ]
+            try:
+                process = subprocess.Popen(
+                    command,
+                    env=environment,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                )
+            except Exception:
+                log_handle.close()
+                raise
+            children.append((process, log_handle, log_path, gpu))
+            print(
+                f"started pid={process.pid} gpu={gpu} log={log_path}",
+                flush=True,
+            )
+    except Exception:
+        for process, log_handle, _, _ in children:
+            try:
+                if process.poll() is None:
+                    process.terminate()
+            except OSError:
+                pass
+            try:
+                process.wait()
+            except OSError:
+                pass
+            log_handle.close()
+        raise
 
     failed = False
     for process, log_handle, log_path, gpu in children:
-        return_code = process.wait()
-        log_handle.close()
+        try:
+            return_code = process.wait()
+        finally:
+            log_handle.close()
         print(
             f"finished pid={process.pid} gpu={gpu} status={return_code} "
             f"log={log_path}",
