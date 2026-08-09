@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from importlib import metadata as importlib_metadata
 import inspect
 import json
 import time
@@ -45,6 +46,8 @@ class NonlinearSearchSettings:
         Optional PyAutoFit unique tag.
     use_jax : `bool`, optional
         Whether to request PyAutoLens JAX execution.
+    jax_n_batch : `int`, optional
+        Vectorized AutoFit likelihood batch size for JAX execution only.
 
     Notes
     -----
@@ -64,6 +67,84 @@ class NonlinearSearchSettings:
     path_prefix: str = "nonlinear"
     unique_tag: Optional[str] = None
     use_jax: bool = False
+    jax_n_batch: int = 100
+
+    def __post_init__(self) -> None:
+        """Validate execution settings before analysis or search setup."""
+        if (
+            isinstance(self.jax_n_batch, bool)
+            or not isinstance(self.jax_n_batch, int)
+            or self.jax_n_batch <= 0
+        ):
+            raise ValueError("jax_n_batch must be a positive integer")
+
+
+def ensure_jax_x64() -> None:
+    """Import JAX, enable x64, and verify the effective precision mode."""
+    try:
+        import jax
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise RuntimeError(
+            "JAX likelihood was requested, but JAX could not be imported"
+        ) from exc
+
+    try:
+        jax.config.update("jax_enable_x64", True)
+        enabled = bool(jax.config.jax_enable_x64)
+    except Exception as exc:
+        raise RuntimeError(
+            "JAX likelihood was requested, but 64-bit mode could not be enabled"
+        ) from exc
+    if not enabled:
+        raise RuntimeError(
+            "JAX likelihood was requested, but 64-bit mode is not enabled"
+        )
+
+
+def _installed_version(distribution: str) -> str:
+    """Return installed distribution version text for an error message."""
+    try:
+        return importlib_metadata.version(distribution)
+    except importlib_metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _accepts_keyword(callable_obj: Any, name: str) -> bool:
+    """Return whether a callable explicitly exposes one keyword."""
+    try:
+        return name in inspect.signature(callable_obj).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def ensure_target_jax_backend() -> None:
+    """Require the installed AutoFit traced-vector Fitness API seam."""
+    try:
+        import autofit as af
+        from autofit.non_linear.fitness import Fitness
+    except (ImportError, ModuleNotFoundError) as exc:
+        raise RuntimeError(
+            "JAX likelihood was requested, but AutoFit could not be imported"
+        ) from exc
+
+    missing = []
+    if not _accepts_keyword(Fitness, "use_jax_vmap"):
+        missing.append("Fitness.use_jax_vmap")
+    if not _accepts_keyword(Fitness, "batch_size"):
+        missing.append("Fitness.batch_size")
+    instance_from_vector = getattr(af.Model, "instance_from_vector", None)
+    if instance_from_vector is None or not _accepts_keyword(
+        instance_from_vector,
+        "xp",
+    ):
+        missing.append("Model.instance_from_vector(xp=...)")
+    if missing:
+        raise RuntimeError(
+            "Unsupported installed JAX backend: "
+            f"autofit={_installed_version('autofit')}, "
+            f"autolens={_installed_version('autolens')}; "
+            "missing API seam: " + ", ".join(missing)
+        )
 
 
 def _metadata_value(metadata: Any, name: str) -> Any:
@@ -375,6 +456,12 @@ class AutoLensFitRunner:
     """
 
     def __init__(self, settings: NonlinearSearchSettings, output_dir: str):
+        if settings.use_jax and settings.number_of_cores != 1:
+            raise ValueError(
+                "JAX likelihood requires number_of_cores=1; AutoFit "
+                "vectorizes parameter batches and ignores the process count; "
+                "parallelize cases via CUDA_VISIBLE_DEVICES"
+            )
         self.settings = settings
         self.output_dir = str(output_dir)
 
@@ -403,14 +490,33 @@ class AutoLensFitRunner:
             and model_metadata.get("requires_cpu")
         ):
             raise ValueError(
-                "use_jax=True is unsupported for Item 7 custom profiles; "
-                "this model requires CPU execution"
+                "JAX likelihood cannot run a model marked "
+                "requires_cpu=True; this model requires CPU execution"
             )
+        if self.settings.use_jax:
+            ensure_jax_x64()
+            ensure_target_jax_backend()
+
         import autolens as al
 
         _patch_analysis_imaging_adapt_images_compat(al)
+        if self.settings.use_jax:
+            try:
+                analysis = al.AnalysisImaging(dataset=dataset, use_jax=True)
+            except TypeError as exc:
+                raise RuntimeError(
+                    "JAX likelihood was requested, but AutoLens could not "
+                    "construct AnalysisImaging with use_jax=True"
+                ) from exc
+            if getattr(analysis, "_use_jax", None) is not True:
+                raise RuntimeError(
+                    "JAX likelihood was requested, but constructed AutoLens "
+                    "analysis does not report _use_jax is True"
+                )
+            return analysis
+
         try:
-            return al.AnalysisImaging(dataset=dataset, use_jax=self.settings.use_jax)
+            return al.AnalysisImaging(dataset=dataset, use_jax=False)
         except TypeError:
             return al.AnalysisImaging(dataset=dataset)
 
@@ -428,6 +534,8 @@ class AutoLensFitRunner:
         import autofit as af
 
         name = f"{case_id}_{role}_{analysis_key}"
+        if self.settings.use_jax:
+            name += f"_jax_vmap_b{self.settings.jax_n_batch}"
         kwargs = {
             "path_prefix": str(Path(self.output_dir) / self.settings.path_prefix),
             "name": name,
@@ -443,8 +551,53 @@ class AutoLensFitRunner:
             "n_like_max": self.settings.maxcall,
             "seed": self.settings.seed,
         }
+        if self.settings.use_jax:
+            kwargs.update(
+                {
+                    "n_batch": int(self.settings.jax_n_batch),
+                    "use_jax_vmap": True,
+                }
+            )
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
-        return af.Nautilus(**kwargs)
+        search = af.Nautilus(**kwargs)
+        if self.settings.use_jax:
+            problems = []
+            if getattr(search, "n_batch", None) != self.settings.jax_n_batch:
+                problems.append("n_batch")
+            if getattr(search, "use_jax_vmap", None) is not True:
+                problems.append("use_jax_vmap")
+            if problems:
+                raise RuntimeError(
+                    "Nautilus does not expose the requested effective JAX "
+                    "execution seam: " + ", ".join(problems)
+                )
+        return search
+
+    def _effective_jax_provenance(
+        self,
+        analysis: Any,
+        search: Any,
+    ) -> Tuple[Optional[bool], Optional[int]]:
+        """Derive effective execution state from constructed objects."""
+        if not self.settings.use_jax:
+            return None, None
+
+        problems = []
+        if getattr(analysis, "_use_jax", None) is not True:
+            problems.append("analysis._use_jax is not True")
+        if getattr(search, "use_jax_vmap", None) is not True:
+            problems.append("search.use_jax_vmap is not True")
+        effective_batch = getattr(search, "n_batch", None)
+        if effective_batch != self.settings.jax_n_batch:
+            problems.append(
+                "search.n_batch does not match requested jax_n_batch"
+            )
+        if problems:
+            raise RuntimeError(
+                "Requested JAX execution disagrees with effective JAX "
+                "execution: " + "; ".join(problems)
+            )
+        return True, int(effective_batch)
 
     def run_model(
         self,
@@ -491,6 +644,9 @@ class AutoLensFitRunner:
                 n_live=n_live,
                 analysis_key=analysis_key,
             )
+            use_jax_effective, jax_n_batch_effective = (
+                self._effective_jax_provenance(analysis, search)
+            )
             result = search.fit(model=model, analysis=analysis)
             log_likelihood, method = extract_max_log_likelihood_with_method(result)
             warnings = []
@@ -513,6 +669,8 @@ class AutoLensFitRunner:
                 warnings=warnings,
                 log_likelihood_extraction_method=method,
                 use_jax_requested=self.settings.use_jax,
+                use_jax_effective=use_jax_effective,
+                jax_n_batch_effective=jax_n_batch_effective,
                 search_engine=self.settings.engine,
                 n_live=n_live,
                 analysis_key=analysis_key,

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import FrozenInstanceError, fields, replace
 import multiprocessing
 import pickle
+import sys
+from types import SimpleNamespace
 
 import autolens as al
 import numpy as np
@@ -16,14 +19,28 @@ from scipy.interpolate import PchipInterpolator
 from hwoslaps.constants import KM_TO_M, MPC_TO_M
 from hwoslaps.lensing import mass_models
 from hwoslaps.lensing.image_source import ImageSource
+from hwoslaps.modeling.nonlinear import autolens_runner
 from hwoslaps.modeling.nonlinear import autolens_model_builder as model_builder
+from hwoslaps.modeling.nonlinear.autolens_runner import (
+    AutoLensFitRunner,
+    NonlinearSearchSettings,
+)
 from hwoslaps.modeling.nonlinear.clumpy_profiles import (
     ClumpyTemplateContext,
     ClumpyTransformedSource,
 )
+from hwoslaps.modeling.nonlinear.dataset_builder import (
+    NonlinearDatasetMetadata,
+)
 from hwoslaps.modeling.nonlinear import mass_mapping
 from hwoslaps.modeling.nonlinear.model_specs import uniform as real_uniform
+from hwoslaps.modeling.nonlinear.output_schema import (
+    NONLINEAR_CASE_CSV_COLUMNS,
+    NonlinearCaseResult,
+    NonlinearFitSummary,
+)
 from hwoslaps.modeling.nonlinear.trial import SubhaloTrial
+from hwoslaps.modeling.nonlinear.validator import NonlinearMetricValidator
 
 
 MASS_GRID = np.logspace(6.0, 8.5, 512)
@@ -493,6 +510,569 @@ def test_t5_builder_accepts_mass_prior_at_exact_context_bounds():
     prior = spec.galaxies["lens"].components["subhalo"].parameters["log10_m200"]
     assert prior.lower == context.log10_m200_lower
     assert prior.upper == context.log10_m200_upper
+
+
+JAX_CORES_ERROR = (
+    "JAX likelihood requires number_of_cores=1; AutoFit vectorizes parameter "
+    "batches and ignores the process count; parallelize cases via "
+    "CUDA_VISIBLE_DEVICES"
+)
+
+
+def _patch_supported_jax_analysis(monkeypatch, events=None):
+    """Install a minimal effective-JAX analysis without tracing."""
+    events = [] if events is None else events
+
+    def ensure_x64():
+        events.append("x64")
+
+    def ensure_backend():
+        events.append("backend")
+
+    class AnalysisImaging:
+        """Record explicit JAX construction and expose its effective state."""
+
+        def __init__(self, dataset, use_jax):
+            events.append(("analysis", use_jax))
+            self.dataset = dataset
+            self._use_jax = use_jax
+
+    monkeypatch.setattr(autolens_runner, "ensure_jax_x64", ensure_x64)
+    monkeypatch.setattr(
+        autolens_runner,
+        "ensure_target_jax_backend",
+        ensure_backend,
+    )
+    monkeypatch.setattr(al, "AnalysisImaging", AnalysisImaging)
+    monkeypatch.setattr(
+        autolens_runner,
+        "_patch_analysis_imaging_adapt_images_compat",
+        lambda module: None,
+    )
+    return events
+
+
+def test_t6_jax_rejects_nonunit_process_count_with_exact_message(tmp_path):
+    """Catch silent acceptance of a process count AutoFit ignores for JAX."""
+    with pytest.raises(ValueError) as error:
+        AutoLensFitRunner(
+            NonlinearSearchSettings(use_jax=True, number_of_cores=2),
+            output_dir=tmp_path,
+        )
+    assert str(error.value) == JAX_CORES_ERROR
+
+
+@pytest.mark.parametrize("jax_n_batch", [0, -1])
+def test_t6_jax_batch_size_must_be_positive(jax_n_batch):
+    """Catch zero or negative vectorized batch settings before search setup."""
+    with pytest.raises(ValueError, match="jax_n_batch must be a positive integer"):
+        NonlinearSearchSettings(jax_n_batch=jax_n_batch)
+
+
+def test_t6_missing_jax_fails_explicitly(monkeypatch):
+    """Catch import errors that do not identify the requested engine."""
+    real_import = builtins.__import__
+
+    def import_without_jax(name, *args, **kwargs):
+        if name == "jax":
+            raise ModuleNotFoundError("synthetic missing jax")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_jax)
+    with pytest.raises(RuntimeError, match="JAX likelihood was requested.*import"):
+        autolens_runner.ensure_jax_x64()
+
+
+def test_t6_x64_enablement_failure_is_fatal(monkeypatch):
+    """Catch a JAX config update that leaves 64-bit likelihoods disabled."""
+
+    class DisabledConfig:
+        """Ignore x64 updates to emulate an ineffective installed backend."""
+
+        jax_enable_x64 = False
+
+        def update(self, name, value):
+            assert name == "jax_enable_x64"
+            assert value is True
+
+    monkeypatch.setitem(sys.modules, "jax", SimpleNamespace(config=DisabledConfig()))
+    with pytest.raises(RuntimeError, match="64-bit mode"):
+        autolens_runner.ensure_jax_x64()
+
+
+def test_t6_backend_feature_check_names_every_missing_fitness_model_seam(
+    monkeypatch,
+):
+    """Catch version-only acceptance of missing traced-vector APIs."""
+    import autofit as af
+    from autofit.non_linear import fitness as fitness_module
+
+    class UnsupportedFitness:
+        """Omit the target vectorization and batch constructor keywords."""
+
+        def __init__(self, model, analysis):
+            self.model = model
+            self.analysis = analysis
+
+    def unsupported_instance_from_vector(self, vector):
+        return vector
+
+    monkeypatch.setattr(fitness_module, "Fitness", UnsupportedFitness)
+    monkeypatch.setattr(
+        af.Model,
+        "instance_from_vector",
+        unsupported_instance_from_vector,
+    )
+    with pytest.raises(RuntimeError) as error:
+        autolens_runner.ensure_target_jax_backend()
+    message = str(error.value)
+    assert "installed" in message
+    assert "Fitness.use_jax_vmap" in message
+    assert "Fitness.batch_size" in message
+    assert "Model.instance_from_vector(xp=...)" in message
+
+
+def test_t6_x64_is_enabled_before_autolens_analysis_construction(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch importing or constructing AutoLens before x64 is established."""
+    events = _patch_supported_jax_analysis(monkeypatch)
+    analysis = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True),
+        output_dir=tmp_path,
+    ).make_analysis(dataset=object(), model_metadata={})
+    assert analysis._use_jax is True
+    assert events == ["x64", "backend", ("analysis", True)]
+
+
+def test_t6_jax_analysis_typeerror_never_silently_downgrades(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch the TypeError fallback disabling an explicit JAX request."""
+    calls = []
+
+    class RejectingAnalysis:
+        """Reject the target keyword and record fallback attempts."""
+
+        def __init__(self, dataset, **kwargs):
+            calls.append(kwargs)
+            if "use_jax" in kwargs:
+                raise TypeError("synthetic unsupported use_jax")
+
+    monkeypatch.setattr(autolens_runner, "ensure_jax_x64", lambda: None)
+    monkeypatch.setattr(
+        autolens_runner,
+        "ensure_target_jax_backend",
+        lambda: None,
+    )
+    monkeypatch.setattr(al, "AnalysisImaging", RejectingAnalysis)
+    monkeypatch.setattr(
+        autolens_runner,
+        "_patch_analysis_imaging_adapt_images_compat",
+        lambda module: None,
+    )
+    runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True),
+        output_dir=tmp_path,
+    )
+    with pytest.raises(RuntimeError, match="could not construct.*use_jax=True"):
+        runner.make_analysis(dataset=object(), model_metadata={})
+    assert calls == [{"use_jax": True}]
+
+
+def test_t6_cpu_analysis_retains_legacy_typeerror_fallback(monkeypatch, tmp_path):
+    """Catch removal of the old-backend CPU construction fallback."""
+    calls = []
+
+    class LegacyAnalysis:
+        """Accept only the legacy constructor without a use_jax keyword."""
+
+        def __init__(self, dataset, **kwargs):
+            calls.append(kwargs)
+            if kwargs:
+                raise TypeError("legacy constructor")
+            self.dataset = dataset
+
+    monkeypatch.setattr(al, "AnalysisImaging", LegacyAnalysis)
+    monkeypatch.setattr(
+        autolens_runner,
+        "_patch_analysis_imaging_adapt_images_compat",
+        lambda module: None,
+    )
+    analysis = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=False),
+        output_dir=tmp_path,
+    ).make_analysis(dataset=object(), model_metadata={})
+    assert analysis.dataset is not None
+    assert calls == [{"use_jax": False}, {}]
+
+
+def test_t6_requires_cpu_guard_remains_general_and_precedes_backend_import(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch deletion of the dormant guard or coupling it to Item 7 wording."""
+    monkeypatch.setattr(
+        autolens_runner,
+        "ensure_jax_x64",
+        lambda: pytest.fail("requires_cpu must fail before importing JAX"),
+        raising=False,
+    )
+    runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True),
+        output_dir=tmp_path,
+    )
+    with pytest.raises(ValueError, match="model marked requires_cpu=True"):
+        runner.make_analysis(
+            dataset=object(),
+            model_metadata={"requires_cpu": True},
+        )
+
+
+def test_t6_search_name_and_vectorized_kwargs_change_only_for_jax(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch CPU resume drift or omission of the JAX execution token/kwargs."""
+    import autofit as af
+
+    captured = []
+
+    class CapturingNautilus:
+        """Expose effective execution attributes passed by runner."""
+
+        def __init__(self, **kwargs):
+            captured.append(dict(kwargs))
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+
+    monkeypatch.setattr(af, "Nautilus", CapturingNautilus)
+    cpu_runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=False),
+        output_dir=tmp_path,
+    )
+    cpu_runner._make_search("case", "smooth", 5, "analysis")
+    jax_runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True, jax_n_batch=32),
+        output_dir=tmp_path,
+    )
+    jax_runner._make_search("case", "smooth", 5, "analysis")
+
+    cpu_kwargs, jax_kwargs = captured
+    assert cpu_kwargs["name"] == "case_smooth_analysis"
+    assert "n_batch" not in cpu_kwargs
+    assert "use_jax_vmap" not in cpu_kwargs
+    assert jax_kwargs["name"] == "case_smooth_analysis_jax_vmap_b32"
+    assert jax_kwargs["n_batch"] == 32
+    assert jax_kwargs["use_jax_vmap"] is True
+    without_jax = {
+        key: value
+        for key, value in jax_kwargs.items()
+        if key not in {"name", "n_batch", "use_jax_vmap"}
+    }
+    without_cpu_name = {
+        key: value for key, value in cpu_kwargs.items() if key != "name"
+    }
+    assert without_jax == without_cpu_name
+
+
+def test_t6_constructed_nautilus_must_expose_effective_vectorized_seam(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch a kwargs-tolerant backend silently ignoring JAX batch controls."""
+    import autofit as af
+
+    class IgnoringNautilus:
+        """Accept but discard every keyword like an unsupported loose API."""
+
+        def __init__(self, **kwargs):
+            self.name = kwargs["name"]
+
+    monkeypatch.setattr(af, "Nautilus", IgnoringNautilus)
+    runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True, jax_n_batch=8),
+        output_dir=tmp_path,
+    )
+    with pytest.raises(RuntimeError, match="Nautilus.*n_batch.*use_jax_vmap"):
+        runner._make_search("case", "subhalo", 5, "analysis")
+
+
+def _successful_result(log_likelihood=-5.0):
+    """Return the smallest result accepted by runner summary extraction."""
+    sample = SimpleNamespace(log_likelihood=log_likelihood)
+    return SimpleNamespace(
+        samples=SimpleNamespace(max_log_likelihood=lambda: sample),
+    )
+
+
+def test_t12_successful_jax_summary_uses_effective_analysis_and_search_state(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch request-copy provenance that ignores constructed runtime state."""
+    import autofit as af
+
+    class EffectiveNautilus:
+        """Expose target attributes and return one successful search result."""
+
+        def __init__(self, **kwargs):
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+
+        def fit(self, model, analysis):
+            assert analysis._use_jax is True
+            return _successful_result()
+
+    monkeypatch.setattr(af, "Nautilus", EffectiveNautilus)
+    runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True, jax_n_batch=32),
+        output_dir=tmp_path,
+    )
+    summary = runner.run_model(
+        model=SimpleNamespace(total_free_parameters=2),
+        analysis=SimpleNamespace(_use_jax=True),
+        role="subhalo",
+        fit_mode="freed",
+        case_id="case",
+        n_live=5,
+        analysis_key="analysis",
+    )
+    assert summary.status == "success"
+    assert summary.use_jax_requested is True
+    assert summary.use_jax_effective is True
+    assert summary.jax_n_batch_effective == 32
+
+
+def test_t12_requested_effective_disagreement_fails_before_search_fit(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch a successful summary after runtime JAX state was downgraded."""
+    import autofit as af
+
+    fit_called = []
+
+    class DowngradedNautilus:
+        """Expose a backend that ignored the vectorization request."""
+
+        def __init__(self, **kwargs):
+            self.n_batch = kwargs["n_batch"]
+            self.use_jax_vmap = False
+
+        def fit(self, model, analysis):
+            fit_called.append(True)
+            return _successful_result()
+
+    monkeypatch.setattr(af, "Nautilus", DowngradedNautilus)
+    runner = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True, jax_n_batch=8),
+        output_dir=tmp_path,
+    )
+    summary = runner.run_model(
+        model=SimpleNamespace(total_free_parameters=2),
+        analysis=SimpleNamespace(_use_jax=True),
+        role="subhalo",
+        fit_mode="freed",
+        case_id="case",
+        n_live=5,
+        analysis_key="analysis",
+    )
+    assert summary.status == "failed"
+    assert "effective JAX execution" in summary.error
+    assert fit_called == []
+
+
+def test_t12_x64_helper_is_idempotent():
+    """Catch stateful x64 setup that fails or disables itself on repetition."""
+    jax = pytest.importorskip("jax")
+    autolens_runner.ensure_jax_x64()
+    autolens_runner.ensure_jax_x64()
+    assert jax.config.jax_enable_x64 is True
+
+
+@pytest.mark.xtx_gpu
+def test_t12_real_target_fitness_output_is_float64():
+    """Catch float32 contamination at the installed vectorized Fitness seam."""
+    try:
+        autolens_runner.ensure_target_jax_backend()
+    except RuntimeError as error:
+        pytest.skip(str(error))
+    autolens_runner.ensure_jax_x64()
+
+    import autofit as af
+    from autofit.non_linear.fitness import Fitness
+    import jax.numpy as jnp
+
+    class ScalarModel:
+        """Trace-safe scalar instance for the real Fitness boundary."""
+
+        def __init__(self, value=0.0):
+            self.value = value
+
+    class QuadraticAnalysis:
+        """Return a scalar likelihood without imposing a NumPy dtype."""
+
+        _xp = jnp
+
+        def log_likelihood_function(self, instance):
+            return -jnp.square(instance.value)
+
+    model = af.Model(ScalarModel)
+    model.value = af.UniformPrior(lower_limit=-1.0, upper_limit=1.0)
+    fitness = Fitness(
+        model=model,
+        analysis=QuadraticAnalysis(),
+        paths=None,
+        use_jax_vmap=True,
+        batch_size=2,
+    )
+    result = fitness.call_wrap(np.asarray([[-0.25], [0.5]], dtype=np.float64))
+    assert np.asarray(result).dtype == np.dtype(np.float64)
+
+
+def _validator_dataset_and_metadata():
+    """Return deterministic identity inputs for validator contract tests."""
+    dataset = SimpleNamespace(
+        data=np.zeros((2, 2), dtype=float),
+        noise_map=np.ones((2, 2), dtype=float),
+        psf=np.eye(2, dtype=float),
+    )
+    metadata = NonlinearDatasetMetadata(
+        dataset_kind="asimov",
+        data_units="adu",
+        background_treatment="subtract_known",
+        sky_dark_background_adu=0.0,
+        mask_name="all_pixels",
+        n_unmasked_pixels=4,
+        psf_truth_label="truth",
+        psf_fit_label="fit",
+    )
+    return dataset, metadata
+
+
+class _IdentityAnalysis:
+    """Record the object receiving the C1 fixed-point evaluation."""
+
+    def __init__(self):
+        self.fixed_point_calls = 0
+
+    def log_likelihood_function(self, instance):
+        self.fixed_point_calls += 1
+        return -5.0
+
+
+class _IdentityRunner:
+    """Record analysis identity while returning deterministic summaries."""
+
+    def __init__(self, use_jax=False):
+        self.settings = NonlinearSearchSettings(use_jax=use_jax)
+        self.analysis = _IdentityAnalysis()
+        self.calls = []
+
+    def make_analysis(self, dataset, model_metadata=None):
+        return self.analysis
+
+    def run_model(self, **kwargs):
+        self.calls.append(kwargs)
+        return NonlinearFitSummary(
+            model_role=kwargs["role"],
+            fit_mode=kwargs["fit_mode"],
+            status="success",
+            log_likelihood_max=-10.0 if kwargs["role"] == "smooth" else -4.0,
+            analysis_key=kwargs["analysis_key"],
+            use_jax_requested=self.settings.use_jax,
+        )
+
+
+def test_t6_c1_fixed_point_uses_exact_freed_analysis_object():
+    """Catch reconstruction of C1 on an engine-distinct analysis object."""
+    config, trial = _freed_config_and_trial()
+    dataset, metadata = _validator_dataset_and_metadata()
+    runner = _IdentityRunner()
+    NonlinearMetricValidator(runner).validate_case(
+        dataset=dataset,
+        dataset_metadata=metadata,
+        full_config=config,
+        trial=trial,
+        fit_mode="freed",
+        mass_context=_context(),
+    )
+    assert runner.analysis.fixed_point_calls == 1
+    assert len(runner.calls) == 2
+    assert all(call["analysis"] is runner.analysis for call in runner.calls)
+
+
+def test_t6_smooth_engine_mismatch_is_informational_and_exact():
+    """Catch missing/misfiring engine provenance flags on smooth reuse."""
+    config, trial = _freed_config_and_trial()
+    dataset, metadata = _validator_dataset_and_metadata()
+    cpu_runner = _IdentityRunner(use_jax=False)
+    first = NonlinearMetricValidator(cpu_runner).validate_case(
+        dataset=dataset,
+        dataset_metadata=metadata,
+        full_config=config,
+        trial=trial,
+    )
+
+    same = NonlinearMetricValidator(_IdentityRunner(use_jax=False)).validate_case(
+        dataset=dataset,
+        dataset_metadata=metadata,
+        full_config=config,
+        trial=trial,
+        smooth_result=first.smooth_fit,
+    )
+    mixed = NonlinearMetricValidator(_IdentityRunner(use_jax=True)).validate_case(
+        dataset=dataset,
+        dataset_metadata=metadata,
+        full_config=config,
+        trial=trial,
+        smooth_result=first.smooth_fit,
+    )
+    assert "smooth_engine_mismatch" not in same.quality_flags
+    assert "smooth_engine_mismatch" in mixed.quality_flags
+    assert mixed.subhalo_fit.status == "success"
+
+
+def test_t12_effective_provenance_serializes_and_old_payloads_default_null():
+    """Catch omitted JSON/CSV fields or incompatible legacy construction."""
+    legacy = NonlinearFitSummary("smooth", "fixed_template", "success")
+    assert legacy.to_dict()["use_jax_effective"] is None
+    assert legacy.to_dict()["jax_n_batch_effective"] is None
+
+    effective = NonlinearFitSummary(
+        "subhalo",
+        "freed",
+        "success",
+        use_jax_requested=True,
+        use_jax_effective=True,
+        jax_n_batch_effective=100,
+    )
+    config, trial = _freed_config_and_trial()
+    del config
+    dataset, metadata = _validator_dataset_and_metadata()
+    del dataset
+    case = NonlinearCaseResult(
+        case_id=trial.case_id,
+        trial=trial,
+        dataset_metadata=metadata,
+        fit_mode="freed",
+        psf_case="nominal",
+        smooth_fit=legacy,
+        subhalo_fit=effective,
+        metric=None,
+        quality_flags=["smooth_engine_mismatch"],
+    )
+    nested = case.to_dict()["subhalo_fit"]
+    row = case.to_csv_row()
+    assert nested["use_jax_effective"] is True
+    assert nested["jax_n_batch_effective"] == 100
+    assert row["use_jax_effective"] is True
+    assert row["jax_n_batch_effective"] == 100
+    assert row["smooth_engine_mismatch"] is True
+    assert set(row) == set(NONLINEAR_CASE_CSV_COLUMNS)
 
 
 def test_t7_xp_selector_finds_nested_jax_arrays_and_tracers():

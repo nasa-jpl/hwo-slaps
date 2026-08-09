@@ -66,6 +66,9 @@ NONLINEAR_CASE_CSV_COLUMNS = (
     "smooth_reused",
     "freed_below_fixed_template",
     "n_like_max_reached",
+    "use_jax_effective",
+    "jax_n_batch_effective",
+    "smooth_engine_mismatch",
 )
 """CSV columns emitted for nonlinear validation cases."""
 
@@ -121,6 +124,10 @@ class NonlinearFitSummary:
         Accessor used to extract ``log_likelihood_max``.
     use_jax_requested : `bool`, optional
         Whether JAX execution was requested.
+    use_jax_effective : `bool`, optional
+        Whether the constructed analysis and search used JAX effectively.
+    jax_n_batch_effective : `int`, optional
+        Effective vectorized likelihood batch size from the search object.
     search_engine : `str`, optional
         Search backend name.
     n_live : `int`, optional
@@ -148,6 +155,8 @@ class NonlinearFitSummary:
     n_live: Optional[int] = None
     analysis_key: Optional[str] = None
     n_like_max_reached: Optional[bool] = None
+    use_jax_effective: Optional[bool] = None
+    jax_n_batch_effective: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the fit summary to a JSON-compatible dictionary."""
@@ -605,6 +614,13 @@ class NonlinearCaseResult:
                 "freed_below_fixed_template" in self.quality_flags
             ),
             "n_like_max_reached": self.subhalo_fit.n_like_max_reached,
+            "use_jax_effective": self.subhalo_fit.use_jax_effective,
+            "jax_n_batch_effective": (
+                self.subhalo_fit.jax_n_batch_effective
+            ),
+            "smooth_engine_mismatch": (
+                "smooth_engine_mismatch" in self.quality_flags
+            ),
         }
         return _json_safe(row)
 

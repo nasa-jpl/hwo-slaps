@@ -162,6 +162,8 @@ class NonlinearMetricValidator:
                 )
             smooth_fit = smooth_result
             quality_flags.append("smooth_reused")
+        if smooth_fit.use_jax_requested != self.runner.settings.use_jax:
+            quality_flags.append("smooth_engine_mismatch")
 
         recovery_holder = {}
 
