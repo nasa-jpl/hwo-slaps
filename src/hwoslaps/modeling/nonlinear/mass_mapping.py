@@ -36,6 +36,42 @@ if TYPE_CHECKING:
     SISMCRSubhalo: Any
 
 
+def _as_float(value: Any) -> Any:
+    """Convert concrete scalars to float while preserving traced values."""
+    if isinstance(value, (int, float, np.generic)):
+        return float(value)
+    return value
+
+
+def _xp_for(*values: Any) -> Any:
+    """Select JAX for concrete arrays or tracers nested in input values."""
+    try:
+        import jax
+        import jax.numpy as jnp
+    except ImportError:
+        return np
+
+    jax_types = tuple(
+        value_type
+        for value_type in (
+            getattr(jax, "Array", None),
+            getattr(jax.core, "Tracer", None),
+        )
+        if isinstance(value_type, type)
+    )
+    pending = list(values)
+    while pending:
+        value = pending.pop()
+        if jax_types and isinstance(value, jax_types):
+            return jnp
+        if isinstance(value, dict):
+            pending.extend(value.keys())
+            pending.extend(value.values())
+        elif isinstance(value, (tuple, list)):
+            pending.extend(value)
+    return np
+
+
 @dataclass(frozen=True)
 class MassMappingContext:
     """Immutable mass-to-profile conversion context.
@@ -460,19 +496,39 @@ def _build_profile_classes() -> None:
                 raise ValueError("mapping_context is required for freed NFW fits")
             if mapping_context.subhalo_model != "NFW":
                 raise ValueError("NFWMCRSubhaloSph requires an NFW context")
-            derived = evaluate_mass_mapping(mapping_context, log10_m200)
+            xp = _xp_for(centre, log10_m200)
+            mass_msun = 10.0**log10_m200
+            if mapping_context.concentration_model == "moline2017_eq7":
+                concentration = concentration_moline2017_eq7_xp(
+                    mass_msun,
+                    mapping_context.x_sub,
+                    mapping_context.h,
+                    xp,
+                )
+            elif mapping_context.concentration_model == "power_law":
+                concentration = concentration_power_law_xp(
+                    mass_msun,
+                    mapping_context.z_lens,
+                    xp,
+                )
+            else:
+                raise ValueError("NFWMCRSubhaloSph requires a supported relation")
+            kappa_s, scale_radius = nfw_lensing_parameters_xp(
+                mass_msun,
+                concentration,
+                mapping_context.geometry,
+                xp,
+            )
             super().__init__(
                 centre=centre,
-                kappa_s=derived["kappa_s"],
-                scale_radius=derived["scale_radius_arcsec"],
+                kappa_s=kappa_s,
+                scale_radius=scale_radius,
             )
-            self.log10_m200 = float(log10_m200)
+            self.log10_m200 = _as_float(log10_m200)
             self.mapping_context = mapping_context
-            self.concentration = float(derived["c200"])
-            self.kappa_s_derived = float(derived["kappa_s"])
-            self.scale_radius_arcsec_derived = float(
-                derived["scale_radius_arcsec"]
-            )
+            self.concentration = _as_float(concentration)
+            self.kappa_s_derived = _as_float(kappa_s)
+            self.scale_radius_arcsec_derived = _as_float(scale_radius)
 
     class SISMCRSubhalo(al.mp.IsothermalSph):
         """SIS profile whose Einstein radius is derived from log10 M200.
@@ -497,16 +553,19 @@ def _build_profile_classes() -> None:
                 raise ValueError("mapping_context is required for freed SIS fits")
             if mapping_context.subhalo_model != "SIS":
                 raise ValueError("SISMCRSubhalo requires an SIS context")
-            derived = evaluate_mass_mapping(mapping_context, log10_m200)
+            xp = _xp_for(centre, log10_m200)
+            einstein_radius = einstein_radius_sis_m200_xp(
+                10.0**log10_m200,
+                mapping_context.geometry,
+                xp,
+            )
             super().__init__(
                 centre=centre,
-                einstein_radius=derived["einstein_radius_arcsec"],
+                einstein_radius=einstein_radius,
             )
-            self.log10_m200 = float(log10_m200)
+            self.log10_m200 = _as_float(log10_m200)
             self.mapping_context = mapping_context
-            self.einstein_radius_arcsec_derived = float(
-                derived["einstein_radius_arcsec"]
-            )
+            self.einstein_radius_arcsec_derived = _as_float(einstein_radius)
 
     class PointMassMCRSubhalo(al.mp.PointMass):
         """Point mass whose Einstein radius is derived from log10 M200.
@@ -535,16 +594,45 @@ def _build_profile_classes() -> None:
                 raise ValueError(
                     "PointMassMCRSubhalo requires a PointMass context"
                 )
-            derived = evaluate_mass_mapping(mapping_context, log10_m200)
+            xp = _xp_for(centre, log10_m200)
+            einstein_radius = einstein_radius_point_mass_xp(
+                10.0**log10_m200,
+                mapping_context.geometry,
+                xp,
+            )
             super().__init__(
                 centre=centre,
-                einstein_radius=derived["einstein_radius_arcsec"],
+                einstein_radius=einstein_radius,
             )
-            self.log10_m200 = float(log10_m200)
+            self.log10_m200 = _as_float(log10_m200)
             self.mapping_context = mapping_context
-            self.einstein_radius_arcsec_derived = float(
-                derived["einstein_radius_arcsec"]
+            self.einstein_radius_arcsec_derived = _as_float(einstein_radius)
+
+        def _cartesian_grid_via_radial_from(
+            self,
+            grid,
+            radius,
+            xp=np,
+            **kwargs,
+        ):
+            """Unwrap AutoArray radius values only on the JAX path."""
+            if xp is np:
+                return super()._cartesian_grid_via_radial_from(
+                    grid=grid,
+                    radius=radius,
+                    xp=xp,
+                    **kwargs,
+                )
+            grid_values = grid.array if hasattr(grid, "array") else grid
+            radius_values = (
+                radius.array if hasattr(radius, "array") else radius
             )
+            angles = xp.arctan2(grid_values[:, 0], grid_values[:, 1])
+            directions = xp.stack(
+                (xp.sin(angles), xp.cos(angles)),
+                axis=-1,
+            )
+            return xp.multiply(radius_values[:, None], directions)
 
     for profile_class in (
         NFWMCRSubhaloSph,

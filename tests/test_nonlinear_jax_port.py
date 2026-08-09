@@ -15,7 +15,12 @@ from scipy.interpolate import PchipInterpolator
 
 from hwoslaps.constants import KM_TO_M, MPC_TO_M
 from hwoslaps.lensing import mass_models
+from hwoslaps.lensing.image_source import ImageSource
 from hwoslaps.modeling.nonlinear import autolens_model_builder as model_builder
+from hwoslaps.modeling.nonlinear.clumpy_profiles import (
+    ClumpyTemplateContext,
+    ClumpyTransformedSource,
+)
 from hwoslaps.modeling.nonlinear import mass_mapping
 from hwoslaps.modeling.nonlinear.model_specs import uniform as real_uniform
 from hwoslaps.modeling.nonlinear.trial import SubhaloTrial
@@ -29,6 +34,30 @@ def _assert_true_relative(actual, expected, tolerance):
     actual = np.asarray(actual)
     expected = np.asarray(expected)
     assert np.all(np.abs(actual - expected) <= tolerance * np.abs(expected))
+
+
+def _assert_finite_difference(actual, expected):
+    """Apply the required relative gradient gate with a near-zero fallback."""
+    actual = np.asarray(actual, dtype=float)
+    expected = np.asarray(expected, dtype=float)
+    assert np.all(np.isfinite(actual))
+    assert np.all(np.isfinite(expected))
+    difference = np.abs(actual - expected)
+    tolerance = 1.0e-6 * np.abs(expected) + 1.0e-8
+    assert np.all(difference <= tolerance), (actual, expected, difference)
+
+
+def _central_difference(function, parameters, step=1.0e-5):
+    """Return independent central differences for every scalar parameter."""
+    parameters = np.asarray(parameters, dtype=float)
+    derivatives = []
+    for index in range(parameters.size):
+        upper = parameters.copy()
+        lower = parameters.copy()
+        upper[index] += step
+        lower[index] -= step
+        derivatives.append((function(upper) - function(lower)) / (2.0 * step))
+    return np.asarray(derivatives)
 
 
 def _geometry():
@@ -464,3 +493,384 @@ def test_t5_builder_accepts_mass_prior_at_exact_context_bounds():
     prior = spec.galaxies["lens"].components["subhalo"].parameters["log10_m200"]
     assert prior.lower == context.log10_m200_lower
     assert prior.upper == context.log10_m200_upper
+
+
+def test_t7_xp_selector_finds_nested_jax_arrays_and_tracers():
+    """Catch shallow traversal or omission of either supported JAX type."""
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    jax.config.update("jax_enable_x64", True)
+    concrete = jnp.asarray(0.37)
+    assert mass_mapping._xp_for({"outer": [(concrete,)]}) is jnp
+
+    @jax.jit
+    def traced(value):
+        xp = mass_mapping._xp_for({"outer": [(value,)]})
+        return xp.sin(value)
+
+    actual = traced(concrete)
+    np.testing.assert_allclose(np.asarray(actual), np.sin(0.37), rtol=0.0, atol=0.0)
+
+
+@pytest.mark.parametrize(
+    "model,relation,adapter",
+    [
+        ("NFW", "moline2017_eq7", "NFWMCRSubhaloSph"),
+        ("NFW", "power_law", "NFWMCRSubhaloSph"),
+        ("SIS", None, "SISMCRSubhalo"),
+        ("PointMass", None, "PointMassMCRSubhalo"),
+    ],
+)
+def test_t7_mass_adapters_construct_and_evaluate_under_persistent_jit(
+    model,
+    relation,
+    adapter,
+):
+    """Catch tracer casts, NumPy derivations, and frozen traced mass values."""
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    jax.config.update("jax_enable_x64", True)
+    context = _context(
+        model=model,
+        relation=relation or "moline2017_eq7",
+    )
+    adapter_class = getattr(mass_mapping, adapter)
+    grid = al.Grid2D.uniform(
+        shape_native=(3, 3),
+        pixel_scales=0.14,
+        origin=(0.04, -0.02),
+    )
+
+    def traced_image(log_mass):
+        profile = adapter_class(
+            centre=(0.02, -0.03),
+            log10_m200=log_mass,
+            mapping_context=context,
+        )
+        return profile.deflections_yx_2d_from(grid=grid, xp=jnp).array
+
+    def eager_objective(log_mass):
+        profile = adapter_class(
+            centre=(0.02, -0.03),
+            log10_m200=float(log_mass),
+            mapping_context=context,
+        )
+        values = profile.deflections_yx_2d_from(grid=grid, xp=np)
+        return float(np.asarray(values).sum())
+
+    persistent = jax.jit(traced_image)
+    first = persistent(jnp.asarray(7.0))
+    changed = persistent(jnp.asarray(7.2))
+    eager = adapter_class(
+        centre=(0.02, -0.03),
+        log10_m200=7.0,
+        mapping_context=context,
+    ).deflections_yx_2d_from(grid=grid, xp=np)
+    np.testing.assert_allclose(
+        np.asarray(first),
+        np.asarray(eager),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    assert not np.array_equal(np.asarray(first), np.asarray(changed))
+
+    gradient = jax.grad(lambda value: jnp.sum(traced_image(value)))(
+        jnp.asarray(7.0)
+    )
+    finite_difference = (
+        eager_objective(7.0 + 1.0e-5)
+        - eager_objective(7.0 - 1.0e-5)
+    ) / (2.0e-5)
+    _assert_finite_difference(np.asarray(gradient), finite_difference)
+
+
+def _clumpy_context():
+    """Return a nondegenerate fixed host-and-clump template."""
+    return ClumpyTemplateContext(
+        host=(0.11, -0.07, 1.8, 0.16, 1.4),
+        host_centre=(0.03, -0.04),
+        clumps=(
+            (0.09, -0.06, 0.03, -0.02, 0.7, 0.035, 1.1),
+            (-0.08, 0.05, -0.04, 0.01, 0.5, 0.028, 0.9),
+        ),
+        context_hash="item7b-t8",
+    )
+
+
+def _clumpy_profile(parameters, mode):
+    """Construct a rigid or host-free profile from flat parameters."""
+    arguments = {
+        "centre": (parameters[0], parameters[1]),
+        "flux_scale": parameters[2],
+        "size_scale": parameters[3],
+        "host_ell_comps": (0.11, -0.07),
+        "host_intensity": 1.8,
+        "host_effective_radius": 0.16,
+        "host_sersic_index": 1.4,
+        "template_context": _clumpy_context(),
+    }
+    if mode == "host_free":
+        arguments.update(
+            host_ell_comps=(parameters[4], parameters[5]),
+            host_intensity=parameters[6],
+            host_effective_radius=parameters[7],
+            host_sersic_index=parameters[8],
+        )
+    return ClumpyTransformedSource(**arguments)
+
+
+@pytest.mark.parametrize(
+    "mode,parameters",
+    [
+        ("rigid", [0.03, -0.04, 1.15, 0.92]),
+        (
+            "host_free",
+            [0.03, -0.04, 1.15, 0.92, 0.11, -0.07, 1.8, 0.16, 1.4],
+        ),
+    ],
+)
+def test_t8_clumpy_profiles_trace_every_sampled_scalar(mode, parameters):
+    """Catch scalar casts, lost xp threading, or detached clumpy parameters."""
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    jax.config.update("jax_enable_x64", True)
+    parameters = np.asarray(parameters, dtype=float)
+    grid = al.Grid2D.uniform(
+        shape_native=(3, 3),
+        pixel_scales=0.11,
+        origin=(0.04, -0.02),
+    )
+
+    def traced_image(values):
+        image = _clumpy_profile(values, mode).image_2d_from(
+            grid=grid,
+            xp=jnp,
+        )
+        return image.array
+
+    def eager_image(values):
+        return np.asarray(
+            _clumpy_profile(values, mode).image_2d_from(
+                grid=grid,
+                xp=np,
+            )
+        )
+
+    def eager_objective(values):
+        return float(eager_image(values).sum())
+
+    persistent = jax.jit(traced_image)
+    first = persistent(jnp.asarray(parameters))
+    changed_parameters = parameters.copy()
+    changed_parameters[:4] += np.asarray([0.006, -0.004, 0.05, 0.03])
+    if mode == "host_free":
+        changed_parameters[4:] += np.asarray(
+            [0.006, -0.005, 0.08, 0.008, 0.04]
+        )
+    changed = persistent(jnp.asarray(changed_parameters))
+    np.testing.assert_allclose(
+        np.asarray(first),
+        eager_image(parameters),
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    assert not np.array_equal(np.asarray(first), np.asarray(changed))
+
+    gradient = jax.grad(lambda values: jnp.sum(traced_image(values)))(
+        jnp.asarray(parameters)
+    )
+    finite_difference = _central_difference(
+        eager_objective,
+        parameters,
+        step=3.0e-6,
+    )
+    _assert_finite_difference(np.asarray(gradient), finite_difference)
+
+
+def _image_samples():
+    """Return a deterministic normalized asymmetric image asset."""
+    rows, cols = np.indices((8, 10), dtype=float)
+    values = np.exp(
+        -0.5 * (((rows - 2.7) / 1.1) ** 2 + ((cols - 5.6) / 1.4) ** 2)
+    )
+    return values / (0.2**2 * values.sum())
+
+
+def _sky_points_from_pixels(rows, cols, centre, rotation_deg, size_scale):
+    """Map literal pixel coordinates to sky coordinates independently."""
+    theta = np.deg2rad(rotation_deg)
+    cosine = np.cos(theta)
+    sine = np.sin(theta)
+    u = (np.asarray(cols) - 4.5) * 0.2 * size_scale
+    v = (np.asarray(rows) - 3.5) * 0.2 * size_scale
+    dx = u * cosine - v * sine
+    dy = u * sine + v * cosine
+    return np.column_stack((centre[0] + dy, centre[1] + dx))
+
+
+@pytest.mark.parametrize("size_scale", [0.85, 1.2])
+def test_t9_image_source_jax_matches_complete_zero_pad_matrix(size_scale):
+    """Catch wrong bilinear corners, transforms, masks, or external leakage."""
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    jax.config.update("jax_enable_x64", True)
+    centre = (0.13, -0.21)
+    rows = np.asarray(
+        [2.25, 0.0, 7.0, -0.5, 7.5, -1.0, 8.0, -1.01, 8.01, 3.3]
+    )
+    cols = np.asarray(
+        [4.60, 0.0, 9.0, 4.2, 5.1, 2.0, 7.0, 3.0, 6.0, 10.01]
+    )
+    points = _sky_points_from_pixels(
+        rows,
+        cols,
+        centre,
+        rotation_deg=37.3,
+        size_scale=size_scale,
+    )
+    profile = ImageSource(
+        centre=centre,
+        rotation_deg=37.3,
+        pixel_scale_arcsec=0.2,
+        sb=_image_samples(),
+        total_flux=1.7,
+        flux_scale=1.15,
+        size_scale=size_scale,
+    )
+    grid = al.Grid2DIrregular(values=points)
+    expected = np.asarray(profile.image_2d_from(grid=grid, xp=np))
+    actual = profile.image_2d_from(grid=grid, xp=jnp)
+    np.testing.assert_allclose(
+        np.asarray(actual),
+        expected,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+    assert np.array_equal(np.asarray(actual)[7:], np.zeros(3))
+
+
+def _image_profile(parameters):
+    """Construct a traced ImageSource while its sample asset stays fixed."""
+    return ImageSource(
+        centre=(parameters[0], parameters[1]),
+        rotation_deg=37.3,
+        pixel_scale_arcsec=0.2,
+        sb=_image_samples(),
+        total_flux=1.7,
+        flux_scale=parameters[2],
+        size_scale=parameters[3],
+    )
+
+
+def test_t9_image_source_persistent_jit_gradients_and_warm_transfer_guard():
+    """Catch traced casts, stale values, bad gradients, or warm transfers."""
+    jax = pytest.importorskip("jax")
+    jnp = pytest.importorskip("jax.numpy")
+    jax.config.update("jax_enable_x64", True)
+    parameters = np.asarray([0.13, -0.21, 1.15, 0.92], dtype=float)
+    grid = al.Grid2D.uniform(
+        shape_native=(3, 3),
+        pixel_scales=0.11,
+        origin=tuple(parameters[:2]),
+    )
+
+    def traced_image(values):
+        return _image_profile(values).image_2d_from(
+            grid=grid,
+            xp=jnp,
+        ).array
+
+    def eager_objective(values):
+        profile = _image_profile(values)
+        return float(
+            np.asarray(profile.image_2d_from(grid=grid, xp=np).array).sum()
+        )
+
+    persistent = jax.jit(traced_image)
+    parameters_device = jax.device_put(parameters)
+    first = persistent(parameters_device)
+    first.block_until_ready()
+    changed_parameters = parameters + np.asarray([0.006, -0.004, 0.05, 0.03])
+    changed = persistent(jax.device_put(changed_parameters))
+    changed.block_until_ready()
+    assert not np.array_equal(np.asarray(first), np.asarray(changed))
+
+    with jax.transfer_guard("disallow"):
+        persistent(parameters_device).block_until_ready()
+
+    gradient = jax.grad(lambda values: jnp.sum(traced_image(values)))(
+        parameters_device
+    )
+    finite_difference = _central_difference(eager_objective, parameters)
+    _assert_finite_difference(np.asarray(gradient), finite_difference)
+
+
+def _spawn_profile_evaluation(serialized_profiles, queue):
+    """Unpickle every Item 7 custom profile and evaluate it eagerly."""
+    try:
+        grid = al.Grid2DIrregular(
+            values=np.asarray(
+                [[0.071, -0.013], [-0.043, 0.097]],
+                dtype=float,
+            )
+        )
+        results = []
+        for serialized in serialized_profiles:
+            profile = pickle.loads(serialized)
+            if hasattr(profile, "mapping_context"):
+                values = profile.deflections_yx_2d_from(grid=grid, xp=np)
+            else:
+                values = profile.image_2d_from(grid=grid, xp=np)
+            results.append(
+                (
+                    profile.__class__.__module__,
+                    profile.__class__.__qualname__,
+                    float(np.asarray(values).sum()),
+                )
+            )
+        queue.put(("ok", results))
+    except Exception as error:
+        queue.put(("error", repr(error)))
+
+
+def test_t11_all_custom_profiles_pickle_spawn_and_evaluate_on_cpu():
+    """Catch lost module identity or non-picklable traced-profile state."""
+    profiles = [
+        mass_mapping.NFWMCRSubhaloSph(
+            log10_m200=7.0,
+            mapping_context=_context(),
+        ),
+        mass_mapping.SISMCRSubhalo(
+            log10_m200=7.0,
+            mapping_context=_context(model="SIS"),
+        ),
+        mass_mapping.PointMassMCRSubhalo(
+            log10_m200=7.0,
+            mapping_context=_context(model="PointMass"),
+        ),
+        _clumpy_profile(np.asarray([0.03, -0.04, 1.15, 0.92]), "rigid"),
+        _image_profile(np.asarray([0.13, -0.21, 1.15, 0.92])),
+    ]
+    serialized = [pickle.dumps(profile) for profile in profiles]
+    restored = [pickle.loads(payload) for payload in serialized]
+    assert [profile.__class__ for profile in restored] == [
+        profile.__class__ for profile in profiles
+    ]
+    assert all(profile.__class__.__qualname__ == profile.__class__.__name__ for profile in restored)
+
+    spawn = multiprocessing.get_context("spawn")
+    queue = spawn.Queue()
+    process = spawn.Process(
+        target=_spawn_profile_evaluation,
+        args=(serialized, queue),
+    )
+    process.start()
+    status, payload = queue.get(timeout=60)
+    process.join(timeout=60)
+    assert process.exitcode == 0
+    assert status == "ok", payload
+    results = payload
+    assert all(np.isfinite(value) for _, _, value in results)
+    assert [module for module, _, _ in results] == [
+        profile.__class__.__module__ for profile in profiles
+    ]

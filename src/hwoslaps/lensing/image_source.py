@@ -28,6 +28,13 @@ _MIN_ASSET_DIMENSION = 8
 _MAX_ASSET_DIMENSION = 4096
 
 
+def _as_float(value: Any) -> Any:
+    """Convert concrete scalars to float while preserving traced values."""
+    if isinstance(value, (int, float, np.generic)):
+        return float(value)
+    return value
+
+
 @dataclass(frozen=True)
 class SourceImageAsset:
     """Validated source-image asset and its content hash.
@@ -217,22 +224,23 @@ class ImageSource(ag.LightProfile):
         flux_scale: float,
         size_scale: float,
     ):
-        total_flux = float(total_flux)
-        flux_scale = float(flux_scale)
-        size_scale = float(size_scale)
+        total_flux = _as_float(total_flux)
+        flux_scale = _as_float(flux_scale)
+        size_scale = _as_float(size_scale)
         super().__init__(
-            centre=tuple(float(value) for value in centre),
+            centre=tuple(_as_float(value) for value in centre),
             ell_comps=(0.0, 0.0),
             intensity=total_flux * flux_scale,
         )
-        self.rotation_deg = float(rotation_deg)
-        self.pixel_scale_arcsec = float(pixel_scale_arcsec)
+        self.rotation_deg = _as_float(rotation_deg)
+        self.pixel_scale_arcsec = _as_float(pixel_scale_arcsec)
         self.sb = np.asarray(sb, dtype=np.float64)
         if self.sb.ndim != 2:
             raise ValueError('ImageSource sb must be a 2D array')
         self.total_flux = total_flux
         self.flux_scale = flux_scale
         self.size_scale = size_scale
+        self._padded = np.pad(self.sb, 1, mode='constant')
         self._spline = None
 
     @classmethod
@@ -280,13 +288,12 @@ class ImageSource(ag.LightProfile):
     def _spline_from_samples(self) -> RectBivariateSpline:
         """Return the lazily built spline over the one-pixel zero pad."""
         if self._spline is None:
-            padded = np.pad(self.sb, 1, mode='constant')
             row_coords = np.arange(-1, self.sb.shape[0] + 1, dtype=float)
             col_coords = np.arange(-1, self.sb.shape[1] + 1, dtype=float)
             self._spline = RectBivariateSpline(
                 row_coords,
                 col_coords,
-                padded,
+                self._padded,
                 kx=1,
                 ky=1,
             )
@@ -316,12 +323,40 @@ class ImageSource(ag.LightProfile):
         image : `autoarray.Array2D`
             Surface brightness at every input coordinate.
         """
-        relative = np.asarray(grid, dtype=float)
+        if xp is np:
+            relative = np.asarray(grid, dtype=float)
+            dy = relative[:, 0]
+            dx = relative[:, 1]
+            theta = np.deg2rad(self.rotation_deg)
+            cosine = np.cos(theta)
+            sine = np.sin(theta)
+            u = dx * cosine + dy * sine
+            v = -dx * sine + dy * cosine
+            row_c = (self.sb.shape[0] - 1) / 2.0
+            col_c = (self.sb.shape[1] - 1) / 2.0
+            scale = self.pixel_scale_arcsec * self.size_scale
+            rows = v / scale + row_c
+            cols = u / scale + col_c
+            in_bounds = (
+                (rows >= -1.0)
+                & (rows <= self.sb.shape[0])
+                & (cols >= -1.0)
+                & (cols <= self.sb.shape[1])
+            )
+            brightness = np.zeros(rows.shape, dtype=float)
+            if np.any(in_bounds):
+                brightness[in_bounds] = self._spline_from_samples().ev(
+                    rows[in_bounds], cols[in_bounds]
+                )
+            return self.total_flux * self.flux_scale * brightness
+
+        grid_values = grid.array if hasattr(grid, 'array') else grid
+        relative = xp.asarray(grid_values, dtype=float)
         dy = relative[:, 0]
         dx = relative[:, 1]
-        theta = np.deg2rad(self.rotation_deg)
-        cosine = np.cos(theta)
-        sine = np.sin(theta)
+        theta = xp.deg2rad(self.rotation_deg)
+        cosine = xp.cos(theta)
+        sine = xp.sin(theta)
         u = dx * cosine + dy * sine
         v = -dx * sine + dy * cosine
         row_c = (self.sb.shape[0] - 1) / 2.0
@@ -335,11 +370,30 @@ class ImageSource(ag.LightProfile):
             & (cols >= -1.0)
             & (cols <= self.sb.shape[1])
         )
-        brightness = np.zeros(rows.shape, dtype=float)
-        if np.any(in_bounds):
-            brightness[in_bounds] = self._spline_from_samples().ev(
-                rows[in_bounds], cols[in_bounds]
-            )
+
+        padded = xp.asarray(self._padded)
+        padded_rows = rows + 1.0
+        padded_cols = cols + 1.0
+        row_lower = xp.floor(padded_rows).astype(int)
+        col_lower = xp.floor(padded_cols).astype(int)
+        row_upper = row_lower + 1
+        col_upper = col_lower + 1
+        row_lower_safe = xp.clip(row_lower, 0, padded.shape[0] - 1)
+        row_upper_safe = xp.clip(row_upper, 0, padded.shape[0] - 1)
+        col_lower_safe = xp.clip(col_lower, 0, padded.shape[1] - 1)
+        col_upper_safe = xp.clip(col_upper, 0, padded.shape[1] - 1)
+        row_weight = padded_rows - row_lower
+        col_weight = padded_cols - col_lower
+        lower = (
+            (1.0 - col_weight) * padded[row_lower_safe, col_lower_safe]
+            + col_weight * padded[row_lower_safe, col_upper_safe]
+        )
+        upper = (
+            (1.0 - col_weight) * padded[row_upper_safe, col_lower_safe]
+            + col_weight * padded[row_upper_safe, col_upper_safe]
+        )
+        brightness = (1.0 - row_weight) * lower + row_weight * upper
+        brightness = xp.where(in_bounds, brightness, 0.0)
         return self.total_flux * self.flux_scale * brightness
 
     def image_2d_via_radii_from(self, grid_radii, xp=np, **kwargs):
@@ -357,6 +411,8 @@ class ImageSource(ag.LightProfile):
     def __setstate__(self, state):
         """Restore pickle state with lazy spline construction enabled."""
         self.__dict__.update(state)
+        if '_padded' not in self.__dict__:
+            self._padded = np.pad(self.sb, 1, mode='constant')
 
 
 __all__ = ['ImageSource', 'SourceImageAsset', 'load_source_image_asset']

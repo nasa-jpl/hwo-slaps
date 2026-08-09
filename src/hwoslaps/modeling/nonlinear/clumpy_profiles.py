@@ -5,9 +5,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Tuple, TYPE_CHECKING
 
+import numpy as np
+
 
 if TYPE_CHECKING:
     ClumpyTransformedSource: Any
+
+
+def _as_float(value: Any) -> Any:
+    """Convert concrete scalars to float while preserving traced values."""
+    if isinstance(value, (int, float, np.generic)):
+        return float(value)
+    return value
 
 
 @dataclass(frozen=True)
@@ -38,7 +47,6 @@ def _build_profile_class() -> None:
         return
 
     import autogalaxy as ag
-    import numpy as np
 
     class ClumpyTransformedSource(ag.LightProfile):
         """Jointly transformed host-and-clump Sersic light profile.
@@ -78,13 +86,15 @@ def _build_profile_class() -> None:
                 raise ValueError(
                     "template_context is required for a clumpy source"
                 )
-            centre = tuple(float(value) for value in centre)
-            host_ell_comps = tuple(float(value) for value in host_ell_comps)
-            flux_scale = float(flux_scale)
-            size_scale = float(size_scale)
-            host_intensity = float(host_intensity)
-            host_effective_radius = float(host_effective_radius)
-            host_sersic_index = float(host_sersic_index)
+            centre = tuple(_as_float(value) for value in centre)
+            host_ell_comps = tuple(
+                _as_float(value) for value in host_ell_comps
+            )
+            flux_scale = _as_float(flux_scale)
+            size_scale = _as_float(size_scale)
+            host_intensity = _as_float(host_intensity)
+            host_effective_radius = _as_float(host_effective_radius)
+            host_sersic_index = _as_float(host_sersic_index)
             super().__init__(
                 centre=centre,
                 ell_comps=host_ell_comps,
