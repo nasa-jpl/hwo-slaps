@@ -10,7 +10,7 @@ import numpy as np
 from astropy import constants as const
 from astropy import units as u
 
-from ..constants import ARCSEC_PER_RAD, KM_TO_M, MPC_TO_M
+from ..constants import ARCSEC_PER_RAD, KM_TO_M, KPC_TO_M, MPC_TO_M
 
 MOLINE_EQ7_C0 = 19.9
 MOLINE_EQ7_A1 = -0.195
@@ -405,6 +405,56 @@ def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):
     rho_s = rho_crit * (200.0 / 3.0) * concentration**3 / f_c
 
     return rs_kpc, rho_s
+
+
+def nfw_lensing_parameters(M200_msun, c200, z_lens, z_source, cosmology):
+    """Return the lensing parameters of an NFW subhalo.
+
+    Parameters
+    ----------
+    M200_msun : `float`
+        Subhalo M200 mass in solar masses.
+    c200 : `float`
+        NFW concentration parameter.
+    z_lens : `float`
+        Lens-plane redshift.
+    z_source : `float`
+        Source-plane redshift.
+    cosmology : `object`
+        Astropy-style or PyAuto cosmology object.
+
+    Returns
+    -------
+    kappa_s : `float`
+        NFW scale convergence.
+    scale_radius_arcsec : `float`
+        NFW scale radius in arcseconds.
+    """
+    rs_kpc, rho_s = nfw_scale_parameters(
+        M200_msun,
+        c200,
+        z_lens,
+        cosmology,
+    )
+
+    D_l_m = angular_diameter_distance_mpc(cosmology, z_lens) * MPC_TO_M
+    D_s_m = angular_diameter_distance_mpc(cosmology, z_source) * MPC_TO_M
+    D_ls_m = (
+        angular_diameter_distance_z1z2_mpc(cosmology, z_lens, z_source)
+        * MPC_TO_M
+    )
+
+    c_SI = float(const.c.value)
+    G_SI = float(const.G.value)
+    Sigma_crit = (c_SI**2 / (4 * np.pi * G_SI)) * (
+        D_s_m / (D_l_m * D_ls_m)
+    )
+
+    rs_m = rs_kpc * KPC_TO_M
+    kappa_s = (rho_s * rs_m) / Sigma_crit
+    scale_radius_arcsec = (rs_m / D_l_m) * ARCSEC_PER_RAD
+
+    return float(kappa_s), float(scale_radius_arcsec)
 
 
 def sigma_v_from_m200_sis(M200_msun, z_lens, cosmology):

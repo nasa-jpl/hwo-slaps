@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import math
 from typing import Any, Dict, Optional, Tuple
+
+from ...lensing.mass_models import (
+    concentration_mass_relation,
+    einstein_radius_point_mass,
+    einstein_radius_sis_m200,
+    nfw_lensing_parameters,
+)
 
 PROFILE_CLASS_BY_MODEL = {
     "PointMass": "PointMass",
@@ -199,21 +207,162 @@ def trial_from_fisher_map_position(
     fisher_z = fisher_q**0.5 if fisher_q is not None and fisher_q >= 0.0 else None
     fisher_delta = 0.5*fisher_q if fisher_q is not None else None
 
+    lens_redshift = float(getattr(lensing_reference, "lens_redshift"))
+    source_redshift = float(getattr(lensing_reference, "source_redshift"))
+    reference_mass = float(
+        getattr(lensing_reference, "subhalo_mass", mass_msun)
+    )
+    masses_match = math.isclose(
+        mass_msun,
+        reference_mass,
+        rel_tol=1.0e-9,
+        abs_tol=0.0,
+    )
+    if masses_match:
+        einstein_radius = getattr(
+            lensing_reference,
+            "subhalo_einstein_radius",
+            None,
+        )
+        kappa_s = getattr(lensing_reference, "subhalo_kappa_s", None)
+        scale_radius = getattr(
+            lensing_reference,
+            "subhalo_scale_radius_arcsec",
+            None,
+        )
+        concentration = getattr(
+            lensing_reference,
+            "subhalo_concentration",
+            None,
+        )
+        concentration_model = getattr(
+            lensing_reference,
+            "subhalo_concentration_model",
+            None,
+        )
+        profile_scales_source = "reference"
+    else:
+        (
+            einstein_radius,
+            kappa_s,
+            scale_radius,
+            concentration,
+            concentration_model,
+        ) = _profile_scales_for_mass(
+            full_config=full_config,
+            model=model,
+            mass_msun=mass_msun,
+            lens_redshift=lens_redshift,
+            source_redshift=source_redshift,
+        )
+        profile_scales_source = "recomputed"
+
     return SubhaloTrial(
         case_id=case_id,
         mass_msun=mass_msun,
         position_yx_arcsec=position_yx_arcsec,
         model=model,
         profile_class=_profile_class_from_model(model),
-        lens_redshift=float(getattr(lensing_reference, "lens_redshift")),
-        source_redshift=float(getattr(lensing_reference, "source_redshift")),
-        einstein_radius_arcsec=getattr(lensing_reference, "subhalo_einstein_radius", None),
-        kappa_s=getattr(lensing_reference, "subhalo_kappa_s", None),
-        scale_radius_arcsec=getattr(lensing_reference, "subhalo_scale_radius_arcsec", None),
-        concentration=getattr(lensing_reference, "subhalo_concentration", None),
-        concentration_model=getattr(lensing_reference, "subhalo_concentration_model", None),
+        lens_redshift=lens_redshift,
+        source_redshift=source_redshift,
+        einstein_radius_arcsec=einstein_radius,
+        kappa_s=kappa_s,
+        scale_radius_arcsec=scale_radius,
+        concentration=concentration,
+        concentration_model=concentration_model,
         fisher_q=fisher_q,
         fisher_z=fisher_z,
         fisher_delta_log_l_equiv=fisher_delta,
-        metadata={"source": "fisher_map"},
+        metadata={
+            "source": "fisher_map",
+            "profile_scales_source": profile_scales_source,
+        },
+    )
+
+
+def _profile_scales_for_mass(
+    *,
+    full_config: Dict[str, Any],
+    model: str,
+    mass_msun: float,
+    lens_redshift: float,
+    source_redshift: float,
+) -> tuple:
+    """Recompute profile scales for a Fisher-map trial mass."""
+    from ...lensing.generator import _get_cosmology, _infer_reduced_h
+
+    lensing = full_config.get("lensing")
+    if not isinstance(lensing, dict) or "cosmology" not in lensing:
+        raise ValueError(
+            "Recomputing Fisher-map profile scales requires "
+            "lensing.cosmology"
+        )
+    cosmology = _get_cosmology(lensing["cosmology"])
+    if model == "PointMass":
+        radius = einstein_radius_point_mass(
+            mass_msun,
+            lens_redshift,
+            source_redshift,
+            cosmology,
+        )
+        return radius, None, None, None, None
+    if model == "SIS":
+        radius = einstein_radius_sis_m200(
+            mass_msun,
+            lens_redshift,
+            source_redshift,
+            cosmology,
+        )
+        return radius, None, None, None, None
+
+    subhalo = lensing.get("subhalo")
+    concentration_config = (
+        subhalo.get("concentration")
+        if isinstance(subhalo, dict)
+        else None
+    )
+    if not isinstance(concentration_config, dict):
+        raise ValueError(
+            "Recomputing NFW profile scales requires "
+            "lensing.subhalo.concentration"
+        )
+    concentration_model = concentration_config.get("model")
+    if concentration_model == "moline2017_eq7":
+        if "x_sub" not in concentration_config:
+            raise ValueError(
+                "moline2017_eq7 recomputation requires concentration.x_sub"
+            )
+        h_value = concentration_config.get("h")
+        if h_value is None:
+            h_value = _infer_reduced_h(cosmology)
+        concentration = concentration_mass_relation(
+            mass_msun,
+            model=concentration_model,
+            x_sub=float(concentration_config["x_sub"]),
+            h=float(h_value),
+        )
+    elif concentration_model == "power_law":
+        concentration = concentration_mass_relation(
+            mass_msun,
+            model=concentration_model,
+            z=lens_redshift,
+        )
+    else:
+        raise ValueError(
+            "NFW recomputation requires concentration.model to be "
+            "'moline2017_eq7' or 'power_law'"
+        )
+    kappa_s, scale_radius = nfw_lensing_parameters(
+        mass_msun,
+        concentration,
+        lens_redshift,
+        source_redshift,
+        cosmology,
+    )
+    return (
+        None,
+        kappa_s,
+        scale_radius,
+        concentration,
+        concentration_model,
     )

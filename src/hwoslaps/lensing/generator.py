@@ -10,17 +10,13 @@ import os
 
 import autolens as al
 import numpy as np
-from astropy import constants as const
 
-from ..constants import ARCSEC_PER_RAD, KPC_TO_M, MPC_TO_M
 from .image_source import ImageSource, load_source_image_asset
 from .mass_models import (
-    angular_diameter_distance_mpc,
-    angular_diameter_distance_z1z2_mpc,
     concentration_mass_relation,
     einstein_radius_point_mass,
     einstein_radius_sis_m200,
-    nfw_scale_parameters,
+    nfw_lensing_parameters,
 )
 from .utils import LensingData, get_einstein_ring_position
 
@@ -599,27 +595,13 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
             cosmology=cosmology,
         )
 
-        # Get NFW parameters
-        rs_kpc, rho_s = nfw_scale_parameters(mass, concentration, lens_z, cosmology)
-
-        D_l_m = angular_diameter_distance_mpc(cosmology, lens_z) * MPC_TO_M
-        D_s_m = angular_diameter_distance_mpc(cosmology, source_z) * MPC_TO_M
-        D_ls_m = (
-            angular_diameter_distance_z1z2_mpc(cosmology, lens_z, source_z)
-            * MPC_TO_M
+        kappa_s, scale_radius_arcsec = nfw_lensing_parameters(
+            mass,
+            concentration,
+            lens_z,
+            source_z,
+            cosmology,
         )
-
-        # Critical surface density calculated robustly in SI units
-        c_SI = float(const.c.value)
-        G_SI = float(const.G.value)
-        Sigma_crit = (c_SI**2 / (4 * np.pi * G_SI)) * (D_s_m / (D_l_m * D_ls_m))
-
-        # Calculate kappa_s
-        rs_m = rs_kpc * KPC_TO_M
-        kappa_s = (rho_s * rs_m) / Sigma_crit
-
-        # Convert scale radius to arcsec
-        scale_radius_arcsec = (rs_m / D_l_m) * ARCSEC_PER_RAD
 
         # Create ACTUAL NFW subhalo
         subhalo = al.mp.NFWSph(

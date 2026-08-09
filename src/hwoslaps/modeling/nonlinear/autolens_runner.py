@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
+
+import numpy as np
 
 from .output_schema import NonlinearFitSummary
 
@@ -27,18 +31,25 @@ class NonlinearSearchSettings:
         Live points reserved for future local-search fits.
     number_of_cores : `int`, optional
         PyAutoFit process count.
-    iterations_per_update : `int`, optional
-        PyAutoFit update cadence.
+    iterations_per_quick_update : `int`, optional
+        PyAutoFit quick-update cadence.
+    iterations_per_full_update : `int`, optional
+        PyAutoFit full-update cadence.
     maxcall : `int`, optional
         Maximum likelihood calls if supported by the search backend.
+    seed : `int`, optional
+        Nautilus RNG seed for reproducible searches.
     path_prefix : `str`, optional
         PyAutoFit output path prefix.
     unique_tag : `str`, optional
         Optional PyAutoFit unique tag.
-    resume : `bool`, optional
-        Whether PyAutoFit should resume existing searches when supported.
     use_jax : `bool`, optional
         Whether to request PyAutoLens JAX execution.
+
+    Notes
+    -----
+    AutoFit resumes completed or interrupted searches from their output path;
+    no explicit resume setting is required.
     """
 
     engine: str = "Nautilus"
@@ -46,12 +57,112 @@ class NonlinearSearchSettings:
     n_live_subhalo_fixed: int = 100
     n_live_subhalo_search: int = 200
     number_of_cores: int = 1
-    iterations_per_update: Optional[int] = None
+    iterations_per_quick_update: Optional[int] = None
+    iterations_per_full_update: Optional[int] = None
     maxcall: Optional[int] = None
+    seed: Optional[int] = None
     path_prefix: str = "nonlinear"
     unique_tag: Optional[str] = None
-    resume: bool = True
     use_jax: bool = False
+
+
+def _metadata_value(metadata: Any, name: str) -> Any:
+    """Return one field from dictionary- or attribute-style metadata."""
+    if isinstance(metadata, dict):
+        return metadata.get(name)
+    return getattr(metadata, name, None)
+
+
+def _native_array(value: Any) -> np.ndarray:
+    """Return an object as a contiguous native float64 array."""
+    if hasattr(value, "kernel"):
+        value = value.kernel
+    if hasattr(value, "native"):
+        value = value.native
+    return np.ascontiguousarray(np.asarray(value, dtype=np.float64))
+
+
+def _array_hash(value: Any) -> Optional[str]:
+    """Return a SHA-256 digest for native float64 array bytes."""
+    if value is None:
+        return None
+    array = _native_array(value)
+    return hashlib.sha256(array.tobytes()).hexdigest()
+
+
+def analysis_key_from(
+    dataset: Any,
+    dataset_metadata: Any,
+    model_metadata: Dict[str, Any],
+) -> str:
+    """Return a deterministic 16-hex analysis identity key.
+
+    AutoFit model hashes distinguish priors but not the fitted dataset. This
+    identity prevents a completed fit from being silently reused for a
+    different PSF-bank draw, noise realization, or model context.
+
+    Parameters
+    ----------
+    dataset : `object`
+        PyAutoLens imaging dataset.
+    dataset_metadata : `object`
+        Dataset provenance fields.
+    model_metadata : `dict`
+        Resolved fit mode, custom-context hashes, and prior widths.
+
+    Returns
+    -------
+    analysis_key : `str`
+        First 16 hexadecimal characters of the canonical SHA-256.
+    """
+    prior_widths = model_metadata.get(
+        "resolved_prior_widths",
+        model_metadata.get("prior_widths", {}),
+    )
+    prior_repr = json.dumps(
+        prior_widths,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    psf = getattr(dataset, "psf", None)
+    payload = {
+        "dataset_kind": _metadata_value(dataset_metadata, "dataset_kind"),
+        "background_treatment": _metadata_value(
+            dataset_metadata,
+            "background_treatment",
+        ),
+        "psf_truth_label": _metadata_value(
+            dataset_metadata,
+            "psf_truth_label",
+        ),
+        "psf_fit_label": _metadata_value(
+            dataset_metadata,
+            "psf_fit_label",
+        ),
+        "data_sha256": _array_hash(getattr(dataset, "data", None)),
+        "noise_map_sha256": _array_hash(
+            getattr(dataset, "noise_map", None)
+        ),
+        "psf_sha256": _array_hash(psf),
+        "fit_mode": model_metadata.get("fit_mode"),
+        "clumpy_fit_parameterization": model_metadata.get(
+            "clumpy_fit_parameterization"
+        ),
+        "mass_context_hash": model_metadata.get("mass_context_hash"),
+        "image_source_asset_hash": model_metadata.get(
+            "image_source_asset_hash"
+        ),
+        "prior_widths_sha256": hashlib.sha256(
+            prior_repr.encode("utf-8")
+        ).hexdigest(),
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 def _get_nested_attr(obj: Any, attr_path: str) -> Any:
@@ -173,11 +284,28 @@ def _model_parameter_count(model: Any) -> Optional[int]:
     return None
 
 
+def _n_like_max_reached(
+    result: Any,
+    n_like_max: Optional[int],
+) -> Optional[bool]:
+    """Return whether a configured likelihood-call ceiling was reached."""
+    if n_like_max is None:
+        return None
+    samples_info = getattr(getattr(result, "samples", None), "samples_info", None)
+    if not isinstance(samples_info, dict) or "total_samples" not in samples_info:
+        return None
+    try:
+        total_samples = float(samples_info["total_samples"])
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(total_samples):
+        return None
+    return total_samples >= float(n_like_max)
+
+
 def _filter_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Filter keyword arguments to those accepted by a callable."""
     signature = inspect.signature(callable_obj)
-    if any(param.kind == param.VAR_KEYWORD for param in signature.parameters.values()):
-        return {key: val for key, val in kwargs.items() if val is not None}
     return {
         key: val
         for key, val in kwargs.items()
@@ -236,25 +364,48 @@ def _patch_analysis_imaging_adapt_images_compat(al: Any) -> None:
 
 
 class AutoLensFitRunner:
-    """Run PyAutoLens validation fits and summarize their outputs."""
+    """Run PyAutoLens validation fits and summarize their outputs.
+
+    Parameters
+    ----------
+    settings : `NonlinearSearchSettings`
+        Search-engine and execution settings.
+    output_dir : `str`
+        Root directory for AutoFit outputs.
+    """
 
     def __init__(self, settings: NonlinearSearchSettings, output_dir: str):
         self.settings = settings
         self.output_dir = str(output_dir)
 
-    def make_analysis(self, dataset: Any) -> Any:
+    def make_analysis(
+        self,
+        dataset: Any,
+        model_metadata: Optional[Dict[str, Any]] = None,
+    ) -> Any:
         """Create a PyAutoLens imaging analysis object.
 
         Parameters
         ----------
         dataset : `autolens.Imaging`
             Dataset to fit.
+        model_metadata : `dict`, optional
+            Model provenance used to enforce CPU-only custom profiles.
 
         Returns
         -------
         analysis : `autolens.AnalysisImaging`
             PyAutoLens analysis object.
         """
+        if (
+            self.settings.use_jax
+            and model_metadata
+            and model_metadata.get("requires_cpu")
+        ):
+            raise ValueError(
+                "use_jax=True is unsupported for Item 7 custom profiles; "
+                "this model requires CPU execution"
+            )
         import autolens as al
 
         _patch_analysis_imaging_adapt_images_compat(al)
@@ -263,25 +414,37 @@ class AutoLensFitRunner:
         except TypeError:
             return al.AnalysisImaging(dataset=dataset)
 
-    def _make_search(self, case_id: str, role: str, n_live: int) -> Any:
+    def _make_search(
+        self,
+        case_id: str,
+        role: str,
+        n_live: int,
+        analysis_key: str,
+    ) -> Any:
         """Create a PyAutoFit search object."""
         if self.settings.engine != "Nautilus":
             raise ValueError("Only the Nautilus search engine is currently supported")
 
         import autofit as af
 
-        name = f"{case_id}_{role}"
+        name = f"{case_id}_{role}_{analysis_key}"
         kwargs = {
             "path_prefix": str(Path(self.output_dir) / self.settings.path_prefix),
             "name": name,
             "unique_tag": self.settings.unique_tag,
             "n_live": int(n_live),
             "number_of_cores": int(self.settings.number_of_cores),
-            "iterations_per_update": self.settings.iterations_per_update,
+            "iterations_per_quick_update": (
+                self.settings.iterations_per_quick_update
+            ),
+            "iterations_per_full_update": (
+                self.settings.iterations_per_full_update
+            ),
             "n_like_max": self.settings.maxcall,
-            "resume": self.settings.resume,
+            "seed": self.settings.seed,
         }
-        return af.Nautilus(**_filter_kwargs(af.Nautilus, kwargs))
+        kwargs = {key: value for key, value in kwargs.items() if value is not None}
+        return af.Nautilus(**kwargs)
 
     def run_model(
         self,
@@ -291,6 +454,8 @@ class AutoLensFitRunner:
         fit_mode: str,
         case_id: str,
         n_live: int,
+        analysis_key: str,
+        result_callback: Optional[Callable] = None,
     ) -> NonlinearFitSummary:
         """Run one nonlinear model fit.
 
@@ -308,6 +473,10 @@ class AutoLensFitRunner:
             Validation case identifier.
         n_live : `int`
             Number of live points requested for the search.
+        analysis_key : `str`
+            Dataset-and-model identity embedded in the search path.
+        result_callback : `callable`, optional
+            Callback receiving ``(result, model)`` before result disposal.
 
         Returns
         -------
@@ -316,9 +485,20 @@ class AutoLensFitRunner:
         """
         start = time.time()
         try:
-            search = self._make_search(case_id=case_id, role=role, n_live=n_live)
+            search = self._make_search(
+                case_id=case_id,
+                role=role,
+                n_live=n_live,
+                analysis_key=analysis_key,
+            )
             result = search.fit(model=model, analysis=analysis)
             log_likelihood, method = extract_max_log_likelihood_with_method(result)
+            warnings = []
+            if result_callback is not None:
+                try:
+                    result_callback(result, model)
+                except Exception as exc:
+                    warnings.append(f"result_callback failed: {exc}")
             runtime_s = time.time() - start
             return NonlinearFitSummary(
                 model_role=role,
@@ -330,10 +510,16 @@ class AutoLensFitRunner:
                 n_free_parameters=_model_parameter_count(model),
                 result_path=_extract_result_path(result),
                 runtime_s=runtime_s,
+                warnings=warnings,
                 log_likelihood_extraction_method=method,
                 use_jax_requested=self.settings.use_jax,
                 search_engine=self.settings.engine,
                 n_live=n_live,
+                analysis_key=analysis_key,
+                n_like_max_reached=_n_like_max_reached(
+                    result,
+                    self.settings.maxcall,
+                ),
             )
         except Exception as exc:
             runtime_s = time.time() - start
@@ -347,4 +533,5 @@ class AutoLensFitRunner:
                 use_jax_requested=self.settings.use_jax,
                 search_engine=self.settings.engine,
                 n_live=n_live,
+                analysis_key=analysis_key,
             )

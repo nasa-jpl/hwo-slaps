@@ -52,6 +52,20 @@ NONLINEAR_CASE_CSV_COLUMNS = (
     "result_path_smooth",
     "result_path_subhalo",
     "error",
+    "analysis_key",
+    "recovered_log10_m200_ml",
+    "recovered_log10_m200_p16",
+    "recovered_log10_m200_p50",
+    "recovered_log10_m200_p84",
+    "recovered_y_ml",
+    "recovered_x_ml",
+    "recovered_concentration_ml",
+    "mass_at_lower_bound",
+    "mass_at_upper_bound",
+    "pdf_converged",
+    "smooth_reused",
+    "freed_below_fixed_template",
+    "n_like_max_reached",
 )
 """CSV columns emitted for nonlinear validation cases."""
 
@@ -111,6 +125,10 @@ class NonlinearFitSummary:
         Search backend name.
     n_live : `int`, optional
         Number of live points requested for nested sampling.
+    analysis_key : `str`, optional
+        Dataset-and-model identity embedded in the search name.
+    n_like_max_reached : `bool`, optional
+        Whether the configured likelihood-call limit was reached.
     """
 
     model_role: str
@@ -128,10 +146,296 @@ class NonlinearFitSummary:
     use_jax_requested: Optional[bool] = None
     search_engine: Optional[str] = None
     n_live: Optional[int] = None
+    analysis_key: Optional[str] = None
+    n_like_max_reached: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the fit summary to a JSON-compatible dictionary."""
         return _json_safe(asdict(self))
+
+
+@dataclass
+class SubhaloRecovery:
+    """Recovered freed-subhalo parameters and posterior diagnostics.
+
+    Parameters
+    ----------
+    log10_m200_ml : `float`
+        Maximum-likelihood log10 M200.
+    centre_ml_y : `float`
+        Maximum-likelihood centre y coordinate.
+    centre_ml_x : `float`
+        Maximum-likelihood centre x coordinate.
+    concentration_ml : `float`, optional
+        Derived maximum-likelihood NFW concentration.
+    kappa_s_ml : `float`, optional
+        Derived maximum-likelihood NFW scale convergence.
+    scale_radius_arcsec_ml : `float`, optional
+        Derived maximum-likelihood NFW scale radius.
+    log10_m200_p16, log10_m200_p50, log10_m200_p84 : `float`, optional
+        Posterior log-mass quantiles.
+    centre_y_p16, centre_y_p50, centre_y_p84 : `float`, optional
+        Posterior centre-y quantiles.
+    centre_x_p16, centre_x_p50, centre_x_p84 : `float`, optional
+        Posterior centre-x quantiles.
+    mass_at_lower_bound : `bool`, optional
+        Whether the ML mass is within 0.01 dex of the lower bound.
+    mass_at_upper_bound : `bool`, optional
+        Whether the ML mass is within 0.01 dex of the upper bound.
+    posterior_mass_frac_lower : `float`, optional
+        Posterior fraction within 0.05 dex of the lower bound.
+    posterior_mass_frac_upper : `float`, optional
+        Posterior fraction within 0.05 dex of the upper bound.
+    pdf_converged : `bool`, optional
+        Backend PDF convergence flag.
+    extraction_method : `str`, optional
+        Accessor path used for extraction.
+    n_samples : `int`, optional
+        Number of posterior samples used.
+    """
+
+    log10_m200_ml: float
+    centre_ml_y: float
+    centre_ml_x: float
+    concentration_ml: Optional[float] = None
+    kappa_s_ml: Optional[float] = None
+    scale_radius_arcsec_ml: Optional[float] = None
+    log10_m200_p16: Optional[float] = None
+    log10_m200_p50: Optional[float] = None
+    log10_m200_p84: Optional[float] = None
+    centre_y_p16: Optional[float] = None
+    centre_y_p50: Optional[float] = None
+    centre_y_p84: Optional[float] = None
+    centre_x_p16: Optional[float] = None
+    centre_x_p50: Optional[float] = None
+    centre_x_p84: Optional[float] = None
+    mass_at_lower_bound: bool = False
+    mass_at_upper_bound: bool = False
+    posterior_mass_frac_lower: Optional[float] = None
+    posterior_mass_frac_upper: Optional[float] = None
+    pdf_converged: Optional[bool] = None
+    extraction_method: str = "unknown"
+    n_samples: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the recovery payload to a JSON-compatible dictionary.
+
+        Returns
+        -------
+        data : `dict`
+            JSON-safe recovery values.
+        """
+        return _json_safe(asdict(self))
+
+
+def _nested_attr(value: Any, path: str) -> Any:
+    """Return a dotted attribute path from an object."""
+    for name in path.split("."):
+        value = getattr(value, name)
+    return value
+
+
+def _maximum_likelihood_subhalo(result: Any) -> tuple[Any, str]:
+    """Return the maximum-likelihood subhalo and accessor path."""
+    for accessor in (
+        "max_log_likelihood_instance",
+        "instance",
+        "samples.instance",
+    ):
+        try:
+            instance = _nested_attr(result, accessor)
+            if callable(instance):
+                instance = instance()
+            if instance is None:
+                continue
+            return instance.galaxies.lens.subhalo, accessor
+        except Exception:
+            continue
+    raise AttributeError("Could not extract the maximum-likelihood instance")
+
+
+def _sample_values(samples: Any, paths: tuple[tuple[str, ...], ...]) -> Any:
+    """Return sample values for the first available parameter path."""
+    for path in paths:
+        try:
+            values = samples.values_for_path(path)
+            return np.asarray(values, dtype=float)
+        except Exception:
+            continue
+    return None
+
+
+def _weighted_quantiles(
+    values: np.ndarray,
+    weights: Optional[np.ndarray],
+) -> tuple[float, float, float]:
+    """Return posterior 16th, 50th, and 84th percentiles."""
+    if weights is None or weights.shape != values.shape:
+        return tuple(
+            float(value) for value in np.quantile(values, [0.16, 0.5, 0.84])
+        )
+    order = np.argsort(values)
+    sorted_values = values[order]
+    sorted_weights = np.asarray(weights[order], dtype=float)
+    if (
+        sorted_weights.size < 2
+        or np.all(sorted_weights == sorted_weights[0])
+    ):
+        return tuple(
+            float(value) for value in np.quantile(values, [0.16, 0.5, 0.84])
+        )
+    cumulative = np.cumsum(sorted_weights)[:-1]
+    normalization = float(cumulative[-1])
+    if not np.isfinite(normalization) or normalization <= 0.0:
+        return tuple(
+            float(value) for value in np.quantile(values, [0.16, 0.5, 0.84])
+        )
+    cumulative = cumulative / normalization
+    cumulative = np.append(0.0, cumulative)
+    return tuple(
+        float(np.interp(quantile, cumulative, sorted_values))
+        for quantile in (0.16, 0.5, 0.84)
+    )
+
+
+def _posterior_fraction(
+    selected: np.ndarray,
+    weights: Optional[np.ndarray],
+) -> float:
+    """Return an unweighted or posterior-weighted selected fraction."""
+    if weights is None or weights.shape != selected.shape:
+        return float(np.mean(selected))
+    total = float(np.sum(weights))
+    if not np.isfinite(total) or total <= 0.0:
+        return float(np.mean(selected))
+    return float(np.sum(weights[selected]) / total)
+
+
+def extract_subhalo_recovery(
+    result: Any,
+    mapping_context: Any,
+) -> SubhaloRecovery:
+    """Extract freed-subhalo ML values and converged PDF summaries.
+
+    Parameters
+    ----------
+    result : `object`
+        PyAutoFit result carrying an instance and samples.
+    mapping_context : `MassMappingContext`
+        Mass conversion context used by the fitted profile.
+
+    Returns
+    -------
+    recovery : `SubhaloRecovery`
+        Recovered parameters, boundary flags, and convergence metadata.
+    """
+    from .mass_mapping import evaluate_mass_mapping
+
+    subhalo, instance_accessor = _maximum_likelihood_subhalo(result)
+    log_mass = float(subhalo.log10_m200)
+    centre_y, centre_x = (float(value) for value in subhalo.centre)
+    derived = evaluate_mass_mapping(mapping_context, log_mass)
+    samples = getattr(result, "samples", None)
+    pdf_converged = None
+    mass_values = None
+    centre_y_values = None
+    centre_x_values = None
+    weights = None
+    n_samples = None
+    extraction_method = instance_accessor
+    if samples is not None:
+        if hasattr(samples, "pdf_converged"):
+            try:
+                pdf_converged = bool(samples.pdf_converged)
+            except Exception:
+                pdf_converged = None
+        mass_values = _sample_values(
+            samples,
+            (("galaxies", "lens", "subhalo", "log10_m200"),),
+        )
+        centre_y_values = _sample_values(
+            samples,
+            (
+                (
+                    "galaxies",
+                    "lens",
+                    "subhalo",
+                    "centre",
+                    "centre_0",
+                ),
+                ("galaxies", "lens", "subhalo", "centre_0"),
+            ),
+        )
+        centre_x_values = _sample_values(
+            samples,
+            (
+                (
+                    "galaxies",
+                    "lens",
+                    "subhalo",
+                    "centre",
+                    "centre_1",
+                ),
+                ("galaxies", "lens", "subhalo", "centre_1"),
+            ),
+        )
+        if mass_values is not None:
+            n_samples = int(mass_values.size)
+            extraction_method += "+samples.values_for_path"
+        try:
+            weights = np.asarray(samples.weight_list, dtype=float)
+        except Exception:
+            weights = None
+
+    mass_quantiles = (None, None, None)
+    centre_y_quantiles = (None, None, None)
+    centre_x_quantiles = (None, None, None)
+    if pdf_converged is not False:
+        if mass_values is not None and mass_values.size:
+            mass_quantiles = _weighted_quantiles(mass_values, weights)
+        if centre_y_values is not None and centre_y_values.size:
+            centre_y_quantiles = _weighted_quantiles(centre_y_values, weights)
+        if centre_x_values is not None and centre_x_values.size:
+            centre_x_quantiles = _weighted_quantiles(centre_x_values, weights)
+
+    lower = mapping_context.log10_m200_lower
+    upper = mapping_context.log10_m200_upper
+    lower_fraction = None
+    upper_fraction = None
+    if mass_values is not None and mass_values.size:
+        lower_fraction = _posterior_fraction(
+            mass_values <= lower + 0.05,
+            weights,
+        )
+        upper_fraction = _posterior_fraction(
+            mass_values >= upper - 0.05,
+            weights,
+        )
+
+    return SubhaloRecovery(
+        log10_m200_ml=log_mass,
+        centre_ml_y=centre_y,
+        centre_ml_x=centre_x,
+        concentration_ml=derived.get("c200"),
+        kappa_s_ml=derived.get("kappa_s"),
+        scale_radius_arcsec_ml=derived.get("scale_radius_arcsec"),
+        log10_m200_p16=mass_quantiles[0],
+        log10_m200_p50=mass_quantiles[1],
+        log10_m200_p84=mass_quantiles[2],
+        centre_y_p16=centre_y_quantiles[0],
+        centre_y_p50=centre_y_quantiles[1],
+        centre_y_p84=centre_y_quantiles[2],
+        centre_x_p16=centre_x_quantiles[0],
+        centre_x_p50=centre_x_quantiles[1],
+        centre_x_p84=centre_x_quantiles[2],
+        mass_at_lower_bound=abs(log_mass - lower) <= 0.01,
+        mass_at_upper_bound=abs(log_mass - upper) <= 0.01,
+        posterior_mass_frac_lower=lower_fraction,
+        posterior_mass_frac_upper=upper_fraction,
+        pdf_converged=pdf_converged,
+        extraction_method=extraction_method,
+        n_samples=n_samples,
+    )
 
 
 @dataclass
@@ -164,6 +468,10 @@ class NonlinearCaseResult:
         Fisher-equivalent ``Delta log L``.
     quality_flags : `list` [`str`], optional
         Diagnostic flags.
+    subhalo_recovery : `SubhaloRecovery`, optional
+        Freed-subhalo recovery values.
+    diagnostics : `dict`, optional
+        Additional invariant and likelihood diagnostics.
     """
 
     case_id: str
@@ -178,6 +486,8 @@ class NonlinearCaseResult:
     fisher_z: Optional[float] = None
     fisher_delta_log_l_equiv: Optional[float] = None
     quality_flags: List[str] = field(default_factory=list)
+    subhalo_recovery: Optional[SubhaloRecovery] = None
+    diagnostics: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the case result to a JSON-compatible dictionary."""
@@ -185,6 +495,8 @@ class NonlinearCaseResult:
 
     def to_csv_row(self, run_name: str = "") -> Dict[str, Any]:
         """Convert the case result to one flat CSV row.
+
+        Freed significance requires the empirical null from brief section 3.
 
         Parameters
         ----------
@@ -206,6 +518,7 @@ class NonlinearCaseResult:
             for fit in (self.smooth_fit, self.subhalo_fit)
             if fit.error
         ]
+        recovery = self.subhalo_recovery
 
         row = {
             "run_name": run_name,
@@ -229,12 +542,18 @@ class NonlinearCaseResult:
                 metric.signed_delta_log_l if metric is not None else None
             ),
             "q_fit": q_fit,
-            "z_fit_local": metric.z_local if metric is not None else None,
+            "z_fit_local": (
+                metric.z_local
+                if metric is not None and self.fit_mode != "freed"
+                else None
+            ),
             "detected_fisher_scdd": (
                 self.fisher_q >= 10.0 if self.fisher_q is not None else None
             ),
             "detected_fit_scdd": (
-                metric.detected_scdd_local if metric is not None else None
+                metric.detected_scdd_local
+                if metric is not None and self.fit_mode != "freed"
+                else None
             ),
             "q_fit_over_q_fisher": q_ratio,
             "fit_status_smooth": self.smooth_fit.status,
@@ -250,6 +569,42 @@ class NonlinearCaseResult:
             "result_path_smooth": self.smooth_fit.result_path,
             "result_path_subhalo": self.subhalo_fit.result_path,
             "error": " | ".join(errors) if errors else None,
+            "analysis_key": self.subhalo_fit.analysis_key,
+            "recovered_log10_m200_ml": (
+                recovery.log10_m200_ml if recovery is not None else None
+            ),
+            "recovered_log10_m200_p16": (
+                recovery.log10_m200_p16 if recovery is not None else None
+            ),
+            "recovered_log10_m200_p50": (
+                recovery.log10_m200_p50 if recovery is not None else None
+            ),
+            "recovered_log10_m200_p84": (
+                recovery.log10_m200_p84 if recovery is not None else None
+            ),
+            "recovered_y_ml": (
+                recovery.centre_ml_y if recovery is not None else None
+            ),
+            "recovered_x_ml": (
+                recovery.centre_ml_x if recovery is not None else None
+            ),
+            "recovered_concentration_ml": (
+                recovery.concentration_ml if recovery is not None else None
+            ),
+            "mass_at_lower_bound": (
+                recovery.mass_at_lower_bound if recovery is not None else None
+            ),
+            "mass_at_upper_bound": (
+                recovery.mass_at_upper_bound if recovery is not None else None
+            ),
+            "pdf_converged": (
+                recovery.pdf_converged if recovery is not None else None
+            ),
+            "smooth_reused": "smooth_reused" in self.quality_flags,
+            "freed_below_fixed_template": (
+                "freed_below_fixed_template" in self.quality_flags
+            ),
+            "n_like_max_reached": self.subhalo_fit.n_like_max_reached,
         }
         return _json_safe(row)
 
@@ -283,7 +638,7 @@ class NonlinearDetectionData:
     cases: List[NonlinearCaseResult]
     thresholds: Dict[str, Any]
     config: Dict[str, Any]
-    schema_version: str = "nonlinear_detection.v1"
+    schema_version: str = "nonlinear_detection.v2"
     generation_timestamp: Optional[str] = None
     summary: Dict[str, Any] = field(default_factory=dict)
 

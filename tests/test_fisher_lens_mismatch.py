@@ -24,8 +24,6 @@ from hwoslaps.modeling.generator_fisher import perform_fisher_detection
 from hwoslaps.modeling.nonlinear.autolens_model_builder import (
     smooth_model_spec_from_config,
 )
-from hwoslaps.modeling.nonlinear.trial import SubhaloTrial
-from hwoslaps.modeling.nonlinear.validator import NonlinearMetricValidator
 from hwoslaps.modeling.utils_fisher import (
     FisherDetectionData,
     load_fisher_grid_map_npz,
@@ -1258,34 +1256,14 @@ def test_fisher_summary_names_active_mismatch_blocks(
     assert "fit_psf mode: explicit" not in output
 
 
-def _guard_trial() -> SubhaloTrial:
-    """Return a minimal fixed-template trial for nonlinear guard tests."""
-    return SubhaloTrial(
-        case_id="item5-guard",
-        position_yx_arcsec=(0.0, 0.0),
-        mass_msun=1.0e8,
-        model="PointMass",
-        profile_class="PointMass",
-        lens_redshift=0.2,
-        source_redshift=0.6,
-        einstein_radius_arcsec=0.01,
-    )
+def test_nonlinear_builder_supports_power_law_truth(flexible_setup):
+    """Build PowerLaw truth after the Item 7 guard removal."""
+    spec = smooth_model_spec_from_config(flexible_setup["config"])
+    assert spec.galaxies["lens"].components["mass"].class_name == "PowerLaw"
 
 
-def test_nonlinear_validator_rejects_power_law_truth(flexible_setup):
-    """Guard PowerLaw truth at the earliest nonlinear run-level seam."""
-    validator = NonlinearMetricValidator(runner=None)
-    with pytest.raises(NotImplementedError, match="Items 7/9"):
-        validator.validate_fixed_template(
-            dataset=None,
-            dataset_metadata=None,
-            full_config=flexible_setup["config"],
-            trial=_guard_trial(),
-        )
-
-
-def test_nonlinear_validator_rejects_explicit_fit_lens(flexible_setup):
-    """Guard explicit fit_lens at the nonlinear run-level seam."""
+def test_nonlinear_builder_supports_explicit_fit_lens(flexible_setup):
+    """Build an explicit fit-side SIE macro after Item 7."""
     config = deepcopy(flexible_setup["config"])
     config["lensing"]["lens_galaxy"]["mass"] = _isothermal_fit(config)["mass"]
     config["lensing"]["lens_galaxy"].pop("shear", None)
@@ -1293,24 +1271,19 @@ def test_nonlinear_validator_rejects_explicit_fit_lens(flexible_setup):
         "mode": "explicit",
         "lens_galaxy": _isothermal_fit(config),
     }
-    validator = NonlinearMetricValidator(runner=None)
-    with pytest.raises(NotImplementedError, match="Items 7/9"):
-        validator.validate_fixed_template(
-            dataset=None,
-            dataset_metadata=None,
-            full_config=config,
-            trial=_guard_trial(),
-        )
+    spec = smooth_model_spec_from_config(config)
+    assert spec.galaxies["lens"].components["mass"].class_name == "Isothermal"
 
 
-def test_nonlinear_builder_rejects_power_law_truth(flexible_setup):
-    """Guard direct nonlinear model-builder use with PowerLaw truth."""
-    with pytest.raises(NotImplementedError, match="Items 7/9"):
-        smooth_model_spec_from_config(flexible_setup["config"])
+def test_nonlinear_builder_power_law_contains_linked_multipoles(flexible_setup):
+    """Build fit-side multipoles linked to the PowerLaw macro."""
+    spec = smooth_model_spec_from_config(flexible_setup["config"])
+    lens = spec.galaxies["lens"].components
+    assert lens["multipole_m3"].parameters["slope"].kind == "linked"
 
 
-def test_nonlinear_builder_rejects_explicit_fit_lens(flexible_setup):
-    """Guard explicit fit_lens at the direct nonlinear builder seam."""
+def test_nonlinear_builder_explicit_fit_lens_has_no_truth_shear(flexible_setup):
+    """Omit truth-only shear from an explicit SIE fit model."""
     config = deepcopy(flexible_setup["config"])
     isothermal = _isothermal_fit(config)
     config["lensing"]["lens_galaxy"]["mass"] = deepcopy(
@@ -1322,5 +1295,5 @@ def test_nonlinear_builder_rejects_explicit_fit_lens(flexible_setup):
         "lens_galaxy": isothermal,
     }
 
-    with pytest.raises(NotImplementedError, match="Items 7/9"):
-        smooth_model_spec_from_config(config)
+    spec = smooth_model_spec_from_config(config)
+    assert set(spec.galaxies["lens"].components) == {"mass"}
