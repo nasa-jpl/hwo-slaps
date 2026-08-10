@@ -1,5 +1,7 @@
 """Fisher-based lens modeling module for HWO-SLAPS."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from .fisher_core import (
@@ -74,3 +76,8 @@ def __getattr__(name: str) -> Any:
 
         return FisherDetector
     raise AttributeError(name)
+
+
+def __dir__() -> list[str]:
+    """Return package public names for IDE and star-import compatibility."""
+    return sorted(__all__)

@@ -1,8 +1,13 @@
 """Habitable Worlds Observatory Strong Lensing Analysis Pipeline System."""
 
-from typing import Any
+from __future__ import annotations
+
+from typing import Any, TYPE_CHECKING
 
 __all__ = ["run_enhanced_pipeline"]
+
+if TYPE_CHECKING:
+    from .pipeline import run_enhanced_pipeline
 
 
 def __getattr__(name: str) -> Any:
@@ -12,3 +17,8 @@ def __getattr__(name: str) -> Any:
 
         return run_enhanced_pipeline
     raise AttributeError(name)
+
+
+def __dir__() -> list[str]:
+    """Return package public names for IDE and star-import compatibility."""
+    return sorted(__all__)

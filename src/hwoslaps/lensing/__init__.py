@@ -1,19 +1,21 @@
-"""
-Lensing system generation module for HWO-SLAPS.
+"""Lensing system generation module for HWO-SLAPS.
 
 This module provides functionality to generate realistic galaxy-galaxy strong
 lensing systems with precisely known subhalo populations.
 """
 
-from typing import Any
+from __future__ import annotations
 
-from .image_source import ImageSource, SourceImageAsset, load_source_image_asset
-from .mass_models import (
-    einstein_radius_point_mass,
-    einstein_radius_sis_m200,
-    nfw_scale_parameters,
-    concentration_mass_relation,
-)
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .image_source import ImageSource, SourceImageAsset, load_source_image_asset
+    from .mass_models import (
+        concentration_mass_relation,
+        einstein_radius_point_mass,
+        einstein_radius_sis_m200,
+        nfw_scale_parameters,
+    )
 
 __all__ = [
     "generate_lensing_system",
@@ -30,6 +32,23 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """Resolve PyAutoLens-backed generation helpers only when requested."""
+    if name in {
+        "ImageSource",
+        "SourceImageAsset",
+        "load_source_image_asset",
+    }:
+        from . import image_source
+
+        return getattr(image_source, name)
+    if name in {
+        "einstein_radius_point_mass",
+        "einstein_radius_sis_m200",
+        "nfw_scale_parameters",
+        "concentration_mass_relation",
+    }:
+        from . import mass_models
+
+        return getattr(mass_models, name)
     if name == "generate_lensing_system":
         from .generator import generate_lensing_system
 
@@ -39,3 +58,8 @@ def __getattr__(name: str) -> Any:
 
         return LensingData
     raise AttributeError(name)
+
+
+def __dir__() -> list[str]:
+    """Return package public names for IDE and star-import compatibility."""
+    return sorted(__all__)

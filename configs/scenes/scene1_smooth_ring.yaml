@@ -45,6 +45,9 @@ lensing:
     enabled: true
     mass: 1.0e7  # Solar masses
     model: NFW
+    # Concentration configuration applies only for NFW subhalos.
+    # For SIS and PointMass, remove this block (or set `concentration: null`).
+    # x_sub and h are accepted only by moline2017_eq7.
     concentration:
       model: moline2017_eq7
       x_sub: 1.0

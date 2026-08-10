@@ -1,5 +1,7 @@
 """Nonlinear validation helpers for Fisher detectability metrics."""
 
+from __future__ import annotations
+
 from typing import Any
 
 from .autolens_model_builder import (
@@ -127,3 +129,8 @@ def __getattr__(name: str) -> Any:
 
         return getattr(mass_mapping, name)
     raise AttributeError(name)
+
+
+def __dir__() -> list[str]:
+    """Return package public names for IDE and star-import compatibility."""
+    return sorted(__all__)

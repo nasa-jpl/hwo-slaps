@@ -207,6 +207,31 @@ def test_mapping_range_endpoints_and_extrapolation_guards():
         )
 
 
+@pytest.mark.parametrize("subhalo_model", ["SIS", "PointMass"])
+def test_build_mass_mapping_context_rejects_concentration_block_for_non_nfw(
+    subhalo_model: str,
+) -> None:
+    """Reject concentration settings for non-NFW context construction."""
+    config = deepcopy(_scene_config())
+    config["lensing"]["subhalo"]["model"] = subhalo_model
+    with pytest.raises(
+        ValueError, match="SIS and PointMass contexts do not accept concentration"
+    ):
+        build_mass_mapping_context(config)
+
+
+def test_build_mass_mapping_context_rejects_power_law_x_sub_or_h():
+    """Reject x_sub/h for power-law concentration in NFW context."""
+    config = deepcopy(_scene_config())
+    config["lensing"]["subhalo"]["concentration"] = {
+        "model": "power_law",
+        "x_sub": 1.0,
+        "h": 0.6774,
+    }
+    with pytest.raises(ValueError, match="power_law contexts do not accept x_sub or h"):
+        build_mass_mapping_context(config)
+
+
 def test_context_h_resolution_and_explicit_hash_equivalence():
     """Resolve null h and match config and explicit context identities."""
     config = _scene_config()

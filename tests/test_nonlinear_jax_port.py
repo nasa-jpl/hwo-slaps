@@ -488,12 +488,23 @@ def test_t5_builder_rejects_mass_prior_support_outside_context(monkeypatch):
     config, trial = _freed_config_and_trial()
     context = _context()
 
-    def expanded_mass_uniform(lower, upper):
-        if lower == context.log10_m200_lower and upper == context.log10_m200_upper:
-            return real_uniform(lower - 0.1, upper)
-        return real_uniform(lower, upper)
+    spec = model_builder.subhalo_model_spec_from_trial(
+        config,
+        trial,
+        fit_mode="freed",
+        mass_context=context,
+    )
+    prior = spec.galaxies["lens"].components["subhalo"].parameters["log10_m200"]
+    assert prior.lower == context.log10_m200_lower
+    assert prior.upper == context.log10_m200_upper
 
-    monkeypatch.setattr(model_builder, "uniform", expanded_mass_uniform)
+    def expanded_mass_prior(_mass_context):
+        return real_uniform(
+            _mass_context.log10_m200_lower - 0.1,
+            _mass_context.log10_m200_upper,
+        )
+
+    monkeypatch.setattr(model_builder, "_freed_mass_prior", expanded_mass_prior)
     with pytest.raises(ValueError, match="log10_m200 prior support"):
         model_builder.subhalo_model_spec_from_trial(
             config,
@@ -665,26 +676,46 @@ def test_t6_x64_precedes_first_autolens_import_in_fresh_interpreter():
 
         jax.config.update("jax_enable_x64", False)
         events = []
+        tracked = {"autolens", "autogalaxy", "autoarray", "autofit"}
+
+        # Enforced contract: x64 is enabled before the runner imports
+        # AutoLens. The wider PyAuto stack cannot be gated the same way:
+        # hwoslaps.modeling.nonlinear eagerly imports ImageSource, which
+        # subclasses ag.LightProfile and applies aa decorators at class
+        # definition, so autogalaxy/autoarray (and autofit through
+        # autogalaxy) load before x64 on every real path. Those imports
+        # are recorded as observations only; the runner-level guarantee
+        # is x64-before-AutoLens-import and before any traced evaluation.
 
 
         class AutoLensImportGuard(importlib.abc.MetaPathFinder,
                                   importlib.abc.Loader):
             def find_spec(self, fullname, path=None, target=None):
-                if fullname == "autolens":
-                    return importlib.util.spec_from_loader(fullname, self)
-                return None
+                top_level = fullname.split(".")[0]
+                if top_level not in tracked:
+                    return None
+
+                x64_enabled = bool(jax.config.jax_enable_x64)
+                if top_level not in sys.modules:
+                    events.append((top_level, x64_enabled))
+                if top_level != "autolens":
+                    return None
+
+                if not x64_enabled:
+                    raise RuntimeError(
+                        "AutoLens imported before JAX x64 was enabled"
+                    )
+                is_package = "." not in fullname
+                return importlib.util.spec_from_loader(
+                    fullname,
+                    self,
+                    is_package=is_package,
+                )
 
             def create_module(self, spec):
                 return None
 
             def exec_module(self, module):
-                x64_enabled = bool(jax.config.jax_enable_x64)
-                events.append(("autolens", x64_enabled))
-                if not x64_enabled:
-                    raise RuntimeError(
-                        "AutoLens imported before JAX x64 was enabled"
-                    )
-
                 class AnalysisImaging:
                     def __init__(self, dataset, use_jax):
                         self.dataset = dataset
@@ -707,7 +738,11 @@ def test_t6_x64_precedes_first_autolens_import_in_fresh_interpreter():
             output_dir=".",
         ).make_analysis(dataset=object(), model_metadata={})
         assert analysis._use_jax is True
-        assert events == [("autolens", True)]
+        autolens_events = [
+            enabled for name, enabled in events if name == "autolens"
+        ]
+        assert autolens_events == [True]
+        assert {name for name, _ in events} <= tracked
         """
     )
     result = subprocess.run(

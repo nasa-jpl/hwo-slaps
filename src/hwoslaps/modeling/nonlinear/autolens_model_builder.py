@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -840,6 +840,26 @@ def _validate_freed_context(
     return mass_context
 
 
+def _freed_mass_prior(mass_context: MassMappingContext) -> PriorSpec:
+    """Build the default freed fit prior on log10(M200)."""
+    return uniform(
+        mass_context.log10_m200_lower,
+        mass_context.log10_m200_upper,
+    )
+
+
+def _prior_support_bounds(prior: PriorSpec) -> Tuple[float, float]:
+    """Return the effective lower and upper support bounds for a prior."""
+    if prior.kind == "fixed":
+        value = float(prior.value)
+        return value, value
+    if prior.lower is None or prior.upper is None:
+        raise ValueError(
+            "freed subhalo log10_m200 prior must define support bounds"
+        )
+    return float(prior.lower), float(prior.upper)
+
+
 def subhalo_model_spec_from_trial(
     full_config: Dict[str, Any],
     trial: SubhaloTrial,
@@ -894,13 +914,11 @@ def subhalo_model_spec_from_trial(
             mass_context,
         )
         window = widths["subhalo_freed_centre_window_arcsec"]
-        mass_prior = uniform(
-            mass_context.log10_m200_lower,
-            mass_context.log10_m200_upper,
-        )
+        mass_prior = _freed_mass_prior(mass_context)
+        prior_lower, prior_upper = _prior_support_bounds(mass_prior)
         if (
-            mass_prior.lower < mass_context.log10_m200_lower
-            or mass_prior.upper > mass_context.log10_m200_upper
+            prior_lower < mass_context.log10_m200_lower
+            or prior_upper > mass_context.log10_m200_upper
         ):
             raise ValueError(
                 "log10_m200 prior support lies outside mass_context bounds"
