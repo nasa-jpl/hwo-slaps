@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import builtins
+from copy import deepcopy
 from dataclasses import FrozenInstanceError, fields, replace
 import importlib.util
 import multiprocessing
@@ -43,6 +44,7 @@ from hwoslaps.modeling.nonlinear.output_schema import (
 )
 from hwoslaps.modeling.nonlinear.trial import SubhaloTrial
 from hwoslaps.modeling.nonlinear.validator import NonlinearMetricValidator
+from hwoslaps.psf.utils import make_pyauto_convolver, make_pyauto_kernel
 
 
 MASS_GRID = np.logspace(6.0, 8.5, 512)
@@ -731,6 +733,134 @@ def test_t6_requires_cpu_guard_remains_general_and_precedes_backend_import(
             dataset=object(),
             model_metadata={"requires_cpu": True},
         )
+
+
+def _t10_source_config(source_family):
+    """Return one complete config for a stock, clumpy, or image source."""
+    config, _ = _freed_config_and_trial()
+    if source_family == "stock":
+        return config
+    if source_family == "clumpy":
+        config["lensing"]["source_galaxy"]["light"] = {
+            "type": "Clumpy",
+            "host": {
+                "centre": [-0.03, 0.08],
+                "ell_comps": [0.12, -0.06],
+                "intensity": 1.8,
+                "effective_radius": 0.11,
+                "sersic_index": 1.2,
+            },
+            "clumps": [
+                {
+                    "centre": [0.03, 0.12],
+                    "ell_comps": [0.0, 0.0],
+                    "intensity": 0.8,
+                    "effective_radius": 0.025,
+                    "sersic_index": 1.0,
+                },
+                {
+                    "centre": [-0.08, 0.01],
+                    "ell_comps": [0.02, -0.01],
+                    "intensity": 0.6,
+                    "effective_radius": 0.03,
+                    "sersic_index": 0.9,
+                },
+            ],
+            "flux_scale": 1.0,
+            "size_scale": 1.0,
+        }
+        return config
+    if source_family == "image":
+        asset_path = (
+            Path(__file__).resolve().parents[1]
+            / "configs/source_assets/cosmos_48849_hlr011.npz"
+        )
+        config["lensing"]["source_galaxy"]["light"] = {
+            "type": "Image",
+            "asset_path": str(asset_path),
+            "centre": [-0.03, 0.08],
+            "rotation_deg": 17.0,
+            "total_flux": 0.5,
+            "flux_scale": 1.0,
+            "size_scale": 1.0,
+        }
+        return config
+    raise AssertionError(f"unsupported T10 source family: {source_family}")
+
+
+def _t10_freed_trial(model):
+    """Return a physical freed trial for one supported mass family."""
+    return SubhaloTrial(
+        case_id=f"item7b-t10-{model.lower()}",
+        mass_msun=1.0e7,
+        position_yx_arcsec=(0.2, -0.1),
+        model=model,
+        profile_class={
+            "NFW": "NFWSph",
+            "SIS": "IsothermalSph",
+            "PointMass": "PointMass",
+        }[model],
+        lens_redshift=0.2,
+        source_redshift=0.6,
+        kappa_s=0.01 if model == "NFW" else None,
+        scale_radius_arcsec=0.2 if model == "NFW" else None,
+        einstein_radius_arcsec=0.01 if model != "NFW" else None,
+    )
+
+
+def _t10_spec(family):
+    """Build the real repository ModelSpec for one T10 family."""
+    if family == "smooth":
+        return model_builder.smooth_model_spec_from_config(
+            _t10_source_config("stock")
+        )
+    if family.startswith("freed_"):
+        model = {
+            "freed_nfw": "NFW",
+            "freed_sis": "SIS",
+            "freed_point_mass": "PointMass",
+        }[family]
+        config = deepcopy(_t10_source_config("stock"))
+        config["lensing"]["subhalo"]["model"] = model
+        context = _context(model=model)
+        return model_builder.subhalo_model_spec_from_trial(
+            config,
+            _t10_freed_trial(model),
+            fit_mode="freed",
+            mass_context=context,
+        )
+    if family in {"clumpy_rigid", "clumpy_host_free"}:
+        mode = family.removeprefix("clumpy_")
+        return model_builder.smooth_model_spec_from_config(
+            _t10_source_config("clumpy"),
+            clumpy_fit_parameterization=mode,
+        )
+    if family == "image_source":
+        return model_builder.smooth_model_spec_from_config(
+            _t10_source_config("image")
+        )
+    raise AssertionError(f"unsupported T10 family: {family}")
+
+
+T10_FAMILIES = (
+    "smooth",
+    "freed_nfw",
+    "freed_sis",
+    "freed_point_mass",
+    "clumpy_rigid",
+    "clumpy_host_free",
+    "image_source",
+)
+
+
+def test_t6_all_intended_item7b_specs_have_no_requires_cpu_stamp():
+    """Catch retaining any CPU stamp after its complete T10 gate passes."""
+    ported_families = T10_FAMILIES[1:]
+    stamped = {
+        family: _t10_spec(family).metadata.get("requires_cpu")
+        for family in ported_families
+    }
+    assert stamped == {family: None for family in ported_families}
 
 
 def test_t6_search_name_and_vectorized_kwargs_change_only_for_jax(
@@ -1518,6 +1648,197 @@ def test_t9_image_source_persistent_jit_gradients_and_warm_transfer_guard():
     )
     finite_difference = _central_difference(eager_objective, parameters)
     _assert_finite_difference(np.asarray(gradient), finite_difference)
+
+
+def _require_t10_target_gpu():
+    """Skip T10 only when the pinned target API or a GPU is absent."""
+    try:
+        autolens_runner.ensure_target_jax_backend()
+    except RuntimeError as error:
+        pytest.skip(str(error))
+    autolens_runner.ensure_jax_x64()
+    import jax
+
+    if not any(device.platform == "gpu" for device in jax.devices()):
+        pytest.skip("T10 requires an available target GPU")
+    return jax
+
+
+def _t10_real_imaging(model):
+    """Generate one actual 61x61 Imaging dataset from a real model instance."""
+    instance = model.instance_from_prior_medians()
+    grid = al.Grid2D.uniform(
+        shape_native=(61, 61),
+        pixel_scales=0.04,
+    )
+    tracer = al.Tracer(
+        galaxies=[instance.galaxies.lens, instance.galaxies.source]
+    )
+    image = tracer.image_2d_from(grid=grid)
+    data = al.Array2D.no_mask(
+        values=np.asarray(image.native),
+        pixel_scales=0.04,
+    )
+    noise = al.Array2D.full(
+        fill_value=0.2,
+        shape_native=(61, 61),
+        pixel_scales=0.04,
+    )
+    unit_kernel = make_pyauto_kernel(
+        [[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]],
+        pixel_scales=0.04,
+    )
+    return al.Imaging(
+        data=data,
+        noise_map=noise,
+        psf=make_pyauto_convolver(unit_kernel),
+        over_sample_size_lp=1,
+    )
+
+
+def _t10_changed_physical_batches(model, family):
+    """Build two same-shape batches varying every real free parameter."""
+    batch_size = 3
+    parameter_count = model.prior_count
+    column_offsets = np.linspace(-0.03, 0.03, parameter_count)
+    row_offsets = np.linspace(-0.04, 0.04, batch_size)[:, None]
+    unit_a = 0.40 + row_offsets + column_offsets[None, :]
+    unit_b = 0.60 - row_offsets - column_offsets[None, :]
+    batch_a = np.asarray(
+        [model.vector_from_unit_vector(row) for row in unit_a],
+        dtype=np.float64,
+    )
+    batch_b = np.asarray(
+        [model.vector_from_unit_vector(row) for row in unit_b],
+        dtype=np.float64,
+    )
+    if family == "freed_nfw":
+        names = list(model.model_component_and_parameter_names)
+        mass_name = "galaxies.lens.subhalo.log10_m200"
+        mass_index = names.index(mass_name)
+        batch_a[:, mass_index] = np.asarray([6.0, 7.0, 8.5])
+        batch_b[:, mass_index] = np.asarray([6.2, 7.2, 8.3])
+        assert np.array_equal(batch_a[:, mass_index], [6.0, 7.0, 8.5])
+    assert batch_a.shape == batch_b.shape == (batch_size, parameter_count)
+    assert np.all(np.any(batch_a != batch_b, axis=0))
+    assert np.all(np.ptp(batch_a, axis=0) > 0.0)
+    assert np.all(np.ptp(batch_b, axis=0) > 0.0)
+    return batch_a, batch_b
+
+
+def _t10_fitness_pair(model, dataset, tmp_path, batch_size):
+    """Construct persistent real target and NumPy Fitness objects."""
+    from autofit.non_linear.fitness import Fitness
+
+    jax_analysis = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=True, number_of_cores=1),
+        output_dir=tmp_path / "jax",
+    ).make_analysis(dataset=dataset, model_metadata={})
+    numpy_analysis = AutoLensFitRunner(
+        NonlinearSearchSettings(use_jax=False, number_of_cores=1),
+        output_dir=tmp_path / "numpy",
+    ).make_analysis(dataset=dataset, model_metadata={})
+    resample_merit = -1.23456789e99
+    jax_fitness = Fitness(
+        model=model,
+        analysis=jax_analysis,
+        paths=None,
+        fom_is_log_likelihood=True,
+        resample_figure_of_merit=resample_merit,
+        use_jax_vmap=True,
+        batch_size=batch_size,
+    )
+    numpy_fitness = Fitness(
+        model=model,
+        analysis=numpy_analysis,
+        paths=None,
+        fom_is_log_likelihood=True,
+        resample_figure_of_merit=resample_merit,
+        use_jax_vmap=False,
+    )
+    return jax_fitness, numpy_fitness, resample_merit
+
+
+def _t10_numpy_values(fitness, physical_batch):
+    """Evaluate one physical batch serially through real NumPy Fitness."""
+    return np.asarray(
+        [fitness.call_wrap(vector) for vector in physical_batch],
+        dtype=np.float64,
+    )
+
+
+@pytest.mark.xtx_gpu
+@pytest.mark.parametrize("family", T10_FAMILIES)
+def test_t10_each_real_model_family_matches_numpy_through_persistent_fitness(
+    family,
+    tmp_path,
+):
+    """Catch traced model, decorator, precision, or persistent-cache breaks."""
+    jax = _require_t10_target_gpu()
+    spec = _t10_spec(family)
+    model = model_builder.autofit_model_from_spec(spec)
+    dataset = _t10_real_imaging(model)
+    batch_a, batch_b = _t10_changed_physical_batches(model, family)
+    jax_fitness, numpy_fitness, _ = _t10_fitness_pair(
+        model,
+        dataset,
+        tmp_path,
+        batch_size=batch_a.shape[0],
+    )
+
+    first = jax_fitness.call_wrap(batch_a)
+    jax.block_until_ready(first)
+    first = np.asarray(first)
+    changed = jax_fitness.call_wrap(batch_b)
+    jax.block_until_ready(changed)
+    changed = np.asarray(changed)
+
+    assert first.shape == changed.shape == (batch_a.shape[0],)
+    assert first.dtype == changed.dtype == np.dtype(np.float64)
+    assert np.all(np.isfinite(first))
+    assert np.all(np.isfinite(changed))
+    assert np.any(first != changed)
+    numpy_first = _t10_numpy_values(numpy_fitness, batch_a)
+    numpy_changed = _t10_numpy_values(numpy_fitness, batch_b)
+    assert np.all(np.isfinite(numpy_first))
+    assert np.all(np.isfinite(numpy_changed))
+    assert np.all(np.abs(first - numpy_first) <= 1.0e-5)
+    assert np.all(np.abs(changed - numpy_changed) <= 1.0e-5)
+
+
+@pytest.mark.xtx_gpu
+def test_t10_nonfinite_dynamic_vector_resamples_without_poisoning_fitness(
+    tmp_path,
+):
+    """Catch NaN leakage or persistent-state corruption after resampling."""
+    jax = _require_t10_target_gpu()
+    model = model_builder.autofit_model_from_spec(_t10_spec("smooth"))
+    dataset = _t10_real_imaging(model)
+    valid_a, valid_b = _t10_changed_physical_batches(model, "smooth")
+    jax_fitness, numpy_fitness, resample_merit = _t10_fitness_pair(
+        model,
+        dataset,
+        tmp_path,
+        batch_size=valid_a.shape[0],
+    )
+
+    baseline = jax_fitness.call_wrap(valid_a)
+    jax.block_until_ready(baseline)
+    invalid = valid_a.copy()
+    invalid[1, 0] = np.nan
+    invalid_values = jax_fitness.call_wrap(invalid)
+    jax.block_until_ready(invalid_values)
+    invalid_values = np.asarray(invalid_values)
+    assert invalid_values[1] == resample_merit
+
+    recovered = jax_fitness.call_wrap(valid_b)
+    jax.block_until_ready(recovered)
+    recovered = np.asarray(recovered)
+    expected = _t10_numpy_values(numpy_fitness, valid_b)
+    assert recovered.shape == (valid_b.shape[0],)
+    assert recovered.dtype == np.dtype(np.float64)
+    assert np.all(np.isfinite(recovered))
+    assert np.all(np.abs(recovered - expected) <= 1.0e-5)
 
 
 def _spawn_profile_evaluation(serialized_profiles, queue):

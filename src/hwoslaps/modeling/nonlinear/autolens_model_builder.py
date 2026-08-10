@@ -714,7 +714,6 @@ def _source_components(
         )
         return {"light": profile}, {
             "image_source_asset_hash": asset.sha256_16,
-            "requires_cpu": True,
         }
     if clumpy_fit_parameterization not in {"rigid", "host_free", "fully_free"}:
         raise ValueError(
@@ -730,7 +729,6 @@ def _source_components(
             widths,
             pin_to_targets=pin_to_targets,
         ), metadata
-    metadata["requires_cpu"] = True
     return {
         "light": _clumpy_composite_profile(
             light_config,
@@ -980,7 +978,6 @@ def subhalo_model_spec_from_trial(
                 "trial_case_id": trial.case_id,
                 "mass_profile_source": "mass_mapping_context",
                 "mass_context_hash": mass_context.context_hash,
-                "requires_cpu": True,
             }
         )
     return ModelSpec(

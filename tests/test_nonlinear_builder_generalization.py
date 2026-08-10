@@ -164,30 +164,28 @@ def test_legacy_subhalo_specs_preserve_custom_source_metadata(
     scene_name,
     fit_mode,
 ):
-    """Carry CPU and image provenance through both legacy fit modes."""
+    """Carry JAX-capable source provenance through both legacy fit modes."""
     spec = subhalo_model_spec_from_trial(
         _scene(scene_name),
         _legacy_trial(),
         fit_mode=fit_mode,
     )
-    assert spec.metadata["requires_cpu"] is True
+    assert "requires_cpu" not in spec.metadata
     if scene_name == "scene4_cosmos.yaml":
         assert spec.metadata["image_source_asset_hash"]
+    else:
+        assert spec.metadata["clumpy_fit_parameterization"] == "host_free"
 
 
-def test_builder_metadata_drives_legacy_jax_guard(tmp_path):
-    """Reject JAX using metadata from a legacy custom-source builder."""
+def test_builder_metadata_does_not_request_legacy_jax_guard():
+    """Keep the retired custom-source CPU stamp out of builder metadata."""
     spec = subhalo_model_spec_from_trial(
         _scene("scene2_clumpy.yaml"),
         _legacy_trial(),
         fit_mode="fixed_template",
     )
-    runner = AutoLensFitRunner(
-        NonlinearSearchSettings(use_jax=True),
-        output_dir=tmp_path,
-    )
-    with pytest.raises(ValueError, match="requires CPU"):
-        runner.make_analysis(None, model_metadata=spec.metadata)
+    assert spec.metadata["clumpy_fit_parameterization"] == "host_free"
+    assert "requires_cpu" not in spec.metadata
 
 
 def test_scene5_macro_count_and_link_identity():
