@@ -855,12 +855,12 @@ T10_FAMILIES = (
 
 def test_t6_all_intended_item7b_specs_have_no_requires_cpu_stamp():
     """Catch retaining any CPU stamp after its complete T10 gate passes."""
-    ported_families = T10_FAMILIES[1:]
-    stamped = {
-        family: _t10_spec(family).metadata.get("requires_cpu")
-        for family in ported_families
-    }
-    assert stamped == {family: None for family in ported_families}
+    for family in T10_FAMILIES[1:]:
+        spec = _t10_spec(family)
+        assert "requires_cpu" not in spec.metadata, (
+            f"{family} still carries requires_cpu="
+            f"{spec.metadata['requires_cpu']!r}"
+        )
 
 
 def test_t6_search_name_and_vectorized_kwargs_change_only_for_jax(
