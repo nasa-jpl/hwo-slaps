@@ -7,13 +7,15 @@ import json
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
 
-from .dataset_builder import NonlinearDatasetMetadata
 from .likelihood_metrics import LikelihoodRatioMetric
 from .trial import SubhaloTrial
+
+if TYPE_CHECKING:
+    from .dataset_builder import NonlinearDatasetMetadata
 
 NONLINEAR_CASE_CSV_COLUMNS = (
     "run_name",

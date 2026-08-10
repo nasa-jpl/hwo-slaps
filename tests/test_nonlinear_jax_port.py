@@ -9,7 +9,9 @@ import importlib.util
 import multiprocessing
 from pathlib import Path
 import pickle
+import subprocess
 import sys
+import textwrap
 from types import SimpleNamespace
 
 import autolens as al
@@ -650,6 +652,73 @@ def test_t6_x64_is_enabled_before_autolens_analysis_construction(
     assert events == ["x64", "backend", ("analysis", True)]
 
 
+@pytest.mark.xtx_gpu
+def test_t6_x64_precedes_first_autolens_import_in_fresh_interpreter():
+    """Catch transitive AutoLens imports before the runner enables x64."""
+    source = textwrap.dedent(
+        """
+        import importlib.abc
+        import importlib.util
+        import sys
+
+        import jax
+
+        jax.config.update("jax_enable_x64", False)
+        events = []
+
+
+        class AutoLensImportGuard(importlib.abc.MetaPathFinder,
+                                  importlib.abc.Loader):
+            def find_spec(self, fullname, path=None, target=None):
+                if fullname == "autolens":
+                    return importlib.util.spec_from_loader(fullname, self)
+                return None
+
+            def create_module(self, spec):
+                return None
+
+            def exec_module(self, module):
+                x64_enabled = bool(jax.config.jax_enable_x64)
+                events.append(("autolens", x64_enabled))
+                if not x64_enabled:
+                    raise RuntimeError(
+                        "AutoLens imported before JAX x64 was enabled"
+                    )
+
+                class AnalysisImaging:
+                    def __init__(self, dataset, use_jax):
+                        self.dataset = dataset
+                        self._use_jax = use_jax
+
+                module.AnalysisImaging = AnalysisImaging
+
+
+        sys.meta_path.insert(0, AutoLensImportGuard())
+
+        from hwoslaps.modeling.nonlinear import autolens_runner
+
+        assert "autolens" not in sys.modules
+        autolens_runner.ensure_target_jax_backend = lambda: None
+        autolens_runner._patch_analysis_imaging_adapt_images_compat = (
+            lambda module: None
+        )
+        analysis = autolens_runner.AutoLensFitRunner(
+            autolens_runner.NonlinearSearchSettings(use_jax=True),
+            output_dir=".",
+        ).make_analysis(dataset=object(), model_metadata={})
+        assert analysis._use_jax is True
+        assert events == [("autolens", True)]
+        """
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", source],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_t6_jax_analysis_typeerror_never_silently_downgrades(
     monkeypatch,
     tmp_path,
@@ -928,8 +997,14 @@ def test_t6_constructed_nautilus_must_expose_effective_vectorized_seam(
         NonlinearSearchSettings(use_jax=True, jax_n_batch=8),
         output_dir=tmp_path,
     )
-    with pytest.raises(RuntimeError, match="Nautilus.*n_batch.*use_jax_vmap"):
+    with pytest.raises(RuntimeError) as error:
         runner._make_search("case", "subhalo", 5, "analysis")
+    message = str(error.value)
+    assert "Nautilus" in message
+    assert "n_batch" in message
+    assert "use_jax_vmap" in message
+    assert "autofit=" in message
+    assert "autolens=" in message
 
 
 def _successful_result(log_likelihood=-5.0):

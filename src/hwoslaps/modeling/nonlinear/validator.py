@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 
 from .autolens_model_builder import (
     DEFAULT_PRIOR_WIDTHS,
@@ -12,7 +12,6 @@ from .autolens_model_builder import (
     subhalo_model_spec_from_trial,
 )
 from .autolens_runner import AutoLensFitRunner, analysis_key_from
-from .dataset_builder import NonlinearDatasetMetadata
 from .likelihood_metrics import profile_likelihood_ratio
 from .mass_mapping import MassMappingContext
 from .output_schema import (
@@ -21,6 +20,9 @@ from .output_schema import (
     extract_subhalo_recovery,
 )
 from .trial import SubhaloTrial
+
+if TYPE_CHECKING:
+    from .dataset_builder import NonlinearDatasetMetadata
 
 
 class NonlinearMetricValidator:

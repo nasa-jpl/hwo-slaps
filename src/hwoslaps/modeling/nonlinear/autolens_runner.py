@@ -569,7 +569,10 @@ class AutoLensFitRunner:
             if problems:
                 raise RuntimeError(
                     "Nautilus does not expose the requested effective JAX "
-                    "execution seam: " + ", ".join(problems)
+                    "execution seam: "
+                    f"autofit={_installed_version('autofit')}, "
+                    f"autolens={_installed_version('autolens')}; "
+                    "missing effective state: " + ", ".join(problems)
                 )
         return search
 
