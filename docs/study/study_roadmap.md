@@ -624,7 +624,7 @@ Workstream 2 — PSF requirements:
 Workstream 3 — calibration:
 
 - D1a (C): freed nonlinear searches.
-  - [ ] Free the subhalo mass (`log M200`) and widen the position window in
+  - [x] Free the subhalo mass (`log M200`) and widen the position window in
         the nonlinear fit model.
   - [ ] Rerun the nonlinear validation grid with the freed model.
 - D3 (C/G): Fisher-to-nonlinear calibration; expect `alpha` to shift for
