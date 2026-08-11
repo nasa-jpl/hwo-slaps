@@ -6,6 +6,7 @@ import hashlib
 from importlib import metadata as importlib_metadata
 import inspect
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,8 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import numpy as np
 
 from .output_schema import NonlinearFitSummary
+
+_VISUALIZATION_ENV = "PYAUTO_SKIP_VISUALIZATION"
 
 
 @dataclass(frozen=True)
@@ -48,6 +51,11 @@ class NonlinearSearchSettings:
         Whether to request PyAutoLens JAX execution.
     jax_n_batch : `int`, optional
         Vectorized AutoFit likelihood batch size for JAX execution only.
+    disable_visualization : `bool`, optional
+        Whether to disable AutoFit in-search visualization by setting
+        ``PYAUTO_SKIP_VISUALIZATION=1`` around the search; ``False``
+        sets ``0`` so plots run regardless of the ambient environment.
+        The prior value is restored after every fit.
 
     Notes
     -----
@@ -68,6 +76,7 @@ class NonlinearSearchSettings:
     unique_tag: Optional[str] = None
     use_jax: bool = False
     jax_n_batch: int = 100
+    disable_visualization: bool = True
 
     def __post_init__(self) -> None:
         """Validate execution settings before analysis or search setup."""
@@ -77,6 +86,8 @@ class NonlinearSearchSettings:
             or self.jax_n_batch <= 0
         ):
             raise ValueError("jax_n_batch must be a positive integer")
+        if not isinstance(self.disable_visualization, bool):
+            raise ValueError("disable_visualization must be a boolean")
 
 
 def ensure_jax_x64() -> None:
@@ -652,7 +663,17 @@ class AutoLensFitRunner:
             use_jax_effective, jax_n_batch_effective = (
                 self._effective_jax_provenance(analysis, search)
             )
-            result = search.fit(model=model, analysis=analysis)
+            saved_visualization = os.environ.get(_VISUALIZATION_ENV)
+            os.environ[_VISUALIZATION_ENV] = (
+                "1" if self.settings.disable_visualization else "0"
+            )
+            try:
+                result = search.fit(model=model, analysis=analysis)
+            finally:
+                if saved_visualization is None:
+                    os.environ.pop(_VISUALIZATION_ENV, None)
+                else:
+                    os.environ[_VISUALIZATION_ENV] = saved_visualization
             log_likelihood, method = extract_max_log_likelihood_with_method(result)
             warnings = []
             if result_callback is not None:
@@ -683,6 +704,7 @@ class AutoLensFitRunner:
                     result,
                     self.settings.maxcall,
                 ),
+                visualization_disabled=self.settings.disable_visualization,
             )
         except Exception as exc:
             runtime_s = time.time() - start
@@ -699,4 +721,5 @@ class AutoLensFitRunner:
                 search_engine=self.settings.engine,
                 n_live=n_live,
                 analysis_key=analysis_key,
+                visualization_disabled=self.settings.disable_visualization,
             )

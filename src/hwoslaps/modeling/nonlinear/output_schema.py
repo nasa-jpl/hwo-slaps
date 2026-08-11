@@ -138,6 +138,8 @@ class NonlinearFitSummary:
         Dataset-and-model identity embedded in the search name.
     n_like_max_reached : `bool`, optional
         Whether the configured likelihood-call limit was reached.
+    visualization_disabled : `bool`, optional
+        Whether AutoFit in-search visualization was disabled for the fit.
     """
 
     model_role: str
@@ -159,6 +161,7 @@ class NonlinearFitSummary:
     n_like_max_reached: Optional[bool] = None
     use_jax_effective: Optional[bool] = None
     jax_n_batch_effective: Optional[int] = None
+    visualization_disabled: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the fit summary to a JSON-compatible dictionary."""
