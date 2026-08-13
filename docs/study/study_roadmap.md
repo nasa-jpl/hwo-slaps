@@ -616,7 +616,7 @@ Workstream 2 — PSF requirements:
   - [ ] Run the `delta` ladder per mode family; produce completeness and
         false-positive degradation curves.
 - D2a (C): prior-sampled PSF nuisance bank.
-  - [ ] Extend the PSF bank from 4 scaled candidates to roughly 16-32 draws
+  - [x] Extend the PSF bank from 4 scaled candidates to roughly 16-32 draws
         from the P2 priors with log-sum-exp marginalization.
   - [ ] Rerun the bank-marginalized completeness and control grids with the
         new bank.
