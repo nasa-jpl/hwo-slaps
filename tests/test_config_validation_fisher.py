@@ -397,14 +397,320 @@ def test_valid_fisher_psf_options_pass_validation():
     [
         {"mode": "matched"},
         {"mode": "explicit"},
+        {
+            "mode": "bank",
+            "bank": {
+                "kind": "prior_draws",
+                "prior_table": "missing-at-validation.yaml",
+                "amplitude_rms_nm": 20.0,
+                "n_draws": 2,
+                "seed": 7,
+            },
+        },
     ],
 )
 def test_fit_psf_accepts_supported_modes(fit_psf):
-    """Accept matched and complete explicit fit-PSF configurations."""
+    """Accept matched, explicit, and bank fit-PSF configurations."""
     config = _with_valid_fisher_block(_load_master_config())
     if fit_psf["mode"] == "explicit":
         fit_psf["psf"] = copy.deepcopy(config["psf"])
     config["modeling"]["fit_psf"] = fit_psf
+
+    validation.validate_or_raise(config)
+
+
+def _valid_prior_draw_bank() -> dict:
+    """Return one complete prior-draw bank configuration."""
+    return {
+        "kind": "prior_draws",
+        "prior_table": "not-checked-at-validation.yaml",
+        "amplitude_rms_nm": 20.0,
+        "n_draws": 2,
+        "seed": 11,
+    }
+
+
+def _valid_aberrations(config: dict) -> dict:
+    """Return a valid bare aberrations block."""
+    return copy.deepcopy(config["psf"]["aberrations"])
+
+
+def test_fit_psf_bank_accepts_amplitude_list_and_anchor_defaults():
+    """Accept a balanced ordered amplitude list and explicit anchor flags."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = _valid_prior_draw_bank()
+    bank.update({
+        "amplitude_rms_nm": [10.0, 20.0],
+        "n_draws": 4,
+        "include_perfect": True,
+        "include_truth": False,
+    })
+    config["modeling"]["fit_psf"] = {"mode": "BANK", "bank": bank}
+
+    validation.validate_or_raise(config)
+
+
+def test_fit_psf_bank_accepts_explicit_bare_aberrations():
+    """Accept non-empty explicit banks of bare aberrations blocks."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {
+        "mode": "bank",
+        "bank": {
+            "kind": "explicit",
+            "candidates": [_valid_aberrations(config)],
+        },
+    }
+
+    validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("mode", ["matched", "explicit"])
+def test_nonbank_fit_psf_rejects_bank_block(mode):
+    """Reject a bank payload outside bank mode."""
+    config = _with_valid_fisher_block(_load_master_config())
+    fit_psf = {"mode": mode, "bank": _valid_prior_draw_bank()}
+    if mode == "explicit":
+        fit_psf["psf"] = copy.deepcopy(config["psf"])
+    config["modeling"]["fit_psf"] = fit_psf
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.bank"):
+        validation.validate_or_raise(config)
+
+
+def test_bank_fit_psf_requires_bank_and_rejects_psf():
+    """Require exactly the bank payload for bank mode."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {"mode": "bank"}
+    with pytest.raises(ValueError, match="bank.*modeling.fit_psf"):
+        validation.validate_or_raise(config)
+
+    config["modeling"]["fit_psf"] = {
+        "mode": "bank",
+        "bank": _valid_prior_draw_bank(),
+        "psf": copy.deepcopy(config["psf"]),
+    }
+    with pytest.raises(ValueError, match="modeling.fit_psf.psf"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_bank", [None, [], "bank"])
+def test_bank_fit_psf_rejects_non_dict_bank_block(bad_bank):
+    """Reject a non-dictionary modeling.fit_psf.bank block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {
+        "mode": "bank",
+        "bank": bad_bank,
+    }
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.bank"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("kind", [None, 3, "scaled_truth"])
+def test_fit_psf_bank_rejects_missing_or_invalid_kind(kind):
+    """Reject missing, mistyped, and unsupported bank kinds."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = _valid_prior_draw_bank()
+    if kind is None:
+        bank.pop("kind")
+    else:
+        bank["kind"] = kind
+    config["modeling"]["fit_psf"] = {"mode": "bank", "bank": bank}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.bank.kind"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("prior_table", None),
+        ("prior_table", 4),
+        ("n_draws", 0),
+        ("n_draws", -1),
+        ("n_draws", 1.0),
+        ("n_draws", True),
+        ("seed", -1),
+        ("seed", 1.0),
+        ("seed", True),
+        ("amplitude_rms_nm", 0.0),
+        ("amplitude_rms_nm", -1.0),
+        ("amplitude_rms_nm", float("nan")),
+        ("amplitude_rms_nm", float("inf")),
+        ("amplitude_rms_nm", True),
+        ("amplitude_rms_nm", []),
+        ("amplitude_rms_nm", [10.0, 0.0]),
+        ("amplitude_rms_nm", [10.0, float("nan")]),
+        ("include_perfect", 1),
+        ("include_truth", "false"),
+    ],
+)
+def test_prior_draw_bank_rejects_invalid_values(key, value):
+    """Reject invalid prior-draw fields with their exact paths."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = _valid_prior_draw_bank()
+    bank[key] = value
+    config["modeling"]["fit_psf"] = {"mode": "bank", "bank": bank}
+
+    with pytest.raises(ValueError, match=f"modeling.fit_psf.bank.{key}"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    ["prior_table", "amplitude_rms_nm", "n_draws", "seed"],
+)
+def test_prior_draw_bank_requires_generation_fields(missing_key):
+    """Require every prior-draw generation input."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = _valid_prior_draw_bank()
+    bank.pop(missing_key)
+    config["modeling"]["fit_psf"] = {"mode": "bank", "bank": bank}
+
+    with pytest.raises(ValueError, match=missing_key):
+        validation.validate_or_raise(config)
+
+
+def test_prior_draw_bank_requires_balanced_amplitude_list():
+    """Reject unequal candidate counts across configured amplitudes."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = _valid_prior_draw_bank()
+    bank["amplitude_rms_nm"] = [10.0, 20.0]
+    bank["n_draws"] = 3
+    config["modeling"]["fit_psf"] = {"mode": "bank", "bank": bank}
+
+    with pytest.raises(ValueError, match="n_draws.*amplitude_rms_nm"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("forbidden", ["candidates", "extra"])
+def test_prior_draw_bank_rejects_kind_specific_unknown_keys(forbidden):
+    """Reject explicit-only and unknown keys from a prior-draw bank."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = _valid_prior_draw_bank()
+    bank[forbidden] = []
+    config["modeling"]["fit_psf"] = {"mode": "bank", "bank": bank}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.bank"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("candidates", [None, {}, [], "candidate"])
+def test_explicit_bank_requires_nonempty_candidate_list(candidates):
+    """Reject missing, mistyped, and empty explicit candidate lists."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = {"kind": "explicit"}
+    if candidates is not None:
+        bank["candidates"] = candidates
+    config["modeling"]["fit_psf"] = {"mode": "bank", "bank": bank}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.bank.candidates"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "forbidden",
+    [
+        "prior_table",
+        "amplitude_rms_nm",
+        "n_draws",
+        "seed",
+        "include_perfect",
+        "include_truth",
+        "extra",
+    ],
+)
+def test_explicit_bank_rejects_prior_and_unknown_keys(forbidden):
+    """Reject prior-draw controls and unknown keys from explicit banks."""
+    config = _with_valid_fisher_block(_load_master_config())
+    bank = {
+        "kind": "explicit",
+        "candidates": [_valid_aberrations(config)],
+        forbidden: False,
+    }
+    config["modeling"]["fit_psf"] = {"mode": "bank", "bank": bank}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.bank"):
+        validation.validate_or_raise(config)
+
+
+def test_explicit_bank_delegates_aberrations_validation_with_index():
+    """Report the indexed path for an invalid bare aberrations block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    aberrations = _valid_aberrations(config)
+    aberrations["global_zernikes"] = {"4": 5.0}
+    aberrations["enable_global_zernikes"] = True
+    config["modeling"]["fit_psf"] = {
+        "mode": "bank",
+        "bank": {"kind": "explicit", "candidates": [aberrations]},
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"modeling.fit_psf.bank.candidates\[0\]",
+    ):
+        validation.validate_or_raise(config)
+
+
+def test_explicit_bank_rejects_unknown_aberration_key():
+    """Reject typoed family flags instead of silently ignoring them."""
+    config = _with_valid_fisher_block(_load_master_config())
+    aberrations = _valid_aberrations(config)
+    aberrations["enable_global_zernike"] = True
+    config["modeling"]["fit_psf"] = {
+        "mode": "bank",
+        "bank": {"kind": "explicit", "candidates": [aberrations]},
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"modeling.fit_psf.bank.candidates\[0\].*unsupported keys",
+    ):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "map_key,malformed",
+    [
+        ("segment_pistons", {"0": 1.0}),
+        ("segment_tiptilts", {0: [1.0]}),
+        ("segment_hexikes", {0: {0: 1.0}}),
+        ("global_zernikes", {"4": 1.0}),
+    ],
+)
+def test_psf_aberrations_validate_disabled_present_maps(map_key, malformed):
+    """Reject malformed staged coefficients even when their flag is false."""
+    config = _with_valid_fisher_block(_load_master_config())
+    aberrations = {
+        "enable_segment_pistons": False,
+        "enable_segment_tiptilts": False,
+        "enable_segment_hexikes": False,
+        "enable_global_zernikes": False,
+        "segment_pistons": {},
+        "segment_tiptilts": {},
+        "segment_hexikes": {},
+        "global_zernikes": {},
+    }
+    aberrations[map_key] = malformed
+    config["psf"]["aberrations"] = aberrations
+
+    with pytest.raises(ValueError, match=rf"psf.aberrations.{map_key}"):
+        validation.validate_or_raise(config)
+
+
+def test_psf_aberrations_accept_disabled_empty_maps():
+    """Accept explicitly empty coefficient maps for disabled families."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["psf"]["aberrations"] = {
+        "enable_segment_pistons": False,
+        "enable_segment_tiptilts": False,
+        "enable_segment_hexikes": False,
+        "enable_global_zernikes": False,
+        "segment_pistons": {},
+        "segment_tiptilts": {},
+        "segment_hexikes": {},
+        "global_zernikes": {},
+    }
 
     validation.validate_or_raise(config)
 

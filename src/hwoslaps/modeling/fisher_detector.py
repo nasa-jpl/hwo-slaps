@@ -310,6 +310,14 @@ class FisherDetector:
 
         fit_psf_config = self.full_config["modeling"].get("fit_psf")
         fit_lens_config = self.full_config["modeling"].get("fit_lens")
+        if (
+            fit_psf_config is not None
+            and str(fit_psf_config.get("mode", "")).lower() == "bank"
+        ):
+            raise ValueError(
+                "modeling.fit_psf mode 'bank' is a nonlinear-only "
+                "treatment; use 'matched' or 'explicit' for Fisher runs"
+            )
         self.psf_mismatch_enabled = bool(
             fit_psf_config is not None
             and str(fit_psf_config.get("mode", "")).lower() == "explicit"

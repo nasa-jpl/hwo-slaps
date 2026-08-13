@@ -242,6 +242,23 @@ def _detector(config: dict, products: dict) -> FisherDetector:
     )
 
 
+def test_fisher_detector_rejects_psf_bank_before_initialization():
+    """Reject nonlinear-only PSF banks before any Fisher construction."""
+    config = {"modeling": {"fit_psf": {"mode": "bank"}}}
+
+    with pytest.raises(
+        ValueError,
+        match="mode 'bank' is a nonlinear-only treatment",
+    ):
+        FisherDetector(
+            observation_baseline=None,
+            lensing_baseline=None,
+            psf_data=None,
+            full_config=config,
+            fisher_config={},
+        )
+
+
 def _perform_detection(config: dict, products: dict) -> FisherDetectionData:
     """Run the production Fisher orchestration on prepared truth products."""
     return perform_fisher_detection(

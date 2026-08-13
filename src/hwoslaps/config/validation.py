@@ -14,7 +14,7 @@ Policy enforced (per user requirements):
 
 import math
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 MOLINE_EQ7_MIN_MASS_MSUN = 1.0e6
 MOLINE_EQ7_MAX_MASS_MSUN = 1.0e12
@@ -527,6 +527,126 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
             raise ValueError("lensing.subhalo.position.type must be 'random', 'angle', or 'direct'")
 
 
+def _validate_psf_aberrations(
+    aberr: Dict[str, Any],
+    key_path: str,
+) -> None:
+    """Validate one PSF aberrations block.
+
+    Parameters
+    ----------
+    aberr : `dict`
+        Bare aberrations configuration block.
+    key_path : `str`
+        Configuration path used in validation errors.
+
+    Raises
+    ------
+    ValueError
+        Raised if a flag or coefficient map is invalid.
+    """
+    _require_type(aberr, dict, key_path)
+    flags = [
+        'enable_segment_pistons',
+        'enable_segment_tiptilts',
+        'enable_segment_hexikes',
+        'enable_global_zernikes',
+    ]
+    map_keys = [
+        'segment_pistons',
+        'segment_tiptilts',
+        'segment_hexikes',
+        'global_zernikes',
+    ]
+    _reject_unknown_keys(aberr, set(flags + map_keys), key_path)
+    for f in flags:
+        val = _require(aberr, f, key_path)
+        _require_type(val, bool, f'{key_path}.{f}')
+
+    def _require_nonempty_dict(value: Any, key_path: str) -> Dict[str, Any]:
+        mapping = _require_type(value, dict, key_path)
+        if not mapping:
+            raise ValueError(f"{key_path} must contain at least one coefficient when enabled")
+        return mapping
+
+    def _require_segment_key(seg_idx: Any, key_path: str) -> int:
+        if isinstance(seg_idx, bool) or not isinstance(seg_idx, int) or seg_idx < 0:
+            raise ValueError(f'{key_path} segment indices must be non-negative integers')
+        return seg_idx
+
+    def _coefficient_map(map_key: str, flag_key: str) -> Optional[Dict[str, Any]]:
+        if map_key not in aberr:
+            if aberr[flag_key]:
+                _require(aberr, map_key, key_path)
+            return None
+        mapping = _require_type(aberr[map_key], dict, f'{key_path}.{map_key}')
+        if aberr[flag_key] and not mapping:
+            raise ValueError(
+                f"{key_path}.{map_key} must contain at least one "
+                "coefficient when enabled"
+            )
+        return mapping
+
+    segment_pistons = _coefficient_map(
+        'segment_pistons',
+        'enable_segment_pistons',
+    )
+    if segment_pistons is not None:
+        for seg_idx, piston_nm in segment_pistons.items():
+            _require_segment_key(seg_idx, f'{key_path}.segment_pistons')
+            _require_finite_number(
+                piston_nm,
+                f'{key_path}.segment_pistons[{seg_idx}]',
+            )
+    segment_tiptilts = _coefficient_map(
+        'segment_tiptilts',
+        'enable_segment_tiptilts',
+    )
+    if segment_tiptilts is not None:
+        for seg_idx, tiptilt in segment_tiptilts.items():
+            _require_segment_key(seg_idx, f'{key_path}.segment_tiptilts')
+            _require_finite_pair(
+                tiptilt,
+                f'{key_path}.segment_tiptilts[{seg_idx}]',
+            )
+    segment_hexikes = _coefficient_map(
+        'segment_hexikes',
+        'enable_segment_hexikes',
+    )
+    if segment_hexikes is not None:
+        for seg_idx, mode_dict in segment_hexikes.items():
+            _require_segment_key(seg_idx, f'{key_path}.segment_hexikes')
+            mode_dict = _require_nonempty_dict(
+                mode_dict,
+                f'{key_path}.segment_hexikes[{seg_idx}]'
+            )
+            for mode_noll, coeff_nm in mode_dict.items():
+                if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
+                    raise ValueError(
+                        f'{key_path}.segment_hexikes mode indices must be '
+                        '1-based Noll integers (>= 1)'
+                    )
+                _require_finite_number(
+                    coeff_nm,
+                    f'{key_path}.segment_hexikes[{seg_idx}][{mode_noll}]'
+                )
+    global_zernikes = _coefficient_map(
+        'global_zernikes',
+        'enable_global_zernikes',
+    )
+    if global_zernikes is not None:
+        for mode_noll, coeff_nm in global_zernikes.items():
+            if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
+                raise ValueError(
+                    f'{key_path}.global_zernikes mode indices must be '
+                    '1-based Noll integers (>= 1)'
+                )
+            _require_finite_number(
+                coeff_nm,
+                f'{key_path}.global_zernikes[{mode_noll}]',
+            )
+
+
 def validate_psf_config(psf: Dict[str, Any]) -> None:
     """Validate the ``psf`` configuration section.
 
@@ -555,77 +675,7 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
         _require(tel, k, 'psf.telescope')
 
     aberr = _require(psf, 'aberrations', 'psf')
-    _require_type(aberr, dict, 'psf.aberrations')
-    # Require explicit flags even if all false
-    flags = [
-        'enable_segment_pistons',
-        'enable_segment_tiptilts',
-        'enable_segment_hexikes',
-        'enable_global_zernikes',
-    ]
-    for f in flags:
-        val = _require(aberr, f, 'psf.aberrations')
-        _require_type(val, bool, f'psf.aberrations.{f}')
-
-    def _require_nonempty_dict(value: Any, key_path: str) -> Dict[str, Any]:
-        mapping = _require_type(value, dict, key_path)
-        if not mapping:
-            raise ValueError(f"{key_path} must contain at least one coefficient when enabled")
-        return mapping
-
-    def _require_segment_key(seg_idx: Any, key_path: str) -> int:
-        if isinstance(seg_idx, bool) or not isinstance(seg_idx, int) or seg_idx < 0:
-            raise ValueError(f'{key_path} segment indices must be non-negative integers')
-        return seg_idx
-
-    # If any flag enabled, require corresponding dict present
-    if aberr['enable_segment_pistons']:
-        segment_pistons = _require_nonempty_dict(
-            _require(aberr, 'segment_pistons', 'psf.aberrations'),
-            'psf.aberrations.segment_pistons'
-        )
-        for seg_idx, piston_nm in segment_pistons.items():
-            _require_segment_key(seg_idx, 'psf.aberrations.segment_pistons')
-            _require_finite_number(piston_nm, f'psf.aberrations.segment_pistons[{seg_idx}]')
-    if aberr['enable_segment_tiptilts']:
-        segment_tiptilts = _require_nonempty_dict(
-            _require(aberr, 'segment_tiptilts', 'psf.aberrations'),
-            'psf.aberrations.segment_tiptilts'
-        )
-        for seg_idx, tiptilt in segment_tiptilts.items():
-            _require_segment_key(seg_idx, 'psf.aberrations.segment_tiptilts')
-            _require_finite_pair(tiptilt, f'psf.aberrations.segment_tiptilts[{seg_idx}]')
-    if aberr['enable_segment_hexikes']:
-        segment_hexikes = _require_nonempty_dict(
-            _require(aberr, 'segment_hexikes', 'psf.aberrations'),
-            'psf.aberrations.segment_hexikes'
-        )
-        for seg_idx, mode_dict in segment_hexikes.items():
-            _require_segment_key(seg_idx, 'psf.aberrations.segment_hexikes')
-            mode_dict = _require_nonempty_dict(
-                mode_dict,
-                f'psf.aberrations.segment_hexikes[{seg_idx}]'
-            )
-            for mode_noll, coeff_nm in mode_dict.items():
-                if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
-                    raise ValueError(
-                        'psf.aberrations.segment_hexikes mode indices must be 1-based Noll integers (>= 1)'
-                    )
-                _require_finite_number(
-                    coeff_nm,
-                    f'psf.aberrations.segment_hexikes[{seg_idx}][{mode_noll}]'
-                )
-    if aberr['enable_global_zernikes']:
-        global_zernikes = _require_nonempty_dict(
-            _require(aberr, 'global_zernikes', 'psf.aberrations'),
-            'psf.aberrations.global_zernikes'
-        )
-        for mode_noll, coeff_nm in global_zernikes.items():
-            if isinstance(mode_noll, bool) or not isinstance(mode_noll, int) or mode_noll < 1:
-                raise ValueError(
-                    'psf.aberrations.global_zernikes mode indices must be 1-based Noll integers (>= 1)'
-                )
-            _require_finite_number(coeff_nm, f'psf.aberrations.global_zernikes[{mode_noll}]')
+    _validate_psf_aberrations(aberr, 'psf.aberrations')
 
 
 def validate_observation_config(observation: Dict[str, Any]) -> None:
@@ -685,7 +735,9 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
     if 'fit_psf' in modeling:
         fit_psf = modeling['fit_psf']
         _require_type(fit_psf, dict, 'modeling.fit_psf')
-        unsupported_fit_psf_keys = sorted(set(fit_psf) - {'mode', 'psf'})
+        unsupported_fit_psf_keys = sorted(
+            set(fit_psf) - {'mode', 'psf', 'bank'}
+        )
         if unsupported_fit_psf_keys:
             raise ValueError(
                 "modeling.fit_psf contains unsupported keys: "
@@ -694,9 +746,10 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         fit_psf_mode = _require(fit_psf, 'mode', 'modeling.fit_psf')
         _require_type(fit_psf_mode, str, 'modeling.fit_psf.mode')
         fit_psf_mode = fit_psf_mode.lower()
-        if fit_psf_mode not in {'matched', 'explicit'}:
+        if fit_psf_mode not in {'matched', 'explicit', 'bank'}:
             raise ValueError(
-                "modeling.fit_psf.mode must be one of: 'matched', 'explicit'"
+                "modeling.fit_psf.mode must be one of: "
+                "'matched', 'explicit', 'bank'"
             )
         if fit_psf_mode == 'matched':
             if 'psf' in fit_psf:
@@ -704,13 +757,148 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                     "modeling.fit_psf.psf must not be present when "
                     "modeling.fit_psf.mode is 'matched'"
                 )
-        else:
+            if 'bank' in fit_psf:
+                raise ValueError(
+                    "modeling.fit_psf.bank must not be present when "
+                    "modeling.fit_psf.mode is 'matched'"
+                )
+        elif fit_psf_mode == 'explicit':
+            if 'bank' in fit_psf:
+                raise ValueError(
+                    "modeling.fit_psf.bank must not be present when "
+                    "modeling.fit_psf.mode is 'explicit'"
+                )
             explicit_psf = _require(fit_psf, 'psf', 'modeling.fit_psf')
             _require_type(explicit_psf, dict, 'modeling.fit_psf.psf')
             try:
                 validate_psf_config(explicit_psf)
             except ValueError as exc:
                 raise ValueError(f"modeling.fit_psf.psf is invalid: {exc}") from exc
+        else:
+            if 'psf' in fit_psf:
+                raise ValueError(
+                    "modeling.fit_psf.psf must not be present when "
+                    "modeling.fit_psf.mode is 'bank'"
+                )
+            bank = _require(fit_psf, 'bank', 'modeling.fit_psf')
+            _require_type(bank, dict, 'modeling.fit_psf.bank')
+            if 'kind' not in bank:
+                raise ValueError(
+                    "Missing required key 'modeling.fit_psf.bank.kind'"
+                )
+            kind = bank['kind']
+            _require_type(kind, str, 'modeling.fit_psf.bank.kind')
+            kind = kind.lower()
+            if kind not in {'prior_draws', 'explicit'}:
+                raise ValueError(
+                    "modeling.fit_psf.bank.kind must be one of: "
+                    "'prior_draws', 'explicit'"
+                )
+            if kind == 'prior_draws':
+                supported = {
+                    'kind',
+                    'prior_table',
+                    'amplitude_rms_nm',
+                    'n_draws',
+                    'seed',
+                    'include_perfect',
+                    'include_truth',
+                }
+                _reject_unknown_keys(bank, supported, 'modeling.fit_psf.bank')
+                prior_table = _require(
+                    bank,
+                    'prior_table',
+                    'modeling.fit_psf.bank',
+                )
+                _require_type(
+                    prior_table,
+                    str,
+                    'modeling.fit_psf.bank.prior_table',
+                )
+                amplitude = _require(
+                    bank,
+                    'amplitude_rms_nm',
+                    'modeling.fit_psf.bank',
+                )
+                if isinstance(amplitude, list):
+                    if not amplitude:
+                        raise ValueError(
+                            "modeling.fit_psf.bank.amplitude_rms_nm must be "
+                            "a non-empty list"
+                        )
+                    for index, value in enumerate(amplitude):
+                        _require_positive_finite_number(
+                            value,
+                            "modeling.fit_psf.bank.amplitude_rms_nm"
+                            f"[{index}]",
+                        )
+                else:
+                    _require_positive_finite_number(
+                        amplitude,
+                        'modeling.fit_psf.bank.amplitude_rms_nm',
+                    )
+                n_draws = _require(
+                    bank,
+                    'n_draws',
+                    'modeling.fit_psf.bank',
+                )
+                if (
+                    isinstance(n_draws, bool)
+                    or not isinstance(n_draws, int)
+                    or n_draws < 1
+                ):
+                    raise ValueError(
+                        "modeling.fit_psf.bank.n_draws must be an integer "
+                        "greater than or equal to 1"
+                    )
+                if isinstance(amplitude, list) and n_draws % len(amplitude):
+                    raise ValueError(
+                        "modeling.fit_psf.bank.n_draws must be divisible by "
+                        "the length of modeling.fit_psf.bank.amplitude_rms_nm"
+                    )
+                seed = _require(bank, 'seed', 'modeling.fit_psf.bank')
+                if (
+                    isinstance(seed, bool)
+                    or not isinstance(seed, int)
+                    or seed < 0
+                ):
+                    raise ValueError(
+                        "modeling.fit_psf.bank.seed must be a non-negative "
+                        "integer"
+                    )
+                for key in ('include_perfect', 'include_truth'):
+                    if key in bank:
+                        _require_type(
+                            bank[key],
+                            bool,
+                            f'modeling.fit_psf.bank.{key}',
+                        )
+            else:
+                _reject_unknown_keys(
+                    bank,
+                    {'kind', 'candidates'},
+                    'modeling.fit_psf.bank',
+                )
+                if 'candidates' not in bank:
+                    raise ValueError(
+                        "Missing required key "
+                        "'modeling.fit_psf.bank.candidates'"
+                    )
+                candidates = bank['candidates']
+                _require_type(
+                    candidates,
+                    list,
+                    'modeling.fit_psf.bank.candidates',
+                )
+                if not candidates:
+                    raise ValueError(
+                        "modeling.fit_psf.bank.candidates must be non-empty"
+                    )
+                for index, candidate in enumerate(candidates):
+                    _validate_psf_aberrations(
+                        candidate,
+                        f'modeling.fit_psf.bank.candidates[{index}]',
+                    )
 
     if 'fit_lens' in modeling:
         fit_lens = modeling['fit_lens']

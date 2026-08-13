@@ -216,10 +216,19 @@ observation:
 modeling:
   enabled: true  # Set to true to enable detection mode
   detection: 'fisher'
-  # Optional analysis-PSF override. Explicit mode requires a complete psf block.
+  # Optional analysis-PSF treatment. Bank mode is nonlinear-only.
   # fit_psf:
-  #   mode: matched               # matched | explicit
-  #   # psf: {...}                # required only for explicit; same shape as top-level psf
+  #   mode: matched               # matched | explicit | bank
+  #   # psf: {...}                # explicit only; complete top-level psf shape
+  #   # bank:                     # required only for bank
+  #   #   kind: prior_draws       # prior_draws | explicit
+  #   #   prior_table: configs/psf_priors/jwst_wss_drift_v1.yaml
+  #   #   amplitude_rms_nm: 20.0  # positive float or balanced list
+  #   #   n_draws: 16             # prior_draws only; at least one
+  #   #   seed: 20260811          # prior_draws only; non-negative integer
+  #   #   include_perfect: false  # optional control anchor
+  #   #   include_truth: false    # optional control anchor
+  #   #   candidates: [...]       # explicit only; bare aberrations blocks
   # Optional analysis-lens override; explicit replaces mass and shear.
   # fit_lens:
   #   mode: matched               # matched | explicit
