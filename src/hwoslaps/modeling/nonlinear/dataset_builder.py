@@ -12,6 +12,7 @@ from ...psf.utils import (
     make_pyauto_kernel,
     pyauto_kernel_native,
 )
+from ...psf.mismatch import _kernel_sha256
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,10 @@ class NonlinearDatasetMetadata:
         Label for the PSF used to generate the data.
     psf_fit_label : `str`
         Label for the PSF supplied to the fit.
+    psf_fit_supplied : `bool`, optional
+        Whether the caller supplied a fit-side PSF.
+    psf_fit_sha256 : `str`, optional
+        Shape-aware digest of the actual dataset fit kernel.
     """
 
     dataset_kind: str
@@ -46,6 +51,8 @@ class NonlinearDatasetMetadata:
     n_unmasked_pixels: int
     psf_truth_label: str
     psf_fit_label: str
+    psf_fit_supplied: bool = False
+    psf_fit_sha256: str = ""
 
     def to_dict(self) -> Dict[str, object]:
         """Convert metadata to a JSON-compatible dictionary."""
@@ -283,11 +290,13 @@ def imaging_from_observation(
         dataset_kind=dataset_kind,
         background_treatment=background_treatment,
     )
+    psf_fit_supplied = psf_for_fit is not None
     psf = _kernel_from_any(
         observation.psf if psf_for_fit is None else psf_for_fit,
         observation.pixel_scale,
     )
-    psf_shape = tuple(pyauto_kernel_native(psf).shape)
+    psf_native = pyauto_kernel_native(psf)
+    psf_shape = tuple(psf_native.shape)
 
     if mask_bool_use is None:
         use_mask = _exclude_psf_edge_pixels(
@@ -316,5 +325,7 @@ def imaging_from_observation(
         n_unmasked_pixels=n_unmasked_pixels,
         psf_truth_label=psf_truth_label,
         psf_fit_label=psf_fit_label,
+        psf_fit_supplied=psf_fit_supplied,
+        psf_fit_sha256=_kernel_sha256(psf_native),
     )
     return dataset, metadata

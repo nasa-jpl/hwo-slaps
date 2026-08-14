@@ -736,7 +736,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         fit_psf = modeling['fit_psf']
         _require_type(fit_psf, dict, 'modeling.fit_psf')
         unsupported_fit_psf_keys = sorted(
-            set(fit_psf) - {'mode', 'psf', 'bank'}
+            set(fit_psf) - {'mode', 'psf', 'bank', 'delta'}
         )
         if unsupported_fit_psf_keys:
             raise ValueError(
@@ -746,40 +746,38 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         fit_psf_mode = _require(fit_psf, 'mode', 'modeling.fit_psf')
         _require_type(fit_psf_mode, str, 'modeling.fit_psf.mode')
         fit_psf_mode = fit_psf_mode.lower()
-        if fit_psf_mode not in {'matched', 'explicit', 'bank'}:
+        if fit_psf_mode not in {'matched', 'explicit', 'bank', 'delta'}:
             raise ValueError(
                 "modeling.fit_psf.mode must be one of: "
-                "'matched', 'explicit', 'bank'"
+                "'matched', 'explicit', 'bank', 'delta'"
             )
         if fit_psf_mode == 'matched':
-            if 'psf' in fit_psf:
-                raise ValueError(
-                    "modeling.fit_psf.psf must not be present when "
-                    "modeling.fit_psf.mode is 'matched'"
-                )
-            if 'bank' in fit_psf:
-                raise ValueError(
-                    "modeling.fit_psf.bank must not be present when "
-                    "modeling.fit_psf.mode is 'matched'"
-                )
+            for key in ('psf', 'bank', 'delta'):
+                if key in fit_psf:
+                    raise ValueError(
+                        f"modeling.fit_psf.{key} must not be present when "
+                        "modeling.fit_psf.mode is 'matched'"
+                    )
         elif fit_psf_mode == 'explicit':
-            if 'bank' in fit_psf:
-                raise ValueError(
-                    "modeling.fit_psf.bank must not be present when "
-                    "modeling.fit_psf.mode is 'explicit'"
-                )
+            for key in ('bank', 'delta'):
+                if key in fit_psf:
+                    raise ValueError(
+                        f"modeling.fit_psf.{key} must not be present when "
+                        "modeling.fit_psf.mode is 'explicit'"
+                    )
             explicit_psf = _require(fit_psf, 'psf', 'modeling.fit_psf')
             _require_type(explicit_psf, dict, 'modeling.fit_psf.psf')
             try:
                 validate_psf_config(explicit_psf)
             except ValueError as exc:
                 raise ValueError(f"modeling.fit_psf.psf is invalid: {exc}") from exc
-        else:
-            if 'psf' in fit_psf:
-                raise ValueError(
-                    "modeling.fit_psf.psf must not be present when "
-                    "modeling.fit_psf.mode is 'bank'"
-                )
+        elif fit_psf_mode == 'bank':
+            for key in ('psf', 'delta'):
+                if key in fit_psf:
+                    raise ValueError(
+                        f"modeling.fit_psf.{key} must not be present when "
+                        "modeling.fit_psf.mode is 'bank'"
+                    )
             bank = _require(fit_psf, 'bank', 'modeling.fit_psf')
             _require_type(bank, dict, 'modeling.fit_psf.bank')
             if 'kind' not in bank:
@@ -899,6 +897,55 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                         candidate,
                         f'modeling.fit_psf.bank.candidates[{index}]',
                     )
+        else:
+            for key in ('psf', 'bank'):
+                if key in fit_psf:
+                    raise ValueError(
+                        f"modeling.fit_psf.{key} must not be present when "
+                        "modeling.fit_psf.mode is 'delta'"
+                    )
+            delta = _require(fit_psf, 'delta', 'modeling.fit_psf')
+            _require_type(delta, dict, 'modeling.fit_psf.delta')
+            _reject_unknown_keys(
+                delta,
+                {'prior_table', 'amplitude_rms_nm', 'seed', 'family'},
+                'modeling.fit_psf.delta',
+            )
+            prior_table = _require(
+                delta,
+                'prior_table',
+                'modeling.fit_psf.delta',
+            )
+            _require_type(
+                prior_table,
+                str,
+                'modeling.fit_psf.delta.prior_table',
+            )
+            _require_nonnegative_finite_number(
+                _require(
+                    delta,
+                    'amplitude_rms_nm',
+                    'modeling.fit_psf.delta',
+                ),
+                'modeling.fit_psf.delta.amplitude_rms_nm',
+            )
+            seed = _require(delta, 'seed', 'modeling.fit_psf.delta')
+            if (
+                isinstance(seed, bool)
+                or not isinstance(seed, int)
+                or seed < 0
+            ):
+                raise ValueError(
+                    "modeling.fit_psf.delta.seed must be a non-negative "
+                    "integer"
+                )
+            family = delta.get('family', 'combined')
+            _require_type(family, str, 'modeling.fit_psf.delta.family')
+            if family.lower() not in {'combined', 'global', 'segment'}:
+                raise ValueError(
+                    "modeling.fit_psf.delta.family must be one of: "
+                    "'combined', 'global', 'segment'"
+                )
 
     if 'fit_lens' in modeling:
         fit_lens = modeling['fit_lens']

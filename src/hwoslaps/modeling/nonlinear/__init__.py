@@ -80,6 +80,8 @@ __all__ = [
     "PsfBankCandidateFit",
     "PsfBankCaseResult",
     "PsfBankSummary",
+    "PsfMismatchCaseResult",
+    "PsfMismatchSpec",
     "SCDD_DELTA_LOG_L_THRESHOLD",
     "SCDD_Q_THRESHOLD",
     "SISMCRSubhalo",
@@ -101,9 +103,11 @@ __all__ = [
     "profile_likelihood_q",
     "q_from_delta_log_l",
     "build_psf_bank",
+    "build_psf_mismatch_spec",
     "combine_psf_bank_fits",
     "load_psf_bank_npz",
     "run_psf_bank_case",
+    "run_psf_mismatch_case",
     "save_psf_bank_npz",
     "smooth_model_spec_from_config",
     "subhalo_model_spec_from_trial",
@@ -153,6 +157,15 @@ def __getattr__(name: str) -> Any:
         from . import psf_bank
 
         return getattr(psf_bank, name)
+    if name in {
+        "PsfMismatchCaseResult",
+        "PsfMismatchSpec",
+        "build_psf_mismatch_spec",
+        "run_psf_mismatch_case",
+    }:
+        from . import psf_mismatch
+
+        return getattr(psf_mismatch, name)
     raise AttributeError(name)
 
 

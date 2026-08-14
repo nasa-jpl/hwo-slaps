@@ -120,4 +120,6 @@ def perform_fisher_detection(
         psf_scan_mode_names=list(getattr(detector, "psf_scan_mode_names", []) or []),
         psf_mismatch_enabled=detector.psf_mismatch_enabled,
         lens_mismatch_enabled=detector.lens_mismatch_enabled,
+        fit_psf_mode=str(getattr(detector, "fit_psf_mode", "matched")),
+        fit_psf_delta=deepcopy(getattr(detector, "fit_psf_delta", None)),
     )

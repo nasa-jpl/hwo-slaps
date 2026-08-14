@@ -761,9 +761,11 @@ class FakeValidator:
         mass_context=None,
         clumpy_fit_parameterization="host_free",
         smooth_result=None,
+        expected_psf_fit_sha256=None,
     ):
         """Record one executor call and return deterministic fit summaries."""
         del full_config, priors_config, mass_context, clumpy_fit_parameterization
+        del expected_psf_fit_sha256
         label = psf_case.rsplit(":", 1)[-1]
         index = len(self.calls)
         smooth_key = analysis_key_from(

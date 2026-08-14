@@ -361,6 +361,8 @@ class FisherDetectionData:
 
     Local and grid payloads optionally include truth-vs-fit model mismatch
     statistics while their existing fields retain fit-template semantics.
+    Fit-PSF delta provenance is transported in memory only; grid NPZ
+    persistence is reserved for the stage-two output decision.
     """
 
     mode: str
@@ -389,6 +391,8 @@ class FisherDetectionData:
     grid_map: Optional[FisherGridMapData] = None
     psf_mismatch_enabled: bool = False
     lens_mismatch_enabled: bool = False
+    fit_psf_mode: str = "explicit"
+    fit_psf_delta: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         """Stamp the generation timestamp when one was not supplied."""
@@ -511,7 +515,17 @@ def print_fisher_summary(fisher_data: FisherDetectionData) -> None:
     if local_mismatch or grid_mismatch:
         print("\nModel mismatch:")
         if fisher_data.psf_mismatch_enabled:
-            print("  fit_psf mode: explicit")
+            if fisher_data.fit_psf_mode == "delta":
+                delta = fisher_data.fit_psf_delta or {}
+                print(
+                    "  fit_psf mode: delta "
+                    f"(delta_id={delta.get('delta_id')}, "
+                    "amplitude="
+                    f"{delta.get('requested_amplitude_rms_nm')} nm, "
+                    f"family={delta.get('family')})"
+                )
+            else:
+                print("  fit_psf mode: explicit")
         if fisher_data.lens_mismatch_enabled:
             print("  fit_lens mode: explicit")
             print(

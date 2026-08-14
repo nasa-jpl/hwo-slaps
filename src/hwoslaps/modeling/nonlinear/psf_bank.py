@@ -26,6 +26,20 @@ from typing import Any, Iterable, Optional, Sequence
 
 import numpy as np
 
+from ...psf.mismatch import (
+    _BANK_VERSION_PACKAGES,
+    _aberrations_from_wire,
+    _aberrations_to_wire,
+    _canonical_aberrations,
+    _current_versions,
+    _empty_aberrations,
+    _flat_int_map_from_wire,
+    _flat_int_map_to_wire,
+    _kernel_sha256,
+    _nested_int_map_from_wire,
+    _nested_int_map_to_wire,
+    _resolve_prior_table_path,
+)
 from .likelihood_metrics import SCDD_Q_THRESHOLD
 
 
@@ -33,7 +47,6 @@ STRONG_EVIDENCE_DELTA_LOG_Z_THRESHOLD = 5.0
 """Strong-evidence threshold on marginalized ``Delta log Z`` (`float`)."""
 
 _ARTIFACT_SCHEMA_VERSION = 1
-_BANK_VERSION_PACKAGES = ("hwoslaps", "hcipy", "numpy")
 
 
 @dataclass(frozen=True)
@@ -215,15 +228,6 @@ class PsfBankSummary:
     detected_evidence_psf_marg: Optional[bool]
 
 
-def _kernel_sha256(kernel: Any) -> str:
-    """Return the canonical SHA-256 for a native detector kernel."""
-    array = np.ascontiguousarray(np.asarray(kernel, dtype=np.float64))
-    if array.ndim != 2:
-        raise ValueError("PSF bank kernels must be two-dimensional")
-    prefix = f"{array.shape[0]}x{array.shape[1]}:".encode("utf-8")
-    return hashlib.sha256(prefix + array.tobytes()).hexdigest()
-
-
 def _usable(value: Any) -> bool:
     """Return whether a statistic is present and finite."""
     return value is not None and math.isfinite(float(value))
@@ -396,23 +400,6 @@ def combine_psf_bank_fits(
     )
 
 
-def _resolve_prior_table_path(path: Any) -> Path:
-    """Resolve a prior table through absolute, CWD, then repository paths."""
-    requested = Path(path).expanduser()
-    if requested.is_absolute():
-        candidates = (requested,)
-    else:
-        repository_root = Path(__file__).resolve().parents[4]
-        candidates = (Path.cwd() / requested, repository_root / requested)
-    for candidate in candidates:
-        if candidate.is_file():
-            return candidate.resolve()
-    attempted = ", ".join(str(candidate.resolve()) for candidate in candidates)
-    raise FileNotFoundError(
-        f"PSF bank prior table {path!s} was not found; tried: {attempted}"
-    )
-
-
 def _identity_payload(
     bank_config: dict,
     prior_table_sha256: Optional[str],
@@ -474,48 +461,6 @@ def _bank_id_from_inputs(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-def _empty_aberrations() -> dict:
-    """Return an all-disabled aberrations block."""
-    return {
-        "enable_segment_pistons": False,
-        "enable_segment_tiptilts": False,
-        "enable_segment_hexikes": False,
-        "enable_global_zernikes": False,
-        "segment_pistons": {},
-        "segment_tiptilts": {},
-        "segment_hexikes": {},
-        "global_zernikes": {},
-    }
-
-
-def _canonical_aberrations(aberrations: dict) -> dict:
-    """Return aberrations with canonical float coefficients and pair lists."""
-    canonical = deepcopy(aberrations)
-    if "segment_pistons" in canonical:
-        canonical["segment_pistons"] = {
-            key: float(value)
-            for key, value in canonical["segment_pistons"].items()
-        }
-    if "segment_tiptilts" in canonical:
-        canonical["segment_tiptilts"] = {
-            key: [float(value[0]), float(value[1])]
-            for key, value in canonical["segment_tiptilts"].items()
-        }
-    if "segment_hexikes" in canonical:
-        canonical["segment_hexikes"] = {
-            segment: {
-                mode: float(value) for mode, value in modes.items()
-            }
-            for segment, modes in canonical["segment_hexikes"].items()
-        }
-    if "global_zernikes" in canonical:
-        canonical["global_zernikes"] = {
-            key: float(value)
-            for key, value in canonical["global_zernikes"].items()
-        }
-    return canonical
-
-
 def _generate_candidate(
     label: str,
     kind: str,
@@ -553,16 +498,6 @@ def _generate_candidate(
         kernel_sha256=_kernel_sha256(kernel),
         measured_total_rms_nm=float(psf_data.total_rms_nm),
     )
-
-
-def _current_versions() -> dict:
-    """Return the software versions recorded for a generated bank."""
-    from ...provenance import _package_version
-
-    return {
-        package: _package_version(package)
-        for package in _BANK_VERSION_PACKAGES
-    }
 
 
 def build_psf_bank(full_config: dict) -> PsfBank:
@@ -733,86 +668,6 @@ def build_psf_bank(full_config: dict) -> PsfBank:
         bank_config=bank_config,
         versions=_current_versions(),
     )
-
-
-def _flat_int_map_to_wire(mapping: Optional[dict]) -> Optional[list]:
-    """Encode one integer-keyed scalar map as sorted entries."""
-    if mapping is None:
-        return None
-    return [[int(key), float(value)] for key, value in sorted(mapping.items())]
-
-
-def _nested_int_map_to_wire(mapping: Optional[dict]) -> Optional[list]:
-    """Encode nested integer-keyed scalar maps as sorted entries."""
-    if mapping is None:
-        return None
-    return [
-        [int(segment), _flat_int_map_to_wire(modes)]
-        for segment, modes in sorted(mapping.items())
-    ]
-
-
-def _flat_int_map_from_wire(entries: Optional[list]) -> Optional[dict]:
-    """Decode sorted scalar entries to integer-keyed maps."""
-    if entries is None:
-        return None
-    return {int(key): float(value) for key, value in entries}
-
-
-def _nested_int_map_from_wire(entries: Optional[list]) -> Optional[dict]:
-    """Decode nested sorted entries to integer-keyed maps."""
-    if entries is None:
-        return None
-    return {
-        int(segment): _flat_int_map_from_wire(modes)
-        for segment, modes in entries
-    }
-
-
-def _aberrations_to_wire(aberrations: dict) -> dict:
-    """Encode integer-keyed aberration maps without JSON key coercion."""
-    wire = deepcopy(aberrations)
-    if "segment_pistons" in wire:
-        wire["segment_pistons"] = _flat_int_map_to_wire(
-            aberrations["segment_pistons"]
-        )
-    if "segment_tiptilts" in wire:
-        wire["segment_tiptilts"] = [
-            [int(key), [float(value[0]), float(value[1])]]
-            for key, value in sorted(aberrations["segment_tiptilts"].items())
-        ]
-    if "segment_hexikes" in wire:
-        wire["segment_hexikes"] = _nested_int_map_to_wire(
-            aberrations["segment_hexikes"]
-        )
-    if "global_zernikes" in wire:
-        wire["global_zernikes"] = _flat_int_map_to_wire(
-            aberrations["global_zernikes"]
-        )
-    return wire
-
-
-def _aberrations_from_wire(wire: dict) -> dict:
-    """Restore integer-keyed aberration maps from typed entries."""
-    aberrations = deepcopy(wire)
-    if "segment_pistons" in aberrations:
-        aberrations["segment_pistons"] = _flat_int_map_from_wire(
-            wire["segment_pistons"]
-        )
-    if "segment_tiptilts" in aberrations:
-        aberrations["segment_tiptilts"] = {
-            int(key): [float(value[0]), float(value[1])]
-            for key, value in wire["segment_tiptilts"]
-        }
-    if "segment_hexikes" in aberrations:
-        aberrations["segment_hexikes"] = _nested_int_map_from_wire(
-            wire["segment_hexikes"]
-        )
-    if "global_zernikes" in aberrations:
-        aberrations["global_zernikes"] = _flat_int_map_from_wire(
-            wire["global_zernikes"]
-        )
-    return aberrations
 
 
 def _bank_config_to_wire(bank_config: dict) -> dict:
@@ -1404,6 +1259,7 @@ def run_psf_bank_case(
         full_config,
         bank,
     )
+    from ...psf.utils import pyauto_kernel_native
     from .dataset_builder import imaging_from_observation
 
     candidate_results = []
@@ -1415,9 +1271,13 @@ def run_psf_bank_case(
         selected.extend(bank.anchors)
     for index, candidate in enumerate(selected):
         psf_case = f"bank:{bank.bank_id}:{candidate.label}"
+        wrapped_kernel = _wrapped_candidate_kernel(candidate)
+        expected_psf_fit_sha256 = _kernel_sha256(
+            pyauto_kernel_native(wrapped_kernel)
+        )
         dataset, metadata = imaging_from_observation(
             observation,
-            psf_for_fit=_wrapped_candidate_kernel(candidate),
+            psf_for_fit=wrapped_kernel,
             dataset_kind=dataset_kind,
             background_treatment=background_treatment,
             mask_bool_use=mask_bool_use,
@@ -1435,6 +1295,7 @@ def run_psf_bank_case(
             mass_context=mass_context,
             clumpy_fit_parameterization=clumpy_fit_parameterization,
             smooth_result=None,
+            expected_psf_fit_sha256=expected_psf_fit_sha256,
         )
         if on_candidate is not None:
             try:

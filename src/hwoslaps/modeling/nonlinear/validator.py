@@ -25,6 +25,95 @@ if TYPE_CHECKING:
     from .dataset_builder import NonlinearDatasetMetadata
 
 
+_PSF_MISMATCH_PREFIXES = ("bank:", "delta:", "explicit:")
+
+
+def _metadata_field(metadata: Any, name: str, default: Any) -> Any:
+    """Read one metadata field from dictionary or attribute storage."""
+    if isinstance(metadata, dict):
+        return metadata.get(name, default)
+    return getattr(metadata, name, default)
+
+
+def _validate_fit_psf_dataset(
+    full_config: dict,
+    dataset_metadata: Any,
+    matched_control: bool,
+    expected_psf_fit_sha256: Optional[str],
+) -> None:
+    """Require coherent mode, labels, supplied state, and kernel identity."""
+    fit_psf = (full_config.get("modeling") or {}).get("fit_psf") or {}
+    mode = str(fit_psf.get("mode", "matched")).lower()
+    label = str(_metadata_field(dataset_metadata, "psf_fit_label", "fit"))
+    supplied = bool(_metadata_field(
+        dataset_metadata,
+        "psf_fit_supplied",
+        False,
+    ))
+    dataset_psf_fit_sha256 = str(_metadata_field(
+        dataset_metadata,
+        "psf_fit_sha256",
+        "",
+    ))
+    mismatch_label = label.startswith(_PSF_MISMATCH_PREFIXES)
+    mismatch_mode = mode in {"bank", "delta", "explicit"}
+
+    if matched_control or mode == "matched":
+        if expected_psf_fit_sha256 is not None:
+            raise ValueError(
+                "expected_psf_fit_sha256 must be None for matched mode or "
+                "matched_control=True"
+            )
+    elif mismatch_mode:
+        if expected_psf_fit_sha256 is None:
+            raise ValueError(
+                "mismatch-mode datasets must be executed through "
+                "run_psf_mismatch_case / run_psf_bank_case"
+            )
+        if expected_psf_fit_sha256 != dataset_psf_fit_sha256:
+            raise ValueError(
+                "expected_psf_fit_sha256 "
+                f"{expected_psf_fit_sha256!r} does not match dataset "
+                f"psf_fit_sha256 {dataset_psf_fit_sha256!r}"
+            )
+
+    if matched_control:
+        if supplied or mismatch_label:
+            raise ValueError(
+                "matched_control=True requires a truth-PSF dataset without "
+                f"a mismatch label; configured mode is '{mode}', dataset "
+                f"label is {label!r}, psf_fit_supplied is {supplied}"
+            )
+        return
+
+    expected_prefix = {
+        "bank": "bank:",
+        "delta": "delta:",
+        "explicit": "explicit:",
+    }.get(mode)
+    valid = (
+        (mode == "matched" and not supplied and not mismatch_label)
+        or (
+            expected_prefix is not None
+            and supplied
+            and label.startswith(expected_prefix)
+        )
+    )
+    if valid:
+        return
+    if not supplied and mode != "matched":
+        detail = "dataset was built with the truth PSF"
+    elif supplied and mode == "matched":
+        detail = "dataset was built with a supplied fit PSF"
+    else:
+        detail = "dataset PSF provenance is incoherent"
+    raise ValueError(
+        f"{detail} but modeling.fit_psf.mode is '{mode}'; dataset label is "
+        f"{label!r}, psf_fit_supplied is {supplied}; use "
+        "run_psf_mismatch_case or pass matched_control=True"
+    )
+
+
 class NonlinearMetricValidator:
     """Validate Fisher cases with smooth-versus-subhalo nonlinear fits.
 
@@ -50,6 +139,9 @@ class NonlinearMetricValidator:
         clumpy_fit_parameterization: str = "host_free",
         smooth_result: Optional[NonlinearFitSummary] = None,
         analysis_key: Optional[str] = None,
+        *,
+        matched_control: bool = False,
+        expected_psf_fit_sha256: Optional[str] = None,
     ) -> NonlinearCaseResult:
         """Run one generalized nonlinear validation case.
 
@@ -77,6 +169,11 @@ class NonlinearMetricValidator:
             Reusable smooth denominator. If supplied, no smooth search runs.
         analysis_key : `str`, optional
             Precomputed analysis identity.
+        matched_control : `bool`, optional
+            Whether this is a truth-kernel reference under a mismatch config.
+        expected_psf_fit_sha256 : `str`, optional
+            Executor-computed digest of the fit kernel supplied to the
+            dataset.
 
         Returns
         -------
@@ -88,6 +185,12 @@ class NonlinearMetricValidator:
         ``local_search`` and ``freed`` use ``n_live_subhalo_search``;
         ``fixed_template`` retains ``n_live_subhalo_fixed``.
         """
+        _validate_fit_psf_dataset(
+            full_config,
+            dataset_metadata,
+            matched_control,
+            expected_psf_fit_sha256,
+        )
         smooth_spec = smooth_model_spec_from_config(
             full_config,
             priors_config=priors_config,

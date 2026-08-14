@@ -435,6 +435,16 @@ def _valid_aberrations(config: dict) -> dict:
     return copy.deepcopy(config["psf"]["aberrations"])
 
 
+def _valid_delta() -> dict:
+    """Return one complete fit-PSF delta configuration."""
+    return {
+        "prior_table": "not-checked-at-validation.yaml",
+        "amplitude_rms_nm": 0.0,
+        "seed": 11,
+        "family": "combined",
+    }
+
+
 def test_fit_psf_bank_accepts_amplitude_list_and_anchor_defaults():
     """Accept a balanced ordered amplitude list and explicit anchor flags."""
     config = _with_valid_fisher_block(_load_master_config())
@@ -791,4 +801,142 @@ def test_explicit_fit_psf_delegates_inner_validation():
     config["modeling"]["fit_psf"] = {"mode": "explicit", "psf": fit_psf}
 
     with pytest.raises(ValueError, match="modeling.fit_psf.psf"):
+        validation.validate_or_raise(config)
+
+
+def test_fit_psf_delta_accepts_complete_block_and_optional_family_default():
+    """Accept complete delta blocks with explicit or default family."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {
+        "mode": "delta",
+        "delta": _valid_delta(),
+    }
+    validation.validate_or_raise(config)
+
+    config["modeling"]["fit_psf"]["delta"].pop("family")
+    validation.validate_or_raise(config)
+
+    config["modeling"]["fit_psf"]["delta"]["amplitude_rms_nm"] = -0.0
+    validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "bad_amplitude",
+    [-1.0, float("nan"), float("inf"), True, [0.0]],
+)
+def test_fit_psf_delta_rejects_invalid_scalar_amplitude(bad_amplitude):
+    """Reject negative, non-finite, boolean, and list delta amplitudes."""
+    config = _with_valid_fisher_block(_load_master_config())
+    delta = _valid_delta()
+    delta["amplitude_rms_nm"] = bad_amplitude
+    config["modeling"]["fit_psf"] = {"mode": "delta", "delta": delta}
+
+    with pytest.raises(
+        ValueError,
+        match="modeling.fit_psf.delta.amplitude_rms_nm",
+    ):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_seed", [-1, 1.0, True])
+def test_fit_psf_delta_rejects_invalid_seed(bad_seed):
+    """Reject delta seeds that are not non-negative integer scalars."""
+    config = _with_valid_fisher_block(_load_master_config())
+    delta = _valid_delta()
+    delta["seed"] = bad_seed
+    config["modeling"]["fit_psf"] = {"mode": "delta", "delta": delta}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.delta.seed"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_family", ["all", "", 1, None])
+def test_fit_psf_delta_rejects_invalid_family(bad_family):
+    """Reject delta families outside the supported enum."""
+    config = _with_valid_fisher_block(_load_master_config())
+    delta = _valid_delta()
+    delta["family"] = bad_family
+    config["modeling"]["fit_psf"] = {"mode": "delta", "delta": delta}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.delta.family"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "missing_key",
+    ["prior_table", "amplitude_rms_nm", "seed"],
+)
+def test_fit_psf_delta_requires_generation_fields(missing_key):
+    """Require every delta generation input except optional family."""
+    config = _with_valid_fisher_block(_load_master_config())
+    delta = _valid_delta()
+    delta.pop(missing_key)
+    config["modeling"]["fit_psf"] = {"mode": "delta", "delta": delta}
+
+    with pytest.raises(ValueError, match=missing_key):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("bad_prior", [None, 4, []])
+def test_fit_psf_delta_rejects_non_string_prior_table(bad_prior):
+    """Require a string delta prior-table path."""
+    config = _with_valid_fisher_block(_load_master_config())
+    delta = _valid_delta()
+    delta["prior_table"] = bad_prior
+    config["modeling"]["fit_psf"] = {"mode": "delta", "delta": delta}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.delta.prior_table"):
+        validation.validate_or_raise(config)
+
+
+def test_fit_psf_delta_rejects_unknown_key():
+    """Reject unsupported keys in the strict delta block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    delta = _valid_delta()
+    delta["replicates"] = 2
+    config["modeling"]["fit_psf"] = {"mode": "delta", "delta": delta}
+
+    with pytest.raises(ValueError, match="modeling.fit_psf.delta"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("mode,payload", [
+    ("matched", "delta"),
+    ("matched", "bank"),
+    ("matched", "psf"),
+    ("explicit", "delta"),
+    ("explicit", "bank"),
+    ("bank", "delta"),
+    ("bank", "psf"),
+    ("delta", "bank"),
+    ("delta", "psf"),
+])
+def test_fit_psf_modes_reject_mutually_exclusive_payloads(mode, payload):
+    """Reject every payload that is incompatible with the selected mode."""
+    config = _with_valid_fisher_block(_load_master_config())
+    fit_psf = {"mode": mode}
+    if mode == "explicit":
+        fit_psf["psf"] = copy.deepcopy(config["psf"])
+    elif mode == "bank":
+        fit_psf["bank"] = _valid_prior_draw_bank()
+    elif mode == "delta":
+        fit_psf["delta"] = _valid_delta()
+    if payload == "psf":
+        fit_psf["psf"] = copy.deepcopy(config["psf"])
+    elif payload == "bank":
+        fit_psf["bank"] = _valid_prior_draw_bank()
+    else:
+        fit_psf["delta"] = _valid_delta()
+    config["modeling"]["fit_psf"] = fit_psf
+
+    with pytest.raises(ValueError, match=f"modeling.fit_psf.{payload}"):
+        validation.validate_or_raise(config)
+
+
+def test_fit_psf_delta_requires_delta_block():
+    """Reject delta mode without its delta block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fit_psf"] = {"mode": "delta"}
+
+    with pytest.raises(ValueError, match="delta.*modeling.fit_psf"):
         validation.validate_or_raise(config)

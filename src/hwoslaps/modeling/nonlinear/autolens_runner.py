@@ -166,20 +166,22 @@ def _metadata_value(metadata: Any, name: str) -> Any:
 
 
 def _native_array(value: Any) -> np.ndarray:
-    """Return an object as a contiguous native float64 array."""
+    """Return an object as a contiguous native array."""
     if hasattr(value, "kernel"):
         value = value.kernel
     if hasattr(value, "native"):
         value = value.native
-    return np.ascontiguousarray(np.asarray(value, dtype=np.float64))
+    return np.ascontiguousarray(np.asarray(value))
 
 
 def _array_hash(value: Any) -> Optional[str]:
-    """Return a SHA-256 digest for native float64 array bytes."""
+    """Return a dtype- and shape-aware SHA-256 for native array bytes."""
     if value is None:
         return None
     array = _native_array(value)
-    return hashlib.sha256(array.tobytes()).hexdigest()
+    shape = "x".join(str(size) for size in array.shape)
+    prefix = f"{array.dtype}:{shape}:".encode("utf-8")
+    return hashlib.sha256(prefix + array.tobytes()).hexdigest()
 
 
 def analysis_key_from(
