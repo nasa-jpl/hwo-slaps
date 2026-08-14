@@ -609,10 +609,10 @@ Workstream 2 — PSF requirements:
         existing hexike, global-Zernike, and combined families.
   - [ ] Run the family-by-amplitude-ladder Fisher grid.
 - R2 (C): graded PSF-knowledge-error sweep; anchors the requirement curves.
-  - [ ] Implement delta-mismatch fitting: generate with the truth PSF, fit
-        with a PSF wrong by a controlled `delta` (Fisher-side truth-vs-fit
-        split implemented; nonlinear side and the delta-draw orchestration
-        remain open).
+  - [x] Implement delta-mismatch fitting: generate with the truth PSF, fit
+        with a PSF wrong by a controlled `delta` (Fisher and nonlinear
+        paths both honor `fit_psf.mode: delta`: truth aberrations plus one
+        prior-shaped draw realized at exactly `delta` nm RMS).
   - [ ] Run the `delta` ladder per mode family; produce completeness and
         false-positive degradation curves.
 - D2a (C): prior-sampled PSF nuisance bank.
