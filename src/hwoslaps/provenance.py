@@ -236,6 +236,78 @@ def capture_provenance(config=None, command=None, repo_dir=None):
     return provenance
 
 
+def _git_toplevel(repo_dir):
+    """Return the git working-tree root for ``repo_dir``, or `None`."""
+    try:
+        return subprocess.check_output(
+            ['git', 'rev-parse', '--show-toplevel'],
+            cwd=str(repo_dir),
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except Exception:
+        return None
+
+
+def revision_provenance(repo_dir=None):
+    """Build a source-revision record for one result object.
+
+    Parameters
+    ----------
+    repo_dir : `str` or `pathlib.Path`, optional
+        Repository directory whose git state is recorded. When omitted,
+        the directory containing this package is used, and the record is
+        returned only if this module actually lives inside the discovered
+        working tree; an installed package running under an unrelated
+        checkout records all-`None` fields instead of the wrong
+        repository.
+
+    Returns
+    -------
+    revision : `dict`
+        Git commit hash, tracked-tree dirty flag, sorted dirty tracked
+        paths, and a SHA-256 digest of ``git diff HEAD``. All values are
+        `None` outside a usable git repository. Untracked files are not
+        recorded.
+    """
+    null_record = {
+        'git_hash': None,
+        'git_dirty': None,
+        'git_dirty_paths': None,
+        'git_diff_sha256': None,
+    }
+    if repo_dir is None:
+        module_path = Path(__file__).resolve()
+        repo_dir = module_path.parent
+        toplevel = _git_toplevel(repo_dir)
+        if toplevel is None:
+            return null_record
+        try:
+            module_relpath = module_path.relative_to(
+                Path(toplevel).resolve()
+            )
+        except ValueError:
+            return null_record
+        try:
+            tracked = subprocess.call(
+                ['git', 'ls-files', '--error-unmatch', str(module_relpath)],
+                cwd=toplevel,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ) == 0
+        except Exception:
+            return null_record
+        if not tracked:
+            return null_record
+    git_hash, git_dirty, git_dirty_paths, git_diff_sha256 = _git_state(repo_dir)
+    return {
+        'git_hash': git_hash,
+        'git_dirty': git_dirty,
+        'git_dirty_paths': git_dirty_paths,
+        'git_diff_sha256': git_diff_sha256,
+    }
+
+
 def write_provenance(path, config=None, command=None, repo_dir=None):
     """Capture provenance and write it to a YAML file.
 

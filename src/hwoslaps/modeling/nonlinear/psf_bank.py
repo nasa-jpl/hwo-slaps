@@ -1089,8 +1089,11 @@ class PsfBankCaseResult:
 def _bank_provenance(
     bank: PsfBank,
     version_mismatches: Optional[dict] = None,
+    revision: Optional[dict] = None,
 ) -> dict:
     """Return non-kernel provenance for result JSON."""
+    from ...provenance import revision_provenance
+
     provenance = {
         "seed": bank.seed,
         "n_draws": bank.n_draws,
@@ -1100,6 +1103,9 @@ def _bank_provenance(
         "lensing_pixel_scale": bank.lensing_pixel_scale,
         "bank_config": _bank_config_to_wire(bank.bank_config),
         "versions": deepcopy(bank.versions),
+        "revision": (
+            revision_provenance() if revision is None else revision
+        ),
     }
     if version_mismatches:
         provenance["version_mismatches"] = deepcopy(version_mismatches)
@@ -1259,9 +1265,15 @@ def run_psf_bank_case(
         full_config,
         bank,
     )
-    from ...psf.utils import pyauto_kernel_native
-    from .dataset_builder import imaging_from_observation
+    from ...provenance import revision_provenance
+    from .dataset_builder import (
+        fitted_kernel_sha256,
+        imaging_from_observation,
+    )
 
+    # Captured before the candidate loop so the record describes the
+    # source the fits actually ran with.
+    entry_revision = revision_provenance()
     candidate_results = []
     anchor_results = []
     fits = []
@@ -1272,9 +1284,6 @@ def run_psf_bank_case(
     for index, candidate in enumerate(selected):
         psf_case = f"bank:{bank.bank_id}:{candidate.label}"
         wrapped_kernel = _wrapped_candidate_kernel(candidate)
-        expected_psf_fit_sha256 = _kernel_sha256(
-            pyauto_kernel_native(wrapped_kernel)
-        )
         dataset, metadata = imaging_from_observation(
             observation,
             psf_for_fit=wrapped_kernel,
@@ -1283,6 +1292,11 @@ def run_psf_bank_case(
             mask_bool_use=mask_bool_use,
             psf_truth_label=psf_truth_label,
             psf_fit_label=psf_case,
+        )
+        expected_psf_fit_sha256 = fitted_kernel_sha256(
+            dataset,
+            wrapped_kernel,
+            observation.pixel_scale,
         )
         case = validator.validate_case(
             dataset,
@@ -1353,5 +1367,9 @@ def run_psf_bank_case(
         anchor_results=anchor_results,
         anchor_diagnostics=anchor_diagnostics,
         quality_flags=quality_flags,
-        bank_provenance=_bank_provenance(bank, version_mismatches),
+        bank_provenance=_bank_provenance(
+            bank,
+            version_mismatches,
+            revision=entry_revision,
+        ),
     )

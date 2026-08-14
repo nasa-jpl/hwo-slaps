@@ -265,6 +265,12 @@ def run_psf_mismatch_case(
             "build_mass_mapping_context or "
             "build_mass_mapping_context_explicit"
         )
+    from ...provenance import config_hash, revision_provenance
+
+    # Captured at entry, before spec construction and fitting, so the
+    # record describes the source and configuration the case ran with.
+    entry_revision = revision_provenance()
+    entry_config_hash = config_hash(full_config)
     spec = build_psf_mismatch_spec(full_config)
     truth_kernel, truth_scale, truth_total_rms = generate_fit_psf(
         full_config["psf"],
@@ -310,7 +316,10 @@ def run_psf_mismatch_case(
 
     from ...observation.generator import _ensure_odd_kernel
     from ...psf.utils import make_pyauto_convolver, make_pyauto_kernel
-    from .dataset_builder import imaging_from_observation
+    from .dataset_builder import (
+        fitted_kernel_sha256,
+        imaging_from_observation,
+    )
 
     wrapped = make_pyauto_kernel(
         values=fit_kernel,
@@ -318,9 +327,6 @@ def run_psf_mismatch_case(
         normalize=False,
     )
     wrapped = make_pyauto_convolver(_ensure_odd_kernel(wrapped))
-    wrapped_kernel_sha256 = _kernel_sha256(
-        pyauto_kernel_native(wrapped)
-    )
     psf_case = f"{spec.mode}:{spec.delta_id}"
     dataset, metadata = imaging_from_observation(
         observation,
@@ -330,6 +336,11 @@ def run_psf_mismatch_case(
         mask_bool_use=mask_bool_use,
         psf_truth_label=psf_truth_label,
         psf_fit_label=psf_case,
+    )
+    wrapped_kernel_sha256 = fitted_kernel_sha256(
+        dataset,
+        wrapped,
+        kernel_pixel_scale,
     )
     case = validator.validate_case(
         dataset,
@@ -378,6 +389,8 @@ def run_psf_mismatch_case(
     )
     provenance = {
         "versions": deepcopy(spec.versions),
+        "revision": entry_revision,
+        "config_hash": entry_config_hash,
         "psf_truth_label": psf_truth_label,
         "psf_fit_label": psf_case,
         "fit_mode": fit_mode,

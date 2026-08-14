@@ -184,6 +184,23 @@ def _array_hash(value: Any) -> Optional[str]:
     return hashlib.sha256(prefix + array.tobytes()).hexdigest()
 
 
+def _mask_hash(value: Any) -> Optional[str]:
+    """Return the hash of an array's boolean mask, if it carries one."""
+    return _array_hash(getattr(value, "mask", None))
+
+
+def _pixel_scales(value: Any) -> Optional[list]:
+    """Return the physical pixel scales bound to an array-like object."""
+    if value is None:
+        return None
+    if hasattr(value, "kernel"):
+        value = value.kernel
+    scales = getattr(value, "pixel_scales", None)
+    if scales is None:
+        return None
+    return [float(scale) for scale in np.atleast_1d(scales)]
+
+
 def analysis_key_from(
     dataset: Any,
     dataset_metadata: Any,
@@ -239,6 +256,15 @@ def analysis_key_from(
             getattr(dataset, "noise_map", None)
         ),
         "psf_sha256": _array_hash(psf),
+        "data_mask_sha256": _mask_hash(getattr(dataset, "data", None)),
+        "noise_map_mask_sha256": _mask_hash(
+            getattr(dataset, "noise_map", None)
+        ),
+        "data_pixel_scales": _pixel_scales(getattr(dataset, "data", None)),
+        "noise_map_pixel_scales": _pixel_scales(
+            getattr(dataset, "noise_map", None)
+        ),
+        "psf_pixel_scales": _pixel_scales(psf),
         "fit_mode": model_metadata.get("fit_mode"),
         "clumpy_fit_parameterization": model_metadata.get(
             "clumpy_fit_parameterization"

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import dataclasses
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -22,9 +24,13 @@ from hwoslaps.config.validation import validate_or_raise
 from hwoslaps.lensing import generate_lensing_system
 from hwoslaps.modeling.fisher_detector import FisherDetector
 from hwoslaps.modeling.generator_fisher import perform_fisher_detection
-from hwoslaps.modeling.nonlinear.autolens_runner import _array_hash
+from hwoslaps.modeling.nonlinear.autolens_runner import (
+    _array_hash,
+    analysis_key_from,
+)
 from hwoslaps.modeling.nonlinear.dataset_builder import (
     NonlinearDatasetMetadata,
+    fitted_kernel_sha256,
     imaging_from_observation,
 )
 from hwoslaps.modeling.nonlinear.psf_mismatch import (
@@ -51,7 +57,13 @@ from hwoslaps.psf.mismatch import (
     build_psf_mismatch_spec,
     generate_fit_psf,
 )
-from hwoslaps.psf.utils import pyauto_kernel_native
+from hwoslaps.psf.utils import (
+    make_pyauto_convolver,
+    make_pyauto_kernel,
+    pyauto_kernel_native,
+    pyauto_kernel_pixel_scales,
+)
+from hwoslaps.provenance import config_hash
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -712,7 +724,11 @@ def _canonical_aberrations_config(psf_config: dict) -> dict:
     return canonical
 
 
-def _metadata(label, supplied) -> NonlinearDatasetMetadata:
+def _metadata(
+    label,
+    supplied,
+    psf_fit_sha256="0"*64,
+) -> NonlinearDatasetMetadata:
     """Return metadata suitable for guard-only validation calls."""
     return NonlinearDatasetMetadata(
         dataset_kind="asimov",
@@ -724,8 +740,13 @@ def _metadata(label, supplied) -> NonlinearDatasetMetadata:
         psf_truth_label="truth",
         psf_fit_label=label,
         psf_fit_supplied=supplied,
-        psf_fit_sha256="0"*64,
+        psf_fit_sha256=psf_fit_sha256,
     )
+
+
+def _guard_kernel() -> np.ndarray:
+    """Return a small deterministic kernel for guard-only calls."""
+    return np.linspace(0.0, 1.0, 49, dtype=np.float64).reshape(7, 7)
 
 
 @pytest.mark.parametrize(
@@ -788,19 +809,25 @@ def test_validator_guard_rejects_mode_label_and_supplied_incoherence(
         reached,
     )
     validator = NonlinearMetricValidator(SimpleNamespace())
+    kernel = _guard_kernel()
+    digest = _kernel_sha256(kernel)
+    resolved_label = label
+    if passes and mode in {"delta", "explicit"}:
+        resolved_label = f"{mode}:{_build(config).delta_id}"
 
     def call():
-        metadata = _metadata(label, supplied)
+        metadata = _metadata(resolved_label, supplied, digest)
         expected_digest = (
             metadata.psf_fit_sha256
             if mode in {"bank", "delta", "explicit"}
             else None
         )
         return validator.validate_case(
-            SimpleNamespace(),
+            SimpleNamespace(psf=kernel),
             metadata,
             config,
             _trial(),
+            psf_case=resolved_label,
             expected_psf_fit_sha256=expected_digest,
         )
     if passes:
@@ -889,6 +916,111 @@ def test_validator_guard_rejects_forged_label_truth_kernel(compact_config):
         )
     assert expected_digest in str(error.value)
     assert metadata.psf_fit_sha256 in str(error.value)
+
+
+def test_validator_guard_rejects_swapped_dataset_pair(compact_config):
+    """Reject a dataset whose PSF is not the digested executor kernel."""
+    spec = _build(compact_config)
+    label = f"delta:{spec.delta_id}"
+    kernel = _guard_kernel()
+    digest = _kernel_sha256(kernel)
+    metadata = _metadata(label, True, digest)
+
+    with pytest.raises(
+        ValueError,
+        match="does not match the executor kernel digest",
+    ):
+        NonlinearMetricValidator(SimpleNamespace()).validate_case(
+            SimpleNamespace(psf=kernel + 1.0),
+            metadata,
+            compact_config,
+            _trial(),
+            psf_case=label,
+            expected_psf_fit_sha256=digest,
+        )
+
+
+def test_validator_guard_rejects_truth_dataset_with_fit_metadata(
+    compact_config,
+):
+    """Reject a truth-PSF dataset paired with mismatch-build metadata."""
+    observation = _observation(compact_config)
+    spec = _build(compact_config)
+    label = f"delta:{spec.delta_id}"
+    fit_kernel, _, _ = _quiet_call(
+        generate_fit_psf,
+        spec.fit_psf_config,
+        compact_config,
+    )
+    truth_dataset, _ = imaging_from_observation(
+        observation,
+        psf_for_fit=observation.psf,
+        psf_fit_label=label,
+    )
+    _, fit_metadata = imaging_from_observation(
+        observation,
+        psf_for_fit=fit_kernel,
+        psf_fit_label=label,
+    )
+    assert fit_metadata.psf_fit_sha256 != _kernel_sha256(
+        pyauto_kernel_native(truth_dataset.psf)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="does not match the executor kernel digest",
+    ):
+        NonlinearMetricValidator(SimpleNamespace()).validate_case(
+            truth_dataset,
+            fit_metadata,
+            compact_config,
+            _trial(),
+            psf_case=label,
+            expected_psf_fit_sha256=fit_metadata.psf_fit_sha256,
+        )
+
+
+def test_validator_guard_requires_psf_case_label_congruence(compact_config):
+    """Require the recorded psf_case to equal the guarded dataset label."""
+    spec = _build(compact_config)
+    label = f"delta:{spec.delta_id}"
+    kernel = _guard_kernel()
+    digest = _kernel_sha256(kernel)
+    metadata = _metadata(label, True, digest)
+
+    with pytest.raises(
+        ValueError,
+        match="does not match the dataset label",
+    ):
+        NonlinearMetricValidator(SimpleNamespace()).validate_case(
+            SimpleNamespace(psf=kernel),
+            metadata,
+            compact_config,
+            _trial(),
+            psf_case="delta:other",
+            expected_psf_fit_sha256=digest,
+        )
+
+
+def test_validator_guard_rejects_arbitrary_delta_identity(compact_config):
+    """Reject delta labels that are not the configured identity."""
+    kernel = _guard_kernel()
+    digest = _kernel_sha256(kernel)
+    label = "delta:not-the-configured-id"
+    metadata = _metadata(label, True, digest)
+
+    with pytest.raises(
+        ValueError,
+        match="recomputed from modeling.fit_psf",
+    ):
+        NonlinearMetricValidator(SimpleNamespace()).validate_case(
+            SimpleNamespace(psf=kernel),
+            metadata,
+            compact_config,
+            _trial(),
+            psf_case=label,
+            expected_psf_fit_sha256=digest,
+        )
 
 
 @pytest.mark.parametrize("mode", ["bank", "delta"])
@@ -1044,6 +1176,293 @@ def test_fisher_delta_rejects_different_same_scale_truth_psf(compact_config):
     ) in str(error.value)
 
 
+def test_fisher_delta_rejects_stale_baseline_observation(compact_config):
+    """Reject baseline observations convolved with a different PSF."""
+    truth_psf = _psf(compact_config)
+    other_psf_config = copy.deepcopy(compact_config["psf"])
+    other_psf_config["aberrations"]["global_zernikes"][4] += 2.0
+    other_psf = _psf(compact_config, psf_config=other_psf_config)
+    baseline_config = copy.deepcopy(compact_config)
+    baseline_config["lensing"]["subhalo"]["enabled"] = False
+    baseline = _quiet_call(
+        generate_lensing_system,
+        baseline_config["lensing"],
+        full_config=baseline_config,
+    )
+    observation_other = _quiet_call(
+        generate_observation,
+        baseline,
+        other_psf,
+        observation_config=baseline_config["observation"],
+        full_config=baseline_config,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="observation_baseline was not generated",
+    ):
+        FisherDetector(
+            observation_baseline=observation_other,
+            lensing_baseline=baseline,
+            psf_data=truth_psf,
+            full_config=compact_config,
+            fisher_config=compact_config["modeling"]["fisher"],
+        )
+
+
+def test_fisher_delta_rejects_stale_test_observation(compact_config):
+    """Reject test observations convolved with a different PSF."""
+    products = _fisher_products(compact_config)
+    psf_data, baseline, test, observation_baseline, _ = products
+    other_psf_config = copy.deepcopy(compact_config["psf"])
+    other_psf_config["aberrations"]["global_zernikes"][4] += 2.0
+    other_psf = _psf(compact_config, psf_config=other_psf_config)
+    observation_test_other = _quiet_call(
+        generate_observation,
+        test,
+        other_psf,
+        observation_config=compact_config["observation"],
+        full_config=compact_config,
+    )
+    detector = _quiet_call(
+        FisherDetector,
+        observation_baseline=observation_baseline,
+        lensing_baseline=baseline,
+        psf_data=psf_data,
+        full_config=compact_config,
+        fisher_config=compact_config["modeling"]["fisher"],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="observation_test was not generated",
+    ):
+        detector.compute_local(observation_test_other, test)
+
+
+def test_fisher_delta_rejects_rescaled_truth_kernel(compact_config):
+    """Reject identical kernel samples rewrapped at another pixel scale."""
+    products = _fisher_products(compact_config)
+    psf_data, baseline, _, observation_baseline, _ = products
+    values = np.ascontiguousarray(
+        pyauto_kernel_native(psf_data.kernel),
+        dtype=np.float64,
+    )
+    scales = pyauto_kernel_pixel_scales(psf_data.kernel)
+    rewrapped = make_pyauto_kernel(
+        values=values,
+        pixel_scales=float(scales[0])*2.0,
+        normalize=False,
+    )
+    rescaled_psf = dataclasses.replace(psf_data, kernel=rewrapped)
+    assert _kernel_sha256(
+        pyauto_kernel_native(rescaled_psf.kernel)
+    ) == _kernel_sha256(values)
+
+    with pytest.raises(
+        ValueError,
+        match="pixel scales do not match",
+    ):
+        FisherDetector(
+            observation_baseline=observation_baseline,
+            lensing_baseline=baseline,
+            psf_data=rescaled_psf,
+            full_config=compact_config,
+            fisher_config=compact_config["modeling"]["fisher"],
+        )
+
+
+def test_fisher_delta_rejects_swapped_preconvolved_source(compact_config):
+    """Reject observations whose stored source is not the truth product."""
+    products = _fisher_products(compact_config)
+    psf_data, baseline, test, observation_baseline, observation_test = (
+        products
+    )
+    swapped = dataclasses.replace(
+        observation_baseline,
+        noiseless_source_eps=observation_test.noiseless_source_eps,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="noiseless_source_eps does not reproduce",
+    ):
+        FisherDetector(
+            observation_baseline=swapped,
+            lensing_baseline=baseline,
+            psf_data=psf_data,
+            full_config=compact_config,
+            fisher_config=compact_config["modeling"]["fisher"],
+        )
+
+
+def test_fisher_delta_rejects_rescaled_observation_kernel(compact_config):
+    """Reject an observation PSF rewrapped at another pixel scale."""
+    import autolens as al
+
+    products = _fisher_products(compact_config)
+    psf_data, baseline, _, observation_baseline, _ = products
+    rescaled_kernel = make_pyauto_kernel(
+        values=np.ascontiguousarray(
+            pyauto_kernel_native(observation_baseline.psf),
+            dtype=np.float64,
+        ),
+        pixel_scales=float(observation_baseline.pixel_scale)*2.0,
+        normalize=False,
+    )
+    rescaled_imaging = al.Imaging(
+        data=observation_baseline.imaging.data,
+        noise_map=observation_baseline.imaging.noise_map,
+        psf=make_pyauto_convolver(rescaled_kernel),
+    )
+    rescaled = dataclasses.replace(
+        observation_baseline,
+        imaging=rescaled_imaging,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="embedded PSF pixel scales",
+    ):
+        FisherDetector(
+            observation_baseline=rescaled,
+            lensing_baseline=baseline,
+            psf_data=psf_data,
+            full_config=compact_config,
+            fisher_config=compact_config["modeling"]["fisher"],
+        )
+
+
+def test_truth_kernel_accept_digests_cover_normalization():
+    """Accept both the generated bytes and their sum-normalization."""
+    from hwoslaps.modeling.fisher_detector import (
+        _truth_kernel_accept_digests,
+    )
+
+    non_unit = make_pyauto_kernel(
+        values=np.full((5, 5), 2.0/25.0),
+        pixel_scales=0.1,
+        normalize=False,
+    )
+    digests = _truth_kernel_accept_digests(non_unit)
+    assert len(digests) == 2
+    assert _kernel_sha256(pyauto_kernel_native(non_unit)) in digests
+    normalized = make_pyauto_kernel(
+        values=np.full((5, 5), 2.0/25.0),
+        pixel_scales=0.1,
+        normalize=True,
+    )
+    assert _kernel_sha256(pyauto_kernel_native(normalized)) in digests
+
+
+def test_generate_observation_preserves_shared_psf_kernel(compact_config):
+    """Keep the shared PSFData kernel byte-stable across observations.
+
+    al.Imaging sum-normalizes its kernel in place; without a private
+    copy, a first observation build would rewrite the shared kernel and
+    a second observation would convolve with different bytes.
+    """
+    baseline_config = copy.deepcopy(compact_config)
+    baseline_config["lensing"]["subhalo"]["enabled"] = False
+    lensing = _quiet_call(
+        generate_lensing_system,
+        baseline_config["lensing"],
+        full_config=baseline_config,
+    )
+    psf = _psf(compact_config)
+    # Scale inside the generator's 1e-10 unit-flux tolerance, but off the
+    # normalization fixed point, so an in-place al.Imaging normalization
+    # would change the shared bytes.
+    perturbed = dataclasses.replace(
+        psf,
+        kernel=make_pyauto_kernel(
+            values=np.ascontiguousarray(
+                pyauto_kernel_native(psf.kernel),
+                dtype=np.float64,
+            )*(1.0 + 5.0e-11),
+            pixel_scales=pyauto_kernel_pixel_scales(psf.kernel),
+            normalize=False,
+        ),
+    )
+    before = np.array(pyauto_kernel_native(perturbed.kernel), copy=True)
+
+    observations = [
+        _quiet_call(
+            generate_observation,
+            lensing,
+            perturbed,
+            observation_config=baseline_config["observation"],
+            full_config=baseline_config,
+        )
+        for _ in range(2)
+    ]
+
+    assert np.array_equal(
+        np.asarray(pyauto_kernel_native(perturbed.kernel)),
+        before,
+    )
+    assert np.array_equal(
+        np.asarray(observations[0].noiseless_source_eps),
+        np.asarray(observations[1].noiseless_source_eps),
+    )
+
+
+def test_fisher_delta_rejects_swapped_noise_map(compact_config):
+    """Reject observations whose noise map is not the truth product."""
+    import autolens as al
+
+    products = _fisher_products(compact_config)
+    psf_data, baseline, _, observation_baseline, _ = products
+    doubled_noise = al.Array2D(
+        values=np.asarray(observation_baseline.noise_map.native)*2.0,
+        mask=observation_baseline.noise_map.mask,
+    )
+    tampered_imaging = al.Imaging(
+        data=observation_baseline.imaging.data,
+        noise_map=doubled_noise,
+        psf=make_pyauto_convolver(observation_baseline.imaging.psf),
+    )
+    tampered = dataclasses.replace(
+        observation_baseline,
+        imaging=tampered_imaging,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="noise map does not reproduce",
+    ):
+        FisherDetector(
+            observation_baseline=tampered,
+            lensing_baseline=baseline,
+            psf_data=psf_data,
+            full_config=compact_config,
+            fisher_config=compact_config["modeling"]["fisher"],
+        )
+
+
+def test_fisher_delta_rejects_altered_observation_scalars(compact_config):
+    """Reject observations whose consumed scalars left the configuration."""
+    products = _fisher_products(compact_config)
+    psf_data, baseline, _, observation_baseline, _ = products
+    tampered_metadata = dict(observation_baseline.metadata)
+    tampered_metadata["exposure_time"] = (
+        float(observation_baseline.exposure_time)*2.0
+    )
+    tampered = dataclasses.replace(
+        observation_baseline,
+        metadata=tampered_metadata,
+    )
+
+    with pytest.raises(ValueError, match="exposure_time"):
+        FisherDetector(
+            observation_baseline=tampered,
+            lensing_baseline=baseline,
+            psf_data=psf_data,
+            full_config=compact_config,
+            fisher_config=compact_config["modeling"]["fisher"],
+        )
+
+
 def test_fisher_bank_still_raises(compact_config):
     """Keep the nonlinear-only bank rejection intact on the Fisher path."""
     psf_data, baseline, _, observation_baseline, _ = _fisher_products(
@@ -1097,7 +1516,14 @@ def test_fisher_detection_transports_delta_provenance(
         "versions",
         "truth_kernel_sha256",
         "fit_kernel_sha256",
+        "revision",
     } <= set(delta)
+    assert set(delta["revision"]) == {
+        "git_hash",
+        "git_dirty",
+        "git_dirty_paths",
+        "git_diff_sha256",
+    }
     assert _aberrations_from_wire(
         delta["draw_aberrations"]
     ) == spec.draw_aberrations
@@ -1150,6 +1576,162 @@ def test_executor_wraps_kernel_bytes_and_records_truth_binding(compact_config):
     assert validator.calls[0]["expected_psf_fit_sha256"] == (
         validator.calls[0]["metadata"].psf_fit_sha256
     )
+
+
+def test_executor_records_revision_provenance(compact_config):
+    """Record source revision and config identity with every result."""
+    result = run_psf_mismatch_case(
+        _FakeValidator(),
+        _observation(compact_config),
+        compact_config,
+        _trial(),
+        fit_mode="fixed_template",
+    )
+    revision = result.provenance["revision"]
+    assert set(revision) == {
+        "git_hash",
+        "git_dirty",
+        "git_dirty_paths",
+        "git_diff_sha256",
+    }
+    # The suite runs from repository checkouts by project policy, so the
+    # record must actually resolve the executing source revision.
+    assert isinstance(revision["git_hash"], str)
+    assert len(revision["git_hash"]) == 40
+    assert result.provenance["config_hash"] == config_hash(compact_config)
+
+
+def test_dataset_build_does_not_mutate_observation(compact_config):
+    """Preserve the observation's stored source across dataset builds.
+
+    al.Array2D zeroes masked pixels in place, so a no-copy view of
+    noiseless_source_eps handed to the dataset constructor would zero
+    the observation's own PSF-border pixels.
+    """
+    observation = _observation(compact_config)
+    before = np.array(observation.noiseless_source_eps, copy=True)
+    dataset_one, _ = imaging_from_observation(
+        observation,
+        psf_for_fit=None,
+    )
+    assert np.array_equal(
+        np.asarray(observation.noiseless_source_eps),
+        before,
+    )
+    dataset_two, _ = imaging_from_observation(
+        observation,
+        psf_for_fit=None,
+    )
+    assert np.array_equal(
+        np.asarray(dataset_one.data.native),
+        np.asarray(dataset_two.data.native),
+    )
+
+
+def test_dataset_metadata_digest_describes_fitted_kernel(compact_config):
+    """Hash the as-fitted, autolens-normalized dataset PSF kernel."""
+    observation = _observation(compact_config)
+    values = np.full((7, 7), 2.0/49.0)
+    wrapped = make_pyauto_convolver(
+        make_pyauto_kernel(
+            values=values,
+            pixel_scales=observation.pixel_scale,
+            normalize=False,
+        )
+    )
+    input_digest = _kernel_sha256(pyauto_kernel_native(wrapped))
+    dataset, metadata = imaging_from_observation(
+        observation,
+        psf_for_fit=wrapped,
+        psf_fit_label="delta:test",
+    )
+    fitted_digest = _kernel_sha256(pyauto_kernel_native(dataset.psf))
+
+    assert metadata.psf_fit_sha256 == fitted_digest
+    assert metadata.psf_fit_sha256 != input_digest
+    assert fitted_kernel_sha256(
+        dataset,
+        wrapped,
+        observation.pixel_scale,
+    ) == fitted_digest
+    with pytest.raises(ValueError, match="neither the wrapped"):
+        fitted_kernel_sha256(
+            dataset,
+            make_pyauto_kernel(
+                values=values + 1.0,
+                pixel_scales=observation.pixel_scale,
+                normalize=False,
+            ),
+            observation.pixel_scale,
+        )
+
+
+def test_delta_rejects_erased_draw(compact_config):
+    """Reject positive amplitudes fully erased by float addition."""
+    config = copy.deepcopy(compact_config)
+    config["psf"]["aberrations"]["global_zernikes"] = {
+        4: float(2**53),
+        5: float(2**53),
+    }
+    delta = config["modeling"]["fit_psf"]["delta"]
+    delta["family"] = "global"
+    delta["amplitude_rms_nm"] = 1.0e-10
+
+    with pytest.raises(ValueError, match="completely erased"):
+        _build(config)
+
+
+def test_prior_digest_and_parse_share_one_read(
+    compact_config,
+    tmp_path,
+    monkeypatch,
+):
+    """Hash and parse the identical prior bytes from one file read."""
+    document_a = yaml.safe_dump({
+        "name": "table-a",
+        "segment_variance_fraction": 0.4,
+        "global_weights": {4: 1.0, 5: 0.5},
+        "segment_weights": {1: 1.0, 2: 0.5},
+    })
+    document_b = yaml.safe_dump({
+        "name": "table-b",
+        "segment_variance_fraction": 0.7,
+        "global_weights": {4: 0.2, 5: 1.0},
+        "segment_weights": {1: 0.3, 2: 1.0},
+    })
+    path_a = tmp_path / "prior_a.yaml"
+    path_a.write_text(document_a, encoding="utf-8")
+    path_b = tmp_path / "prior_b.yaml"
+    path_b.write_text(document_b, encoding="utf-8")
+
+    reference_config = copy.deepcopy(compact_config)
+    reference_config["modeling"]["fit_psf"]["delta"]["prior_table"] = str(
+        path_a
+    )
+    reference_spec = _build(reference_config)
+
+    config = copy.deepcopy(compact_config)
+    config["modeling"]["fit_psf"]["delta"]["prior_table"] = str(path_b)
+    original_read_bytes = Path.read_bytes
+    read_count = {"n": 0}
+
+    def racing_read_bytes(self):
+        if Path(self) == path_b:
+            read_count["n"] += 1
+            if read_count["n"] == 1:
+                return document_a.encode("utf-8")
+            return document_b.encode("utf-8")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", racing_read_bytes)
+    spec = _build(config)
+
+    assert read_count["n"] == 1
+    assert spec.prior_table_sha256 == hashlib.sha256(
+        document_a.encode("utf-8")
+    ).hexdigest()
+    assert spec.prior_table_sha256 == reference_spec.prior_table_sha256
+    assert spec.draw_aberrations == reference_spec.draw_aberrations
 
 
 def test_bank_executor_passes_wrapped_kernel_digest(compact_config):
@@ -1401,6 +1983,66 @@ def test_array_hash_includes_shape_and_dtype():
     assert _array_hash(np.zeros(1, dtype=np.float32)) != _array_hash(
         np.zeros(1, dtype=np.int32)
     )
+
+
+def test_analysis_key_binds_mask_and_pixel_scales():
+    """Change the analysis key on each mask and pixel-scale field alone."""
+    values = np.arange(36, dtype=np.float64).reshape(6, 6)
+    base_mask = np.zeros((6, 6), dtype=bool)
+    flipped_mask = base_mask.copy()
+    flipped_mask[5, 5] = True
+    metadata = {
+        "dataset_kind": "asimov",
+        "background_treatment": "subtract_known",
+        "psf_truth_label": "truth",
+        "psf_fit_label": "fit",
+    }
+    model_metadata = {"fit_mode": "freed", "prior_widths": {}}
+
+    def dataset(**overrides):
+        fields = {
+            "data_mask": base_mask,
+            "noise_mask": base_mask,
+            "data_scales": (0.1, 0.1),
+            "noise_scales": (0.1, 0.1),
+            "psf_scales": (0.1, 0.1),
+        }
+        fields.update(overrides)
+        return SimpleNamespace(
+            data=SimpleNamespace(
+                native=values,
+                mask=fields["data_mask"],
+                pixel_scales=fields["data_scales"],
+            ),
+            noise_map=SimpleNamespace(
+                native=values,
+                mask=fields["noise_mask"],
+                pixel_scales=fields["noise_scales"],
+            ),
+            psf=SimpleNamespace(
+                native=values,
+                pixel_scales=fields["psf_scales"],
+            ),
+        )
+
+    def key(**overrides):
+        return analysis_key_from(
+            dataset(**overrides),
+            metadata,
+            model_metadata,
+        )
+
+    base = key()
+    variants = {
+        "data_mask": key(data_mask=flipped_mask),
+        "noise_mask": key(noise_mask=flipped_mask),
+        "data_scales": key(data_scales=(0.2, 0.2)),
+        "noise_scales": key(noise_scales=(0.2, 0.2)),
+        "psf_scales": key(psf_scales=(0.2, 0.2)),
+    }
+    for field, variant in variants.items():
+        assert variant != base, field
+    assert len({base, *variants.values()}) == 6
 
 
 @pytest.mark.parametrize(

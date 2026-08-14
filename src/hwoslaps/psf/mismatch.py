@@ -438,7 +438,8 @@ def build_psf_mismatch_spec(full_config: dict) -> PsfMismatchSpec:
 
     delta = fit_psf["delta"]
     prior_path = _resolve_prior_table_path(delta["prior_table"])
-    prior_sha256 = hashlib.sha256(prior_path.read_bytes()).hexdigest()
+    prior_bytes = prior_path.read_bytes()
+    prior_sha256 = hashlib.sha256(prior_bytes).hexdigest()
     amplitude = _canonical_float(delta["amplitude_rms_nm"])
     seed = int(delta["seed"])
     family = str(delta.get("family", "combined")).lower()
@@ -454,14 +455,14 @@ def build_psf_mismatch_spec(full_config: dict) -> PsfMismatchSpec:
             draw_weighted_combined_family,
             draw_weighted_global_zernike_family,
             draw_weighted_segment_hexike_family,
-            load_mode_weight_prior,
             measure_aperture_rms_nm,
+            parse_mode_weight_prior,
             realize_weighted_draw,
         )
         from .opd_basis import ApertureBasisTransform
         from .telescope_models import create_hcipy_telescope
 
-        prior = load_mode_weight_prior(prior_path)
+        prior = parse_mode_weight_prior(prior_bytes)
         telescope_data = create_hcipy_telescope(truth_psf_config)
         transform = ApertureBasisTransform(
             telescope_data,
@@ -560,6 +561,13 @@ def build_psf_mismatch_spec(full_config: dict) -> PsfMismatchSpec:
                 _difference_flat_maps(fit_global, truth_global) or None
             ),
         ))
+        if effective == 0.0:
+            raise ValueError(
+                "floating-point addition against the truth coefficients "
+                "completely erased the requested delta: effective "
+                f"aperture RMS 0 for requested amplitude "
+                f"{amplitude:.17g} nm"
+            )
         if abs(effective - amplitude) > tolerance:
             raise ValueError(
                 "floating-point addition against the truth coefficients "

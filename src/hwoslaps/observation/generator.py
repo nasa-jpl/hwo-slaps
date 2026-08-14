@@ -15,7 +15,9 @@ from ..lensing.utils import LensingData
 from ..psf.utils import (
     PSFData,
     make_pyauto_convolver,
+    make_pyauto_kernel,
     pyauto_kernel_native,
+    pyauto_kernel_pixel_scales,
 )
 from .noise_models import (
     apply_detector_noise,
@@ -153,11 +155,20 @@ def generate_observation(
     data = al.Array2D(values=final_image_adu, mask=mask)
     noise_map = al.Array2D(values=noise_map_adu, mask=mask)
 
-    # Create the imaging dataset
+    # Create the imaging dataset. al.Imaging sum-normalizes the supplied
+    # kernel in place, so wrap a private copy: the shared PSFData kernel
+    # must keep the exact bytes this observation was convolved with.
+    imaging_psf = make_pyauto_convolver(
+        make_pyauto_kernel(
+            values=np.array(pyauto_kernel_native(psf_kernel), dtype=float),
+            pixel_scales=pyauto_kernel_pixel_scales(psf_kernel),
+            normalize=False,
+        )
+    )
     imaging_dataset = al.Imaging(
         data=data,
         noise_map=noise_map,
-        psf=psf_convolver
+        psf=imaging_psf
     )
 
     # Create metadata dictionary

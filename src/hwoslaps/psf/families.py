@@ -304,11 +304,6 @@ def make_power_law_prior(alpha, global_mode_range=(4, 55),
 def load_mode_weight_prior(path):
     """Load an orthonormal-aperture mode-weight prior from a YAML table.
 
-    Table weights are directional scales in sequentially
-    QR-orthonormalized aperture bases. They are not realized marginal
-    variance fractions: exact-RMS conditioning changes the second moments
-    by up to 15% per mode for the committed JWST drift table.
-
     Parameters
     ----------
     path : path-like
@@ -324,11 +319,39 @@ def load_mode_weight_prior(path):
     ValueError
         Raised if the document structure or prior values are invalid.
     """
-    with open(path, 'r', encoding='utf-8') as stream:
-        try:
-            document = yaml.safe_load(stream)
-        except yaml.YAMLError as exc:
-            raise ValueError(f'Invalid mode-weight prior YAML: {exc}') from exc
+    with open(path, 'rb') as stream:
+        return parse_mode_weight_prior(stream.read())
+
+
+def parse_mode_weight_prior(document_bytes):
+    """Parse an orthonormal-aperture mode-weight prior from YAML bytes.
+
+    Table weights are directional scales in sequentially
+    QR-orthonormalized aperture bases. They are not realized marginal
+    variance fractions: exact-RMS conditioning changes the second moments
+    by up to 15% per mode for the committed JWST drift table.
+
+    Parameters
+    ----------
+    document_bytes : `bytes` or `str`
+        YAML table content. Callers that also record a content digest
+        must hash these exact bytes, so the digest and the parsed prior
+        describe one immutable input.
+
+    Returns
+    -------
+    prior : `ModeWeightPrior`
+        Validated and normalized mode-weight prior.
+
+    Raises
+    ------
+    ValueError
+        Raised if the document structure or prior values are invalid.
+    """
+    try:
+        document = yaml.safe_load(document_bytes)
+    except yaml.YAMLError as exc:
+        raise ValueError(f'Invalid mode-weight prior YAML: {exc}') from exc
     if not isinstance(document, dict):
         raise ValueError('Mode-weight prior document must be a mapping.')
 

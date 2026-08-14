@@ -107,7 +107,9 @@ def source_only_data_electron_rate(observation: Any, dataset_kind: str) -> np.nd
     """
     dataset_kind = _validate_choice(dataset_kind, ("asimov", "noisy"), "dataset_kind")
     if dataset_kind == "asimov":
-        return np.asarray(observation.noiseless_source_eps, dtype=float)
+        # Copy: al.Array2D zeroes masked pixels in place, and a no-copy
+        # view here would corrupt the caller's observation object.
+        return np.array(observation.noiseless_source_eps, dtype=float)
     return (
         np.asarray(observation.data.native, dtype=float)
         * float(observation.gain)
@@ -316,6 +318,10 @@ def imaging_from_observation(
     noise_array = al.Array2D(values=noise_rate_from_observation(observation), mask=mask)
     dataset = al.Imaging(data=data_array, noise_map=noise_array, psf=psf)
 
+    # al.Imaging sum-normalizes the PSF at construction, so the recorded
+    # digest must describe the kernel the fit actually consumes.
+    fitted_psf_native = pyauto_kernel_native(dataset.psf)
+
     metadata = NonlinearDatasetMetadata(
         dataset_kind=dataset_kind,
         data_units="e_per_s",
@@ -326,6 +332,62 @@ def imaging_from_observation(
         psf_truth_label=psf_truth_label,
         psf_fit_label=psf_fit_label,
         psf_fit_supplied=psf_fit_supplied,
-        psf_fit_sha256=_kernel_sha256(psf_native),
+        psf_fit_sha256=_kernel_sha256(fitted_psf_native),
     )
     return dataset, metadata
+
+
+def fitted_kernel_sha256(dataset, wrapped_kernel, kernel_pixel_scale):
+    """Digest the as-fitted dataset PSF, bound to the executor kernel.
+
+    ``al.Imaging`` sum-normalizes the PSF at construction, so the digest
+    the executors bind through the validator guard must describe
+    ``dataset.psf``, the kernel the fit actually consumes.
+
+    Parameters
+    ----------
+    dataset : `autolens.Imaging`
+        Dataset returned by `imaging_from_observation`.
+    wrapped_kernel : `object`
+        The PyAuto kernel or convolver the executor handed to the
+        dataset builder.
+    kernel_pixel_scale : `float`
+        Kernel pixel scale in arcseconds per pixel.
+
+    Returns
+    -------
+    digest : `str`
+        Canonical SHA-256 of the as-fitted native kernel.
+
+    Raises
+    ------
+    ValueError
+        Raised if the dataset kernel is byte-identical to neither the
+        wrapped kernel nor its sum-normalization.
+    """
+    fitted = np.ascontiguousarray(
+        pyauto_kernel_native(dataset.psf),
+        dtype=np.float64,
+    )
+    supplied = np.ascontiguousarray(
+        pyauto_kernel_native(wrapped_kernel),
+        dtype=np.float64,
+    )
+    if fitted.tobytes() != supplied.tobytes():
+        normalized = np.ascontiguousarray(
+            pyauto_kernel_native(
+                make_pyauto_kernel(
+                    values=supplied,
+                    pixel_scales=float(kernel_pixel_scale),
+                    normalize=True,
+                )
+            ),
+            dtype=np.float64,
+        )
+        if fitted.tobytes() != normalized.tobytes():
+            raise ValueError(
+                "dataset PSF is byte-identical to neither the wrapped "
+                "fit kernel nor its sum-normalization; the dataset does "
+                "not carry the executor kernel"
+            )
+    return _kernel_sha256(fitted)

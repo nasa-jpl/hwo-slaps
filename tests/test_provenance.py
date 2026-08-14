@@ -154,6 +154,43 @@ def test_capture_provenance_records_image_asset_identity(tmp_path):
     )
 
 
+def test_revision_provenance_records_repo_state():
+    """Record the tracked repository revision for the executing source."""
+    from hwoslaps.provenance import revision_provenance
+
+    revision = revision_provenance()
+    assert set(revision) == {
+        "git_hash",
+        "git_dirty",
+        "git_dirty_paths",
+        "git_diff_sha256",
+    }
+    assert isinstance(revision["git_hash"], str)
+    assert len(revision["git_hash"]) == 40
+
+
+def test_revision_provenance_null_on_subprocess_failure(monkeypatch):
+    """Return the all-None record when a git subprocess cannot spawn."""
+    import hwoslaps.provenance as provenance_module
+    from hwoslaps.provenance import revision_provenance
+
+    def failing_call(*args, **kwargs):
+        raise OSError("spawn failed")
+
+    monkeypatch.setattr(
+        provenance_module.subprocess,
+        "call",
+        failing_call,
+    )
+    revision = revision_provenance()
+    assert revision == {
+        "git_hash": None,
+        "git_dirty": None,
+        "git_dirty_paths": None,
+        "git_diff_sha256": None,
+    }
+
+
 def test_write_provenance_round_trips_through_yaml(tmp_path):
     """Round-trip the provenance record through its YAML file."""
     config = {"run_name": "demo", "global_seed": 11}

@@ -37,11 +37,22 @@ def _metadata_field(metadata: Any, name: str, default: Any) -> Any:
 
 def _validate_fit_psf_dataset(
     full_config: dict,
+    dataset: Any,
     dataset_metadata: Any,
+    psf_case: str,
     matched_control: bool,
     expected_psf_fit_sha256: Optional[str],
 ) -> None:
-    """Require coherent mode, labels, supplied state, and kernel identity."""
+    """Require coherent mode, labels, supplied state, and kernel identity.
+
+    For mismatch modes the fitted dataset's own PSF kernel is rehashed and
+    must equal both the dataset metadata digest and the executor-computed
+    digest, the ``psf_case`` argument must equal the metadata label, and
+    for delta and explicit modes the label must equal the exact identity
+    recomputed from ``full_config``. This is mistake-proofing against
+    swapped, stale, or mutated dataset/metadata pairs, not authentication
+    against a hostile in-process caller.
+    """
     fit_psf = (full_config.get("modeling") or {}).get("fit_psf") or {}
     mode = str(fit_psf.get("mode", "matched")).lower()
     label = str(_metadata_field(dataset_metadata, "psf_fit_label", "fit"))
@@ -100,6 +111,15 @@ def _validate_fit_psf_dataset(
         )
     )
     if valid:
+        if mismatch_mode:
+            _validate_fit_psf_dataset_identity(
+                full_config,
+                dataset,
+                mode,
+                label,
+                psf_case,
+                expected_psf_fit_sha256,
+            )
         return
     if not supplied and mode != "matched":
         detail = "dataset was built with the truth PSF"
@@ -112,6 +132,50 @@ def _validate_fit_psf_dataset(
         f"{label!r}, psf_fit_supplied is {supplied}; use "
         "run_psf_mismatch_case or pass matched_control=True"
     )
+
+
+def _validate_fit_psf_dataset_identity(
+    full_config: dict,
+    dataset: Any,
+    mode: str,
+    label: str,
+    psf_case: str,
+    expected_psf_fit_sha256: str,
+) -> None:
+    """Bind the fitted dataset kernel and labels to the executor identity."""
+    from ...psf.mismatch import _kernel_sha256
+    from .autolens_runner import _native_array
+
+    dataset_psf = getattr(dataset, "psf", None)
+    if dataset_psf is None:
+        raise ValueError(
+            "mismatch-mode datasets must expose the fitted PSF kernel as "
+            "dataset.psf so the guard can rehash it"
+        )
+    actual_psf_sha256 = _kernel_sha256(_native_array(dataset_psf))
+    if actual_psf_sha256 != expected_psf_fit_sha256:
+        raise ValueError(
+            f"dataset PSF sha256 {actual_psf_sha256!r} does not match the "
+            f"executor kernel digest {expected_psf_fit_sha256!r}; the "
+            "fitted dataset does not contain the kernel the executor "
+            "supplied"
+        )
+    if str(psf_case) != label:
+        raise ValueError(
+            f"psf_case {psf_case!r} does not match the dataset label "
+            f"{label!r}; the recorded PSF case must be the label that "
+            "passed the guard"
+        )
+    if mode in {"delta", "explicit"}:
+        from ...psf.mismatch import build_psf_mismatch_spec
+
+        spec = build_psf_mismatch_spec(full_config)
+        expected_label = f"{spec.mode}:{spec.delta_id}"
+        if label != expected_label:
+            raise ValueError(
+                f"dataset label {label!r} does not match the identity "
+                f"{expected_label!r} recomputed from modeling.fit_psf"
+            )
 
 
 class NonlinearMetricValidator:
@@ -187,7 +251,9 @@ class NonlinearMetricValidator:
         """
         _validate_fit_psf_dataset(
             full_config,
+            dataset,
             dataset_metadata,
+            psf_case,
             matched_control,
             expected_psf_fit_sha256,
         )
