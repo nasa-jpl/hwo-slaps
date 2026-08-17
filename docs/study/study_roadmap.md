@@ -577,7 +577,7 @@ Workstream 1 — mass reach:
   - [ ] Run matched-PSF no-subhalo control grids across the ensemble.
   - [ ] Run clumpy-source no-subhalo data against smooth-source fit models.
 - R3 (A/G): dark-matter fold.
-  - [ ] Implement the fold of the D5 maps with CDM and WDM subhalo mass
+  - [x] Implement the fold of the D5 maps with CDM and WDM subhalo mass
         functions.
   - [ ] Produce expected-detections-per-lens and lenses-to-discriminate
         forecasts.
