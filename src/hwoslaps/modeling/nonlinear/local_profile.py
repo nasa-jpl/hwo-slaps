@@ -157,6 +157,28 @@ def profile_likelihood_q(
     *,
     smooth_chi2_min: float,
     subhalo_chi2_min: float,
+    clip_negative: bool = True,
 ) -> float:
-    """Return the non-negative smooth-vs-subhalo profile statistic."""
-    return float(max(0.0, float(smooth_chi2_min) - float(subhalo_chi2_min)))
+    """Return the smooth-vs-subhalo profile statistic.
+
+    Parameters
+    ----------
+    smooth_chi2_min : `float`
+        Best smooth-model chi-squared.
+    subhalo_chi2_min : `float`
+        Best subhalo-model chi-squared.
+    clip_negative : `bool`, optional
+        Whether to clip the statistic at zero. ``False`` returns the
+        signed contrast, preserving cases where the subhalo model fits
+        worse than the smooth model.
+
+    Returns
+    -------
+    q : `float`
+        ``smooth_chi2_min - subhalo_chi2_min``, clipped at zero when
+        ``clip_negative`` is True.
+    """
+    signed = float(smooth_chi2_min) - float(subhalo_chi2_min)
+    if clip_negative:
+        return float(max(0.0, signed))
+    return signed

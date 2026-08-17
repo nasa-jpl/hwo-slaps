@@ -10,6 +10,7 @@ numerical correctness of key quantities.
 import copy
 import math
 import os
+from types import SimpleNamespace
 from typing import Any, Dict, Tuple
 
 import numpy as np
@@ -19,6 +20,7 @@ import yaml
 from hwoslaps.psf import (
     generate_psf_system,
 )
+from hwoslaps.psf.generator import _total_aperture_rms_nm
 from hwoslaps.psf.psf_metrics import calculate_strehl_ratio
 
 # ---- Fixtures ----
@@ -305,3 +307,49 @@ def test_single_global_zernike_rms_approx_matches_input(master_config: Dict[str,
     # Measured total RMS across the hex pupil should be close to 10 nm.
     # Allow moderate tolerance for geometry/normalization and discretization.
     assert data.total_rms_nm == pytest.approx(10.0, rel=0.3)
+
+
+def test_total_aperture_rms_helper_exact_hand_value():
+    """Helper reproduces an exact hand-derived piston-removed OPD RMS.
+
+    Inputs: synthetic 5-pixel telescope data with one dark pixel. The
+    surface [5, 5, 15, 15, 500] nm doubles on reflection to
+    [10, 10, 30, 30, 1000] nm OPD, and the phase screen
+    [0, 0, 0.1, 0.1, 0] rad converts at λ/(2π) = 100 nm/rad to add
+    [0, 0, 10, 10, 0] nm. Over the four illuminated pixels the OPD is
+    [10, 10, 40, 40] nm with mean 25 nm, so deviations are
+    [-15, -15, 15, 15] nm and the RMS is exactly 15 nm.
+    """
+    telescope_data = {
+        "hsm": SimpleNamespace(
+            surface=np.array([5.0e-9, 5.0e-9, 15.0e-9, 15.0e-9, 5.0e-7])
+        ),
+        "wavelength": 2.0 * np.pi * 1.0e-7,
+        "aper": np.array([1.0, 1.0, 1.0, 1.0, 0.0]),
+    }
+    phase_screens = {"global_zernikes": np.array([0.0, 0.0, 0.1, 0.1, 0.0])}
+
+    rms_nm = _total_aperture_rms_nm(telescope_data, phase_screens)
+    assert rms_nm == pytest.approx(15.0, rel=1e-12)
+
+
+def test_total_aperture_rms_helper_raises_on_malformed_screen():
+    """A phase screen whose shape mismatches the pupil must raise loudly.
+
+    Inputs: 4-pixel surface and aperture with a 3-pixel phase screen. The
+    OPD addition genuinely fails to broadcast, and the helper must raise
+    RuntimeError chained from the original error with a message naming
+    the operation. No 0.0 fallback is permitted.
+    """
+    telescope_data = {
+        "hsm": SimpleNamespace(surface=np.zeros(4)),
+        "wavelength": 5.0e-7,
+        "aper": np.ones(4),
+    }
+    phase_screens = {"global_zernikes": np.zeros(3)}
+
+    with pytest.raises(
+        RuntimeError, match="Total aperture OPD RMS calculation failed"
+    ) as excinfo:
+        _total_aperture_rms_nm(telescope_data, phase_screens)
+    assert isinstance(excinfo.value.__cause__, ValueError)

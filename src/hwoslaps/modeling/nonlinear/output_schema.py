@@ -140,6 +140,27 @@ class NonlinearFitSummary:
         Whether the configured likelihood-call limit was reached.
     visualization_disabled : `bool`, optional
         Whether AutoFit in-search visualization was disabled for the fit.
+    n_eff_requested : `float`, optional
+        Minimum effective sample size requested for the sampler; None
+        when the installed backend default was delegated to.
+    n_eff_effective : `float`, optional
+        Effective minimum effective sample size discovered on the
+        constructed search; None when undiscoverable.
+    n_shell_requested : `int`, optional
+        Minimum shell-point count requested for the sampler; None when
+        the installed backend default was delegated to.
+    n_shell_effective : `int`, optional
+        Effective minimum shell-point count discovered on the
+        constructed search; None when undiscoverable.
+    discard_exploration_requested : `bool`, optional
+        Requested exploration-phase discard flag; None when the
+        installed backend default was delegated to.
+    discard_exploration_effective : `bool`, optional
+        Effective exploration-phase discard flag discovered on the
+        constructed search; None when undiscoverable.
+    search_internal_retained : `bool`, optional
+        Whether the search-internal retention override was applied for
+        this fit, keeping the raw sampler state on disk.
     """
 
     model_role: str
@@ -162,6 +183,13 @@ class NonlinearFitSummary:
     use_jax_effective: Optional[bool] = None
     jax_n_batch_effective: Optional[int] = None
     visualization_disabled: Optional[bool] = None
+    n_eff_requested: Optional[float] = None
+    n_eff_effective: Optional[float] = None
+    n_shell_requested: Optional[int] = None
+    n_shell_effective: Optional[int] = None
+    discard_exploration_requested: Optional[bool] = None
+    discard_exploration_effective: Optional[bool] = None
+    search_internal_retained: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the fit summary to a JSON-compatible dictionary."""
@@ -283,7 +311,19 @@ def _weighted_quantiles(
     values: np.ndarray,
     weights: Optional[np.ndarray],
 ) -> tuple[float, float, float]:
-    """Return posterior 16th, 50th, and 84th percentiles."""
+    """Return posterior 16th, 50th, and 84th percentiles.
+
+    Weighted samples use the midpoint empirical-CDF convention of
+    ``corner.quantile``: sorted samples receive cumulative probability
+    ``(cumsum(weights) - 0.5 * weights) / sum(weights)`` and quantiles
+    interpolate the sorted values against that CDF. ``np.interp`` clamps
+    quantiles outside the CDF range to the smallest or largest sample.
+
+    Unweighted ``np.quantile`` is the fallback when weights are missing
+    or shape-mismatched, when there are fewer than two samples, when all
+    weights are equal, or when the weight sum is non-finite or
+    non-positive.
+    """
     if weights is None or weights.shape != values.shape:
         return tuple(
             float(value) for value in np.quantile(values, [0.16, 0.5, 0.84])
@@ -298,14 +338,14 @@ def _weighted_quantiles(
         return tuple(
             float(value) for value in np.quantile(values, [0.16, 0.5, 0.84])
         )
-    cumulative = np.cumsum(sorted_weights)[:-1]
-    normalization = float(cumulative[-1])
+    normalization = float(np.sum(sorted_weights))
     if not np.isfinite(normalization) or normalization <= 0.0:
         return tuple(
             float(value) for value in np.quantile(values, [0.16, 0.5, 0.84])
         )
-    cumulative = cumulative / normalization
-    cumulative = np.append(0.0, cumulative)
+    cumulative = (
+        np.cumsum(sorted_weights) - 0.5 * sorted_weights
+    ) / normalization
     return tuple(
         float(np.interp(quantile, cumulative, sorted_values))
         for quantile in (0.16, 0.5, 0.84)

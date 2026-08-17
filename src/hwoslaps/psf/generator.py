@@ -31,6 +31,61 @@ from .telescope_models import create_hcipy_telescope
 from .utils import PSFData, make_pyauto_kernel, pyauto_kernel_pixel_scales
 
 
+def _total_aperture_rms_nm(telescope_data, phase_screens):
+    """Compute the total piston-removed aperture OPD RMS in nanometers.
+
+    The OPD combines the segmented-mirror surface (factor 2 on
+    reflection) with the OPD implied by any applied phase screens
+    (segment hexikes, global Zernikes). The RMS is taken over the
+    illuminated pupil only, after removing the mean (piston).
+
+    Parameters
+    ----------
+    telescope_data : `dict`
+        Pupil-side telescope dictionary containing ``hsm`` (segmented
+        mirror with a ``surface`` array), ``wavelength`` (meters), and
+        ``aper`` (aperture transmission array).
+    phase_screens : `dict`
+        Mapping from screen name to pupil-plane phase screen in radians.
+        May be empty.
+
+    Returns
+    -------
+    total_rms_nm : `float`
+        Piston-removed OPD RMS over the illuminated aperture in
+        nanometers.
+
+    Raises
+    ------
+    RuntimeError
+        Raised, chained from the original exception, if any step of the
+        calculation fails (for example a phase screen whose shape does
+        not match the pupil grid). No fallback value is ever returned.
+    """
+    try:
+        # Start with DM OPD.
+        opd_total = telescope_data['hsm'].surface * 2
+
+        # Convert phase screens (stored in radians) to OPD and add.
+        # Relation: phase [rad] = 2π * OPD / λ  =>  OPD = phase * λ / (2π)
+        if phase_screens:
+            lambda_m = telescope_data['wavelength']
+            rad_to_opd = lambda_m / (2 * np.pi)
+            for screen in phase_screens.values():
+                opd_total += np.asarray(screen) * rad_to_opd
+
+        # Compute RMS over illuminated pupil after removing piston.
+        aper_field = telescope_data['aper']
+        valid_pixels = aper_field > 0.5
+        opd_valid = opd_total[valid_pixels]
+        opd_valid -= np.mean(opd_valid)
+        return float(np.sqrt(np.mean(opd_valid**2)) * 1e9)
+    except Exception as e:
+        raise RuntimeError(
+            f"Total aperture OPD RMS calculation failed: {e}"
+        ) from e
+
+
 def generate_psf_system(config, full_config=None):
     """Generate a PSF system with specified aberrations.
 
@@ -326,29 +381,10 @@ def generate_psf_system(config, full_config=None):
         )
 
     # Calculate proper total RMS wavefront error including all aberrations.
-    # This combines the DM surface OPD (factor 2 on reflection) with OPD
-    # implied by any applied phase screens (segment hexikes, global Zernikes).
-    try:
-        # Start with DM OPD.
-        opd_total = telescope_data['hsm'].surface * 2
-
-        # Convert phase screens (stored in radians) to OPD and add.
-        # Relation: phase [rad] = 2π * OPD / λ  =>  OPD = phase * λ / (2π)
-        if phase_screens:
-            lambda_m = telescope_data['wavelength']
-            rad_to_opd = lambda_m / (2 * np.pi)
-            for screen in phase_screens.values():
-                opd_total += np.asarray(screen) * rad_to_opd
-
-        # Compute RMS over illuminated pupil after removing piston.
-        aper_field = telescope_data['aper']
-        valid_pixels = aper_field > 0.5
-        opd_valid = opd_total[valid_pixels]
-        opd_valid -= np.mean(opd_valid)
-        total_rms_nm = float(np.sqrt(np.mean(opd_valid**2)) * 1e9)
-    except Exception as e:
-        print(f"Warning: Could not calculate total RMS including phase screens: {e}")
-        total_rms_nm = 0.0
+    # The helper combines the DM surface OPD (factor 2 on reflection) with
+    # OPD implied by any applied phase screens (segment hexikes, global
+    # Zernikes) and raises RuntimeError if the calculation fails.
+    total_rms_nm = _total_aperture_rms_nm(telescope_data, phase_screens)
 
     # Calculate individual aberration coefficient summaries for metadata.
     # These are not independent aperture-weighted RMS budget terms.

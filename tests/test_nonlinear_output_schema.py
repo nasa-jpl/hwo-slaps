@@ -311,17 +311,19 @@ def test_recovery_upper_boundary_flag_and_posterior_pile_up():
 
 
 def test_corner_weighted_quantiles_and_converged_recovery():
-    """Match corner-style weighted quantiles for all recovered coordinates."""
-    values = np.asarray([0.0, 1.0, 2.0, 3.0])
-    weights = np.asarray([0.7, 0.1, 0.1, 0.1])
-    first_cdf_step = 0.7 / 0.9
-    second_cdf_step = 0.8 / 0.9
+    """Match corner midpoint-ECDF quantiles for recovered coordinates.
+
+    With values ``[1, 2, 3, 4]`` and weights ``[0.01, 0.01, 0.01, 0.97]``
+    the midpoint ECDF is ``[0.005, 0.015, 0.025, 0.515]``, so the 16th
+    and 50th percentiles interpolate on the ``[0.025, 0.515]`` segment
+    and the 84th percentile clamps to the largest sample.
+    """
+    values = np.asarray([1.0, 2.0, 3.0, 4.0])
+    weights = np.asarray([0.01, 0.01, 0.01, 0.97])
     expected = (
-        0.16 / first_cdf_step,
-        0.5 / first_cdf_step,
-        1.0 + (0.84 - first_cdf_step) / (
-            second_cdf_step - first_cdf_step
-        ),
+        3.0 + (0.16 - 0.025) / 0.49,
+        3.0 + (0.5 - 0.025) / 0.49,
+        4.0,
     )
     assert _weighted_quantiles(values, weights) == pytest.approx(
         expected,
@@ -353,6 +355,55 @@ def test_corner_weighted_quantiles_and_converged_recovery():
     ) == pytest.approx(expected, rel=1.0e-12)
 
 
+def test_weighted_quantiles_clamp_below_heavy_first_weight():
+    """Clamp the 16th percentile to a heavily weighted smallest sample.
+
+    With weights ``[0.97, 0.01, 0.01, 0.01]`` the midpoint ECDF is
+    ``[0.485, 0.975, 0.985, 0.995]``, so the 16th percentile falls below
+    the first CDF value and clamps to the smallest sample.
+    """
+    values = np.asarray([1.0, 2.0, 3.0, 4.0])
+    weights = np.asarray([0.97, 0.01, 0.01, 0.01])
+    expected = (
+        1.0,
+        1.0 + (0.5 - 0.485) / 0.49,
+        1.0 + (0.84 - 0.485) / 0.49,
+    )
+    assert _weighted_quantiles(values, weights) == pytest.approx(
+        expected,
+        rel=1.0e-12,
+    )
+
+
+def test_weighted_quantiles_asymmetric_two_point_case():
+    """Interpolate an asymmetric two-point posterior and clamp above.
+
+    With values ``[0, 10]`` and weights ``[0.25, 0.75]`` the midpoint
+    ECDF is ``[0.125, 0.625]``, so the 16th and 50th percentiles
+    interpolate linearly and the 84th percentile clamps to 10.
+    """
+    values = np.asarray([0.0, 10.0])
+    weights = np.asarray([0.25, 0.75])
+    expected = (
+        10.0 * (0.16 - 0.125) / 0.5,
+        10.0 * (0.5 - 0.125) / 0.5,
+        10.0,
+    )
+    assert _weighted_quantiles(values, weights) == pytest.approx(
+        expected,
+        rel=1.0e-12,
+    )
+
+
+def test_weighted_quantiles_without_weights_match_numpy_quantile():
+    """Fall back to plain np.quantile when no weights are provided."""
+    values = np.asarray([3.0, 1.0, 4.0, 1.5, 9.0, 2.6])
+    expected = tuple(
+        float(value) for value in np.quantile(values, [0.16, 0.5, 0.84])
+    )
+    assert _weighted_quantiles(values, None) == expected
+
+
 def test_unconverged_recovery_suppresses_quantiles():
     """Record false PDF convergence without reporting fallback quantiles."""
     result = _recovery_result(7.0, [6.8, 7.0, 7.2], converged=False)
@@ -362,6 +413,44 @@ def test_unconverged_recovery_suppresses_quantiles():
     assert recovery.log10_m200_p50 is None
     assert recovery.log10_m200_p84 is None
     assert recovery.posterior_mass_frac_lower == pytest.approx(0.0)
+
+
+def test_fit_summary_serializes_sampler_provenance_fields():
+    """Serialize sampler provenance and default omitted fields to None."""
+    summary = NonlinearFitSummary(
+        model_role="subhalo",
+        fit_mode="freed",
+        status="success",
+        n_eff_requested=2000.0,
+        n_eff_effective=2000.0,
+        n_shell_requested=3,
+        n_shell_effective=3,
+        discard_exploration_requested=True,
+        discard_exploration_effective=True,
+        search_internal_retained=True,
+    )
+    payload = summary.to_dict()
+    json.dumps(payload)
+    assert payload["n_eff_requested"] == 2000.0
+    assert payload["n_eff_effective"] == 2000.0
+    assert payload["n_shell_requested"] == 3
+    assert payload["n_shell_effective"] == 3
+    assert payload["discard_exploration_requested"] is True
+    assert payload["discard_exploration_effective"] is True
+    assert payload["search_internal_retained"] is True
+
+    omitted = NonlinearFitSummary(
+        model_role="smooth",
+        fit_mode="freed",
+        status="success",
+    ).to_dict()
+    assert omitted["n_eff_requested"] is None
+    assert omitted["n_eff_effective"] is None
+    assert omitted["n_shell_requested"] is None
+    assert omitted["n_shell_effective"] is None
+    assert omitted["discard_exploration_requested"] is None
+    assert omitted["discard_exploration_effective"] is None
+    assert omitted["search_internal_retained"] is None
 
 
 def test_v2_schema_preserves_v1_column_prefix():

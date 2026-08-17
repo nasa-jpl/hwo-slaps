@@ -1115,9 +1115,13 @@ def detectable_area(metric_values: ArrayLike, cell_area: float, threshold: float
         Array of local detectability values (e.g. ``Z_A`` or ``q_A``) per map
         cell.
     cell_area
-        Physical or angular area represented by one map cell.
+        Physical or angular area represented by one map cell. Every
+        evaluated cell at or above ``threshold`` contributes one full
+        ``cell_area``; there is no sub-cell interpolation.
     threshold
-        Detection threshold applied to ``metric_values``.
+        Detection threshold applied to ``metric_values``. Cells with
+        values greater than or equal to the threshold count as
+        detectable.
     """
     values = np.asarray(metric_values, dtype=float)
     if values.size == 0:

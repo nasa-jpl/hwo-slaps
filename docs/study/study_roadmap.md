@@ -25,7 +25,7 @@ $$
 which corresponds to
 
 $$
-q = 2\Delta \log \mathcal{L} > 10, \qquad Z > \sqrt{10}
+q = 2\Delta \log \mathcal{L} \geq 10, \qquad Z \geq \sqrt{10}
 $$
 
 under the usual likelihood-ratio convention.
@@ -181,7 +181,7 @@ Use one notation consistently across plots, docs, and manuscript:
 - Profiled Fisher statistic: $q_F \equiv \Delta \chi^2_F$.
 - Fisher-equivalent local significance: $Z_F = \sqrt{q_F}$.
 - Fisher-equivalent SCDD likelihood metric: $\Delta \log \mathcal{L}_{F,\mathrm{equiv}} = q_F / 2$.
-- SCDD threshold: $\Delta \log \mathcal{L} > 5$, equivalent to $q_F > 10$ and $Z_F > \sqrt{10}$.
+- SCDD threshold: $\Delta \log \mathcal{L} \geq 5$, equivalent to $q_F \geq 10$ and $Z_F \geq \sqrt{10}$ (the code applies the threshold inclusively).
 - Nonlinear validation statistic: $q_{\mathrm{fit}} = 2(\log \mathcal{L}_{\mathrm{subhalo}} - \log \mathcal{L}_{\mathrm{smooth}})$.
 
 Do not call the Fisher value a nonlinear likelihood ratio. Call it a Fisher-equivalent or Asimov forecast. The current PyAutoLens validation supports using it as a calibrated screening metric for the controlled matched-PSF SPIE study, not as a universal requirement metric.

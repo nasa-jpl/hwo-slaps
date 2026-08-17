@@ -209,6 +209,18 @@ class PsfBankSummary:
         Whether the profile statistic reaches the SCDD threshold.
     detected_evidence_psf_marg : `bool`, optional
         Whether the marginalized evidence difference is strong.
+    signed_q_fit_psf_profile : `float`, optional
+        Signed profiled statistic
+        ``2*(log_l_subhalo_profile - log_l_smooth_profile)`` without
+        clipping. `None` when either profile is missing.
+    censored : `bool`, optional
+        `False` when every declared candidate was usable for both the
+        likelihood profile and the evidence estimate; `True` otherwise.
+    lost_evidence_prior_mass_fraction : `float`, optional
+        ``1 - n_evidence/n_candidates``; ``0.0`` for a complete bank. A
+        censored evidence estimate is the equal-weight estimate under
+        the restricted usable-candidate prior and must never be
+        reported as the declared full-bank evidence.
     """
 
     n_candidates: int
@@ -226,6 +238,9 @@ class PsfBankSummary:
     ess_evidence_subhalo: Optional[float]
     detected_fit_scdd_psf_profile: Optional[bool]
     detected_evidence_psf_marg: Optional[bool]
+    signed_q_fit_psf_profile: Optional[float] = None
+    censored: Optional[bool] = None
+    lost_evidence_prior_mass_fraction: Optional[float] = None
 
 
 def _usable(value: Any) -> bool:
@@ -291,6 +306,8 @@ def _best_candidate(
 def combine_psf_bank_fits(
     candidates: Sequence[PsfBankCandidateFit],
     fit_mode: Optional[str] = None,
+    *,
+    allow_censored: bool = False,
 ) -> PsfBankSummary:
     """Combine paired candidate fits into bank profile and evidence results.
 
@@ -301,6 +318,9 @@ def combine_psf_bank_fits(
     fit_mode : `str`, optional
         Nonlinear fit mode. ``"freed"`` nulls the fixed-calibration SCDD
         detection flag but retains the profile statistic.
+    allow_censored : `bool`, optional
+        Whether an incomplete marginalization set may be combined under
+        the restricted usable-candidate prior. Disabled by default.
 
     Returns
     -------
@@ -310,7 +330,10 @@ def combine_psf_bank_fits(
     Raises
     ------
     ValueError
-        Raised when the marginalization set is empty.
+        Raised when the marginalization set is empty, when
+        ``allow_censored`` is not a boolean, or when censoring is
+        disabled and any declared candidate is unusable for the
+        likelihood profile or the evidence estimate.
 
     Notes
     -----
@@ -318,6 +341,12 @@ def combine_psf_bank_fits(
     the marginalization set. For an ordered amplitude list, the bank is an
     equal-allocation stratified sample over a uniform prior on that list,
     rather than iid sampling from an amplitude distribution.
+
+    With ``allow_censored=True`` the evidence prior renormalizes over the
+    usable candidates, so each hypothesis evidence is the equal-weight
+    estimate under the restricted usable-candidate prior rather than the
+    declared full-bank integral. The likelihood profile is a maximum and
+    needs no prior mass.
 
     Each per-hypothesis ``logZ_marg`` estimate is biased low when evidence
     weights concentrate because it is the log of an MC average. The two
@@ -334,9 +363,26 @@ def combine_psf_bank_fits(
         raise ValueError(
             "combine_psf_bank_fits requires at least one candidate"
         )
+    if not isinstance(allow_censored, bool):
+        raise ValueError("allow_censored must be a boolean")
     ordered = sorted(candidates, key=lambda item: item.label)
     likelihood_set = [item for item in ordered if _likelihood_usable(item)]
     evidence_set = [item for item in likelihood_set if _evidence_usable(item)]
+    censored = (
+        len(likelihood_set) < len(ordered)
+        or len(evidence_set) < len(ordered)
+    )
+    if censored and not allow_censored:
+        offending = sorted(
+            item.label for item in ordered if not _evidence_usable(item)
+        )
+        raise ValueError(
+            f"PSF bank combination is censored: {len(ordered)} declared "
+            f"candidates, {len(likelihood_set)} likelihood-usable, "
+            f"{len(evidence_set)} evidence-usable; unusable candidates "
+            f"{offending}; censoring must be explicitly enabled via "
+            "allow_censored=True"
+        )
     best_smooth = _best_candidate(likelihood_set, "log_l_smooth")
     best_subhalo = _best_candidate(likelihood_set, "log_l_subhalo")
     smooth_profile = (
@@ -350,10 +396,12 @@ def combine_psf_bank_fits(
         else float(best_subhalo.log_l_subhalo)
     )
     q_fit = None
+    signed_q_fit = None
     if smooth_profile is not None and subhalo_profile is not None:
-        q_fit = max(0.0, 2.0*(subhalo_profile - smooth_profile))
+        signed_q_fit = 2.0*(subhalo_profile - smooth_profile)
+        q_fit = max(0.0, signed_q_fit)
 
-    log_prior = -math.log(len(candidates))
+    log_prior = -math.log(len(evidence_set)) if evidence_set else 0.0
     smooth_values = [
         float(item.log_evidence_smooth) for item in evidence_set
     ]
@@ -396,6 +444,11 @@ def combine_psf_bank_fits(
             None
             if delta_logz is None
             else delta_logz > STRONG_EVIDENCE_DELTA_LOG_Z_THRESHOLD
+        ),
+        signed_q_fit_psf_profile=signed_q_fit,
+        censored=censored,
+        lost_evidence_prior_mass_fraction=(
+            1.0 - len(evidence_set)/len(ordered)
         ),
     )
 
@@ -1174,14 +1227,20 @@ def _anchor_diagnostic(case: Any) -> dict:
     smooth_log_l = case.smooth_fit.log_likelihood_max
     subhalo_log_l = case.subhalo_fit.log_likelihood_max
     q_fit = None
+    signed_q_fit = None
     if _usable(smooth_log_l) and _usable(subhalo_log_l):
-        q_fit = max(0.0, 2.0*(float(subhalo_log_l) - float(smooth_log_l)))
+        signed_q_fit = 2.0*(float(subhalo_log_l) - float(smooth_log_l))
+        q_fit = max(0.0, signed_q_fit)
     smooth_logz = case.smooth_fit.log_evidence
     subhalo_logz = case.subhalo_fit.log_evidence
     delta_logz = None
     if _usable(smooth_logz) and _usable(subhalo_logz):
         delta_logz = float(subhalo_logz) - float(smooth_logz)
-    return {"q_fit": q_fit, "delta_log_evidence": delta_logz}
+    return {
+        "q_fit": q_fit,
+        "signed_q_fit": signed_q_fit,
+        "delta_log_evidence": delta_logz,
+    }
 
 
 def run_psf_bank_case(
@@ -1200,6 +1259,7 @@ def run_psf_bank_case(
     clumpy_fit_parameterization: str = "host_free",
     include_anchors: bool = True,
     on_candidate: Any = None,
+    allow_censored: bool = False,
 ) -> PsfBankCaseResult:
     """Run one nonlinear validation case over a compatible PSF bank.
 
@@ -1235,6 +1295,9 @@ def run_psf_bank_case(
         Whether to fit stored anchors as controls.
     on_candidate : callable, optional
         Callback receiving each completed nonlinear case result.
+    allow_censored : `bool`, optional
+        Whether an incomplete marginalization set may be combined under
+        the restricted usable-candidate prior. Disabled by default.
 
     Returns
     -------
@@ -1244,8 +1307,11 @@ def run_psf_bank_case(
     Raises
     ------
     ValueError
-        Raised before fitting for a missing freed mass context, incompatible
-        bank, pixel-scale mismatch, or corrupted kernel.
+        Raised before fitting for a missing freed mass context,
+        incompatible bank, pixel-scale mismatch, or corrupted kernel.
+        With censoring disabled, an incomplete marginalization set
+        raises after the candidate fits complete: their AutoFit outputs
+        persist on disk and only the in-memory combination is refused.
 
     Notes
     -----
@@ -1333,7 +1399,11 @@ def run_psf_bank_case(
         else:
             anchor_results.append(case)
 
-    summary = combine_psf_bank_fits(fits, fit_mode=fit_mode)
+    summary = combine_psf_bank_fits(
+        fits,
+        fit_mode=fit_mode,
+        allow_censored=allow_censored,
+    )
     anchor_diagnostics = {
         case.psf_case.rsplit(":", 1)[-1]: _anchor_diagnostic(case)
         for case in anchor_results

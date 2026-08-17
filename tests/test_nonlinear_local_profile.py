@@ -35,3 +35,17 @@ def test_profile_likelihood_q_is_non_negative():
     """Clip the profile-likelihood q at zero when the fit is worse."""
     assert profile_likelihood_q(smooth_chi2_min=12.0, subhalo_chi2_min=2.0) == 10.0
     assert profile_likelihood_q(smooth_chi2_min=2.0, subhalo_chi2_min=12.0) == 0.0
+
+
+def test_profile_likelihood_q_signed_value_when_clipping_disabled():
+    """Preserve the signed contrast when clipping is disabled."""
+    assert profile_likelihood_q(
+        smooth_chi2_min=2.0,
+        subhalo_chi2_min=12.0,
+        clip_negative=False,
+    ) == -10.0
+    assert profile_likelihood_q(
+        smooth_chi2_min=12.0,
+        subhalo_chi2_min=2.0,
+        clip_negative=False,
+    ) == 10.0

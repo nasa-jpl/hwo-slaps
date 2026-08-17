@@ -35,6 +35,7 @@ from hwoslaps.modeling.nonlinear.output_schema import (
 )
 from hwoslaps.modeling.nonlinear.psf_bank import (
     PsfBankCandidateFit,
+    _anchor_diagnostic,
     _kernel_sha256,
     _resolve_prior_table_path,
     build_psf_bank,
@@ -97,6 +98,10 @@ def test_combination_matches_manual_algebra_and_independent_profiles():
     )
     assert summary.n_success == 3
     assert summary.n_evidence == 3
+    assert summary.signed_q_fit_psf_profile == 6.0
+    assert summary.censored is False
+    assert summary.lost_evidence_prior_mass_fraction == 0.0
+    assert combine_psf_bank_fits(candidates, allow_censored=True) == summary
 
 
 @pytest.mark.parametrize(
@@ -123,6 +128,17 @@ def test_combination_clamp_and_detection_thresholds(
     assert summary.q_fit_psf_profile == q_expected
     assert summary.detected_fit_scdd_psf_profile is q_flag
     assert summary.detected_evidence_psf_marg is evidence_flag
+
+
+def test_signed_profile_statistic_preserves_negative_contrast():
+    """Keep the exact negative signed statistic while clipping q at zero."""
+    summary = combine_psf_bank_fits([
+        _fit("a", -5.0, -8.0, -6.0, -7.0),
+        _fit("b", -5.5, -9.0, -6.5, -7.5),
+    ])
+
+    assert summary.q_fit_psf_profile == 0.0
+    assert summary.signed_q_fit_psf_profile == -6.0
 
 
 def test_combination_is_order_invariant_with_lexical_exact_ties():
@@ -175,13 +191,19 @@ def test_paired_evidence_excludes_asymmetric_missingness_counterexample():
         _fit("subhalo-only", -2.0, -1.0, None, 1000.0),
     ]
 
-    summary = combine_psf_bank_fits(candidates)
+    with pytest.raises(ValueError, match="allow_censored"):
+        combine_psf_bank_fits(candidates)
+    summary = combine_psf_bank_fits(candidates, allow_censored=True)
 
     assert summary.n_success == 3
     assert summary.n_evidence == 1
-    assert summary.log_evidence_smooth_psf_marg == pytest.approx(-math.log(3.0))
-    assert summary.log_evidence_subhalo_psf_marg == pytest.approx(-math.log(3.0))
+    assert summary.log_evidence_smooth_psf_marg == pytest.approx(0.0)
+    assert summary.log_evidence_subhalo_psf_marg == pytest.approx(0.0)
     assert summary.delta_log_evidence_psf_marg == pytest.approx(0.0)
+    assert summary.censored is True
+    assert summary.lost_evidence_prior_mass_fraction == pytest.approx(
+        2.0 / 3.0
+    )
 
 
 def test_nonfinite_and_missing_values_follow_paired_set_semantics():
@@ -194,22 +216,32 @@ def test_nonfinite_and_missing_values_follow_paired_set_semantics():
         _fit("inf-logl", -5.0, -float("inf"), -5.0, -4.0),
     ]
 
-    summary = combine_psf_bank_fits(candidates)
+    with pytest.raises(ValueError, match="allow_censored"):
+        combine_psf_bank_fits(candidates)
+    summary = combine_psf_bank_fits(candidates, allow_censored=True)
 
     assert summary.n_success == 3
     assert summary.n_evidence == 1
     assert summary.delta_log_evidence_psf_marg == pytest.approx(1.0)
+    assert summary.censored is True
+    assert summary.lost_evidence_prior_mass_fraction == pytest.approx(0.8)
 
 
 def test_all_missing_and_all_failed_banks_return_none_statistics():
-    """Return null summaries with exact paired-set counts."""
-    missing = combine_psf_bank_fits([
+    """Return null censored summaries with exact paired-set counts."""
+    missing_candidates = [
         _fit("a", None, -1.0, 0.0, 1.0),
         _fit("b", -2.0, None, 0.0, 1.0),
-    ])
-    failed = combine_psf_bank_fits([
+    ]
+    failed_candidates = [
         _fit("a", -2.0, -1.0, 0.0, 1.0, success=False),
-    ])
+    ]
+
+    for candidates in (missing_candidates, failed_candidates):
+        with pytest.raises(ValueError, match="allow_censored"):
+            combine_psf_bank_fits(candidates)
+    missing = combine_psf_bank_fits(missing_candidates, allow_censored=True)
+    failed = combine_psf_bank_fits(failed_candidates, allow_censored=True)
 
     for summary, total in ((missing, 2), (failed, 1)):
         assert summary.n_candidates == total
@@ -218,6 +250,7 @@ def test_all_missing_and_all_failed_banks_return_none_statistics():
         assert summary.log_l_smooth_profile is None
         assert summary.log_l_subhalo_profile is None
         assert summary.q_fit_psf_profile is None
+        assert summary.signed_q_fit_psf_profile is None
         assert summary.log_evidence_smooth_psf_marg is None
         assert summary.log_evidence_subhalo_psf_marg is None
         assert summary.delta_log_evidence_psf_marg is None
@@ -225,18 +258,101 @@ def test_all_missing_and_all_failed_banks_return_none_statistics():
         assert summary.ess_evidence_subhalo is None
         assert summary.detected_fit_scdd_psf_profile is None
         assert summary.detected_evidence_psf_marg is None
+        assert summary.censored is True
+        assert summary.lost_evidence_prior_mass_fraction == 1.0
 
 
-def test_log_prior_uses_full_marginalization_set():
-    """Retain minus-log-M when only one candidate has paired evidence."""
-    summary = combine_psf_bank_fits([
+def test_censored_log_prior_renormalizes_over_usable_set():
+    """Normalize the censored evidence prior over usable candidates only."""
+    candidates = [
         _fit("usable", -2.0, -1.0, 7.0, 9.0),
         _fit("missing", -3.0, -2.0, None, None),
         _fit("failed", -3.0, -2.0, 30.0, 40.0, success=False),
-    ])
+    ]
 
-    assert summary.log_evidence_smooth_psf_marg == pytest.approx(7.0 - math.log(3.0))
-    assert summary.log_evidence_subhalo_psf_marg == pytest.approx(9.0 - math.log(3.0))
+    with pytest.raises(ValueError, match="allow_censored"):
+        combine_psf_bank_fits(candidates)
+    summary = combine_psf_bank_fits(candidates, allow_censored=True)
+
+    assert summary.log_evidence_smooth_psf_marg == pytest.approx(7.0)
+    assert summary.log_evidence_subhalo_psf_marg == pytest.approx(9.0)
+    assert summary.censored is True
+    assert summary.lost_evidence_prior_mass_fraction == pytest.approx(
+        2.0 / 3.0
+    )
+
+
+def test_censored_two_usable_candidates_match_restricted_prior_algebra():
+    """Match hand algebra for a censored bank with two usable candidates."""
+    candidates = [
+        _fit("a", -10.0, -12.0, -15.0, -14.0),
+        _fit("b", -13.0, -7.0, -16.0, -10.0),
+        _fit("c", -11.0, -9.0, None, None),
+    ]
+
+    summary = combine_psf_bank_fits(candidates, allow_censored=True)
+    log_prior = -math.log(2.0)
+    expected_smooth = math.log(
+        sum(math.exp(value + log_prior) for value in (-15, -16))
+    )
+    expected_subhalo = math.log(
+        sum(math.exp(value + log_prior) for value in (-14, -10))
+    )
+
+    assert summary.n_success == 3
+    assert summary.n_evidence == 2
+    assert summary.log_l_smooth_profile == -10.0
+    assert summary.log_l_subhalo_profile == -7.0
+    assert summary.q_fit_psf_profile == 6.0
+    assert summary.signed_q_fit_psf_profile == 6.0
+    assert summary.log_evidence_smooth_psf_marg == pytest.approx(
+        expected_smooth
+    )
+    assert summary.log_evidence_subhalo_psf_marg == pytest.approx(
+        expected_subhalo
+    )
+    assert summary.censored is True
+    assert summary.lost_evidence_prior_mass_fraction == pytest.approx(
+        1.0 / 3.0
+    )
+
+
+def test_fail_closed_names_counts_and_offending_labels():
+    """Name every count and offending label in the fail-closed error."""
+    nonfinite = [
+        _fit("good", -2.0, -1.0, -4.0, -3.0),
+        _fit("bad", float("nan"), -1.0, -4.0, -3.0),
+    ]
+    with pytest.raises(ValueError) as nonfinite_error:
+        combine_psf_bank_fits(nonfinite)
+    message = str(nonfinite_error.value)
+    assert "2 declared candidates" in message
+    assert "1 likelihood-usable" in message
+    assert "1 evidence-usable" in message
+    assert "['bad']" in message
+    assert "allow_censored=True" in message
+
+    missing_evidence = [
+        _fit("good", -2.0, -1.0, -4.0, -3.0),
+        _fit("noz", -2.0, -1.0, None, -3.0),
+    ]
+    with pytest.raises(ValueError) as missing_error:
+        combine_psf_bank_fits(missing_evidence)
+    message = str(missing_error.value)
+    assert "2 declared candidates" in message
+    assert "2 likelihood-usable" in message
+    assert "1 evidence-usable" in message
+    assert "['noz']" in message
+    assert "allow_censored=True" in message
+
+
+def test_combination_rejects_non_boolean_allow_censored():
+    """Reject non-boolean censoring flags loudly."""
+    candidates = [_fit("a", -2.0, -1.0, -4.0, -3.0)]
+
+    for value in (1, "true", None):
+        with pytest.raises(ValueError, match="allow_censored must be"):
+            combine_psf_bank_fits(candidates, allow_censored=value)
 
 
 def test_evidence_effective_sample_size_contract():
@@ -244,10 +360,13 @@ def test_evidence_effective_sample_size_contract():
     equal = combine_psf_bank_fits([
         _fit(str(index), 0.0, 0.0, 5.0, 5.0) for index in range(3)
     ])
-    singleton = combine_psf_bank_fits([
-        _fit("one", 0.0, 0.0, 5.0, 5.0),
-        _fit("missing", 0.0, 0.0, None, None),
-    ])
+    singleton = combine_psf_bank_fits(
+        [
+            _fit("one", 0.0, 0.0, 5.0, 5.0),
+            _fit("missing", 0.0, 0.0, None, None),
+        ],
+        allow_censored=True,
+    )
     dominant = combine_psf_bank_fits([
         _fit("high", 0.0, 0.0, 100.0, 100.0),
         _fit("low", 0.0, 0.0, 0.0, 0.0),
@@ -280,6 +399,41 @@ def test_random_paired_evidence_obeys_difference_bound():
         differences = subhalo - smooth
         assert np.min(differences) <= summary.delta_log_evidence_psf_marg
         assert summary.delta_log_evidence_psf_marg <= np.max(differences)
+
+
+def test_anchor_diagnostic_reports_signed_and_clipped_statistics():
+    """Carry the exact negative signed anchor statistic beside clipped q."""
+    case = SimpleNamespace(
+        smooth_fit=SimpleNamespace(
+            log_likelihood_max=-5.0,
+            log_evidence=-6.0,
+        ),
+        subhalo_fit=SimpleNamespace(
+            log_likelihood_max=-8.0,
+            log_evidence=-7.0,
+        ),
+    )
+    missing = SimpleNamespace(
+        smooth_fit=SimpleNamespace(
+            log_likelihood_max=None,
+            log_evidence=-6.0,
+        ),
+        subhalo_fit=SimpleNamespace(
+            log_likelihood_max=-8.0,
+            log_evidence=-7.0,
+        ),
+    )
+
+    assert _anchor_diagnostic(case) == {
+        "q_fit": 0.0,
+        "signed_q_fit": -6.0,
+        "delta_log_evidence": -1.0,
+    }
+    assert _anchor_diagnostic(missing) == {
+        "q_fit": None,
+        "signed_q_fit": None,
+        "delta_log_evidence": -1.0,
+    }
 
 
 def test_freed_mode_nulls_only_scdd_detection_flag():
@@ -919,6 +1073,7 @@ def test_executor_wires_candidates_anchors_callbacks_and_slim_json(
     assert len(result.anchor_results) == 1
     assert result.anchor_diagnostics["perfect"] == {
         "q_fit": 6.0,
+        "signed_q_fit": 6.0,
         "delta_log_evidence": 3.0,
     }
     assert result.quality_flags == []
@@ -959,10 +1114,15 @@ def test_executor_flags_failures_missing_evidence_and_callback_errors(compact_co
         bank,
         fit_mode="fixed_template",
         on_candidate=failing_callback,
+        allow_censored=True,
     )
 
     assert result.summary.n_success == 2
     assert result.summary.n_evidence == 1
+    assert result.summary.censored is True
+    assert result.summary.lost_evidence_prior_mass_fraction == pytest.approx(
+        2.0 / 3.0
+    )
     assert callback_count == 4
     assert set(result.quality_flags) == {
         "bank_candidate_failed",
@@ -970,6 +1130,29 @@ def test_executor_flags_failures_missing_evidence_and_callback_errors(compact_co
         "bank_anchor_failed",
         "bank_on_candidate_callback_failed",
     }
+
+
+def test_executor_fails_closed_after_candidate_fits_complete(compact_config):
+    """Refuse the censored combination only after every fit has run."""
+    config = copy.deepcopy(compact_config)
+    config["modeling"]["fit_psf"]["bank"]["n_draws"] = 3
+    bank = _quiet_build(config)
+    validator = FakeValidator(fail_labels={"draw001"})
+
+    with pytest.raises(ValueError, match="allow_censored"):
+        run_psf_bank_case(
+            validator,
+            _observation_from_config(config),
+            config,
+            _trial(),
+            bank,
+            fit_mode="fixed_template",
+        )
+    assert [call["label"] for call in validator.calls] == [
+        "draw000",
+        "draw001",
+        "draw002",
+    ]
 
 
 def test_version_drift_is_a_soft_execution_diagnostic(

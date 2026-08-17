@@ -56,6 +56,23 @@ class NonlinearSearchSettings:
         ``PYAUTO_SKIP_VISUALIZATION=1`` around the search; ``False``
         sets ``0`` so plots run regardless of the ambient environment.
         The prior value is restored after every fit.
+    n_eff : `float`, optional
+        Minimum effective posterior sample size before the sampler
+        stops. None delegates to the installed backend default; the
+        effective value is recorded in the fit summary.
+    n_shell : `int`, optional
+        Minimum number of points in the sampler shell before stopping.
+        None delegates to the installed backend default; the effective
+        value is recorded in the fit summary.
+    discard_exploration : `bool`, optional
+        Whether the sampler discards exploration-phase points when
+        estimating the posterior and evidence. None delegates to the
+        installed backend default; the effective value is recorded in
+        the fit summary.
+    retain_search_internal : `bool`, optional
+        Whether to keep the raw Nautilus search-internal state on disk
+        after the fit instead of letting AutoFit post-fit cleanup
+        remove it. Required for evidence-convergence audit cells.
 
     Notes
     -----
@@ -77,6 +94,10 @@ class NonlinearSearchSettings:
     use_jax: bool = False
     jax_n_batch: int = 100
     disable_visualization: bool = True
+    n_eff: Optional[float] = None
+    n_shell: Optional[int] = None
+    discard_exploration: Optional[bool] = None
+    retain_search_internal: bool = False
 
     def __post_init__(self) -> None:
         """Validate execution settings before analysis or search setup."""
@@ -88,6 +109,26 @@ class NonlinearSearchSettings:
             raise ValueError("jax_n_batch must be a positive integer")
         if not isinstance(self.disable_visualization, bool):
             raise ValueError("disable_visualization must be a boolean")
+        if self.n_eff is not None and (
+            isinstance(self.n_eff, bool)
+            or not isinstance(self.n_eff, (int, float))
+            or not np.isfinite(self.n_eff)
+            or self.n_eff <= 0
+        ):
+            raise ValueError("n_eff must be None or a positive finite number")
+        if self.n_shell is not None and (
+            isinstance(self.n_shell, bool)
+            or not isinstance(self.n_shell, int)
+            or self.n_shell <= 0
+        ):
+            raise ValueError("n_shell must be None or a positive integer")
+        if self.discard_exploration is not None and not isinstance(
+            self.discard_exploration,
+            bool,
+        ):
+            raise ValueError("discard_exploration must be None or a boolean")
+        if not isinstance(self.retain_search_internal, bool):
+            raise ValueError("retain_search_internal must be a boolean")
 
 
 def ensure_jax_x64() -> None:
@@ -423,6 +464,101 @@ def _n_like_max_reached(
     return total_samples >= float(n_like_max)
 
 
+def _search_setting(search: Any, name: str) -> Any:
+    """Return one sampler setting from a constructed search object."""
+    if hasattr(search, name):
+        return getattr(search, name)
+    kwargs = getattr(search, "kwargs", None)
+    if isinstance(kwargs, dict):
+        return kwargs.get(name)
+    return None
+
+
+def _effective_sampler_settings(
+    search: Any,
+) -> Tuple[Optional[float], Optional[int], Optional[bool]]:
+    """Return effective convergence settings from a constructed search.
+
+    Nautilus stores its ``n_eff``, ``n_shell``, and
+    ``discard_exploration`` keyword arguments as attributes, applying
+    backend defaults for keywords that were not passed; unrecognized
+    keywords survive on ``search.kwargs``. Undiscoverable or
+    unexpectedly typed values are recorded as None.
+
+    Parameters
+    ----------
+    search : `object`
+        Constructed PyAutoFit search object.
+
+    Returns
+    -------
+    n_eff : `float`, optional
+        Effective minimum effective sample size.
+    n_shell : `int`, optional
+        Effective minimum shell-point count.
+    discard_exploration : `bool`, optional
+        Effective exploration-phase discard flag.
+    """
+    n_eff = _search_setting(search, "n_eff")
+    n_shell = _search_setting(search, "n_shell")
+    discard_exploration = _search_setting(search, "discard_exploration")
+    if isinstance(n_eff, bool) or not isinstance(n_eff, (int, float)):
+        n_eff = None
+    else:
+        n_eff = float(n_eff)
+    if isinstance(n_shell, bool) or not isinstance(n_shell, int):
+        n_shell = None
+    if not isinstance(discard_exploration, bool):
+        discard_exploration = None
+    return n_eff, n_shell, discard_exploration
+
+
+def _apply_search_internal_retention() -> Tuple[bool, Any]:
+    """Enable AutoFit search-internal retention and return prior state.
+
+    AutoFit post-fit cleanup removes the raw sampler state directory
+    when the autoconf ``output.search_internal`` setting is false.
+    Overriding the cached setting to True keeps the raw Nautilus
+    live/dead-point history on disk after the fit.
+
+    Returns
+    -------
+    existed : `bool`
+        Whether the setting existed before the override.
+    previous : `object`
+        Prior setting value, or None when the setting did not exist.
+    """
+    from autoconf import conf
+
+    output_config = conf.instance["output"]
+    try:
+        previous = output_config["search_internal"]
+        existed = True
+    except KeyError:
+        previous = None
+        existed = False
+    output_config["search_internal"] = True
+    return existed, previous
+
+
+def _restore_search_internal_retention(state: Tuple[bool, Any]) -> None:
+    """Restore the autoconf ``output.search_internal`` setting exactly.
+
+    Parameters
+    ----------
+    state : `tuple`
+        Prior state returned by ``_apply_search_internal_retention``.
+    """
+    from autoconf import conf
+
+    existed, previous = state
+    output_config = conf.instance["output"]
+    if existed:
+        output_config["search_internal"] = previous
+    else:
+        del output_config["search_internal"]
+
+
 def _filter_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Filter keyword arguments to those accepted by a callable."""
     signature = inspect.signature(callable_obj)
@@ -589,6 +725,9 @@ class AutoLensFitRunner:
             ),
             "n_like_max": self.settings.maxcall,
             "seed": self.settings.seed,
+            "n_eff": self.settings.n_eff,
+            "n_shell": self.settings.n_shell,
+            "discard_exploration": self.settings.discard_exploration,
         }
         if self.settings.use_jax:
             kwargs.update(
@@ -681,6 +820,10 @@ class AutoLensFitRunner:
         start = time.time()
         use_jax_effective = None
         jax_n_batch_effective = None
+        n_eff_effective = None
+        n_shell_effective = None
+        discard_exploration_effective = None
+        retention_applied = False
         try:
             search = self._make_search(
                 case_id=case_id,
@@ -691,12 +834,22 @@ class AutoLensFitRunner:
             use_jax_effective, jax_n_batch_effective = (
                 self._effective_jax_provenance(analysis, search)
             )
+            n_eff_effective, n_shell_effective, discard_exploration_effective = (
+                _effective_sampler_settings(search)
+            )
             saved_visualization = os.environ.get(_VISUALIZATION_ENV)
             os.environ[_VISUALIZATION_ENV] = (
                 "1" if self.settings.disable_visualization else "0"
             )
             try:
-                result = search.fit(model=model, analysis=analysis)
+                if self.settings.retain_search_internal:
+                    retention_state = _apply_search_internal_retention()
+                    retention_applied = True
+                try:
+                    result = search.fit(model=model, analysis=analysis)
+                finally:
+                    if retention_applied:
+                        _restore_search_internal_retention(retention_state)
             finally:
                 if saved_visualization is None:
                     os.environ.pop(_VISUALIZATION_ENV, None)
@@ -733,6 +886,15 @@ class AutoLensFitRunner:
                     self.settings.maxcall,
                 ),
                 visualization_disabled=self.settings.disable_visualization,
+                n_eff_requested=self.settings.n_eff,
+                n_eff_effective=n_eff_effective,
+                n_shell_requested=self.settings.n_shell,
+                n_shell_effective=n_shell_effective,
+                discard_exploration_requested=(
+                    self.settings.discard_exploration
+                ),
+                discard_exploration_effective=discard_exploration_effective,
+                search_internal_retained=retention_applied,
             )
         except Exception as exc:
             runtime_s = time.time() - start
@@ -750,4 +912,13 @@ class AutoLensFitRunner:
                 n_live=n_live,
                 analysis_key=analysis_key,
                 visualization_disabled=self.settings.disable_visualization,
+                n_eff_requested=self.settings.n_eff,
+                n_eff_effective=n_eff_effective,
+                n_shell_requested=self.settings.n_shell,
+                n_shell_effective=n_shell_effective,
+                discard_exploration_requested=(
+                    self.settings.discard_exploration
+                ),
+                discard_exploration_effective=discard_exploration_effective,
+                search_internal_retained=retention_applied,
             )
