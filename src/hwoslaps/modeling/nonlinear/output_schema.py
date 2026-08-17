@@ -71,6 +71,14 @@ NONLINEAR_CASE_CSV_COLUMNS = (
     "use_jax_effective",
     "jax_n_batch_effective",
     "smooth_engine_mismatch",
+    "n_eff_requested",
+    "n_eff_effective",
+    "n_shell_requested",
+    "n_shell_effective",
+    "discard_exploration_requested",
+    "discard_exploration_effective",
+    "search_internal_retention_requested",
+    "search_internal_retained",
 )
 """CSV columns emitted for nonlinear validation cases."""
 
@@ -158,9 +166,13 @@ class NonlinearFitSummary:
     discard_exploration_effective : `bool`, optional
         Effective exploration-phase discard flag discovered on the
         constructed search; None when undiscoverable.
+    search_internal_retention_requested : `bool`, optional
+        Whether the search-internal retention override was requested
+        for this fit.
     search_internal_retained : `bool`, optional
-        Whether the search-internal retention override was applied for
-        this fit, keeping the raw sampler state on disk.
+        Whether the raw sampler state was verified present on disk
+        (directory or zipped archive) after the fit; False when
+        verified absent, None when indeterminable.
     """
 
     model_role: str
@@ -189,6 +201,7 @@ class NonlinearFitSummary:
     n_shell_effective: Optional[int] = None
     discard_exploration_requested: Optional[bool] = None
     discard_exploration_effective: Optional[bool] = None
+    search_internal_retention_requested: Optional[bool] = None
     search_internal_retained: Optional[bool] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -313,11 +326,15 @@ def _weighted_quantiles(
 ) -> tuple[float, float, float]:
     """Return posterior 16th, 50th, and 84th percentiles.
 
-    Weighted samples use the midpoint empirical-CDF convention of
-    ``corner.quantile``: sorted samples receive cumulative probability
+    Weighted samples use the midpoint empirical-CDF convention: sorted
+    samples receive cumulative probability
     ``(cumsum(weights) - 0.5 * weights) / sum(weights)`` and quantiles
     interpolate the sorted values against that CDF. ``np.interp`` clamps
     quantiles outside the CDF range to the smallest or largest sample.
+    This is the unbiased convention adopted per audit item P2-1; it
+    deliberately differs from ``corner.quantile`` and the AutoFit
+    weighted-quantile helper, which anchor the smallest sample at zero
+    probability and normalize by an incomplete weight sum.
 
     Unweighted ``np.quantile`` is the fallback when weights are missing
     or shape-mismatched, when there are fewer than two samples, when all
@@ -665,6 +682,22 @@ class NonlinearCaseResult:
             ),
             "smooth_engine_mismatch": (
                 "smooth_engine_mismatch" in self.quality_flags
+            ),
+            "n_eff_requested": self.subhalo_fit.n_eff_requested,
+            "n_eff_effective": self.subhalo_fit.n_eff_effective,
+            "n_shell_requested": self.subhalo_fit.n_shell_requested,
+            "n_shell_effective": self.subhalo_fit.n_shell_effective,
+            "discard_exploration_requested": (
+                self.subhalo_fit.discard_exploration_requested
+            ),
+            "discard_exploration_effective": (
+                self.subhalo_fit.discard_exploration_effective
+            ),
+            "search_internal_retention_requested": (
+                self.subhalo_fit.search_internal_retention_requested
+            ),
+            "search_internal_retained": (
+                self.subhalo_fit.search_internal_retained
             ),
         }
         return _json_safe(row)

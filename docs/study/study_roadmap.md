@@ -19,7 +19,7 @@ The two science axes are inseparable:
 The SCDD anchor is the smooth-model versus subhalo-model log-likelihood criterion. Use the SCDD convention that a halo is detectable when
 
 $$
-\Delta \log \mathcal{L} > 5
+\Delta \log \mathcal{L} \geq 5
 $$
 
 which corresponds to

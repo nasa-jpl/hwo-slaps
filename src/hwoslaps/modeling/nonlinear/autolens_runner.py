@@ -8,6 +8,7 @@ import inspect
 import json
 import os
 import time
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -559,6 +560,49 @@ def _restore_search_internal_retention(state: Tuple[bool, Any]) -> None:
         del output_config["search_internal"]
 
 
+def _search_internal_artifact_exists(search: Any) -> Optional[bool]:
+    """Return whether raw sampler state is verifiably on disk post-fit.
+
+    Checks the search output directory (``files/search_internal``) and
+    the zipped output archive AutoFit leaves when ``remove_files`` is
+    enabled. Deliberately avoids ``paths.search_internal_path`` and
+    ``paths._files_path``, whose property accessors create directories
+    as a side effect. Returns None when the search exposes no usable
+    output path, for example test doubles.
+
+    Parameters
+    ----------
+    search : `object`
+        Search object whose fit has completed or failed.
+
+    Returns
+    -------
+    exists : `bool`, optional
+        True when the artifact is verified present, False when verified
+        absent, None when indeterminable.
+    """
+    paths = getattr(search, "paths", None)
+    output_path = getattr(paths, "output_path", None)
+    if output_path is None:
+        return None
+    try:
+        internal_dir = Path(output_path) / "files" / "search_internal"
+        if internal_dir.is_dir() and any(internal_dir.iterdir()):
+            return True
+        zip_path = Path(f"{output_path}.zip")
+        if zip_path.is_file():
+            with zipfile.ZipFile(zip_path) as archive:
+                for member in archive.namelist():
+                    if (
+                        "search_internal/" in member
+                        and not member.endswith("/")
+                    ):
+                        return True
+        return False
+    except Exception:
+        return None
+
+
 def _filter_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
     """Filter keyword arguments to those accepted by a callable."""
     signature = inspect.signature(callable_obj)
@@ -711,6 +755,12 @@ class AutoLensFitRunner:
         name = f"{case_id}_{role}_{analysis_key}"
         if self.settings.use_jax:
             name += f"_jax_vmap_b{self.settings.jax_n_batch}"
+        # AutoFit excludes discard_exploration from the Nautilus
+        # identifier fields, so runs differing only in that flag would
+        # share an output path and silently reuse or resume a completed
+        # result; an explicit flag must therefore enter the search name.
+        if self.settings.discard_exploration is not None:
+            name += f"_de{int(self.settings.discard_exploration)}"
         kwargs = {
             "path_prefix": str(Path(self.output_dir) / self.settings.path_prefix),
             "name": name,
@@ -818,6 +868,7 @@ class AutoLensFitRunner:
             Fit summary.
         """
         start = time.time()
+        search = None
         use_jax_effective = None
         jax_n_batch_effective = None
         n_eff_effective = None
@@ -855,6 +906,9 @@ class AutoLensFitRunner:
                     os.environ.pop(_VISUALIZATION_ENV, None)
                 else:
                     os.environ[_VISUALIZATION_ENV] = saved_visualization
+            search_internal_verified = _search_internal_artifact_exists(
+                search
+            )
             log_likelihood, method = extract_max_log_likelihood_with_method(result)
             warnings = []
             if result_callback is not None:
@@ -894,7 +948,10 @@ class AutoLensFitRunner:
                     self.settings.discard_exploration
                 ),
                 discard_exploration_effective=discard_exploration_effective,
-                search_internal_retained=retention_applied,
+                search_internal_retention_requested=(
+                    self.settings.retain_search_internal
+                ),
+                search_internal_retained=search_internal_verified,
             )
         except Exception as exc:
             runtime_s = time.time() - start
@@ -920,5 +977,12 @@ class AutoLensFitRunner:
                     self.settings.discard_exploration
                 ),
                 discard_exploration_effective=discard_exploration_effective,
-                search_internal_retained=retention_applied,
+                search_internal_retention_requested=(
+                    self.settings.retain_search_internal
+                ),
+                search_internal_retained=(
+                    _search_internal_artifact_exists(search)
+                    if search is not None
+                    else False
+                ),
             )

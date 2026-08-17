@@ -1047,8 +1047,13 @@ def load_psf_bank_npz(path: Any) -> PsfBank:
 
 
 def _case_slim_row(case: Any) -> dict:
-    """Return the non-kernel case fields persisted in bank JSON."""
-    return {
+    """Return the non-kernel case fields persisted in bank JSON.
+
+    Includes per-role sampler convergence and retention provenance so
+    the persisted bank artifact alone establishes the evidence-quality
+    settings each fit ran under.
+    """
+    row = {
         "label": case.psf_case.rsplit(":", 1)[-1],
         "fit_status_smooth": case.smooth_fit.status,
         "fit_status_subhalo": case.subhalo_fit.status,
@@ -1060,6 +1065,31 @@ def _case_slim_row(case: Any) -> dict:
         "analysis_key_subhalo": case.subhalo_fit.analysis_key,
         "quality_flags": list(case.quality_flags),
     }
+    for role, fit in (
+        ("smooth", case.smooth_fit),
+        ("subhalo", case.subhalo_fit),
+    ):
+        row.update(
+            {
+                f"n_eff_requested_{role}": fit.n_eff_requested,
+                f"n_eff_effective_{role}": fit.n_eff_effective,
+                f"n_shell_requested_{role}": fit.n_shell_requested,
+                f"n_shell_effective_{role}": fit.n_shell_effective,
+                f"discard_exploration_requested_{role}": (
+                    fit.discard_exploration_requested
+                ),
+                f"discard_exploration_effective_{role}": (
+                    fit.discard_exploration_effective
+                ),
+                f"search_internal_retention_requested_{role}": (
+                    fit.search_internal_retention_requested
+                ),
+                f"search_internal_retained_{role}": (
+                    fit.search_internal_retained
+                ),
+            }
+        )
+    return row
 
 
 @dataclass

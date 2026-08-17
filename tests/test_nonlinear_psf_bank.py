@@ -1083,6 +1083,19 @@ def test_executor_wires_candidates_anchors_callbacks_and_slim_json(
     assert "kernel" not in payload["candidate_results"][0]
     assert payload["candidate_results"][0]["label"] == "draw000"
     assert payload["bank_id"] == bank.bank_id
+    for row in payload["candidate_results"] + payload["anchor_results"]:
+        for role in ("smooth", "subhalo"):
+            for key in (
+                f"n_eff_requested_{role}",
+                f"n_eff_effective_{role}",
+                f"n_shell_requested_{role}",
+                f"n_shell_effective_{role}",
+                f"discard_exploration_requested_{role}",
+                f"discard_exploration_effective_{role}",
+                f"search_internal_retention_requested_{role}",
+                f"search_internal_retained_{role}",
+            ):
+                assert key in row
 
 
 def test_executor_flags_failures_missing_evidence_and_callback_errors(compact_config):

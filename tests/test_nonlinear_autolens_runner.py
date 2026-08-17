@@ -9,6 +9,7 @@ import pytest
 from hwoslaps.modeling.nonlinear.autolens_runner import (
     AutoLensFitRunner,
     NonlinearSearchSettings,
+    _search_internal_artifact_exists,
     extract_max_log_likelihood,
     extract_max_log_likelihood_with_method,
 )
@@ -175,7 +176,8 @@ def test_make_search_passes_convergence_kwargs_when_set(
     assert summary.n_shell_effective == 3
     assert summary.discard_exploration_requested is True
     assert summary.discard_exploration_effective is True
-    assert summary.search_internal_retained is False
+    assert summary.search_internal_retention_requested is False
+    assert summary.search_internal_retained is None
 
 
 def test_make_search_passes_false_discard_exploration(
@@ -242,7 +244,7 @@ def test_failed_fit_records_effective_sampler_provenance(
     assert summary.n_eff_effective == 2000.0
     assert summary.n_shell_effective == 1
     assert summary.discard_exploration_effective is False
-    assert summary.search_internal_retained is False
+    assert summary.search_internal_retained is None
 
 
 def test_failure_before_search_construction_leaves_effective_none(tmp_path):
@@ -265,6 +267,7 @@ def test_failure_before_search_construction_leaves_effective_none(tmp_path):
     assert summary.discard_exploration_requested is True
     assert summary.discard_exploration_effective is None
     assert summary.search_internal_retained is False
+    assert summary.search_internal_retention_requested is False
 
 
 def test_retention_override_applied_during_fit_and_restored(
@@ -295,7 +298,8 @@ def test_retention_override_applied_during_fit_and_restored(
     )
     summary = _run(runner)
     assert summary.status == "success"
-    assert summary.search_internal_retained is True
+    assert summary.search_internal_retention_requested is True
+    assert summary.search_internal_retained is None
     assert observed == [True]
     assert conf.instance["output"]["search_internal"] is False
 
@@ -322,7 +326,8 @@ def test_retention_override_restored_after_fit_failure(
     summary = _run(runner)
     assert summary.status == "failed"
     assert "synthetic search failure" in summary.error
-    assert summary.search_internal_retained is True
+    assert summary.search_internal_retention_requested is True
+    assert summary.search_internal_retained is None
     assert conf.instance["output"]["search_internal"] is False
 
 
@@ -348,6 +353,83 @@ def test_no_retention_override_when_disabled(monkeypatch, tmp_path):
     runner = AutoLensFitRunner(NonlinearSearchSettings(), output_dir=tmp_path)
     summary = _run(runner)
     assert summary.status == "success"
-    assert summary.search_internal_retained is False
+    assert summary.search_internal_retention_requested is False
+    assert summary.search_internal_retained is None
     assert observed == [False]
     assert conf.instance["output"]["search_internal"] is False
+
+
+def test_search_name_encodes_explicit_discard_exploration(
+    monkeypatch,
+    tmp_path,
+):
+    """Catch discard-exploration runs sharing an AutoFit output path.
+
+    AutoFit excludes ``discard_exploration`` from the Nautilus
+    identifier fields, so runs differing only in that flag would share
+    a completed output directory and silently reuse its result unless
+    the flag enters the search name.
+    """
+    import autofit as af
+
+    names = {}
+    for label, flag in (("none", None), ("false", False), ("true", True)):
+        captured = []
+        monkeypatch.setattr(af, "Nautilus", _capturing_nautilus(captured))
+        settings = (
+            NonlinearSearchSettings()
+            if flag is None
+            else NonlinearSearchSettings(discard_exploration=flag)
+        )
+        runner = AutoLensFitRunner(settings, output_dir=tmp_path)
+        assert _run(runner).status == "success"
+        names[label] = captured[0]["name"]
+    assert names["none"] == "case_subhalo_analysis"
+    assert names["false"] == "case_subhalo_analysis_de0"
+    assert names["true"] == "case_subhalo_analysis_de1"
+
+
+class _SearchWithOutputPath:
+    """Search stub exposing only a paths.output_path attribute."""
+
+    def __init__(self, output_path):
+        self.paths = SimpleNamespace(output_path=output_path)
+
+
+def test_search_internal_artifact_verified_from_directory(tmp_path):
+    """Verify retention from the on-disk artifact, never the request."""
+    out = tmp_path / "case_subhalo_analysis" / "identifier"
+    internal = out / "files" / "search_internal"
+    assert _search_internal_artifact_exists(
+        _SearchWithOutputPath(out)
+    ) is False
+    internal.mkdir(parents=True)
+    assert _search_internal_artifact_exists(
+        _SearchWithOutputPath(out)
+    ) is False
+    (internal / "search_internal.dill").write_bytes(b"x")
+    assert _search_internal_artifact_exists(
+        _SearchWithOutputPath(out)
+    ) is True
+    assert _search_internal_artifact_exists(SimpleNamespace()) is None
+
+
+def test_search_internal_artifact_verified_from_zip(tmp_path):
+    """Find raw sampler state archived by AutoFit zip cleanup."""
+    import zipfile
+
+    out = tmp_path / "case_subhalo_analysis" / "identifier"
+    out.parent.mkdir(parents=True)
+    with zipfile.ZipFile(f"{out}.zip", "w") as archive:
+        archive.writestr("files/model.json", "{}")
+    assert _search_internal_artifact_exists(
+        _SearchWithOutputPath(out)
+    ) is False
+    with zipfile.ZipFile(f"{out}.zip", "w") as archive:
+        archive.writestr("files/model.json", "{}")
+        archive.writestr(
+            "files/search_internal/search_internal.dill", "x"
+        )
+    assert _search_internal_artifact_exists(
+        _SearchWithOutputPath(out)
+    ) is True

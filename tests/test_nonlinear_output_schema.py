@@ -310,8 +310,8 @@ def test_recovery_upper_boundary_flag_and_posterior_pile_up():
     assert recovery.posterior_mass_frac_upper == pytest.approx(1.0)
 
 
-def test_corner_weighted_quantiles_and_converged_recovery():
-    """Match corner midpoint-ECDF quantiles for recovered coordinates.
+def test_midpoint_ecdf_weighted_quantiles_and_converged_recovery():
+    """Match midpoint-ECDF weighted quantiles for recovered coordinates.
 
     With values ``[1, 2, 3, 4]`` and weights ``[0.01, 0.01, 0.01, 0.97]``
     the midpoint ECDF is ``[0.005, 0.015, 0.025, 0.515]``, so the 16th
@@ -427,6 +427,7 @@ def test_fit_summary_serializes_sampler_provenance_fields():
         n_shell_effective=3,
         discard_exploration_requested=True,
         discard_exploration_effective=True,
+        search_internal_retention_requested=True,
         search_internal_retained=True,
     )
     payload = summary.to_dict()
@@ -437,6 +438,7 @@ def test_fit_summary_serializes_sampler_provenance_fields():
     assert payload["n_shell_effective"] == 3
     assert payload["discard_exploration_requested"] is True
     assert payload["discard_exploration_effective"] is True
+    assert payload["search_internal_retention_requested"] is True
     assert payload["search_internal_retained"] is True
 
     omitted = NonlinearFitSummary(
@@ -450,6 +452,7 @@ def test_fit_summary_serializes_sampler_provenance_fields():
     assert omitted["n_shell_effective"] is None
     assert omitted["discard_exploration_requested"] is None
     assert omitted["discard_exploration_effective"] is None
+    assert omitted["search_internal_retention_requested"] is None
     assert omitted["search_internal_retained"] is None
 
 
