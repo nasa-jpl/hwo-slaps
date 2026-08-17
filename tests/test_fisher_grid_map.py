@@ -35,7 +35,9 @@ from hwoslaps.modeling.utils_fisher import (
     save_fisher_grid_map_npz,
 )
 from hwoslaps.observation import generate_observation
+from hwoslaps.pipeline import Pipeline
 from hwoslaps.plotting.detection_plots import plot_fisher_detection_grid_map
+from hwoslaps.provenance import config_hash
 from hwoslaps.psf.generator import generate_psf_system
 
 GRID_SPACING = 0.1
@@ -264,6 +266,67 @@ def _layout_stub(map_config: dict, lens_centre) -> FisherDetector:
         "lensing": {"lens_galaxy": {"mass": {"centre": list(lens_centre)}}}
     }
     return detector
+
+
+def _corrupt_grid_npz(source, destination, delete=()):
+    """Delete selected NPZ members from a real grid-map artifact."""
+    with np.load(source, allow_pickle=False) as stored:
+        payload = {
+            name: np.array(stored[name], copy=True)
+            for name in stored.files
+            if name not in delete
+        }
+    with Path(destination).open("wb") as stream:
+        np.savez_compressed(stream, **payload)
+    return Path(destination)
+
+
+def _stub_pipeline_grid_result(grid_setup, monkeypatch):
+    """Replace expensive pipeline stages with one synthetic grid result."""
+    import hwoslaps.modeling.generator_fisher as generator_fisher
+    import hwoslaps.pipeline as pipeline_module
+
+    grid_map = replace(
+        grid_setup["grid_map"],
+        config_hash=None,
+        git_hash=None,
+    )
+    result = FisherDetectionData(
+        mode="map",
+        local=None,
+        map=None,
+        snr_threshold=3.0,
+        include_background_offset=True,
+        finite_diff={},
+        map_config={},
+        pixels_unmasked=1,
+        n_nuisance=0,
+        gram_condition_number=1.0,
+        pixel_scale=0.1,
+        grid_map=grid_map,
+    )
+    stub = object()
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_psf_system",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_lensing_system",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_observation",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        generator_fisher,
+        "perform_fisher_detection",
+        lambda **kwargs: result,
+    )
+    return result
 
 
 # ----------------------------------------------------------------------
@@ -764,6 +827,330 @@ def test_grid_map_npz_roundtrip(grid_setup, tmp_path):
     loaded = load_fisher_grid_map_npz(npz_path)
     assert loaded.source_image_asset_path is None
     assert loaded.source_image_asset_sha256_16 is None
+
+
+def test_grid_map_npz_roundtrip_preserves_optional_provenance(grid_setup, tmp_path):
+    """Round-trip embedded configuration and git hashes when present."""
+    grid_map = replace(
+        grid_setup["grid_map"],
+        config_hash="0123456789abcdef",
+        git_hash="f"*40,
+    )
+    npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "provenance.npz")
+
+    with np.load(npz_path, allow_pickle=False) as stored:
+        assert str(stored["config_hash"]) == grid_map.config_hash
+        assert str(stored["git_hash"]) == grid_map.git_hash
+    loaded = load_fisher_grid_map_npz(npz_path)
+    assert loaded.config_hash == grid_map.config_hash
+    assert loaded.git_hash == grid_map.git_hash
+
+
+def test_grid_map_npz_old_format_loads_missing_provenance_as_none(
+    grid_setup,
+    tmp_path,
+):
+    """Load an old-format artifact with no embedded provenance members."""
+    grid_map = replace(
+        grid_setup["grid_map"],
+        config_hash="0123456789abcdef",
+        git_hash="f"*40,
+    )
+    current = save_fisher_grid_map_npz(grid_map, tmp_path / "current.npz")
+    old_format = _corrupt_grid_npz(
+        current,
+        tmp_path / "old-format.npz",
+        delete=("config_hash", "git_hash"),
+    )
+
+    loaded = load_fisher_grid_map_npz(old_format)
+    assert loaded.config_hash is None
+    assert loaded.git_hash is None
+
+
+def test_pipeline_populates_grid_map_provenance(
+    grid_setup,
+    tmp_path,
+    monkeypatch,
+):
+    """Populate embedded hashes before a pipeline grid map is persisted."""
+    import hwoslaps.modeling.generator_fisher as generator_fisher
+    import hwoslaps.pipeline as pipeline_module
+
+    config = copy.deepcopy(grid_setup["config"])
+    config["run_name"] = "pipeline-provenance"
+    config["plotting"]["enabled"] = False
+    config["plotting"]["output_dir"] = str(tmp_path)
+    snapshot = copy.deepcopy(config)
+    run_dir = tmp_path / config["run_name"]
+    run_dir.mkdir(parents=True)
+    with (run_dir / "config_used.yaml").open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(snapshot, stream, sort_keys=False)
+    grid_map = replace(
+        grid_setup["grid_map"],
+        config_hash=None,
+        git_hash=None,
+    )
+    result = FisherDetectionData(
+        mode="map",
+        local=None,
+        map=None,
+        snr_threshold=3.0,
+        include_background_offset=True,
+        finite_diff={},
+        map_config={},
+        pixels_unmasked=1,
+        n_nuisance=0,
+        gram_condition_number=1.0,
+        pixel_scale=0.1,
+        grid_map=grid_map,
+    )
+    stub = object()
+    monkeypatch.setattr(pipeline_module, "generate_psf_system", lambda *args, **kwargs: stub)
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_lensing_system",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_observation",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        generator_fisher,
+        "perform_fisher_detection",
+        lambda **kwargs: result,
+    )
+
+    Pipeline(verbose=False)._run_detection_pipeline(config)
+
+    path = tmp_path / config["run_name"] / "modeling" / "fisher_grid_map.npz"
+    loaded = load_fisher_grid_map_npz(path)
+    assert loaded.config_hash == config_hash(snapshot)
+    assert loaded.git_hash is not None
+
+
+def test_pipeline_omits_config_hash_without_snapshot(
+    grid_setup,
+    tmp_path,
+    monkeypatch,
+):
+    """Leave direct-pipeline maps unbound when no runner snapshot exists."""
+    config = copy.deepcopy(grid_setup["config"])
+    config["run_name"] = "pipeline-no-snapshot"
+    config["plotting"]["enabled"] = False
+    config["plotting"]["output_dir"] = str(tmp_path)
+    _stub_pipeline_grid_result(grid_setup, monkeypatch)
+
+    Pipeline(verbose=False)._run_detection_pipeline(config)
+
+    path = tmp_path / config["run_name"] / "modeling" / "fisher_grid_map.npz"
+    loaded = load_fisher_grid_map_npz(path)
+    assert loaded.config_hash is None
+    assert loaded.git_hash is not None
+
+
+def test_pipeline_snapshot_hash_rejects_bool_int_alias(
+    grid_setup,
+    tmp_path,
+    monkeypatch,
+):
+    """Reject a snapshot whose boolean only compares equal to integer one."""
+    config = copy.deepcopy(grid_setup["config"])
+    config["run_name"] = "pipeline-bool-int-snapshot"
+    config["plotting"]["enabled"] = False
+    config["plotting"]["output_dir"] = str(tmp_path)
+    snapshot = copy.deepcopy(config)
+    snapshot["modeling"]["fisher"]["map"]["num_workers"] = True
+    run_dir = tmp_path / config["run_name"]
+    run_dir.mkdir(parents=True)
+    with (run_dir / "config_used.yaml").open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(snapshot, stream, sort_keys=False)
+    _stub_pipeline_grid_result(grid_setup, monkeypatch)
+
+    with pytest.raises(ValueError, match="does not describe this run"):
+        Pipeline(verbose=False)._run_detection_pipeline(config)
+
+
+def test_pipeline_snapshot_hash_accepts_yaml_sequence_roundtrip(
+    grid_setup,
+    tmp_path,
+    monkeypatch,
+):
+    """Accept a tuple that a YAML snapshot canonically reloads as a list."""
+    config = copy.deepcopy(grid_setup["config"])
+    config["run_name"] = "pipeline-sequence-snapshot"
+    config["plotting"]["enabled"] = False
+    config["plotting"]["output_dir"] = str(tmp_path)
+    config["lensing"]["grid"]["shape"] = tuple(
+        config["lensing"]["grid"]["shape"]
+    )
+    run_dir = tmp_path / config["run_name"]
+    run_dir.mkdir(parents=True)
+    with (run_dir / "config_used.yaml").open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(config, stream, sort_keys=False)
+    _stub_pipeline_grid_result(grid_setup, monkeypatch)
+
+    Pipeline(verbose=False)._run_detection_pipeline(config)
+
+    path = run_dir / "modeling" / "fisher_grid_map.npz"
+    loaded = load_fisher_grid_map_npz(path)
+    with (run_dir / "config_used.yaml").open("r", encoding="utf-8") as stream:
+        snapshot = yaml.safe_load(stream)
+    assert loaded.config_hash == config_hash(snapshot)
+
+
+def test_resolve_relative_output_dir_expands_and_resolves_paths():
+    """Expand home paths, repo-resolve relatives, and preserve absolutes."""
+    import hwoslaps.pipeline as pipeline_module
+
+    home_config = {"plotting": {"output_dir": "~/item10-check"}}
+    pipeline_module._resolve_relative_output_dir(home_config)
+    home_output = Path(home_config["plotting"]["output_dir"])
+    assert home_output == Path.home() / "item10-check"
+    assert home_output.is_absolute()
+    assert "~" not in home_output.parts
+
+    relative_config = {"plotting": {"output_dir": "item10-relative"}}
+    pipeline_module._resolve_relative_output_dir(relative_config)
+    repo_root = Path(pipeline_module.__file__).resolve().parents[2]
+    assert Path(relative_config["plotting"]["output_dir"]) == (
+        repo_root / "item10-relative"
+    )
+
+    absolute = Path("/tmp/item10-absolute")
+    absolute_config = {"plotting": {"output_dir": str(absolute)}}
+    pipeline_module._resolve_relative_output_dir(absolute_config)
+    assert Path(absolute_config["plotting"]["output_dir"]) == absolute
+
+
+def test_pipeline_rejects_foreign_grid_map_snapshot(
+    grid_setup,
+    tmp_path,
+    monkeypatch,
+):
+    """Refuse to bind a grid map to a snapshot from a different run."""
+    import hwoslaps.modeling.generator_fisher as generator_fisher
+    import hwoslaps.pipeline as pipeline_module
+
+    config = copy.deepcopy(grid_setup["config"])
+    config["run_name"] = "pipeline-foreign-snapshot"
+    config["plotting"]["enabled"] = False
+    config["plotting"]["output_dir"] = str(tmp_path)
+    snapshot = copy.deepcopy(config)
+    snapshot["lensing"]["subhalo"]["mass"] = 2.0e8
+    run_dir = tmp_path / config["run_name"]
+    run_dir.mkdir(parents=True)
+    with (run_dir / "config_used.yaml").open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(snapshot, stream, sort_keys=False)
+    grid_map = replace(
+        grid_setup["grid_map"],
+        config_hash=None,
+        git_hash=None,
+    )
+    result = FisherDetectionData(
+        mode="map",
+        local=None,
+        map=None,
+        snr_threshold=3.0,
+        include_background_offset=True,
+        finite_diff={},
+        map_config={},
+        pixels_unmasked=1,
+        n_nuisance=0,
+        gram_condition_number=1.0,
+        pixel_scale=0.1,
+        grid_map=grid_map,
+    )
+    stub = object()
+    monkeypatch.setattr(pipeline_module, "generate_psf_system", lambda *args, **kwargs: stub)
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_lensing_system",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_observation",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        generator_fisher,
+        "perform_fisher_detection",
+        lambda **kwargs: result,
+    )
+
+    with pytest.raises(ValueError, match="does not describe this run"):
+        Pipeline(verbose=False)._run_detection_pipeline(config)
+
+
+def test_pipeline_binds_snapshot_through_resolved_output_dir(
+    grid_setup,
+    tmp_path,
+    monkeypatch,
+):
+    """Bind a raw tilde snapshot to its resolved in-memory configuration."""
+    import hwoslaps.modeling.generator_fisher as generator_fisher
+    import hwoslaps.pipeline as pipeline_module
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    raw_config = copy.deepcopy(grid_setup["config"])
+    raw_config["run_name"] = "pipeline-resolved-snapshot"
+    raw_config["plotting"]["enabled"] = False
+    raw_config["plotting"]["output_dir"] = "~/outputs"
+    snapshot = copy.deepcopy(raw_config)
+    config = copy.deepcopy(raw_config)
+    pipeline_module._resolve_relative_output_dir(config)
+    assert config["plotting"]["output_dir"] == str(tmp_path / "outputs")
+    run_dir = tmp_path / "outputs" / raw_config["run_name"]
+    run_dir.mkdir(parents=True)
+    with (run_dir / "config_used.yaml").open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(snapshot, stream, sort_keys=False)
+    grid_map = replace(
+        grid_setup["grid_map"],
+        config_hash=None,
+        git_hash=None,
+    )
+    result = FisherDetectionData(
+        mode="map",
+        local=None,
+        map=None,
+        snr_threshold=3.0,
+        include_background_offset=True,
+        finite_diff={},
+        map_config={},
+        pixels_unmasked=1,
+        n_nuisance=0,
+        gram_condition_number=1.0,
+        pixel_scale=0.1,
+        grid_map=grid_map,
+    )
+    stub = object()
+    monkeypatch.setattr(pipeline_module, "generate_psf_system", lambda *args, **kwargs: stub)
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_lensing_system",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        pipeline_module,
+        "generate_observation",
+        lambda *args, **kwargs: stub,
+    )
+    monkeypatch.setattr(
+        generator_fisher,
+        "perform_fisher_detection",
+        lambda **kwargs: result,
+    )
+
+    Pipeline(verbose=False)._run_detection_pipeline(config)
+
+    loaded = load_fisher_grid_map_npz(
+        run_dir / "modeling" / "fisher_grid_map.npz"
+    )
+    assert loaded.config_hash == config_hash(snapshot)
+    assert loaded.config_hash != config_hash(config)
 
 
 def test_grid_map_npz_roundtrip_preserves_source_asset_identity(grid_setup, tmp_path):

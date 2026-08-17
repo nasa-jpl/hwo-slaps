@@ -28,7 +28,8 @@ def _resolve_relative_output_dir(config: Dict) -> None:
         return
     output_dir = Path(plotting['output_dir']).expanduser()
     if not output_dir.is_absolute():
-        plotting['output_dir'] = str(Path(__file__).resolve().parents[2] / output_dir)
+        output_dir = Path(__file__).resolve().parents[2] / output_dir
+    plotting['output_dir'] = str(output_dir)
 
 
 class Pipeline:
@@ -174,8 +175,31 @@ class Pipeline:
         # when plotting is disabled.
         if detection_data.has_grid_map:
             from .modeling.utils_fisher import save_fisher_grid_map_npz
+            from .provenance import _git_hash, config_hash
             grid_map_dir = (
                 Path(config['plotting']['output_dir']) / config['run_name'] / 'modeling'
+            )
+            snapshot_path = grid_map_dir.parent / 'config_used.yaml'
+            detection_data.grid_map.config_hash = None
+            if snapshot_path.is_file():
+                with snapshot_path.open('r', encoding='utf-8') as stream:
+                    snapshot_config = yaml.safe_load(stream)
+                resolved_snapshot = deepcopy(snapshot_config)
+                _resolve_relative_output_dir(resolved_snapshot)
+                expected = config_hash(config)
+                snapshot_hash = config_hash(snapshot_config)
+                if (
+                    snapshot_hash != expected
+                    and config_hash(resolved_snapshot) != expected
+                ):
+                    raise ValueError(
+                        f"Adjacent config snapshot {snapshot_path} does not "
+                        "describe this run; refusing to bind the grid map "
+                        "to it."
+                    )
+                detection_data.grid_map.config_hash = snapshot_hash
+            detection_data.grid_map.git_hash = _git_hash(
+                Path(__file__).resolve().parent
             )
             grid_map_dir.mkdir(parents=True, exist_ok=True)
             grid_map_path = save_fisher_grid_map_npz(
