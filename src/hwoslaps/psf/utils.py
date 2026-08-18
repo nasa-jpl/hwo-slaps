@@ -56,10 +56,28 @@ def make_pyauto_convolver(kernel):
     -------
     convolver : `autolens.Convolver`
         PyAuto convolver. Existing convolver inputs are returned unchanged.
+        Repeated calls with the same kernel object return one cached
+        convolver while the kernel values are unchanged, so the convolver's
+        precomputed convolution state is reused across calls; the content
+        check guards against kernels that are sum-normalized in place after
+        a convolver was built.
     """
     if hasattr(kernel, "convolved_image_via_real_space_from"):
         return kernel
-    return al.Convolver(kernel=kernel)
+    cached = getattr(kernel, "_hwoslaps_convolver_cache", None)
+    if cached is not None:
+        cached_values, convolver = cached
+        if np.array_equal(cached_values, np.asarray(kernel.native)):
+            return convolver
+    convolver = al.Convolver(kernel=kernel)
+    try:
+        kernel._hwoslaps_convolver_cache = (
+            np.array(kernel.native, dtype=float, copy=True),
+            convolver,
+        )
+    except AttributeError:
+        pass
+    return convolver
 
 
 def pyauto_kernel_native(kernel):
