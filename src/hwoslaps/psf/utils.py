@@ -57,22 +57,28 @@ def make_pyauto_convolver(kernel):
     convolver : `autolens.Convolver`
         PyAuto convolver. Existing convolver inputs are returned unchanged.
         Repeated calls with the same kernel object return one cached
-        convolver while the kernel values are unchanged, so the convolver's
-        precomputed convolution state is reused across calls; the content
-        check guards against kernels that are sum-normalized in place after
-        a convolver was built.
+        convolver while the kernel values and pixel scales are unchanged, so
+        the convolver's precomputed convolution state is reused across calls;
+        the content check guards against kernels that are sum-normalized in
+        place after a convolver was built, and the pixel-scale check guards
+        against a copied kernel whose cache attribute was inherited through
+        `Array2D.__copy__` and then rebound to a different detector grid.
     """
     if hasattr(kernel, "convolved_image_via_real_space_from"):
         return kernel
+    pixel_scales = tuple(kernel.pixel_scales)
     cached = getattr(kernel, "_hwoslaps_convolver_cache", None)
     if cached is not None:
-        cached_values, convolver = cached
-        if np.array_equal(cached_values, np.asarray(kernel.native)):
+        cached_values, cached_pixel_scales, convolver = cached
+        if cached_pixel_scales == pixel_scales and np.array_equal(
+            cached_values, np.asarray(kernel.native)
+        ):
             return convolver
     convolver = al.Convolver(kernel=kernel)
     try:
         kernel._hwoslaps_convolver_cache = (
             np.array(kernel.native, dtype=float, copy=True),
+            pixel_scales,
             convolver,
         )
     except AttributeError:

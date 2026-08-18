@@ -180,6 +180,7 @@ class FisherGridMapData:
     source_image_asset_sha256_16: Optional[str] = None
     config_hash: Optional[str] = None
     git_hash: Optional[str] = None
+    campaign_uuid: Optional[str] = None
 
 
 def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]) -> Path:
@@ -248,6 +249,8 @@ def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]
         payload['config_hash'] = np.str_(grid_map.config_hash)
     if grid_map.git_hash is not None:
         payload['git_hash'] = np.str_(grid_map.git_hash)
+    if grid_map.campaign_uuid is not None:
+        payload['campaign_uuid'] = np.str_(grid_map.campaign_uuid)
     np.savez_compressed(path, **payload)
     return path
 
@@ -360,6 +363,7 @@ def load_fisher_grid_map_npz(path: Union[str, Path]) -> FisherGridMapData:
             ),
             config_hash=optional_string('config_hash'),
             git_hash=optional_string('git_hash'),
+            campaign_uuid=optional_string('campaign_uuid'),
         )
 
 

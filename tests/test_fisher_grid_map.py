@@ -835,15 +835,18 @@ def test_grid_map_npz_roundtrip_preserves_optional_provenance(grid_setup, tmp_pa
         grid_setup["grid_map"],
         config_hash="0123456789abcdef",
         git_hash="f"*40,
+        campaign_uuid="123e4567-e89b-12d3-a456-426614174000",
     )
     npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "provenance.npz")
 
     with np.load(npz_path, allow_pickle=False) as stored:
         assert str(stored["config_hash"]) == grid_map.config_hash
         assert str(stored["git_hash"]) == grid_map.git_hash
+        assert str(stored["campaign_uuid"]) == grid_map.campaign_uuid
     loaded = load_fisher_grid_map_npz(npz_path)
     assert loaded.config_hash == grid_map.config_hash
     assert loaded.git_hash == grid_map.git_hash
+    assert loaded.campaign_uuid == grid_map.campaign_uuid
 
 
 def test_grid_map_npz_old_format_loads_missing_provenance_as_none(
@@ -855,17 +858,19 @@ def test_grid_map_npz_old_format_loads_missing_provenance_as_none(
         grid_setup["grid_map"],
         config_hash="0123456789abcdef",
         git_hash="f"*40,
+        campaign_uuid="123e4567-e89b-12d3-a456-426614174000",
     )
     current = save_fisher_grid_map_npz(grid_map, tmp_path / "current.npz")
     old_format = _corrupt_grid_npz(
         current,
         tmp_path / "old-format.npz",
-        delete=("config_hash", "git_hash"),
+        delete=("config_hash", "git_hash", "campaign_uuid"),
     )
 
     loaded = load_fisher_grid_map_npz(old_format)
     assert loaded.config_hash is None
     assert loaded.git_hash is None
+    assert loaded.campaign_uuid is None
 
 
 def test_pipeline_populates_grid_map_provenance(
@@ -923,12 +928,16 @@ def test_pipeline_populates_grid_map_provenance(
         lambda **kwargs: result,
     )
 
+    monkeypatch.setenv(
+        "HWOSLAPS_CAMPAIGN_UUID", "123e4567-e89b-12d3-a456-426614174000"
+    )
     Pipeline(verbose=False)._run_detection_pipeline(config)
 
     path = tmp_path / config["run_name"] / "modeling" / "fisher_grid_map.npz"
     loaded = load_fisher_grid_map_npz(path)
     assert loaded.config_hash == config_hash(snapshot)
     assert loaded.git_hash is not None
+    assert loaded.campaign_uuid == "123e4567-e89b-12d3-a456-426614174000"
 
 
 def test_pipeline_omits_config_hash_without_snapshot(
@@ -943,12 +952,14 @@ def test_pipeline_omits_config_hash_without_snapshot(
     config["plotting"]["output_dir"] = str(tmp_path)
     _stub_pipeline_grid_result(grid_setup, monkeypatch)
 
+    monkeypatch.delenv("HWOSLAPS_CAMPAIGN_UUID", raising=False)
     Pipeline(verbose=False)._run_detection_pipeline(config)
 
     path = tmp_path / config["run_name"] / "modeling" / "fisher_grid_map.npz"
     loaded = load_fisher_grid_map_npz(path)
     assert loaded.config_hash is None
     assert loaded.git_hash is not None
+    assert loaded.campaign_uuid is None
 
 
 def test_pipeline_snapshot_hash_rejects_bool_int_alias(

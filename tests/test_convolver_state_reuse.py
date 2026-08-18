@@ -13,8 +13,9 @@ on after the 2026-08-18 convolver fixes:
 2. The two-pass 1D blurring dilation is exactly equivalent to the dense
    kernel-box dilation it replaced, for all structure parities.
 3. ``make_pyauto_convolver`` returns one cached convolver per kernel object
-   while the kernel values are unchanged, so the memoized state is actually
-   shared across the detector's repeated convolution calls.
+   while the kernel values and pixel scales are unchanged, so the memoized
+   state is actually shared across the detector's repeated convolution calls
+   and never shared across detector grids.
 """
 
 import warnings
@@ -134,3 +135,28 @@ class TestMakePyautoConvolverCache:
     def test_convolver_input_passes_through(self):
         convolver = make_pyauto_convolver(_kernel())
         assert make_pyauto_convolver(convolver) is convolver
+
+    def test_distinct_pixel_scales_do_not_share_convolver(self):
+        values = np.random.default_rng(5).random((21, 21))
+        coarse = make_pyauto_kernel(values=values, pixel_scales=PIXEL_SCALE)
+        fine = make_pyauto_kernel(
+            values=values, pixel_scales=PIXEL_SCALE / 2.0
+        )
+        first = make_pyauto_convolver(coarse)
+        second = make_pyauto_convolver(fine)
+        assert second is not first
+        assert first.kernel is coarse
+        assert second.kernel is fine
+
+    def test_copied_kernel_at_new_pixel_scale_invalidates_cache(self):
+        kernel = _kernel()
+        first = make_pyauto_convolver(kernel)
+        rebound = kernel.copy()
+        assert hasattr(rebound, "_hwoslaps_convolver_cache")
+        rebound.mask = al.Mask2D.all_false(
+            shape_native=kernel.shape_native, pixel_scales=PIXEL_SCALE / 2.0
+        )
+        second = make_pyauto_convolver(rebound)
+        assert second is not first
+        assert second.kernel is rebound
+        assert second.kernel.pixel_scales != first.kernel.pixel_scales

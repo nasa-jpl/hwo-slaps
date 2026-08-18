@@ -6,6 +6,7 @@ mode and subhalo detection mode.
 """
 
 from copy import deepcopy
+import os
 from pathlib import Path
 from typing import Dict, Union
 
@@ -200,6 +201,11 @@ class Pipeline:
                 detection_data.grid_map.config_hash = snapshot_hash
             detection_data.grid_map.git_hash = _git_hash(
                 Path(__file__).resolve().parent
+            )
+            # S1-lite exports HWOSLAPS_CAMPAIGN_UUID to every campaign job;
+            # standalone runs stay unbound.
+            detection_data.grid_map.campaign_uuid = os.environ.get(
+                'HWOSLAPS_CAMPAIGN_UUID'
             )
             grid_map_dir.mkdir(parents=True, exist_ok=True)
             grid_map_path = save_fisher_grid_map_npz(

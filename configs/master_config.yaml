@@ -200,8 +200,14 @@ psf:
 observation:
   exposure_time: 900.0  # seconds
   # Dimensionless end-to-end system throughput applied to the source flux.
-  # Source intensities are defined as detected e-/s at throughput 1.0; sky
-  # background and dark current are detected rates and are not scaled.
+  # Two source normalizations are distinct and must both be tracked. The
+  # configured profile intensities set a continuous angular surface-brightness
+  # integral, int I d^2theta, over the source. The observation layer instead
+  # consumes the rendered per-pixel profile samples directly as e-/pixel/s at
+  # throughput 1.0, so the realized discrete detected rate is approximately
+  # that continuous integral divided by the pixel area (5.12656e-5 arcsec^2 at
+  # the 0.00716 arcsec/pixel grid above). Sky background and dark current are
+  # already detected per-pixel rates and are not scaled.
   throughput: 1.0
   output_format: "pyautolens_ready"
   
