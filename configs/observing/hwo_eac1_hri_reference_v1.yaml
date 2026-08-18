@@ -1,0 +1,289 @@
+observation:
+  exposure_time: 2000.0
+  throughput: 1.0
+  detector:
+    gain: 1.0
+    read_noise: 3.5355339059327378
+    dark_current: 0.002
+    sky_background: 0.002510279845963486
+source_normalization:
+  scene1_smooth_ring:
+    lensing:
+      source_galaxy:
+        light:
+          intensity: 0.003174147284617635
+  scene2_clumpy:
+    lensing:
+      source_galaxy:
+        light:
+          flux_scale: 0.0015870697679888485
+  scene3_bow_dot:
+    lensing:
+      source_galaxy:
+        light:
+          intensity: 0.0031741477964652267
+  scene4_cosmos:
+    lensing:
+      source_galaxy:
+        light:
+          total_flux: 0.0004588946736860948
+  scene5_flex_macro:
+    lensing:
+      source_galaxy:
+        light:
+          intensity: 0.003174147284617635
+  scene5_ablation_sie_fit:
+    lensing:
+      source_galaxy:
+        light:
+          intensity: 0.003174147284617635
+metadata:
+  reference_name: hwo_eac1_hri_reference_v1
+  script: derive_hwo_eac1_hri_reference.py
+  script_version: '2'
+  generation_date: '2026-08-18'
+  observation_model_semantics: Source normalization is solved so the production render
+    sums to the detected e-/s rate, so observation.throughput stays 1.0 and the throughput
+    chain below is provenance only; carrying both would double-apply it.
+  source_photometry:
+    input_magnitude_ab: 24.3
+    input_band: F814W
+    input_magnitude_note: Mean magnification-corrected apparent magnitude of the 46-source
+      SLACS emission-line sample; the anchor is intrinsic, not observed through the
+      lens.
+    input_citation: L1
+    sed_mode: vband_photometry
+    sed_mode_description: measured V-band source photometry used directly
+    color_ab: null
+    measured_vband_magnitude_ab: 24.845
+    derived_magnitude_ab: 24.845
+    derived_band: HRI-V
+    flux_density_jy: 4.18818877914838e-07
+    photon_rate_ph_per_s_m2: 1.2683939892161928
+    detected_rate_e_per_s: 8.951505744562876
+    normalization_plane: unlensed intrinsic source-plane total flux; this artifact
+      applies no magnification and no lensing
+  band:
+    name: HRI-V
+    definition: study-defined 20 percent wide band centred at 500 nm
+    centre_m: 5.0e-07
+    fractional_width: 0.2
+    lambda_min_m: 4.5e-07
+    lambda_max_m: 5.5e-07
+    citations:
+    - S6
+    - S4
+  collecting_area:
+    value_m2: 33.606448937520405
+    method: sum of the supersampled hcipy pupil mask times the pupil-grid cell area
+      (pupil_diameter / num_pix) ** 2, no thresholding
+    gapless_hexagon_area_m2: 33.59799680569466
+    gapless_hexagon_formula: num_segments * 3 * sqrt(3) / 8 * segment_point_to_point
+      ** 2
+    mask_to_hexagon_ratio: 1.0002515665405478
+    gap_loss_fraction: -0.0002515665405478096
+    gap_loss_note: gap_loss_fraction is 1 - mask_to_hexagon_ratio and can be slightly
+      negative because fractional edge coverage on the finite pupil grid outweighs
+      the 6 mm gap loss
+    accepted_ratio_bounds:
+    - 0.95
+    - 1.005
+    num_segments: 19
+    geometry_source: configs/master_config.yaml psf.telescope and psf.hres_psf
+    geometry:
+      gap_size_m: 0.006
+      segment_point_to_point_m: 1.65
+      pupil_diameter_m: 7.225765
+      num_rings: 2
+      supersampling_factor: 4
+      num_pix: 512
+    aperture_citation: S1
+    aperture_note: 'EAC1-like area-matched pupil: 19 hexagonal segments, 1.65 m point-to-point
+      against the EAC1 1.7 m, 33.6 m^2 official area. The S3 USORT yield aperture
+      (6.5 m inscribed, 7.87 m circumscribed) is a different aperture and is never
+      mixed in.'
+  throughput_chain:
+    name: luvoir_hdi_system_qe
+    value: 0.21
+    description: end-to-end LUVOIR HDI system QE at V, detector included
+    citation: S4
+    optimistic_chain_bracket:
+      value: 0.5040000000000001
+      optical_throughput: 0.56
+      detector_qe: 0.9
+      citation: S3
+      used_in_baseline: false
+    applied_to: the derived source and sky rates in this artifact only
+  detector:
+    gain_e_per_adu: 1.0
+    pixel_scale_arcsec: 0.00716
+    pixel_solid_angle_arcsec2: 5.126559999999999e-05
+    pixel_scale_source: configs/master_config.yaml lensing.grid.pixel_scale
+    pixel_scale_note: Nyquist sampling at 500 nm for the circumscribed pupil diameter;
+      HWO publishes no HRI pixel scale.
+    sky_surface_brightness_ab_per_arcsec2: 23.0
+    sky_band: V
+    sky_description: zodiacal light, uniform, HWO exposure-time-calculator convention
+    sky_citation: S3
+    sky_rate_e_per_pix_s: 0.002510279845963486
+    qualification_sky_background_e_per_pix_s: 1.0
+    read_noise_per_read_e: 2.5
+    n_reads: 2
+    effective_read_noise_e: 3.5355339059327378
+    effective_read_noise_formula: per_read_e * sqrt(n_reads)
+    read_noise_note: The noise model applies exactly one squared read-noise term,
+      so observation.detector.read_noise carries the effective combined-image value
+      and never the per-read value.
+    read_noise_citation: S4
+    dark_current_e_per_pix_s: 0.002
+    dark_current_description: LUVOIR HDI heritage
+    dark_current_citation: S4
+  exposure:
+    value_s: 2000.0
+    description: HST full-orbit-class exposure (~2000 s)
+  source_normalization_details:
+    target_rate_e_per_s: 8.951505744562876
+    units: detected electrons per second, unlensed intrinsic source total
+    convention: Scene light normalizations are continuous surface-brightness amplitudes,
+      never detected totals. The observation layer reads rendered samples directly
+      as per-pixel e-/s, so every patch is solved on the scene production grid until
+      the unlensed discrete pixel sum equals target_rate_e_per_s. The recorded patched
+      profile angular integral is the baseline closed-form integral times the scale
+      factor, approximately pixel_area_arcsec2 times that rate, and is not itself
+      a detected rate.
+    pixel_scale_arcsec: 0.00716
+    pixel_area_arcsec2: 5.126559999999999e-05
+    render_method: 'unlensed source galaxy from hwoslaps.lensing.generator._create_source_galaxy
+      evaluated on hwoslaps.lensing.generator._create_grid: the exact production constructors,
+      grid geometry, and sub-pixel oversampling'
+    scaling_note: Every source family is exactly linear in its normalized field, so
+      the realized rate is the baseline discrete sum times the scale factor.
+    discrete_mapping_tolerance: 0.01
+    qualification_profile_angular_integral: 0.289151264
+    qualification_intensity: 2.0
+    qualification_effective_radius_arcsec: 0.11
+    qualification_closed_form: F_tot = 2 * pi * exp(b1) / b1 ** 2 * intensity * effective_radius
+      ** 2
+    qualification_closed_form_value: 0.28915126403243807
+    qualification_note: The frozen qualification normalization is a profile angular
+      integral in profile units, not a detected electron rate.
+    sersic_b1: 1.6783886549215685
+    sersic_b1_note: AutoGalaxy sersic_constant polynomial at n = 1, the constant the
+      installed profile code uses; the exact root of (1 + b) exp(-b) = 1/2 is 1.6783469900166605
+      and misses the frozen qualification flux by 8e-6 relative.
+    scene_details:
+      scene1_smooth_ring:
+        scene_config: configs/scenes/scene1_smooth_ring.yaml
+        light_type: Exponential
+        intensity: 0.003174147284617635
+        normalized_field: intensity
+        baseline_value: 2.0
+        scale_factor: 0.0015870736423088175
+        grid_shape:
+        - 500
+        - 500
+        pixel_scale_arcsec: 0.00716
+        baseline_discrete_sum: 5640.258590357879
+        baseline_profile_angular_integral: 0.28915126403243807
+        baseline_discrete_mapping_ratio: 0.999999919617895
+        target_rate_e_per_s: 8.951505744562876
+        realized_rate_e_per_s: 8.951505744562876
+        profile_angular_integral: 0.00045890434978616005
+      scene2_clumpy:
+        scene_config: configs/scenes/scene2_clumpy.yaml
+        light_type: Clumpy
+        flux_scale: 0.0015870697679888485
+        normalized_field: flux_scale
+        baseline_value: 1.0
+        scale_factor: 0.0015870697679888485
+        grid_shape:
+        - 500
+        - 500
+        pixel_scale_arcsec: 0.00716
+        baseline_discrete_sum: 5640.272359233658
+        baseline_profile_angular_integral: 0.2891512645103741
+        baseline_discrete_mapping_ratio: 1.0000023591429075
+        target_rate_e_per_s: 8.951505744562876
+        realized_rate_e_per_s: 8.951505744562876
+        profile_angular_integral: 0.00045890323028016156
+      scene3_bow_dot:
+        scene_config: configs/scenes/scene3_bow_dot.yaml
+        light_type: Exponential
+        intensity: 0.0031741477964652267
+        normalized_field: intensity
+        baseline_value: 2.0
+        scale_factor: 0.0015870738982326133
+        grid_shape:
+        - 500
+        - 500
+        pixel_scale_arcsec: 0.00716
+        baseline_discrete_sum: 5640.25768083729
+        baseline_profile_angular_integral: 0.28915126403243807
+        baseline_discrete_mapping_ratio: 0.9999997583627857
+        target_rate_e_per_s: 8.951505744562876
+        realized_rate_e_per_s: 8.951505744562876
+        profile_angular_integral: 0.00045890442378684914
+      scene4_cosmos:
+        scene_config: configs/scenes/scene4_cosmos.yaml
+        light_type: Image
+        total_flux: 0.0004588946736860948
+        normalized_field: total_flux
+        baseline_value: 0.289151264
+        scale_factor: 0.0015870401786868716
+        grid_shape:
+        - 500
+        - 500
+        pixel_scale_arcsec: 0.00716
+        baseline_discrete_sum: 5640.3775183369435
+        baseline_profile_angular_integral: 0.289151264
+        baseline_discrete_mapping_ratio: 1.000021005282738
+        target_rate_e_per_s: 8.951505744562876
+        realized_rate_e_per_s: 8.951505744562876
+        profile_angular_integral: 0.0004588946736860948
+      scene5_flex_macro:
+        scene_config: configs/scenes/scene5_flex_macro.yaml
+        light_type: Exponential
+        intensity: 0.003174147284617635
+        normalized_field: intensity
+        baseline_value: 2.0
+        scale_factor: 0.0015870736423088175
+        grid_shape:
+        - 500
+        - 500
+        pixel_scale_arcsec: 0.00716
+        baseline_discrete_sum: 5640.258590357879
+        baseline_profile_angular_integral: 0.28915126403243807
+        baseline_discrete_mapping_ratio: 0.999999919617895
+        target_rate_e_per_s: 8.951505744562876
+        realized_rate_e_per_s: 8.951505744562876
+        profile_angular_integral: 0.00045890434978616005
+      scene5_ablation_sie_fit:
+        scene_config: configs/scenes/scene5_ablation_sie_fit.yaml
+        light_type: Exponential
+        intensity: 0.003174147284617635
+        normalized_field: intensity
+        baseline_value: 2.0
+        scale_factor: 0.0015870736423088175
+        grid_shape:
+        - 500
+        - 500
+        pixel_scale_arcsec: 0.00716
+        baseline_discrete_sum: 5640.258590357879
+        baseline_profile_angular_integral: 0.28915126403243807
+        baseline_discrete_mapping_ratio: 0.999999919617895
+        target_rate_e_per_s: 8.951505744562876
+        realized_rate_e_per_s: 8.951505744562876
+        profile_angular_integral: 0.00045890434978616005
+    application: source_normalization holds one deep-merge config patch per scene
+      label; the S1-lite observing-reference loader applies them to staged job configs.
+      The scene files under configs/scenes are not modified by this script.
+  citations:
+    S1: Liu, Levine, Noecker, Feinberg, Stark et al., "Early Architecture Concepts
+      for the Habitable Worlds Observatory", JATIS 12(4) 041017 (2026), arXiv:2602.11046
+    S3: Stark, Steiger, Tokadjian, Savransky et al., "Cross-Model Validation of Coronagraphic
+      Exposure Time Calculators for HWO" (2025), arXiv:2502.18556
+    S4: LUVOIR Final Report (2019), arXiv:1912.06219, HDI Table 8-5
+    S6: Stark, Latouf, Mandell, Young, "Optimized Bandpasses for the HWO ExoEarth
+      Survey" (2024), arXiv:2404.05654
+    L1: Newton et al. 2011, ApJ 734, 104, arXiv:1104.2608; mean magnification-corrected
+      SLACS source magnitude, median mu 8.8
