@@ -19,6 +19,14 @@ conventions. Production configurations therefore keep
 provenance metadata only. The detector read noise is likewise the
 EFFECTIVE combined-image value, because the noise model applies exactly
 one squared read-noise term.
+
+That discrete render-and-normalize contract is the ``intrinsic_rate``
+normalization mode and stays the default. The ``arc_snr`` mode instead
+solves each scene for one achieved integrated source-only
+signal-to-noise on the LENSED, PSF-convolved, exposed image, so
+morphologies can be compared at equal delivered arc signal rather than
+at equal intrinsic rate. It runs the production forward model and
+records both conventions per scene.
 """
 
 from __future__ import annotations
@@ -31,6 +39,7 @@ import math
 from pathlib import Path
 
 import numpy as np
+from scipy.optimize import brentq
 import yaml
 
 
@@ -153,6 +162,41 @@ SCENE_NORMALIZED_FIELD = {
 }
 """Config leaf each source family scales exactly linearly with."""
 
+NORMALIZATION_MODES = ('intrinsic_rate', 'arc_snr')
+NORMALIZATION_MODE_DESCRIPTIONS = {
+    'intrinsic_rate': (
+        'every scene carries the same unlensed intrinsic detected source '
+        'rate; the frozen default convention'
+    ),
+    'arc_snr': (
+        'every scene reaches the same achieved integrated source-only '
+        'signal-to-noise on its lensed, PSF-convolved, exposed image'
+    ),
+}
+
+ARC_SNR_BRACKET_FACTOR = 10.0
+"""Geometric step the arc-S/N bracket search takes in scale factor."""
+
+ARC_SNR_MAX_BRACKET_STEPS = 12
+"""Bracket steps allowed in one direction before the solve fails.
+
+Twelve decades of scale factor around the intrinsic-rate starting point
+cover any physically meaningful arc S/N request and keep the production
+Poisson draw inside its integer domain, so a runaway target fails here
+with the scanned range named rather than deep inside the noise model.
+"""
+
+ARC_SNR_LOG_SCALE_TOLERANCE = 1.0e-9
+"""Bracket width in ``log(scale)`` the Brent solve converges to.
+
+A width in ``log(scale)`` is a relative width in the scale factor, so
+this is far inside the required 1e-6; the achieved arc S/N is checked
+against :data:`ARC_SNR_RELATIVE_TOLERANCE` afterwards regardless.
+"""
+
+ARC_SNR_RELATIVE_TOLERANCE = 1.0e-6
+"""Accepted ``|achieved / requested - 1|`` for a solved arc S/N."""
+
 CITATIONS = {
     'S1': (
         'Liu, Levine, Noecker, Feinberg, Stark et al., "Early Architecture '
@@ -182,6 +226,64 @@ def _require_positive(value, name):
     if not math.isfinite(number) or number <= 0.0:
         raise ValueError(f'{name} must be a positive finite number, got {value!r}.')
     return number
+
+
+def _require_non_negative(value, name):
+    """Return one non-negative finite float or fail loudly."""
+    number = float(value)
+    if not math.isfinite(number) or number < 0.0:
+        raise ValueError(
+            f'{name} must be a non-negative finite number, got {value!r}.'
+        )
+    return number
+
+
+def _deep_merge(base, patch):
+    """Deep-merge one patch mapping onto a base mapping.
+
+    This mirrors the S1-lite campaign staging merge: nested mappings
+    merge key by key while every other value replaces its counterpart,
+    so a configuration assembled here is the one a staged job sees.
+
+    Parameters
+    ----------
+    base : `dict`
+        Mapping to merge onto; never mutated.
+    patch : `dict`
+        Mapping whose entries take precedence.
+
+    Returns
+    -------
+    merged : `dict`
+        Deep copy of ``base`` with ``patch`` applied.
+    """
+    merged = deepcopy(base)
+    for key, value in patch.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge(current, value)
+        else:
+            merged[key] = deepcopy(value)
+    return merged
+
+
+def _absolutize_asset_path(light_config):
+    """Resolve one relative image-asset path against the repository root.
+
+    Relative ``asset_path`` entries in the scene files are repository
+    relative because the runner is invoked from the repository root.
+    Rewriting them here keeps every render in this module independent of
+    the working directory.
+
+    Parameters
+    ----------
+    light_config : `dict`
+        Source-light block, mutated in place when it carries a relative
+        ``asset_path``.
+    """
+    asset_path = light_config.get('asset_path')
+    if asset_path is not None and not Path(asset_path).is_absolute():
+        light_config['asset_path'] = str(PROJECT_ROOT / asset_path)
 
 
 def ab_mag_to_fnu_jy(m_ab):
@@ -522,9 +624,7 @@ def render_unlensed_source(source_config, grid_config):
     from hwoslaps.lensing.generator import _create_grid, _create_source_galaxy
 
     source_config = deepcopy(source_config)
-    asset_path = source_config['light'].get('asset_path')
-    if asset_path is not None and not Path(asset_path).is_absolute():
-        source_config['light']['asset_path'] = str(PROJECT_ROOT / asset_path)
+    _absolutize_asset_path(source_config['light'])
     galaxy = _create_source_galaxy(source_config)
     image = galaxy.image_2d_from(grid=_create_grid(grid_config))
     return np.asarray(image, dtype=float)
@@ -550,7 +650,343 @@ def unlensed_discrete_sum(scene_config_relpath):
     return float(np.sum(image))
 
 
-def scene_flux_patches(total_flux_e_per_s, pixel_scale_arcsec):
+def blank_pixel_variance_e2(observation):
+    """Return the blank-pixel variance of one derived observation block.
+
+    A pixel carrying no source light collects sky and dark electrons and
+    is read once, so its variance is
+    ``(sky_background + dark_current) * exposure_time + read_noise ** 2``
+    in electrons squared. This is the ``B`` of the arc S/N convention and
+    is exactly the source-free limit of the engine noise map.
+
+    Parameters
+    ----------
+    observation : `dict`
+        Observation block carrying ``exposure_time`` and a ``detector``
+        mapping, in the shape this script emits.
+
+    Returns
+    -------
+    variance : `float`
+        Blank-pixel variance in electrons squared.
+    """
+    if not isinstance(observation, dict) or 'detector' not in observation:
+        raise ValueError(
+            'observation must be a mapping carrying a detector block, got '
+            f'{observation!r}.'
+        )
+    exposure = _require_positive(
+        observation['exposure_time'], 'observation.exposure_time'
+    )
+    detector = observation['detector']
+    sky = _require_non_negative(
+        detector['sky_background'], 'observation.detector.sky_background'
+    )
+    dark = _require_non_negative(
+        detector['dark_current'], 'observation.detector.dark_current'
+    )
+    read_noise = _require_non_negative(
+        detector['read_noise'], 'observation.detector.read_noise'
+    )
+    variance = (sky + dark) * exposure + read_noise ** 2
+    if variance <= 0.0:
+        raise ValueError(
+            'The configured detector leaves a blank pixel with zero '
+            'variance, so no arc signal-to-noise is defined.'
+        )
+    return variance
+
+
+def integrated_source_snr(source_electrons, blank_variance_e2):
+    """Integrate one source electron map into an achieved arc S/N.
+
+    The engine reports a per-pixel source signal-to-noise of
+    ``S_p / sqrt(S_p + B)``, the source electrons over the total pixel
+    noise, so the integrated source-only value is
+    ``sqrt(sum_p S_p ** 2 / (S_p + B))``. This is the convention the
+    units audit used to recover 303.94 for the committed reference.
+
+    Parameters
+    ----------
+    source_electrons : array-like
+        Source-only electrons per pixel in the exposure, the lensed and
+        PSF-convolved image times the exposure time.
+    blank_variance_e2 : `float`
+        Blank-pixel variance in electrons squared.
+
+    Returns
+    -------
+    arc_snr : `float`
+        Achieved integrated source-only signal-to-noise.
+    """
+    electrons = np.asarray(source_electrons, dtype=float)
+    if electrons.size == 0:
+        raise ValueError('source_electrons must not be empty.')
+    if not np.all(np.isfinite(electrons)):
+        raise ValueError('source_electrons must be finite.')
+    variance = _require_positive(blank_variance_e2, 'blank_variance_e2')
+    total_variance = electrons + variance
+    minimum = float(np.min(total_variance))
+    if minimum <= 0.0:
+        raise ValueError(
+            f'Source electrons drive a pixel variance down to {minimum} e^2 '
+            f'against a blank-pixel variance of {variance} e^2; the source '
+            'map is not a physical electron map.'
+        )
+    return float(np.sqrt(np.sum(electrons ** 2 / total_variance)))
+
+
+@lru_cache(maxsize=None)
+def _scene_psf_data(scene_config_relpath):
+    """Build one scene's production PSF system once.
+
+    The PSF depends only on the scene ``psf`` block and the lensing grid
+    pixel scale, neither of which a source normalization touches, so one
+    build per scene serves every solver iteration.
+    """
+    from hwoslaps.psf import generate_psf_system
+
+    config = load_scene_config(scene_config_relpath)
+    return generate_psf_system(config['psf'], full_config=config)
+
+
+def scene_source_electrons(scene_config_relpath, observation, light_patch):
+    """Run the production forward model for one scene normalization.
+
+    The scene configuration is merged exactly as the S1-lite loader
+    stages a job: the derived observation block first, then the
+    source-normalization patch. The subhalo is disabled, mirroring
+    ``Pipeline._create_baseline_config``, because subhalo mass and
+    position are campaign sweep axes rather than scene properties and
+    the delivered arc signal must not depend on a scene placeholder.
+
+    Parameters
+    ----------
+    scene_config_relpath : `str`
+        Scene configuration path relative to the repository root.
+    observation : `dict`
+        Derived observation block applied to the scene.
+    light_patch : `dict`
+        Source-normalization patch in the emitted deep-merge shape.
+
+    Returns
+    -------
+    source_electrons : `numpy.ndarray`
+        Source-only electrons per pixel of the lensed, PSF-convolved,
+        exposed image.
+    """
+    from hwoslaps.lensing import generate_lensing_system
+    from hwoslaps.observation import generate_observation
+
+    config = load_scene_config(scene_config_relpath)
+    config = _deep_merge(config, {'observation': observation})
+    config = _deep_merge(config, light_patch)
+    _absolutize_asset_path(config['lensing']['source_galaxy']['light'])
+    if 'subhalo' in config['lensing']:
+        config['lensing']['subhalo']['enabled'] = False
+    lensing_data = generate_lensing_system(
+        config['lensing'], full_config=config
+    )
+    observation_data = generate_observation(
+        lensing_data=lensing_data,
+        psf_data=_scene_psf_data(scene_config_relpath),
+        observation_config=config['observation'],
+        full_config=config,
+    )
+    return np.asarray(observation_data.source_electrons, dtype=float)
+
+
+def scene_arc_snr_response(scene_config_relpath, field, baseline_value,
+                           observation):
+    """Return one scene's achieved arc S/N as a function of scale factor.
+
+    Parameters
+    ----------
+    scene_config_relpath : `str`
+        Scene configuration path relative to the repository root.
+    field : `str`
+        Config leaf the scene's source family is linear in.
+    baseline_value : `float`
+        Configured value of that leaf before scaling.
+    observation : `dict`
+        Derived observation block applied to the scene.
+
+    Returns
+    -------
+    response : `callable`
+        Function mapping one scale factor to the achieved arc S/N.
+    """
+    amplitude = _require_positive(baseline_value, f'scene light {field}')
+    variance = blank_pixel_variance_e2(observation)
+
+    def response(scale):
+        """Return the achieved arc S/N at one source scale factor."""
+        patch = {
+            'lensing': {
+                'source_galaxy': {'light': {field: amplitude * scale}}
+            }
+        }
+        electrons = scene_source_electrons(
+            scene_config_relpath, observation, patch
+        )
+        return integrated_source_snr(electrons, variance)
+
+    return response
+
+
+def solve_arc_snr_scale(response, initial_scale, target_arc_snr):
+    """Solve one monotone arc-S/N response for its target scale factor.
+
+    The achieved arc S/N grows strictly monotonically with the source
+    scale factor, linearly where the blank-pixel variance dominates and
+    as its square root where source shot noise does, so the root is
+    unique. The solve runs Brent's method on ``log(scale)`` after a
+    geometric bracket search, and every failure is loud: a bracket that
+    does not close, a solve that does not converge, and an achieved arc
+    S/N outside :data:`ARC_SNR_RELATIVE_TOLERANCE` all raise.
+
+    Parameters
+    ----------
+    response : `callable`
+        Function mapping one scale factor to an achieved arc S/N.
+    initial_scale : `float`
+        Scale factor the bracket search starts from.
+    target_arc_snr : `float`
+        Requested achieved arc S/N.
+
+    Returns
+    -------
+    scale : `float`
+        Scale factor whose achieved arc S/N is the requested value.
+    record : `dict`
+        Provenance record of the requested and achieved values, the
+        bracket, and the solver effort.
+    """
+    target = _require_positive(target_arc_snr, 'target_arc_snr')
+    start = _require_positive(initial_scale, 'initial_scale')
+    evaluations = 0
+
+    def objective(log_scale):
+        """Return the log ratio of achieved to requested arc S/N."""
+        nonlocal evaluations
+        evaluations += 1
+        scale = math.exp(log_scale)
+        achieved = response(scale)
+        value = float(achieved)
+        if not math.isfinite(value) or value <= 0.0:
+            raise ValueError(
+                f'The arc S/N response returned {achieved!r} at scale factor '
+                f'{scale}; it must be positive and finite.'
+            )
+        return math.log(value / target)
+
+    log_start = math.log(start)
+    start_value = objective(log_start)
+    log_low = log_high = log_start
+    low_value = high_value = start_value
+    steps = 0
+    if start_value != 0.0:
+        log_step = math.log(ARC_SNR_BRACKET_FACTOR)
+        while low_value * high_value > 0.0:
+            if steps >= ARC_SNR_MAX_BRACKET_STEPS:
+                raise ValueError(
+                    f'Arc S/N target {target} is not bracketed by scale '
+                    f'factors {math.exp(log_low)} to {math.exp(log_high)} '
+                    f'after {steps} steps of factor {ARC_SNR_BRACKET_FACTOR}; '
+                    f'the achieved values there are '
+                    f'{target * math.exp(low_value)} and '
+                    f'{target * math.exp(high_value)}.'
+                )
+            steps += 1
+            if start_value < 0.0:
+                log_high += log_step
+                high_value = objective(log_high)
+            else:
+                log_low -= log_step
+                low_value = objective(log_low)
+        log_scale, result = brentq(
+            objective,
+            log_low,
+            log_high,
+            xtol=ARC_SNR_LOG_SCALE_TOLERANCE,
+            full_output=True,
+            disp=False,
+        )
+        if not result.converged:
+            raise ValueError(
+                f'The Brent solve for arc S/N target {target} did not '
+                f'converge: {result.flag}.'
+            )
+        iterations = int(result.iterations)
+    else:
+        log_scale = log_start
+        iterations = 0
+
+    scale = math.exp(log_scale)
+    achieved = float(response(scale))
+    evaluations += 1
+    residual = abs(achieved / target - 1.0)
+    if residual > ARC_SNR_RELATIVE_TOLERANCE:
+        raise ValueError(
+            f'The solved scale factor {scale} achieves an arc S/N of '
+            f'{achieved} against the requested {target}, a relative miss of '
+            f'{residual} beyond the accepted {ARC_SNR_RELATIVE_TOLERANCE}.'
+        )
+    record = {
+        'requested_arc_snr': target,
+        'achieved_arc_snr': achieved,
+        'relative_residual': residual,
+        'initial_scale_factor': start,
+        'bracket_low_scale_factor': math.exp(log_low),
+        'bracket_high_scale_factor': math.exp(log_high),
+        'bracket_steps': steps,
+        'solver': 'scipy.optimize.brentq on log(scale factor)',
+        'solver_iterations': iterations,
+        'forward_model_evaluations': evaluations,
+        'log_scale_tolerance': ARC_SNR_LOG_SCALE_TOLERANCE,
+        'relative_tolerance': ARC_SNR_RELATIVE_TOLERANCE,
+    }
+    return scale, record
+
+
+def validate_normalization_mode(normalization_mode, target_arc_snr):
+    """Validate one normalization mode against its mode-only argument.
+
+    Parameters
+    ----------
+    normalization_mode : `str`
+        One of :data:`NORMALIZATION_MODES`.
+    target_arc_snr : `float` or `None`
+        Requested achieved arc S/N, accepted by ``arc_snr`` only.
+
+    Returns
+    -------
+    normalization_mode : `str`
+        The validated mode.
+    """
+    if normalization_mode not in NORMALIZATION_MODES:
+        raise ValueError(
+            f'Unknown normalization-mode {normalization_mode!r}; choose one '
+            f'of {NORMALIZATION_MODES}.'
+        )
+    if normalization_mode == 'intrinsic_rate':
+        if target_arc_snr is not None:
+            raise ValueError(
+                'normalization-mode intrinsic_rate does not accept '
+                '--target-arc-snr.'
+            )
+        return normalization_mode
+    if target_arc_snr is None:
+        raise ValueError(
+            'normalization-mode arc_snr requires --target-arc-snr.'
+        )
+    _require_positive(target_arc_snr, '--target-arc-snr')
+    return normalization_mode
+
+
+def scene_flux_patches(total_flux_e_per_s, pixel_scale_arcsec,
+                       normalization_mode='intrinsic_rate',
+                       target_arc_snr=None, observation=None):
     """Solve every scene normalization for one detected pixel-sum rate.
 
     Each patch is a deep-merge configuration fragment in the exact shape
@@ -567,12 +1003,31 @@ def scene_flux_patches(total_flux_e_per_s, pixel_scale_arcsec):
     while the observation layer reads rendered samples as per-pixel
     electron rates. The two conventions differ by the pixel area.
 
+    Under ``normalization_mode='arc_snr'`` that unlensed scale factor is
+    only the starting point: each scene is then solved through the
+    production forward model until its lensed, PSF-convolved, exposed
+    image achieves ``target_arc_snr``, and the resulting intrinsic rate
+    is recorded per scene alongside the requested and achieved arc S/N.
+    The scenes no longer share one intrinsic rate in that mode, which is
+    the point of the comparison.
+
     Parameters
     ----------
     total_flux_e_per_s : `float`
-        Physical unlensed total detected source rate.
+        Physical unlensed total detected source rate. It is the solved
+        rate under ``intrinsic_rate`` and the starting scale under
+        ``arc_snr``.
     pixel_scale_arcsec : `float`
         Reference detector pixel scale; every scene grid must match it.
+    normalization_mode : `str`, optional
+        One of :data:`NORMALIZATION_MODES`, defaulting to the frozen
+        ``intrinsic_rate`` convention.
+    target_arc_snr : `float`, optional
+        Requested achieved arc S/N; required by ``arc_snr`` and rejected
+        by ``intrinsic_rate``.
+    observation : `dict`, optional
+        Derived observation block the forward model observes through;
+        required by ``arc_snr`` and rejected by ``intrinsic_rate``.
 
     Returns
     -------
@@ -581,8 +1036,20 @@ def scene_flux_patches(total_flux_e_per_s, pixel_scale_arcsec):
     details : `dict`
         Per-scene provenance records keyed by scene label, carrying the
         target rate, the realized discrete rate, and the render that
-        maps between them.
+        maps between them, plus the arc S/N solution under ``arc_snr``.
     """
+    validate_normalization_mode(normalization_mode, target_arc_snr)
+    if normalization_mode == 'intrinsic_rate':
+        if observation is not None:
+            raise ValueError(
+                'normalization-mode intrinsic_rate does not accept an '
+                'observation block; it never observes the scenes.'
+            )
+    elif observation is None:
+        raise ValueError(
+            'normalization-mode arc_snr requires an observation block to '
+            'expose and noise the lensed scenes.'
+        )
     target_rate = _require_positive(total_flux_e_per_s, 'total_flux_e_per_s')
     pixel_scale = _require_positive(pixel_scale_arcsec, 'pixel_scale_arcsec')
     pixel_area = pixel_scale ** 2
@@ -632,6 +1099,15 @@ def scene_flux_patches(total_flux_e_per_s, pixel_scale_arcsec):
                 'or the profile changed.'
             )
         scale = target_rate / baseline_sum
+        arc_snr_solution = None
+        if normalization_mode == 'arc_snr':
+            scale, arc_snr_solution = solve_arc_snr_scale(
+                scene_arc_snr_response(
+                    relpath, field, baseline_value, observation
+                ),
+                scale,
+                target_arc_snr,
+            )
         realized_rate = baseline_sum * scale
         leaf = {field: baseline_value * scale}
         patches[name] = {
@@ -653,6 +1129,9 @@ def scene_flux_patches(total_flux_e_per_s, pixel_scale_arcsec):
             'realized_rate_e_per_s': realized_rate,
             'profile_angular_integral': baseline_integral * scale,
         }
+        if arc_snr_solution is not None:
+            details[name]['normalization_mode'] = normalization_mode
+            details[name]['arc_snr_solution'] = arc_snr_solution
     return patches, details
 
 
@@ -855,9 +1334,69 @@ def collecting_area_report(area_m2, pupil_geometry):
     }
 
 
+def _arc_snr_normalization_provenance(target_arc_snr, observation):
+    """Return the arc-S/N provenance block of the normalization record.
+
+    Parameters
+    ----------
+    target_arc_snr : `float`
+        Requested achieved arc S/N.
+    observation : `dict`
+        Derived observation block the forward model observes through.
+
+    Returns
+    -------
+    provenance : `dict`
+        Keys added to the normalization details under ``arc_snr`` only,
+        so the ``intrinsic_rate`` artifact is unchanged.
+    """
+    return {
+        'normalization_mode': 'arc_snr',
+        'normalization_mode_description': (
+            NORMALIZATION_MODE_DESCRIPTIONS['arc_snr']
+        ),
+        'requested_arc_snr': _require_positive(
+            target_arc_snr, 'target_arc_snr'
+        ),
+        'arc_snr_formula': (
+            'SNR_arc = sqrt(sum_p S_p ** 2 / (S_p + B)) with S_p the '
+            'source-only electrons per pixel of the lensed, PSF-convolved, '
+            'exposed image and B the blank-pixel variance in e^2'
+        ),
+        'arc_snr_blank_pixel_variance_e2': blank_pixel_variance_e2(
+            observation
+        ),
+        'arc_snr_blank_pixel_variance_formula': (
+            '(sky_background + dark_current) * exposure_time + '
+            'read_noise ** 2'
+        ),
+        'arc_snr_forward_model': (
+            'hwoslaps.lensing.generate_lensing_system followed by '
+            'hwoslaps.observation.generate_observation, on the scene '
+            'production grid with the scene psf block and the observation '
+            'block of this artifact; the subhalo is disabled because its '
+            'mass and position are campaign sweep axes rather than scene '
+            'properties'
+        ),
+        'arc_snr_solver': (
+            'scipy.optimize.brentq on log(scale factor) after a geometric '
+            'bracket search, started from the intrinsic-rate scale factor; '
+            'the achieved arc S/N is verified against the request and every '
+            'bracket, convergence, or residual failure raises'
+        ),
+        'target_rate_note': (
+            'Under arc_snr the scenes do not share one intrinsic rate. '
+            'target_rate_e_per_s stays the photometric anchor that sets the '
+            'solver starting point, and each scene records the intrinsic '
+            'rate it actually realizes in realized_rate_e_per_s.'
+        ),
+    }
+
+
 def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
                              color_ab, mag_vband, exposure_s, system_qe,
-                             sky_mag):
+                             sky_mag, normalization_mode='intrinsic_rate',
+                             target_arc_snr=None):
     """Assemble the full reference observing-configuration document.
 
     Parameters
@@ -878,6 +1417,13 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
         End-to-end system quantum efficiency, detector included.
     sky_mag : `float`
         Sky surface brightness in AB magnitudes per square arcsecond.
+    normalization_mode : `str`, optional
+        One of :data:`NORMALIZATION_MODES`, defaulting to the frozen
+        ``intrinsic_rate`` convention. Only ``arc_snr`` adds keys to the
+        emitted document, so the default artifact is unchanged.
+    target_arc_snr : `float`, optional
+        Requested achieved arc S/N; required by ``arc_snr`` and rejected
+        by ``intrinsic_rate``.
 
     Returns
     -------
@@ -886,6 +1432,7 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
         ``source_normalization``, and ``metadata`` keys, the exact shape
         the S1-lite observing-reference loader consumes.
     """
+    validate_normalization_mode(normalization_mode, target_arc_snr)
     closed_form_flux = verify_qualification_total_flux()
     area_m2 = _require_positive(area_report['value_m2'], 'area_report value_m2')
     exposure = _require_positive(exposure_s, 'exposure_s')
@@ -904,7 +1451,6 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
         sky_mag, area_m2, efficiency, pixel_scale
     )
     read_noise = effective_read_noise(READ_NOISE_PER_READ_E, N_READS)
-    patches, scene_details = scene_flux_patches(total_flux, pixel_scale)
 
     observation = {
         'exposure_time': exposure,
@@ -916,6 +1462,14 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
             'sky_background': sky_rate,
         },
     }
+
+    patches, scene_details = scene_flux_patches(
+        total_flux,
+        pixel_scale,
+        normalization_mode=normalization_mode,
+        target_arc_snr=target_arc_snr,
+        observation=observation if normalization_mode == 'arc_snr' else None,
+    )
 
     normalization_details = {
         'target_rate_e_per_s': total_flux,
@@ -973,6 +1527,10 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
             'configs/scenes are not modified by this script.'
         ),
     }
+    if normalization_mode == 'arc_snr':
+        normalization_details.update(
+            _arc_snr_normalization_provenance(target_arc_snr, observation)
+        )
 
     metadata = {
         'reference_name': REFERENCE_NAME,
@@ -1174,6 +1732,31 @@ def _print_summary(document):
             f"{detail['realized_rate_e_per_s']:>18.10g}"
         )
 
+    _print_arc_snr_summary(normalization)
+
+
+def _print_arc_snr_summary(normalization):
+    """Print the arc-S/N solutions, when the run solved for them."""
+    solutions = {
+        name: detail['arc_snr_solution']
+        for name, detail in normalization['scene_details'].items()
+        if 'arc_snr_solution' in detail
+    }
+    if not solutions:
+        return
+    print(
+        f"\n{'scene':26s}{'requested S/N':>16s}{'achieved S/N':>16s}"
+        f"{'intrinsic e-/s':>18s}{'evals':>8s}"
+    )
+    for name, solution in solutions.items():
+        detail = normalization['scene_details'][name]
+        print(
+            f'{name:26s}{solution["requested_arc_snr"]:>16.10g}'
+            f'{solution["achieved_arc_snr"]:>16.10g}'
+            f'{detail["realized_rate_e_per_s"]:>18.10g}'
+            f'{solution["forward_model_evaluations"]:>8d}'
+        )
+
 
 def _build_parser():
     """Build the command-line argument parser."""
@@ -1184,6 +1767,20 @@ def _build_parser():
     parser.add_argument('--exposure-s', type=float, default=DEFAULT_EXPOSURE_S)
     parser.add_argument('--system-qe', type=float, default=DEFAULT_SYSTEM_QE)
     parser.add_argument('--sky-mag', type=float, default=DEFAULT_SKY_MAG)
+    parser.add_argument(
+        '--normalization-mode',
+        choices=NORMALIZATION_MODES,
+        default='intrinsic_rate',
+        help=(
+            'Scene normalization convention; intrinsic_rate reproduces the '
+            'committed reference exactly'
+        ),
+    )
+    parser.add_argument(
+        '--target-arc-snr',
+        type=float,
+        help='Requested achieved arc S/N, required by --normalization-mode arc_snr',
+    )
     parser.add_argument('--output', default=str(DEFAULT_OUTPUT_PATH))
     parser.add_argument(
         '--force',
@@ -1198,6 +1795,7 @@ def main(argv=None):
     args = _build_parser().parse_args(argv)
     output_path = Path(args.output).expanduser().resolve()
     _refuse_existing(output_path, args.force)
+    validate_normalization_mode(args.normalization_mode, args.target_arc_snr)
 
     pupil_geometry = load_pupil_geometry()
     pixel_scale = load_pixel_scale_arcsec()
@@ -1213,6 +1811,8 @@ def main(argv=None):
         args.exposure_s,
         args.system_qe,
         args.sky_mag,
+        normalization_mode=args.normalization_mode,
+        target_arc_snr=args.target_arc_snr,
     )
     write_reference_document(output_path, document, force=args.force)
     _print_summary(document)

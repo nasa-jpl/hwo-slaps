@@ -218,6 +218,105 @@ def test_fisher_detector_runtime_map_executes(runtime_setup):
     assert np.all(np.isfinite(result.delta_chi2_profiled_by_position))
 
 
+def test_fisher_detector_runtime_nuisance_subset_all_matches_default(runtime_setup):
+    """Reproduce the default nuisance design exactly for subset 'all'."""
+    default = _make_detector(runtime_setup, mode="local")
+    explicit_all = _make_detector(
+        runtime_setup,
+        mode="local",
+        fisher_overrides={"nuisance_subset": "all"},
+    )
+
+    assert default.nuisance_subset_label == "all"
+    assert explicit_all.nuisance_names == default.nuisance_names
+    assert len(default.nuisance_images) == len(explicit_all.nuisance_images)
+    for expected, actual in zip(default.nuisance_images, explicit_all.nuisance_images):
+        np.testing.assert_array_equal(actual, expected)
+
+
+def test_fisher_detector_runtime_nuisance_subset_selects_lens_directions(runtime_setup):
+    """Profile only the lens directions when 'lens_only' is configured."""
+    detector = _make_detector(
+        runtime_setup,
+        mode="local",
+        fisher_overrides={"nuisance_subset": "lens_only"},
+    )
+
+    assert detector.nuisance_subset_label == "lens_only"
+    assert detector.nuisance_names == [
+        "lens.centre_y",
+        "lens.centre_x",
+        "lens.einstein_radius",
+        "lens.ell_comp_1",
+        "lens.ell_comp_2",
+    ]
+    assert detector.n_nuisance == 5
+    assert len(detector.nuisance_images) == 5
+    assert detector.prior_precision.shape == (5, 5)
+
+
+def test_fisher_detector_runtime_nuisance_subset_none_recovers_raw(runtime_setup):
+    """Recover the raw information when no nuisance direction is profiled."""
+    detector = _make_detector(
+        runtime_setup,
+        mode="local",
+        fisher_overrides={"nuisance_subset": "none"},
+    )
+    local = detector.compute_local(
+        observation_test=runtime_setup["observation_test"],
+        lensing_test=runtime_setup["lensing_test"],
+    )
+
+    assert detector.nuisance_subset_label == "none"
+    assert detector.n_nuisance == 0
+    assert detector.nuisance_names == []
+    assert local.delta_chi2_profiled == local.delta_chi2_raw
+    assert local.degradation == 1.0
+
+
+def test_fisher_detector_runtime_fixed_annulus_mask_selects_declared_pixels(runtime_setup):
+    """Mask on a predeclared annulus instead of the source S/N threshold."""
+    detector = _make_detector(
+        runtime_setup,
+        mode="local",
+        fisher_overrides={
+            "mask_mode": "fixed_annulus",
+            "mask_annulus": {
+                "inner_arcsec": 0.3,
+                "outer_arcsec": 0.7,
+                "centre": "lens",
+            },
+        },
+    )
+
+    grid_native = np.asarray(
+        runtime_setup["lensing_baseline"].grid.native,
+        dtype=float,
+    )
+    radius = np.hypot(grid_native[..., 0], grid_native[..., 1])
+    expected = (radius >= 0.3) & (radius <= 0.7)
+
+    np.testing.assert_array_equal(detector.mask_2d, expected)
+    assert detector.pixels_unmasked == int(np.count_nonzero(expected))
+    assert detector.pixels_unmasked > 0
+
+
+def test_fisher_detector_runtime_rejects_empty_fixed_annulus(runtime_setup):
+    """Fail loudly when the predeclared annulus falls outside the grid."""
+    with pytest.raises(ValueError, match="Degenerate Fisher mask"):
+        _make_detector(
+            runtime_setup,
+            mode="local",
+            fisher_overrides={
+                "mask_mode": "fixed_annulus",
+                "mask_annulus": {
+                    "inner_arcsec": 50.0,
+                    "outer_arcsec": 60.0,
+                },
+            },
+        )
+
+
 def test_fisher_detector_runtime_psf_fit_executes(runtime_setup):
     """Fit one global Zernike as a PSF nuisance parameter."""
     detector = _make_detector(

@@ -181,6 +181,8 @@ class FisherGridMapData:
     config_hash: Optional[str] = None
     git_hash: Optional[str] = None
     campaign_uuid: Optional[str] = None
+    nuisance_subset: Optional[str] = None
+    profiled_nuisance_names: Optional[List[str]] = None
 
 
 def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]) -> Path:
@@ -251,6 +253,12 @@ def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]
         payload['git_hash'] = np.str_(grid_map.git_hash)
     if grid_map.campaign_uuid is not None:
         payload['campaign_uuid'] = np.str_(grid_map.campaign_uuid)
+    if grid_map.nuisance_subset is not None:
+        payload['nuisance_subset'] = np.str_(grid_map.nuisance_subset)
+    if grid_map.profiled_nuisance_names is not None:
+        payload['profiled_nuisance_names'] = np.asarray(
+            grid_map.profiled_nuisance_names, dtype=np.str_
+        )
     np.savez_compressed(path, **payload)
     return path
 
@@ -284,6 +292,11 @@ def load_fisher_grid_map_npz(path: Union[str, Path]) -> FisherGridMapData:
             if name not in files:
                 return None
             return str(np.asarray(data[name]).item())
+
+        def optional_string_list(name):
+            if name not in files:
+                return None
+            return [str(value) for value in np.atleast_1d(data[name])]
 
         mismatch_present = 'q_mismatch_2d' in files
         return FisherGridMapData(
@@ -364,6 +377,10 @@ def load_fisher_grid_map_npz(path: Union[str, Path]) -> FisherGridMapData:
             config_hash=optional_string('config_hash'),
             git_hash=optional_string('git_hash'),
             campaign_uuid=optional_string('campaign_uuid'),
+            nuisance_subset=optional_string('nuisance_subset'),
+            profiled_nuisance_names=optional_string_list(
+                'profiled_nuisance_names'
+            ),
         )
 
 

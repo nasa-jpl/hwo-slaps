@@ -75,6 +75,16 @@ from .utils_fisher import (
 )
 
 
+# Reserved ``modeling.fisher.nuisance_subset`` words that select scalar
+# nuisance directions by name prefix.  ``all`` and ``none`` are handled
+# separately because they are not prefix selections.
+_NUISANCE_SUBSET_PREFIXES: Dict[str, Tuple[str, ...]] = {
+    "lens_only": ("lens.",),
+    "source_only": ("source.",),
+    "lens_and_source": ("lens.", "source."),
+}
+
+
 @dataclass(frozen=True)
 class _ScalarNuisanceSpec:
     """Descriptor for one scalar nuisance parameter."""
@@ -502,6 +512,8 @@ class FisherDetector:
         self.show_timing = self._timing_enabled()
 
         self.mask_mode = str(self.fisher_config.get("mask_mode", "source_snr")).lower()
+        self.mask_annulus = deepcopy(self.fisher_config.get("mask_annulus"))
+        self.nuisance_subset = deepcopy(self.fisher_config.get("nuisance_subset"))
         self.include_psf_nuisance = bool(self.fisher_config.get("include_psf_nuisance", False))
         self.compute_psf_mode_scan = bool(
             self.fisher_config.get("compute_psf_mode_scan", False)
@@ -599,7 +611,9 @@ class FisherDetector:
         if self.pixels_unmasked <= 0:
             raise ValueError("Degenerate Fisher mask: no pixels selected for analysis.")
 
-        self.scalar_nuisance_specs = self._build_scalar_nuisance_specs()
+        self.scalar_nuisance_specs, self.nuisance_subset_label = (
+            self._select_nuisance_subset(self._build_scalar_nuisance_specs())
+        )
         self.n_scalar_nuisances = len(self.scalar_nuisance_specs)
 
         self.instrument_psf_mode_specs = self._build_psf_mode_specs_from_selection(
@@ -1233,6 +1247,8 @@ class FisherDetector:
             max_z_spurious=max_z_spurious,
             source_image_asset_path=source_image_asset.get("asset_path"),
             source_image_asset_sha256_16=source_image_asset.get("sha256_16"),
+            nuisance_subset=self.nuisance_subset_label,
+            profiled_nuisance_names=list(self.nuisance_names),
         )
 
     def _grid_signal_iterator(
@@ -1928,6 +1944,111 @@ class FisherDetector:
             )
         return specs
 
+    def _select_nuisance_subset(
+        self,
+        specs: List[_ScalarNuisanceSpec],
+    ) -> Tuple[List[_ScalarNuisanceSpec], str]:
+        """Restrict the scalar nuisance directions to the configured subset.
+
+        ``modeling.fisher.nuisance_subset`` is either a reserved word or an
+        explicit list of direction names.  ``all`` (the default, and the
+        behaviour when the key is absent) keeps every scalar direction built
+        for this scene and ``none`` keeps none of them, so the profiled
+        information equals the raw information.  ``lens_only``,
+        ``source_only`` and ``lens_and_source`` select by the ``lens.`` and
+        ``source.`` name prefixes and therefore never select
+        ``observation.background_offset_adu``; whether that direction exists
+        at all remains governed by
+        ``modeling.fisher.include_background_offset``.
+
+        PSF fit modes are appended after the selected scalar directions by
+        the caller and are not touched by this selection: they are governed
+        by ``modeling.fisher.include_psf_nuisance`` and
+        ``modeling.fisher.fit_psf_mode_selection``, so naming one here is an
+        error rather than a second way to switch them on.
+
+        Parameters
+        ----------
+        specs : `list` of `_ScalarNuisanceSpec`
+            Every scalar nuisance direction available for this scene.
+
+        Returns
+        -------
+        selected : `list` of `_ScalarNuisanceSpec`
+            Directions to profile, in the canonical order of ``specs``.
+        label : `str`
+            Resolved selector for provenance: the reserved word, or
+            ``'explicit'`` when a list of names was supplied.
+
+        Raises
+        ------
+        ValueError
+            Raised for an unknown reserved word, a selector that is neither a
+            string nor a list, an empty list, a duplicated name, a PSF mode
+            name, or a name that is not a direction of this scene.
+        """
+        selector = self.nuisance_subset
+        if selector is None:
+            return specs, "all"
+
+        reserved = sorted({"all", "none", *_NUISANCE_SUBSET_PREFIXES})
+        if isinstance(selector, str):
+            label = selector.strip().lower()
+            if label == "all":
+                return specs, label
+            if label == "none":
+                return [], label
+            prefixes = _NUISANCE_SUBSET_PREFIXES.get(label)
+            if prefixes is None:
+                raise ValueError(
+                    "modeling.fisher.nuisance_subset must be one of "
+                    f"{reserved}, or a list of nuisance direction names; "
+                    f"got {selector!r}"
+                )
+            return [spec for spec in specs if spec.name.startswith(prefixes)], label
+
+        if not isinstance(selector, (list, tuple)):
+            raise ValueError(
+                "modeling.fisher.nuisance_subset must be one of "
+                f"{reserved}, or a list of nuisance direction names; "
+                f"got {selector!r}"
+            )
+        if len(selector) == 0:
+            raise ValueError(
+                "modeling.fisher.nuisance_subset must be non-empty when given "
+                "as a list; use 'none' to profile no nuisance directions."
+            )
+
+        available = {spec.name for spec in specs}
+        requested = set()
+        for entry in selector:
+            if not isinstance(entry, str):
+                raise ValueError(
+                    "modeling.fisher.nuisance_subset entries must be nuisance "
+                    f"direction names; got {entry!r}"
+                )
+            name = entry.strip()
+            if name.startswith("psf."):
+                raise ValueError(
+                    "modeling.fisher.nuisance_subset must not name PSF modes "
+                    f"({name!r}); PSF nuisance directions are governed by "
+                    "modeling.fisher.include_psf_nuisance and "
+                    "modeling.fisher.fit_psf_mode_selection."
+                )
+            if name not in available:
+                raise ValueError(
+                    f"modeling.fisher.nuisance_subset names unknown direction "
+                    f"{name!r}. Valid directions for this scene are: "
+                    f"{sorted(available)}"
+                )
+            if name in requested:
+                raise ValueError(
+                    "modeling.fisher.nuisance_subset contains duplicate "
+                    f"direction {name!r}."
+                )
+            requested.add(name)
+        return [spec for spec in specs if spec.name in requested], "explicit"
+
     def _build_scalar_nuisance_images(self) -> List[np.ndarray]:
         images: List[np.ndarray] = []
         for spec in self._progress_iter(
@@ -2337,11 +2458,19 @@ class FisherDetector:
     # ------------------------------------------------------------------
 
     def _build_mask(self) -> np.ndarray:
+        if self.mask_mode != "fixed_annulus" and self.mask_annulus is not None:
+            raise ValueError(
+                "modeling.fisher.mask_annulus is only accepted when "
+                "modeling.fisher.mask_mode is 'fixed_annulus'."
+            )
         if self.mask_mode == "all_pixels":
             return np.ones_like(self.mu0_adu_2d, dtype=bool)
+        if self.mask_mode == "fixed_annulus":
+            return self._build_fixed_annulus_mask()
         if self.mask_mode != "source_snr":
             raise ValueError(
-                "modeling.fisher.mask_mode must be 'source_snr' or 'all_pixels'."
+                "modeling.fisher.mask_mode must be 'source_snr', 'all_pixels', "
+                "or 'fixed_annulus'."
             )
 
         eps = 1.0e-12
@@ -2350,6 +2479,113 @@ class FisherDetector:
         if not np.any(mask):
             raise ValueError("Degenerate Fisher mask: no pixels above fisher.snr_threshold.")
         return mask
+
+    def _build_fixed_annulus_mask(self) -> np.ndarray:
+        """Select the pixels inside a fixed predeclared annular aperture.
+
+        The aperture is declared in arcseconds and, unlike ``source_snr``,
+        depends on neither the realized source brightness nor the injected
+        subhalo.  ``centre: lens`` places it on the analysis lens mass centre
+        (the fit-side centre when ``modeling.fit_lens`` overrides it) and
+        ``centre: grid`` places it on the geometric centre of the image grid.
+        Radii are compared on the closed interval ``[inner, outer]``.
+
+        Returns
+        -------
+        mask : `numpy.ndarray`
+            Boolean native-shaped mask, true inside the annulus.
+
+        Raises
+        ------
+        ValueError
+            Raised when the annulus block is missing, holds unsupported keys,
+            has a negative, non-finite or non-ordered radius pair, names an
+            unknown centre, or selects no pixels at all.
+        """
+        annulus = self.mask_annulus
+        if not isinstance(annulus, dict):
+            raise ValueError(
+                "modeling.fisher.mask_annulus is required when "
+                "modeling.fisher.mask_mode is 'fixed_annulus'."
+            )
+        unsupported = sorted(
+            set(annulus) - {"inner_arcsec", "outer_arcsec", "centre"}
+        )
+        if unsupported:
+            raise ValueError(
+                "modeling.fisher.mask_annulus contains unsupported keys: "
+                + ", ".join(unsupported)
+            )
+
+        inner_arcsec = self._annulus_radius(annulus, "inner_arcsec")
+        outer_arcsec = self._annulus_radius(annulus, "outer_arcsec")
+        if inner_arcsec < 0.0:
+            raise ValueError(
+                "modeling.fisher.mask_annulus.inner_arcsec must be non-negative."
+            )
+        if outer_arcsec <= inner_arcsec:
+            raise ValueError(
+                "modeling.fisher.mask_annulus.outer_arcsec must be greater than "
+                "inner_arcsec."
+            )
+
+        y_arcsec, x_arcsec = self._pixel_coordinates_arcsec()
+        centre_mode = str(annulus.get("centre", "lens")).lower()
+        if centre_mode == "lens":
+            lens_centre = self.fit_full_config["lensing"]["lens_galaxy"]["mass"]["centre"]
+            centre_y = float(lens_centre[0])
+            centre_x = float(lens_centre[1])
+        elif centre_mode == "grid":
+            centre_y = 0.5 * (float(np.max(y_arcsec)) + float(np.min(y_arcsec)))
+            centre_x = 0.5 * (float(np.max(x_arcsec)) + float(np.min(x_arcsec)))
+        else:
+            raise ValueError(
+                "modeling.fisher.mask_annulus.centre must be 'lens' or 'grid'."
+            )
+
+        radius = np.hypot(y_arcsec - centre_y, x_arcsec - centre_x)
+        mask = (radius >= inner_arcsec) & (radius <= outer_arcsec)
+        if not np.any(mask):
+            raise ValueError(
+                "Degenerate Fisher mask: no pixels inside "
+                "modeling.fisher.mask_annulus."
+            )
+        return mask
+
+    @staticmethod
+    def _annulus_radius(annulus: Dict[str, Any], key: str) -> float:
+        """Read one finite annulus radius in arcseconds."""
+        if key not in annulus:
+            raise ValueError(f"modeling.fisher.mask_annulus.{key} is required.")
+        value = annulus[key]
+        if isinstance(value, bool) or not isinstance(
+            value, (int, float, np.integer, np.floating)
+        ):
+            raise ValueError(f"modeling.fisher.mask_annulus.{key} must be numeric.")
+        radius = float(value)
+        if not np.isfinite(radius):
+            raise ValueError(f"modeling.fisher.mask_annulus.{key} must be finite.")
+        return radius
+
+    def _pixel_coordinates_arcsec(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Native (y, x) arcsecond coordinates of every image pixel.
+
+        Coordinates come from the baseline lensing grid so masks use exactly
+        the coordinate convention the scene was ray-traced on.
+
+        Returns
+        -------
+        y_arcsec, x_arcsec : `numpy.ndarray`
+            Native-shaped coordinate arrays in arcseconds.
+        """
+        grid_native = np.asarray(self.lensing_baseline.grid.native, dtype=float)
+        expected_shape = tuple(self.mu0_adu_2d.shape) + (2,)
+        if grid_native.shape != expected_shape:
+            raise ValueError(
+                "Lensing grid does not match the mean-image shape: grid "
+                f"{grid_native.shape}, expected {expected_shape}"
+            )
+        return grid_native[..., 0], grid_native[..., 1]
 
     def _lookup_prior_sigma(self, name: str) -> Optional[float]:
         value = self.prior_sigmas.get(name)

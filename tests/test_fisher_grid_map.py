@@ -75,6 +75,8 @@ MATCHED_NPZ_KEYS = {
     "subhalo_mass",
     "subhalo_model",
     "lens_einstein_radius",
+    "nuisance_subset",
+    "profiled_nuisance_names",
 }
 
 
@@ -1180,6 +1182,74 @@ def test_grid_map_npz_roundtrip_preserves_source_asset_identity(grid_setup, tmp_
     loaded = load_fisher_grid_map_npz(npz_path)
     assert loaded.source_image_asset_path == grid_map.source_image_asset_path
     assert loaded.source_image_asset_sha256_16 == grid_map.source_image_asset_sha256_16
+
+
+def test_grid_map_records_profiled_nuisance_provenance(grid_setup):
+    """Record which nuisance directions the grid map profiled."""
+    grid_map = grid_setup["grid_map"]
+    detector = grid_setup["detector"]
+
+    assert grid_map.nuisance_subset == "all"
+    assert grid_map.profiled_nuisance_names == detector.nuisance_names
+    assert "lens.centre_y" in grid_map.profiled_nuisance_names
+
+
+def test_grid_map_npz_roundtrip_preserves_nuisance_provenance(grid_setup, tmp_path):
+    """Round-trip the resolved nuisance subset through the NPZ archive."""
+    grid_map = replace(
+        grid_setup["grid_map"],
+        nuisance_subset="lens_only",
+        profiled_nuisance_names=["lens.centre_y", "lens.centre_x"],
+    )
+    npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "nuisance-subset.npz")
+
+    with np.load(npz_path, allow_pickle=False) as data:
+        assert str(data["nuisance_subset"]) == "lens_only"
+        np.testing.assert_array_equal(
+            data["profiled_nuisance_names"],
+            np.asarray(["lens.centre_y", "lens.centre_x"]),
+        )
+
+    loaded = load_fisher_grid_map_npz(npz_path)
+    assert loaded.nuisance_subset == "lens_only"
+    assert loaded.profiled_nuisance_names == ["lens.centre_y", "lens.centre_x"]
+
+
+def test_grid_map_npz_roundtrip_preserves_empty_nuisance_provenance(
+    grid_setup,
+    tmp_path,
+):
+    """Round-trip an unprofiled grid map, whose direction list is empty."""
+    grid_map = replace(
+        grid_setup["grid_map"],
+        nuisance_subset="none",
+        profiled_nuisance_names=[],
+    )
+    npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "nuisance-none.npz")
+
+    loaded = load_fisher_grid_map_npz(npz_path)
+    assert loaded.nuisance_subset == "none"
+    assert loaded.profiled_nuisance_names == []
+
+
+def test_grid_map_npz_old_format_loads_missing_nuisance_provenance_as_none(
+    grid_setup,
+    tmp_path,
+):
+    """Load an archive written before the nuisance provenance existed."""
+    current = save_fisher_grid_map_npz(
+        grid_setup["grid_map"],
+        tmp_path / "current-nuisance.npz",
+    )
+    old_format = _corrupt_grid_npz(
+        current,
+        tmp_path / "old-format-nuisance.npz",
+        delete=("nuisance_subset", "profiled_nuisance_names"),
+    )
+
+    loaded = load_fisher_grid_map_npz(old_format)
+    assert loaded.nuisance_subset is None
+    assert loaded.profiled_nuisance_names is None
 
 
 def test_mismatch_grid_map_npz_roundtrip(mismatch_setup, tmp_path):

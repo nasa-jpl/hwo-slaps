@@ -45,6 +45,111 @@ production grid reproduces them to well inside a percent; a wider miss
 means the render, the grid, or the target rate moved.
 """
 
+COMMITTED_REFERENCE_PATH = (
+    PROJECT_ROOT / 'configs' / 'observing' / 'hwo_eac1_hri_reference_v1.yaml'
+)
+COMMITTED_BLANK_PIXEL_VARIANCE_E2 = 21.52056
+"""Blank-pixel variance the units audit computed for the reference.
+
+``2000 * (0.00251028 + 0.002) + 3.53553 ** 2`` in electrons squared,
+quoted to the audit's five decimals.
+"""
+
+AUDIT_ARC_SNR = 303.94
+"""Integrated source-only arc S/N the audit recovered.
+
+That value came from the depth-ladder run, which observed scene 1
+through an aberrated science PSF state and a 999 pixel kernel. A render
+through the scene's own perfect PSF concentrates the same electrons
+more tightly and therefore lands above it, so the production check
+brackets the value widely rather than pinning it.
+"""
+
+SYNTHETIC_PROFILE_SIDE = 24
+SYNTHETIC_MAGNIFICATIONS = (18.7, 11.3, 25.9, 14.1, 21.4, 9.6)
+
+
+def _committed_reference():
+    """Load the committed reference artifact."""
+    with COMMITTED_REFERENCE_PATH.open('r', encoding='utf-8') as stream:
+        return yaml.safe_load(stream)
+
+
+def _committed_baseline_sums():
+    """Map every scene config path onto its committed discrete sum."""
+    details = _committed_reference()['metadata'][
+        'source_normalization_details'
+    ]['scene_details']
+    return {
+        detail['scene_config']: detail['baseline_discrete_sum']
+        for detail in details.values()
+    }
+
+
+def _freeze_baseline_sums(monkeypatch):
+    """Serve the committed discrete render sums without the engine.
+
+    The unlensed render is the only part of the normalization solve that
+    needs autolens. Replaying the sums the committed artifact recorded
+    keeps every downstream contract testable on a bare interpreter and
+    ties the replay to the artifact rather than to a copied literal.
+    """
+    sums = _committed_baseline_sums()
+
+    def frozen_sum(scene_config_relpath):
+        if scene_config_relpath not in sums:
+            raise AssertionError(
+                f'No committed discrete sum for {scene_config_relpath}.'
+            )
+        return sums[scene_config_relpath]
+
+    monkeypatch.setattr(DERIVATION, 'unlensed_discrete_sum', frozen_sum)
+    return sums
+
+
+def _synthetic_source_profile():
+    """Return a compact non-negative profile normalized to unit sum."""
+    axis = np.linspace(-3.0, 3.0, SYNTHETIC_PROFILE_SIDE)
+    rows, columns = np.meshgrid(axis, axis, indexing='ij')
+    profile = np.exp(-((rows - 0.4) ** 2 + (columns + 0.6) ** 2))
+    return profile / float(np.sum(profile))
+
+
+def _synthetic_forward_model(monkeypatch, baseline_sums):
+    """Replace the production forward model with a linear stand-in.
+
+    Each scene keeps its own magnification, so the scenes reach one arc
+    S/N at genuinely different intrinsic rates, which is the property
+    the arc_snr mode exists to produce.
+    """
+    profile = _synthetic_source_profile()
+    magnifications = dict(
+        zip(sorted(baseline_sums), SYNTHETIC_MAGNIFICATIONS)
+    )
+    baselines = {
+        baseline['scene_config']: baseline
+        for baseline in DERIVATION.SCENE_LIGHT_BASELINES.values()
+    }
+
+    def forward(scene_config_relpath, observation, light_patch):
+        light = light_patch['lensing']['source_galaxy']['light']
+        field = DERIVATION.SCENE_NORMALIZED_FIELD[
+            baselines[scene_config_relpath]['light_type']
+        ]
+        scene = DERIVATION.load_scene_config(scene_config_relpath)
+        baseline_value = scene['lensing']['source_galaxy']['light'][field]
+        scale = light[field] / baseline_value
+        rate = baseline_sums[scene_config_relpath] * scale
+        return (
+            profile
+            * magnifications[scene_config_relpath]
+            * rate
+            * observation['exposure_time']
+        )
+
+    monkeypatch.setattr(DERIVATION, 'scene_source_electrons', forward)
+    return magnifications
+
 
 def _stub_area_report():
     """Return a minimal collecting-area report for offline document tests."""
@@ -640,3 +745,484 @@ def test_artifact_feeds_an_s1_lite_freeze_against_the_real_scenes(tmp_path):
             )
         elif detail['light_type'] == 'Image':
             assert light['flux_scale'] == 1.0
+
+
+def test_default_normalization_mode_rebuilds_the_committed_reference(
+    monkeypatch,
+):
+    """Rebuild the committed artifact and demand an exact match.
+
+    This is the value-for-value guard on the frozen default: every value
+    the committed reference carries, and every key it does not, must come
+    back unchanged from the current code. It is deliberately NOT a
+    byte-for-byte guard, because ``generation_date`` stamps the current
+    date and so a rebuild on any later day differs from the committed
+    artifact in that one field alone.
+    """
+    committed = _committed_reference()
+    _freeze_baseline_sums(monkeypatch)
+    photometry = committed['metadata']['source_photometry']
+    detector = committed['metadata']['detector']
+
+    rebuilt = DERIVATION.build_reference_document(
+        area_report=committed['metadata']['collecting_area'],
+        pixel_scale_arcsec=detector['pixel_scale_arcsec'],
+        sed_mode=photometry['sed_mode'],
+        color_ab=photometry['color_ab'],
+        mag_vband=photometry['measured_vband_magnitude_ab'],
+        exposure_s=committed['observation']['exposure_time'],
+        system_qe=committed['metadata']['throughput_chain']['value'],
+        sky_mag=detector['sky_surface_brightness_ab_per_arcsec2'],
+    )
+
+    assert rebuilt['observation'] == committed['observation']
+    assert rebuilt['source_normalization'] == committed['source_normalization']
+    rebuilt['metadata'].pop('generation_date')
+    committed['metadata'].pop('generation_date')
+    assert rebuilt['metadata'] == committed['metadata']
+    assert DERIVATION.SCRIPT_VERSION == '2'
+
+
+def test_default_normalization_mode_is_the_explicit_intrinsic_rate_mode(
+    monkeypatch,
+):
+    """Pin the default mode and its identity with the explicit request."""
+    _freeze_baseline_sums(monkeypatch)
+
+    implicit = DERIVATION.build_reference_document(
+        area_report=_stub_area_report(),
+        pixel_scale_arcsec=PIXEL_SCALE_ARCSEC,
+        sed_mode='flat_fnu',
+        color_ab=None,
+        mag_vband=None,
+        exposure_s=2000.0,
+        system_qe=0.21,
+        sky_mag=23.0,
+    )
+    explicit = DERIVATION.build_reference_document(
+        area_report=_stub_area_report(),
+        pixel_scale_arcsec=PIXEL_SCALE_ARCSEC,
+        sed_mode='flat_fnu',
+        color_ab=None,
+        mag_vband=None,
+        exposure_s=2000.0,
+        system_qe=0.21,
+        sky_mag=23.0,
+        normalization_mode='intrinsic_rate',
+    )
+
+    implicit['metadata'].pop('generation_date')
+    explicit['metadata'].pop('generation_date')
+    assert implicit == explicit
+    assert DERIVATION.NORMALIZATION_MODES == ('intrinsic_rate', 'arc_snr')
+    parser = DERIVATION._build_parser()
+    assert parser.parse_args([]).normalization_mode == 'intrinsic_rate'
+    assert parser.parse_args([]).target_arc_snr is None
+
+    normalization = implicit['metadata']['source_normalization_details']
+    assert 'normalization_mode' not in normalization
+    assert 'requested_arc_snr' not in normalization
+    for detail in normalization['scene_details'].values():
+        assert 'arc_snr_solution' not in detail
+
+
+def test_blank_pixel_variance_reproduces_the_units_audit():
+    """Reproduce the audit's blank-pixel variance from the artifact."""
+    observation = _committed_reference()['observation']
+    detector = observation['detector']
+    expected = (
+        (detector['sky_background'] + detector['dark_current'])
+        * observation['exposure_time']
+        + detector['read_noise'] ** 2
+    )
+
+    variance = DERIVATION.blank_pixel_variance_e2(observation)
+
+    assert variance == pytest.approx(expected, rel=1.0e-15)
+    assert variance == pytest.approx(
+        COMMITTED_BLANK_PIXEL_VARIANCE_E2, rel=1.0e-5
+    )
+    assert math.sqrt(variance) == pytest.approx(4.639, rel=1.0e-3)
+
+    with pytest.raises(ValueError, match='must be a positive finite number'):
+        DERIVATION.blank_pixel_variance_e2(
+            {**observation, 'exposure_time': 0.0}
+        )
+    with pytest.raises(ValueError, match='must be a non-negative finite'):
+        DERIVATION.blank_pixel_variance_e2(
+            {**observation, 'detector': {**detector, 'read_noise': -1.0}}
+        )
+    with pytest.raises(ValueError, match='detector block'):
+        DERIVATION.blank_pixel_variance_e2({'exposure_time': 2000.0})
+
+
+def test_integrated_source_snr_follows_the_per_pixel_convention():
+    """Match the per-pixel source S/N definition and reject bad maps."""
+    variance = COMMITTED_BLANK_PIXEL_VARIANCE_E2
+    electrons = _synthetic_source_profile() * 5.0e4
+    per_pixel = electrons / np.sqrt(electrons + variance)
+
+    arc_snr = DERIVATION.integrated_source_snr(electrons, variance)
+
+    assert arc_snr == pytest.approx(
+        float(np.sqrt(np.sum(per_pixel ** 2))), rel=1.0e-14
+    )
+    assert arc_snr > 0.0
+
+    with pytest.raises(ValueError, match='must not be empty'):
+        DERIVATION.integrated_source_snr(np.array([]), variance)
+    with pytest.raises(ValueError, match='must be finite'):
+        DERIVATION.integrated_source_snr(np.array([np.nan]), variance)
+    with pytest.raises(ValueError, match='must be a positive finite number'):
+        DERIVATION.integrated_source_snr(electrons, 0.0)
+    with pytest.raises(ValueError, match='not a physical electron map'):
+        DERIVATION.integrated_source_snr(np.array([-2.0 * variance]), variance)
+
+
+def test_achieved_arc_snr_increases_monotonically_with_the_scale_factor():
+    """Hold the monotonicity the arc S/N solve depends on.
+
+    The achieved value rises linearly while the blank-pixel variance
+    dominates and as the square root once source shot noise does, so it
+    is strictly increasing across the whole range and both limits are
+    recovered.
+    """
+    variance = COMMITTED_BLANK_PIXEL_VARIANCE_E2
+    profile = _synthetic_source_profile()
+    scales = np.logspace(-6.0, 6.0, 49)
+
+    achieved = [
+        DERIVATION.integrated_source_snr(profile * scale * 1.0e4, variance)
+        for scale in scales
+    ]
+
+    assert all(
+        later > earlier for earlier, later in zip(achieved, achieved[1:])
+    )
+    faint = DERIVATION.integrated_source_snr(profile * 1.0e-4, variance)
+    fainter = DERIVATION.integrated_source_snr(profile * 1.0e-5, variance)
+    assert faint / fainter == pytest.approx(10.0, rel=1.0e-6)
+    bright = DERIVATION.integrated_source_snr(profile * 1.0e10, variance)
+    brighter = DERIVATION.integrated_source_snr(profile * 1.0e12, variance)
+    assert brighter / bright == pytest.approx(10.0, rel=1.0e-4)
+
+
+def test_arc_snr_solver_hits_its_target_and_records_its_effort():
+    """Solve a monotone response and pin the recorded provenance."""
+    variance = COMMITTED_BLANK_PIXEL_VARIANCE_E2
+    profile = _synthetic_source_profile() * 4.0e4
+
+    def response(scale):
+        return DERIVATION.integrated_source_snr(profile * scale, variance)
+
+    target = 2.5 * response(1.0)
+
+    scale, record = DERIVATION.solve_arc_snr_scale(response, 1.0, target)
+
+    assert response(scale) == pytest.approx(target, rel=1.0e-6)
+    assert record['requested_arc_snr'] == target
+    assert record['achieved_arc_snr'] == pytest.approx(target, rel=1.0e-6)
+    assert record['relative_residual'] <= 1.0e-6
+    assert record['relative_tolerance'] == 1.0e-6
+    assert record['initial_scale_factor'] == 1.0
+    assert record['bracket_low_scale_factor'] <= scale
+    assert scale <= record['bracket_high_scale_factor']
+    assert record['bracket_steps'] >= 1
+    assert record['solver_iterations'] >= 1
+    assert record['forward_model_evaluations'] >= record['solver_iterations']
+    assert record['solver'].startswith('scipy.optimize.brentq')
+
+    exact_scale, exact_record = DERIVATION.solve_arc_snr_scale(
+        lambda _: 7.0, 0.25, 7.0
+    )
+    assert exact_scale == pytest.approx(0.25, rel=1.0e-12)
+    assert exact_record['bracket_steps'] == 0
+    assert exact_record['solver_iterations'] == 0
+    assert exact_record['relative_residual'] == 0.0
+    assert exact_record['forward_model_evaluations'] == 2
+
+
+def test_arc_snr_solver_raises_rather_than_returning_a_failed_bracket():
+    """Fail loudly when no scale factor reaches the requested value."""
+    def saturating(scale):
+        return 12.0 - 1.0 / (1.0 + float(scale))
+
+    with pytest.raises(ValueError, match='is not bracketed by scale'):
+        DERIVATION.solve_arc_snr_scale(saturating, 1.0, 25.0)
+
+    def vanishing(scale):
+        return 1.0e-3 + 1.0 / (1.0 + 1.0 / float(scale))
+
+    with pytest.raises(ValueError, match='is not bracketed by scale'):
+        DERIVATION.solve_arc_snr_scale(vanishing, 1.0, 1.0e-6)
+
+    def unphysical(scale):
+        return -1.0 * float(scale)
+
+    with pytest.raises(ValueError, match='must be positive and finite'):
+        DERIVATION.solve_arc_snr_scale(unphysical, 1.0, 10.0)
+
+    with pytest.raises(ValueError, match='target_arc_snr must be a positive'):
+        DERIVATION.solve_arc_snr_scale(saturating, 1.0, 0.0)
+    with pytest.raises(ValueError, match='initial_scale must be a positive'):
+        DERIVATION.solve_arc_snr_scale(saturating, 0.0, 5.0)
+
+
+def test_normalization_mode_validation_rejects_mismatched_arguments():
+    """Reject every mode and argument pairing that cannot be honoured."""
+    assert DERIVATION.validate_normalization_mode('arc_snr', 300.0) == (
+        'arc_snr'
+    )
+    assert DERIVATION.validate_normalization_mode(
+        'intrinsic_rate', None
+    ) == 'intrinsic_rate'
+
+    with pytest.raises(ValueError, match='Unknown normalization-mode'):
+        DERIVATION.validate_normalization_mode('equal_flux', None)
+    with pytest.raises(ValueError, match='does not accept --target-arc-snr'):
+        DERIVATION.validate_normalization_mode('intrinsic_rate', 300.0)
+    with pytest.raises(ValueError, match='requires --target-arc-snr'):
+        DERIVATION.validate_normalization_mode('arc_snr', None)
+    with pytest.raises(ValueError, match=r'--target-arc-snr must be a pos'):
+        DERIVATION.validate_normalization_mode('arc_snr', 0.0)
+    with pytest.raises(ValueError, match=r'--target-arc-snr must be a pos'):
+        DERIVATION.validate_normalization_mode('arc_snr', float('nan'))
+    with pytest.raises(ValueError, match=r'--target-arc-snr must be a pos'):
+        DERIVATION.validate_normalization_mode('arc_snr', -12.0)
+
+    with pytest.raises(ValueError, match='does not accept an observation'):
+        DERIVATION.scene_flux_patches(
+            PHYSICAL_TARGET_RATE_E_PER_S,
+            PIXEL_SCALE_ARCSEC,
+            observation=_committed_reference()['observation'],
+        )
+    with pytest.raises(ValueError, match='arc_snr requires an observation'):
+        DERIVATION.scene_flux_patches(
+            PHYSICAL_TARGET_RATE_E_PER_S,
+            PIXEL_SCALE_ARCSEC,
+            normalization_mode='arc_snr',
+            target_arc_snr=300.0,
+        )
+    with pytest.raises(ValueError, match='Unknown normalization-mode'):
+        DERIVATION.build_reference_document(
+            area_report=_stub_area_report(),
+            pixel_scale_arcsec=PIXEL_SCALE_ARCSEC,
+            sed_mode='flat_fnu',
+            color_ab=None,
+            mag_vband=None,
+            exposure_s=2000.0,
+            system_qe=0.21,
+            sky_mag=23.0,
+            normalization_mode='equal_flux',
+        )
+
+
+def test_arc_snr_mode_equalizes_the_arc_and_records_both_conventions(
+    monkeypatch, tmp_path
+):
+    """Solve every scene to one arc S/N and keep both conventions.
+
+    The stand-in forward model gives each scene its own magnification,
+    so equal arc S/N means unequal intrinsic rates. Both numbers, the
+    request, and the solver effort must survive into the artifact.
+    """
+    baseline_sums = _freeze_baseline_sums(monkeypatch)
+    magnifications = _synthetic_forward_model(monkeypatch, baseline_sums)
+    target = 250.0
+
+    document = DERIVATION.build_reference_document(
+        area_report=_stub_area_report(),
+        pixel_scale_arcsec=PIXEL_SCALE_ARCSEC,
+        sed_mode='flat_fnu',
+        color_ab=None,
+        mag_vband=None,
+        exposure_s=2000.0,
+        system_qe=0.21,
+        sky_mag=23.0,
+        normalization_mode='arc_snr',
+        target_arc_snr=target,
+    )
+
+    normalization = document['metadata']['source_normalization_details']
+    assert normalization['normalization_mode'] == 'arc_snr'
+    assert normalization['requested_arc_snr'] == target
+    assert normalization['arc_snr_blank_pixel_variance_e2'] == (
+        DERIVATION.blank_pixel_variance_e2(document['observation'])
+    )
+    assert 'SNR_arc' in normalization['arc_snr_formula']
+    assert 'subhalo is disabled' in normalization['arc_snr_forward_model']
+    assert 'photometric anchor' in normalization['target_rate_note']
+
+    realized = {}
+    for label, detail in normalization['scene_details'].items():
+        solution = detail['arc_snr_solution']
+        field = detail['normalized_field']
+        assert detail['normalization_mode'] == 'arc_snr'
+        assert solution['requested_arc_snr'] == target
+        assert solution['achieved_arc_snr'] == pytest.approx(
+            target, rel=1.0e-6
+        )
+        assert solution['relative_residual'] <= 1.0e-6
+        assert solution['solver_iterations'] >= 1
+        assert solution['forward_model_evaluations'] >= 1
+        assert detail['realized_rate_e_per_s'] == pytest.approx(
+            detail['baseline_discrete_sum'] * detail['scale_factor'],
+            rel=1.0e-15,
+        )
+        patch = document['source_normalization'][label]
+        light = patch['lensing']['source_galaxy']['light']
+        assert light[field] == detail[field]
+        realized[detail['scene_config']] = detail['realized_rate_e_per_s']
+
+    assert len(set(realized.values())) == len(realized)
+    ranked = sorted(realized, key=lambda path: magnifications[path])
+    rates = [realized[path] for path in ranked]
+    assert rates == sorted(rates, reverse=True)
+
+    path = tmp_path / 'arc_snr_reference.yaml'
+    DERIVATION.write_reference_document(path, document)
+    with path.open('r', encoding='utf-8') as stream:
+        assert yaml.safe_load(stream) == document
+    DERIVATION._print_arc_snr_summary(normalization)
+
+
+def test_arc_snr_mode_leaves_the_observation_block_untouched(monkeypatch):
+    """Change only the source normalization, never the detector."""
+    baseline_sums = _freeze_baseline_sums(monkeypatch)
+    _synthetic_forward_model(monkeypatch, baseline_sums)
+    parameters = {
+        'area_report': _stub_area_report(),
+        'pixel_scale_arcsec': PIXEL_SCALE_ARCSEC,
+        'sed_mode': 'flat_fnu',
+        'color_ab': None,
+        'mag_vband': None,
+        'exposure_s': 2000.0,
+        'system_qe': 0.21,
+        'sky_mag': 23.0,
+    }
+
+    intrinsic = DERIVATION.build_reference_document(**parameters)
+    arc = DERIVATION.build_reference_document(
+        normalization_mode='arc_snr', target_arc_snr=250.0, **parameters
+    )
+
+    assert arc['observation'] == intrinsic['observation']
+    assert arc['metadata']['source_photometry'] == (
+        intrinsic['metadata']['source_photometry']
+    )
+    assert set(arc['source_normalization']) == set(
+        intrinsic['source_normalization']
+    )
+    for label, patch in arc['source_normalization'].items():
+        baseline_patch = intrinsic['source_normalization'][label]
+        assert set(patch['lensing']['source_galaxy']['light']) == set(
+            baseline_patch['lensing']['source_galaxy']['light']
+        )
+        assert patch != baseline_patch
+
+
+def test_arc_snr_cli_requires_its_target_before_any_derivation(tmp_path):
+    """Refuse an arc_snr run without a target ahead of the pupil work."""
+    path = tmp_path / 'hwo_eac1_hri_reference_v1.yaml'
+
+    with pytest.raises(ValueError, match='requires --target-arc-snr'):
+        DERIVATION.main(
+            ['--output', str(path), '--normalization-mode', 'arc_snr']
+        )
+    with pytest.raises(ValueError, match='does not accept --target-arc-snr'):
+        DERIVATION.main(['--output', str(path), '--target-arc-snr', '300.0'])
+
+    assert not path.exists()
+
+
+def test_production_forward_model_matches_the_engine_noise_map():
+    """Observe a real scene and reproduce the engine's own source S/N.
+
+    This is the arc S/N unit contract against the production pipeline:
+    the electrons this module hands the solver, divided by the engine
+    noise map, must integrate to exactly the value the closed formula
+    gives. The committed artifact supplies both the observation block
+    and the scene normalization, so the check runs on the frozen
+    reference rather than on invented numbers.
+    """
+    pytest.importorskip('autolens')
+    pytest.importorskip('hcipy')
+    noise_models = pytest.importorskip('hwoslaps.observation.noise_models')
+
+    reference = _committed_reference()
+    observation = reference['observation']
+    label = 'scene1_smooth_ring'
+    relpath = DERIVATION.SCENE_LIGHT_BASELINES[label]['scene_config']
+    patch = reference['source_normalization'][label]
+    detail = reference['metadata']['source_normalization_details'][
+        'scene_details'
+    ][label]
+    variance = DERIVATION.blank_pixel_variance_e2(observation)
+
+    electrons = DERIVATION.scene_source_electrons(relpath, observation, patch)
+
+    assert electrons.shape == tuple(detail['grid_shape'])
+    assert np.all(np.isfinite(electrons))
+    noise_adu = noise_models.create_noise_map(
+        source_eps=np.maximum(electrons, 0.0) / observation['exposure_time'],
+        exposure_time=observation['exposure_time'],
+        detector_config=observation['detector'],
+    )
+    engine_snr = electrons / observation['detector']['gain'] / noise_adu
+    arc_snr = DERIVATION.integrated_source_snr(electrons, variance)
+
+    assert arc_snr == pytest.approx(
+        float(np.sqrt(np.sum(engine_snr ** 2))), rel=1.0e-12
+    )
+    magnification = float(np.sum(electrons)) / (
+        detail['realized_rate_e_per_s'] * observation['exposure_time']
+    )
+    assert 10.0 < magnification < 30.0
+    assert AUDIT_ARC_SNR / 3.0 < arc_snr < AUDIT_ARC_SNR * 6.0
+
+
+def test_arc_snr_solve_converges_through_the_production_forward_model():
+    """Solve one real scene end to end and hit the target to 1e-6.
+
+    The target is set from the achieved value at the intrinsic-rate
+    scale factor, so the bracket search closes in one step and the solve
+    stays affordable while still exercising the real lensing render, the
+    real PSF convolution, and Brent's method on the log scale.
+    """
+    pytest.importorskip('autolens')
+    pytest.importorskip('hcipy')
+
+    reference = _committed_reference()
+    observation = reference['observation']
+    label = 'scene1_smooth_ring'
+    baseline = DERIVATION.SCENE_LIGHT_BASELINES[label]
+    relpath = baseline['scene_config']
+    field = DERIVATION.SCENE_NORMALIZED_FIELD[baseline['light_type']]
+    light = DERIVATION.load_scene_config(relpath)['lensing'][
+        'source_galaxy'
+    ]['light']
+    detail = reference['metadata']['source_normalization_details'][
+        'scene_details'
+    ][label]
+
+    response = DERIVATION.scene_arc_snr_response(
+        relpath, field, light[field], observation
+    )
+    initial_scale = detail['scale_factor']
+    target = 1.5 * response(initial_scale)
+
+    scale, record = DERIVATION.solve_arc_snr_scale(
+        response, initial_scale, target
+    )
+
+    assert scale > initial_scale
+    assert record['achieved_arc_snr'] == pytest.approx(target, rel=1.0e-6)
+    assert record['relative_residual'] <= 1.0e-6
+    assert record['bracket_steps'] == 1
+    assert record['solver_iterations'] >= 1
+    assert record['bracket_low_scale_factor'] == pytest.approx(
+        initial_scale, rel=1.0e-14
+    )
+    assert record['bracket_high_scale_factor'] == pytest.approx(
+        initial_scale * DERIVATION.ARC_SNR_BRACKET_FACTOR, rel=1.0e-14
+    )

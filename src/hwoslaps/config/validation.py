@@ -235,6 +235,44 @@ def _validate_sersic_component(component: Dict[str, Any], key_path: str) -> None
     )
 
 
+def _validate_subhalo_truncation(truncation: Dict[str, Any], key_path: str) -> None:
+    """Validate the truncation block of a truncated NFW subhalo.
+
+    Parameters
+    ----------
+    truncation : `dict`
+        The ``lensing.subhalo.truncation`` block.
+    key_path : `str`
+        Configuration path used in error messages.
+
+    Raises
+    ------
+    ValueError
+        Raised when the mode is unsupported, when a mode-specific parameter
+        is missing or supplied for a mode that does not accept it, or when a
+        value is not finite and positive.
+    """
+    _require_type(truncation, dict, key_path)
+    mode = _require(truncation, 'mode', key_path)
+    _require_type(mode, str, f'{key_path}.mode')
+    if mode == 'scale_ratio':
+        _reject_unknown_keys(truncation, {'mode', 'tau'}, key_path)
+        _require_positive_finite_number(
+            _require(truncation, 'tau', key_path),
+            f'{key_path}.tau',
+        )
+    elif mode == 'explicit_arcsec':
+        _reject_unknown_keys(truncation, {'mode', 'radius_arcsec'}, key_path)
+        _require_positive_finite_number(
+            _require(truncation, 'radius_arcsec', key_path),
+            f'{key_path}.radius_arcsec',
+        )
+    else:
+        raise ValueError(
+            f"{key_path}.mode must be one of: 'scale_ratio', 'explicit_arcsec'"
+        )
+
+
 def validate_top_level(config: Dict[str, Any]) -> None:
     """Validate the required top-level configuration sections.
 
@@ -449,8 +487,11 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(enabled, bool, 'lensing.subhalo.enabled')
     if enabled:
         model = _require(subhalo, 'model', 'lensing.subhalo')
-        if model not in {'PointMass', 'SIS', 'NFW'}:
-            raise ValueError("lensing.subhalo.model must be one of: 'PointMass', 'SIS', 'NFW'")
+        if model not in {'PointMass', 'SIS', 'NFW', 'NFWTruncated'}:
+            raise ValueError(
+                "lensing.subhalo.model must be one of: 'PointMass', 'SIS', "
+                "'NFW', 'NFWTruncated'"
+            )
         mass_val = _require(subhalo, 'mass', 'lensing.subhalo')
         try:
             mass_float = float(mass_val)
@@ -458,15 +499,20 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
             raise ValueError("lensing.subhalo.mass must be a number")
         if not math.isfinite(mass_float) or mass_float <= 0:
             raise ValueError("lensing.subhalo.mass must be positive")
-        if model == 'NFW':
+        if model in {'NFW', 'NFWTruncated'}:
             # NFW runs must declare concentration provenance explicitly.
             concentration = _require(subhalo, 'concentration', 'lensing.subhalo')
             _require_type(concentration, dict, 'lensing.subhalo.concentration')
+            _reject_unknown_keys(
+                concentration,
+                {'model', 'x_sub', 'h', 'c200', 'offset_dex'},
+                'lensing.subhalo.concentration',
+            )
             concentration_model = _require(concentration, 'model', 'lensing.subhalo.concentration')
-            if concentration_model not in {'moline2017_eq7', 'power_law'}:
+            if concentration_model not in {'moline2017_eq7', 'power_law', 'explicit'}:
                 raise ValueError(
                     "lensing.subhalo.concentration.model must be one of: "
-                    "'moline2017_eq7', 'power_law'"
+                    "'moline2017_eq7', 'power_law', 'explicit'"
                 )
             if concentration_model == 'moline2017_eq7':
                 _require_bounded_positive_number(
@@ -489,6 +535,59 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
                         h_val,
                         "lensing.subhalo.concentration.h",
                     )
+            if concentration_model == 'explicit':
+                # The explicit model declares c200 and uses no relation, so
+                # it accepts none of the relation inputs.
+                _reject_unknown_keys(
+                    concentration,
+                    {'model', 'c200', 'offset_dex'},
+                    'lensing.subhalo.concentration',
+                )
+                _require_positive_finite_number(
+                    _require(concentration, 'c200', 'lensing.subhalo.concentration'),
+                    "lensing.subhalo.concentration.c200",
+                )
+            elif 'c200' in concentration:
+                raise ValueError(
+                    "lensing.subhalo.concentration.c200 is supported only when "
+                    "lensing.subhalo.concentration.model is 'explicit'"
+                )
+            if concentration_model == 'power_law':
+                # The power-law relation reads only mass and lens redshift,
+                # so accepting the Moline inputs here would let a mistargeted
+                # override run successfully while changing nothing.
+                _reject_unknown_keys(
+                    concentration,
+                    {'model', 'offset_dex'},
+                    'lensing.subhalo.concentration',
+                )
+            # Every concentration model accepts the optional log10 offset.
+            if concentration.get('offset_dex') is not None:
+                _require_finite_number(
+                    concentration['offset_dex'],
+                    "lensing.subhalo.concentration.offset_dex",
+                )
+        if model == 'NFWTruncated':
+            _validate_subhalo_truncation(
+                _require(subhalo, 'truncation', 'lensing.subhalo'),
+                'lensing.subhalo.truncation',
+            )
+        elif 'truncation' in subhalo:
+            raise ValueError(
+                "lensing.subhalo.truncation is supported only when "
+                "lensing.subhalo.model is 'NFWTruncated'"
+            )
+        if model not in {'NFW', 'NFWTruncated'} and (
+            subhalo.get('concentration') is not None
+        ):
+            # PointMass and SIS ignore concentration entirely, so silently
+            # accepting the block would let a panel override appear to take
+            # effect while changing nothing about the injected profile.
+            raise ValueError(
+                "lensing.subhalo.concentration is supported only when "
+                "lensing.subhalo.model is 'NFW' or 'NFWTruncated'; remove the "
+                "block or set it to null"
+            )
         position = _require(subhalo, 'position', 'lensing.subhalo')
         _require_type(position, dict, 'lensing.subhalo.position')
         ptype = _require(position, 'type', 'lensing.subhalo.position')
@@ -1191,6 +1290,8 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         'finite_diff',
         'map',
         'mask_mode',
+        'mask_annulus',
+        'nuisance_subset',
         'include_psf_nuisance',
         'compute_psf_mode_scan',
         'mode_scan_z_tolerance',
@@ -1211,10 +1312,106 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
 
     mask_mode = fisher.get('mask_mode', 'source_snr')
     _require_type(mask_mode, str, 'modeling.fisher.mask_mode')
-    if mask_mode.lower() not in {'source_snr', 'all_pixels'}:
+    mask_mode = mask_mode.lower()
+    if mask_mode not in {'source_snr', 'all_pixels', 'fixed_annulus'}:
         raise ValueError(
-            "modeling.fisher.mask_mode must be one of: 'source_snr', 'all_pixels'"
+            "modeling.fisher.mask_mode must be one of: 'source_snr', "
+            "'all_pixels', 'fixed_annulus'"
         )
+
+    mask_annulus = fisher.get('mask_annulus')
+    if mask_mode == 'fixed_annulus':
+        if mask_annulus is None:
+            raise ValueError(
+                "modeling.fisher.mask_annulus is required when "
+                "modeling.fisher.mask_mode is 'fixed_annulus'"
+            )
+        _require_type(mask_annulus, dict, 'modeling.fisher.mask_annulus')
+        _reject_unknown_keys(
+            mask_annulus,
+            {'inner_arcsec', 'outer_arcsec', 'centre'},
+            'modeling.fisher.mask_annulus',
+        )
+        inner_arcsec = _require_nonnegative_finite_number(
+            _require(mask_annulus, 'inner_arcsec', 'modeling.fisher.mask_annulus'),
+            'modeling.fisher.mask_annulus.inner_arcsec',
+        )
+        outer_arcsec = _require_positive_finite_number(
+            _require(mask_annulus, 'outer_arcsec', 'modeling.fisher.mask_annulus'),
+            'modeling.fisher.mask_annulus.outer_arcsec',
+        )
+        if outer_arcsec <= inner_arcsec:
+            raise ValueError(
+                "modeling.fisher.mask_annulus.outer_arcsec must be > inner_arcsec"
+            )
+        annulus_centre = mask_annulus.get('centre', 'lens')
+        _require_type(annulus_centre, str, 'modeling.fisher.mask_annulus.centre')
+        if annulus_centre.lower() not in {'lens', 'grid'}:
+            raise ValueError(
+                "modeling.fisher.mask_annulus.centre must be one of: 'lens', 'grid'"
+            )
+    elif mask_annulus is not None:
+        raise ValueError(
+            "modeling.fisher.mask_annulus is only accepted when "
+            "modeling.fisher.mask_mode is 'fixed_annulus'"
+        )
+
+    nuisance_subset = fisher.get('nuisance_subset')
+    if nuisance_subset is not None:
+        reserved_subsets = {
+            'all',
+            'none',
+            'lens_only',
+            'source_only',
+            'lens_and_source',
+        }
+        if isinstance(nuisance_subset, str):
+            if nuisance_subset.lower() not in reserved_subsets:
+                raise ValueError(
+                    "modeling.fisher.nuisance_subset must be one of: "
+                    + ", ".join(f"'{word}'" for word in sorted(reserved_subsets))
+                    + ", or a list of nuisance direction names"
+                )
+            if (
+                nuisance_subset.lower() == 'none'
+                and fisher.get('include_psf_nuisance') is True
+            ):
+                # 'none' promises that profiled information equals raw
+                # information. PSF fit directions are appended after the
+                # scalar selection and would still be profiled, so the
+                # combination silently breaks that promise.
+                raise ValueError(
+                    "modeling.fisher.nuisance_subset 'none' requires "
+                    "modeling.fisher.include_psf_nuisance to be false; "
+                    "PSF fit directions are profiled independently of the "
+                    "scalar subset, so the combination would still profile "
+                    "the PSF modes"
+                )
+        elif isinstance(nuisance_subset, list):
+            if len(nuisance_subset) == 0:
+                raise ValueError(
+                    "modeling.fisher.nuisance_subset must be non-empty when "
+                    "given as a list; use 'none' to profile no nuisance "
+                    "directions"
+                )
+            seen_names = set()
+            for idx, name in enumerate(nuisance_subset):
+                if not isinstance(name, str) or not name.strip():
+                    raise ValueError(
+                        f"modeling.fisher.nuisance_subset[{idx}] must be a "
+                        "non-empty nuisance direction name"
+                    )
+                if name.strip() in seen_names:
+                    raise ValueError(
+                        "modeling.fisher.nuisance_subset contains duplicate "
+                        f"direction '{name.strip()}'"
+                    )
+                seen_names.add(name.strip())
+        else:
+            raise ValueError(
+                "modeling.fisher.nuisance_subset must be a reserved word or a "
+                "list of nuisance direction names"
+            )
 
     include_psf_nuisance = fisher.get('include_psf_nuisance', False)
     _require_type(include_psf_nuisance, bool, 'modeling.fisher.include_psf_nuisance')

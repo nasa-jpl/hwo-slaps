@@ -93,6 +93,88 @@ def test_moline_concentration_rejects_unsupported_domain(mass_msun, x_sub):
         )
 
 
+def test_nfw_truncation_radius_scales_the_scale_radius():
+    """Scale the NFW scale radius by tau in scale-ratio mode."""
+    got = MASS_MODELS.nfw_truncation_radius_arcsec(
+        "scale_ratio",
+        0.25,
+        tau=10.0,
+    )
+    assert got == 2.5
+
+
+def test_nfw_truncation_radius_returns_the_declared_radius():
+    """Return the declared truncation radius in explicit-arcsec mode."""
+    got = MASS_MODELS.nfw_truncation_radius_arcsec(
+        "explicit_arcsec",
+        0.25,
+        radius_arcsec=0.05,
+    )
+    assert got == 0.05
+
+
+@pytest.mark.parametrize("bad_tau", [0.0, -1.0, np.nan, np.inf, -np.inf, True])
+def test_nfw_truncation_radius_rejects_invalid_tau(bad_tau):
+    """Reject a tau that is not finite and positive."""
+    with pytest.raises(ValueError, match="tau must be a finite positive number"):
+        MASS_MODELS.nfw_truncation_radius_arcsec("scale_ratio", 0.25, tau=bad_tau)
+
+
+@pytest.mark.parametrize("bad_radius", [0.0, -0.05, np.nan, np.inf, -np.inf, True])
+def test_nfw_truncation_radius_rejects_invalid_explicit_radius(bad_radius):
+    """Reject an explicit truncation radius that is not finite and positive."""
+    with pytest.raises(
+        ValueError,
+        match="radius_arcsec must be a finite positive number",
+    ):
+        MASS_MODELS.nfw_truncation_radius_arcsec(
+            "explicit_arcsec",
+            0.25,
+            radius_arcsec=bad_radius,
+        )
+
+
+@pytest.mark.parametrize("bad_scale_radius", [0.0, -0.25, np.nan, np.inf])
+def test_nfw_truncation_radius_rejects_invalid_scale_radius(bad_scale_radius):
+    """Reject a scale radius that is not finite and positive."""
+    with pytest.raises(ValueError, match="scale_radius_arcsec"):
+        MASS_MODELS.nfw_truncation_radius_arcsec(
+            "scale_ratio",
+            bad_scale_radius,
+            tau=10.0,
+        )
+
+
+@pytest.mark.parametrize("bad_mode", ["scale-ratio", "explicit", "", None, 10.0])
+def test_nfw_truncation_radius_rejects_unknown_mode(bad_mode):
+    """Reject a truncation mode outside the supported set."""
+    with pytest.raises(ValueError, match="Unsupported truncation mode"):
+        MASS_MODELS.nfw_truncation_radius_arcsec(bad_mode, 0.25, tau=10.0)
+
+
+@pytest.mark.parametrize(
+    "mode,kwargs,expected_error",
+    [
+        ("scale_ratio", {}, "tau is required"),
+        (
+            "scale_ratio",
+            {"tau": 10.0, "radius_arcsec": 0.05},
+            "radius_arcsec is not accepted",
+        ),
+        ("explicit_arcsec", {}, "radius_arcsec is required"),
+        (
+            "explicit_arcsec",
+            {"tau": 10.0, "radius_arcsec": 0.05},
+            "tau is not accepted",
+        ),
+    ],
+)
+def test_nfw_truncation_radius_rejects_cross_mode_parameters(mode, kwargs, expected_error):
+    """Reject truncation parameters that the selected mode does not accept."""
+    with pytest.raises(ValueError, match=expected_error):
+        MASS_MODELS.nfw_truncation_radius_arcsec(mode, 0.25, **kwargs)
+
+
 @pytest.mark.parametrize("offset_pixels", [-100.0, -101.0])
 def test_einstein_ring_position_rejects_non_positive_final_radius(offset_pixels):
     """Reject an inward offset that drives the radius to zero."""

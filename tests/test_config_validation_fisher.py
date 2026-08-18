@@ -302,6 +302,135 @@ def test_fisher_rejects_invalid_mask_mode():
         validation.validate_or_raise(config)
 
 
+def test_fisher_accepts_fixed_annulus_mask():
+    """Accept the fixed-annulus mask with a well-formed annulus block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["mask_mode"] = "fixed_annulus"
+    config["modeling"]["fisher"]["mask_annulus"] = {
+        "inner_arcsec": 0.6,
+        "outer_arcsec": 1.4,
+        "centre": "lens",
+    }
+
+    validation.validate_or_raise(config)
+
+
+def test_fisher_fixed_annulus_requires_annulus_block():
+    """Reject the fixed-annulus mask with no annulus block."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["mask_mode"] = "fixed_annulus"
+
+    with pytest.raises(ValueError, match="mask_annulus is required"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("mask_mode", ["source_snr", "all_pixels"])
+def test_fisher_rejects_annulus_block_for_other_mask_modes(mask_mode):
+    """Reject an annulus block supplied for a mask mode that ignores it."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["mask_mode"] = mask_mode
+    config["modeling"]["fisher"]["mask_annulus"] = {
+        "inner_arcsec": 0.6,
+        "outer_arcsec": 1.4,
+    }
+
+    with pytest.raises(ValueError, match="mask_annulus is only accepted"):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "annulus, match",
+    [
+        ({"outer_arcsec": 1.4}, "Missing required key 'inner_arcsec'"),
+        ({"inner_arcsec": 0.6}, "Missing required key 'outer_arcsec'"),
+        (
+            {"inner_arcsec": -0.1, "outer_arcsec": 1.4},
+            "inner_arcsec must be non-negative",
+        ),
+        (
+            {"inner_arcsec": float("nan"), "outer_arcsec": 1.4},
+            "inner_arcsec must be finite",
+        ),
+        (
+            {"inner_arcsec": True, "outer_arcsec": 1.4},
+            "inner_arcsec must be numeric",
+        ),
+        (
+            {"inner_arcsec": 0.6, "outer_arcsec": 0.0},
+            "outer_arcsec must be positive",
+        ),
+        (
+            {"inner_arcsec": 0.6, "outer_arcsec": float("inf")},
+            "outer_arcsec must be finite",
+        ),
+        (
+            {"inner_arcsec": 1.4, "outer_arcsec": 1.4},
+            "outer_arcsec must be > inner_arcsec",
+        ),
+        (
+            {"inner_arcsec": 0.6, "outer_arcsec": 1.4, "centre": "source"},
+            "centre must be one of",
+        ),
+        (
+            {"inner_arcsec": 0.6, "outer_arcsec": 1.4, "centre": 3},
+            "mask_annulus.centre",
+        ),
+        (
+            {"inner_arcsec": 0.6, "outer_arcsec": 1.4, "radius": 1.0},
+            "unsupported keys: radius",
+        ),
+    ],
+)
+def test_fisher_rejects_malformed_annulus_block(annulus, match):
+    """Reject every malformed fixed-annulus declaration."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["mask_mode"] = "fixed_annulus"
+    config["modeling"]["fisher"]["mask_annulus"] = annulus
+
+    with pytest.raises(ValueError, match=match):
+        validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "subset",
+    [
+        "all",
+        "none",
+        "lens_only",
+        "source_only",
+        "lens_and_source",
+        ["lens.centre_y", "source.intensity"],
+    ],
+)
+def test_fisher_accepts_valid_nuisance_subsets(subset):
+    """Accept every reserved subset word and an explicit name list."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["nuisance_subset"] = subset
+
+    validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize(
+    "subset, match",
+    [
+        ("lens_and_background", "nuisance_subset must be one of"),
+        ([], "must be non-empty"),
+        (["lens.centre_y", "lens.centre_y"], "duplicate direction"),
+        (["lens.centre_y", 3], r"nuisance_subset\[1\]"),
+        (["  "], r"nuisance_subset\[0\]"),
+        (True, "must be a reserved word"),
+        ({"lens": True}, "must be a reserved word"),
+    ],
+)
+def test_fisher_rejects_malformed_nuisance_subset(subset, match):
+    """Reject unknown words, empty lists, duplicates and mistyped entries."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["nuisance_subset"] = subset
+
+    with pytest.raises(ValueError, match=match):
+        validation.validate_or_raise(config)
+
+
 def test_fisher_rejects_nonpositive_psf_mode_step():
     """Reject a non-positive PSF mode finite-difference step."""
     config = _with_valid_fisher_block(_load_master_config())
