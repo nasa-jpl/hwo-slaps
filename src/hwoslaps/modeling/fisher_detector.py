@@ -29,6 +29,7 @@ making requirement-level claims.
 from __future__ import annotations
 
 import contextlib
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 import io
 import multiprocessing
 import os
@@ -231,6 +232,51 @@ _GRID_WORKER_ENV = {
 }
 
 
+def _supervised_ordered_map(
+    func,
+    items,
+    num_workers,
+    initializer=None,
+    initargs=(),
+):
+    """Yield ordered task results while supervising worker health."""
+    context = multiprocessing.get_context("spawn")
+    executor = ProcessPoolExecutor(
+        max_workers=num_workers,
+        mp_context=context,
+        initializer=initializer,
+        initargs=initargs,
+    )
+    pending = {}
+    buffered = {}
+    items_iter = iter(items)
+    next_submit = 0
+    next_yield = 0
+    max_pending = max(1, num_workers * 2)
+    try:
+        while pending or next_submit == 0:
+            while len(pending) < max_pending:
+                try:
+                    item = next(items_iter)
+                except StopIteration:
+                    break
+                pending[executor.submit(func, item)] = next_submit
+                next_submit += 1
+            if not pending:
+                break
+            done, _ = wait(pending, return_when=FIRST_COMPLETED)
+            for future in done:
+                index = pending.pop(future)
+                buffered[index] = future.result()
+            while next_yield in buffered:
+                yield buffered.pop(next_yield)
+                next_yield += 1
+        executor.shutdown(wait=True)
+    except BaseException:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+
+
 def _grid_worker_init(
     config_template: Dict[str, Any],
     kernel_native: np.ndarray,
@@ -241,6 +287,15 @@ def _grid_worker_init(
     truth_kernel_pixel_scales=None,
     truth_config_template: Optional[Dict[str, Any]] = None,
 ) -> None:
+    os.environ.update(_GRID_WORKER_ENV)
+    # The spawned worker imports numpy before this initializer runs, so
+    # BLAS pools may already be sized from the pre-update environment;
+    # the runtime limiter is what actually guarantees single-threaded,
+    # order-deterministic kernels, and it must stay referenced for the
+    # worker's lifetime.
+    from threadpoolctl import threadpool_limits
+
+    _GRID_WORKER_STATE["threadpool_limiter"] = threadpool_limits(limits=1)
     _GRID_WORKER_STATE["config_template"] = config_template
     _GRID_WORKER_STATE["kernel"] = make_pyauto_kernel(
         values=kernel_native,
@@ -1050,7 +1105,8 @@ class FisherDetector:
 
         Templates are generated, projected, and discarded in batches so
         memory stays flat regardless of grid size.  With
-        ``map.num_workers > 1`` template generation fans out over spawned
+        ``map.num_workers > 1`` (or the ``HWOSLAPS_FISHER_GRID_WORKERS``
+        runtime override) template generation fans out over spawned
         worker processes; the statistical evaluation always runs in the
         parent against the workspace built at construction time.
 
@@ -1065,7 +1121,8 @@ class FisherDetector:
         layout = self._grid_layout()
         positions = list(layout.positions_yx)
         n_positions = len(positions)
-        num_workers = int(self.map_config.get("num_workers", 1))
+        num_workers = self._grid_num_workers()
+        runtime_provenance = self._grid_runtime_provenance()
         threshold = float(self.map_config.get("detection_q_threshold", 10.0))
 
         start = perf_counter()
@@ -1247,6 +1304,7 @@ class FisherDetector:
             max_z_spurious=max_z_spurious,
             source_image_asset_path=source_image_asset.get("asset_path"),
             source_image_asset_sha256_16=source_image_asset.get("sha256_16"),
+            runtime_provenance=runtime_provenance,
             nuisance_subset=self.nuisance_subset_label,
             profiled_nuisance_names=list(self.nuisance_names),
         )
@@ -1346,23 +1404,13 @@ class FisherDetector:
                 else None
             ),
         )
-        saved_env = {key: os.environ.get(key) for key in _GRID_WORKER_ENV}
-        os.environ.update(_GRID_WORKER_ENV)
-        try:
-            context = multiprocessing.get_context("spawn")
-            with context.Pool(
-                processes=num_workers,
-                initializer=_grid_worker_init,
-                initargs=initargs,
-            ) as pool:
-                chunksize = max(1, len(positions) // (num_workers * 8))
-                yield from pool.imap(_grid_worker_signal, positions, chunksize=chunksize)
-        finally:
-            for key, value in saved_env.items():
-                if value is None:
-                    os.environ.pop(key, None)
-                else:
-                    os.environ[key] = value
+        yield from _supervised_ordered_map(
+            _grid_worker_signal,
+            positions,
+            num_workers=num_workers,
+            initializer=_grid_worker_init,
+            initargs=initargs,
+        )
 
     # ------------------------------------------------------------------
     # Forward-model runtime helpers
@@ -1397,6 +1445,46 @@ class FisherDetector:
     def _timing_enabled() -> bool:
         disable_env = os.environ.get("HWOSLAPS_DISABLE_FISHER_TIMING", "").strip().lower()
         return disable_env not in {"1", "true", "yes", "on"}
+
+    def _grid_num_workers(self) -> int:
+        """Return the template-worker count for this grid map.
+
+        ``modeling.fisher.map.num_workers`` is part of the configuration
+        that provenance hashes, so widening the pool by editing it would
+        change the recorded identity of an otherwise identical map.
+        ``HWOSLAPS_FISHER_GRID_WORKERS`` widens it for one process
+        instead: every node is still produced by the same serial
+        template code, only in a different process.
+        """
+        engine = str(self.map_config.get("engine", "reference")).lower()
+        configured = int(self.map_config.get("num_workers", 1))
+        if engine == "jax":
+            return configured
+        raw = os.environ.get("HWOSLAPS_FISHER_GRID_WORKERS", "").strip()
+        if not raw:
+            return configured
+        workers = int(raw)
+        if workers <= 0:
+            raise ValueError(
+                "HWOSLAPS_FISHER_GRID_WORKERS must be a positive integer"
+            )
+        return workers
+
+    def _grid_runtime_provenance(self) -> Dict[str, Any]:
+        """Return requested and effective grid parallelism metadata."""
+        requested = int(self.map_config.get("num_workers", 1))
+        engine = str(self.map_config.get("engine", "reference")).lower()
+        if engine == "jax":
+            effective = 1
+            start_method = "jax"
+        else:
+            effective = self._grid_num_workers()
+            start_method = "spawn" if effective > 1 else "serial"
+        return {
+            "fisher_grid_workers_requested": requested,
+            "fisher_grid_workers_effective": effective,
+            "fisher_grid_start_method": start_method,
+        }
 
     def _timed_call(
         self,

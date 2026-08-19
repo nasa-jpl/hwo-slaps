@@ -1523,6 +1523,7 @@ def test_fisher_detection_transports_delta_provenance(
         "git_dirty",
         "git_dirty_paths",
         "git_diff_sha256",
+        "worktree_diff_sha256",
     }
     assert _aberrations_from_wire(
         delta["draw_aberrations"]
@@ -1593,6 +1594,7 @@ def test_executor_records_revision_provenance(compact_config):
         "git_dirty",
         "git_dirty_paths",
         "git_diff_sha256",
+        "worktree_diff_sha256",
     }
     # The suite runs from repository checkouts by project policy, so the
     # record must actually resolve the executing source revision.

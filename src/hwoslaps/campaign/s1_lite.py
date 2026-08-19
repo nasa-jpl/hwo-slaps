@@ -74,6 +74,8 @@ import uuid as uuid_module
 
 import yaml
 
+from hwoslaps.provenance import revision_provenance
+
 
 _SCHEMA_VERSION = 1
 
@@ -145,6 +147,19 @@ _FROZEN_CAMPAIGN_MEMBERS = {
 
 class CampaignError(ValueError):
     """Raised for any campaign validation, execution, or harvest failure."""
+
+
+def _check_clean_tree(require_clean_tree: bool, allow_dirty_tree: bool) -> None:
+    """Refuse production launch from a dirty source tree."""
+    if not require_clean_tree or allow_dirty_tree:
+        return
+    revision = revision_provenance()
+    if revision.get("git_dirty") is True:
+        paths = ", ".join(revision.get("git_dirty_paths") or [])
+        raise CampaignError(
+            "refusing campaign launch from dirty source tree"
+            + (f": {paths}" if paths else "")
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1309,6 +1324,8 @@ def run_campaign(
     gpu_ids=None,
     timeout_s,
     allow_rerun=False,
+    require_clean_tree=True,
+    allow_dirty_tree=False,
 ) -> dict:
     """Execute every frozen job that lacks a valid DONE sentinel.
 
@@ -1327,6 +1344,10 @@ def run_campaign(
         Whether a job whose sentinel no longer matches its artifacts may
         have those outputs discarded and be re-run. Stale artifacts are
         rejected by default.
+    require_clean_tree : `bool`, optional
+        Require a clean source tree before launching production jobs.
+    allow_dirty_tree : `bool`, optional
+        Explicit override for ``require_clean_tree``.
 
     Returns
     -------
@@ -1348,6 +1369,11 @@ def run_campaign(
     max_workers = _integer_at_least(max_workers, 1, "max_workers")
     timeout_s = _positive_number(timeout_s, "timeout_s")
     allow_rerun = _require_boolean(allow_rerun, "allow_rerun")
+    require_clean_tree = _require_boolean(
+        require_clean_tree, "require_clean_tree"
+    )
+    allow_dirty_tree = _require_boolean(allow_dirty_tree, "allow_dirty_tree")
+    _check_clean_tree(require_clean_tree, allow_dirty_tree)
     if gpu_ids is None:
         worker_gpus: list[Optional[int]] = [None]*max_workers
     else:

@@ -78,6 +78,7 @@ def perform_fisher_detection(
     local_data = None
     map_data = None
     grid_map_data = None
+    runtime_provenance = None
     if mode in {"local", "both"}:
         start = perf_counter()
         local_data = detector.compute_local(
@@ -88,6 +89,7 @@ def perform_fisher_detection(
     if mode in {"map", "both"}:
         start = perf_counter()
         if detector.map_type == "grid":
+            runtime_provenance = detector._grid_runtime_provenance()
             grid_map_data = detector.compute_grid_map()
             _log_fisher_timing("top-level grid map computation", perf_counter() - start)
         else:
@@ -122,4 +124,5 @@ def perform_fisher_detection(
         lens_mismatch_enabled=detector.lens_mismatch_enabled,
         fit_psf_mode=str(getattr(detector, "fit_psf_mode", "matched")),
         fit_psf_delta=deepcopy(getattr(detector, "fit_psf_delta", None)),
+        runtime_provenance=runtime_provenance,
     )

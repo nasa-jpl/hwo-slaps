@@ -52,9 +52,13 @@ def test_capture_provenance_records_expected_fields():
     if provenance["git_dirty"]:
         assert isinstance(provenance["git_dirty_paths"], list)
         assert isinstance(provenance["git_diff_sha256"], str)
+        # The worktree digest extends the tracked diff with untracked
+        # source files, so it only equals git_diff_sha256 when none exist.
+        assert isinstance(provenance["worktree_diff_sha256"], str)
     else:
         assert provenance["git_dirty_paths"] == []
         assert provenance["git_diff_sha256"] is None
+        assert provenance["worktree_diff_sha256"] is None
 
 
 def test_package_versions_prefer_module_version():
@@ -71,7 +75,13 @@ def test_package_versions_prefer_module_version():
 def test_capture_provenance_outside_repo_records_no_git_hash(tmp_path):
     """Record null git state when run outside the repository."""
     provenance = capture_provenance(repo_dir=tmp_path)
-    for key in ("git_hash", "git_dirty", "git_dirty_paths", "git_diff_sha256"):
+    for key in (
+        "git_hash",
+        "git_dirty",
+        "git_dirty_paths",
+        "git_diff_sha256",
+        "worktree_diff_sha256",
+    ):
         assert provenance[key] is None
 
 
@@ -121,7 +131,27 @@ def test_capture_provenance_records_full_git_state(tmp_path):
     assert dirty["git_dirty"] is True
     assert dirty["git_dirty_paths"] == ["tracked.txt"]
     assert dirty["git_diff_sha256"] == expected_diff_sha
+    assert dirty["worktree_diff_sha256"] == expected_diff_sha
     assert capture_provenance(repo_dir=repo)["git_diff_sha256"] == expected_diff_sha
+
+
+def test_capture_provenance_hashes_untracked_source_files(tmp_path):
+    """Include untracked source files in dirty runtime provenance."""
+    repo = tmp_path / "repo"
+    _init_git_repo(repo)
+    source_dir = repo / "src"
+    source_dir.mkdir()
+    source_file = source_dir / "new_module.py"
+    source_file.write_text("VALUE = 1\n", encoding="utf-8")
+
+    first = capture_provenance(repo_dir=repo)
+    assert first["git_dirty"] is True
+    assert "src/new_module.py" in first["git_dirty_paths"]
+    assert isinstance(first["worktree_diff_sha256"], str)
+
+    source_file.write_text("VALUE = 2\n", encoding="utf-8")
+    second = capture_provenance(repo_dir=repo)
+    assert second["worktree_diff_sha256"] != first["worktree_diff_sha256"]
 
 
 def test_capture_provenance_records_image_asset_identity(tmp_path):
@@ -164,6 +194,7 @@ def test_revision_provenance_records_repo_state():
         "git_dirty",
         "git_dirty_paths",
         "git_diff_sha256",
+        "worktree_diff_sha256",
     }
     assert isinstance(revision["git_hash"], str)
     assert len(revision["git_hash"]) == 40
@@ -188,6 +219,7 @@ def test_revision_provenance_null_on_subprocess_failure(monkeypatch):
         "git_dirty": None,
         "git_dirty_paths": None,
         "git_diff_sha256": None,
+        "worktree_diff_sha256": None,
     }
 
 

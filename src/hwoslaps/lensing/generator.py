@@ -269,6 +269,59 @@ def generate_lensing_system(config, full_config):
     )
 
 
+_UNIFORM_GRID_TEMPLATES = OrderedDict()
+"""Per-geometry uniform grid templates (`OrderedDict`)."""
+_UNIFORM_GRID_CACHE_SIZE = 4
+
+
+def _set_array_writeable(value, writeable, seen=None):
+    """Set the writeability of every ndarray reachable from an object."""
+    if seen is None:
+        seen = set()
+    identity = id(value)
+    if identity in seen:
+        return
+    seen.add(identity)
+    if isinstance(value, np.ndarray):
+        value.flags.writeable = writeable
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _set_array_writeable(item, writeable, seen)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            _set_array_writeable(item, writeable, seen)
+        return
+    attributes = getattr(value, "__dict__", None)
+    if attributes is not None:
+        for item in attributes.values():
+            _set_array_writeable(item, writeable, seen)
+
+
+def clear_uniform_grid_cache():
+    """Clear process-local uniform-grid templates."""
+    _UNIFORM_GRID_TEMPLATES.clear()
+
+
+def _grid_from_template(template):
+    """Return a mutable, detached grid copy from one cached template."""
+    mask = deepcopy(template.mask)
+    over_sampler = deepcopy(template.over_sampler)
+    over_sampler.mask = mask
+    if hasattr(over_sampler.sub_size, "mask"):
+        over_sampler.sub_size.mask = mask
+    grid = al.Grid2D(
+        values=np.array(template.array, dtype=float, copy=True),
+        mask=mask,
+        over_sample_size=np.array(template.over_sample_size, copy=True),
+        over_sampled=deepcopy(template.over_sampled),
+        over_sampler=over_sampler,
+    )
+    _set_array_writeable(grid, True)
+    return grid
+
+
 def _create_grid(grid_config):
     """
     Create PyAutoLens coordinate grid.
@@ -282,11 +335,29 @@ def _create_grid(grid_config):
     -------
     grid : al.Grid2D
         PyAutoLens grid object.
+
+    Notes
+    -----
+    Ray tracing over-samples the grid, and PyAutoLens builds that uniform
+    sub-pixel grid with a Python loop over every unmasked pixel, so on a
+    500x500 scene it costs seconds and dominates the per-node cost of a
+    Fisher grid map. The sub-grid depends only on the mask, the pixel
+    scales and the sub-size, all of which are fixed by ``grid_config``,
+    so one template is built per geometry and each caller receives a
+    detached `Grid2D` copy.
     """
-    return al.Grid2D.uniform(
-        shape_native=tuple(grid_config['shape']),
-        pixel_scales=grid_config['pixel_scale']
-    )
+    key = (tuple(grid_config['shape']), float(grid_config['pixel_scale']))
+    template = _UNIFORM_GRID_TEMPLATES.pop(key, None)
+    if template is None:
+        template = al.Grid2D.uniform(
+            shape_native=key[0],
+            pixel_scales=key[1]
+        )
+        _set_array_writeable(template, False)
+    _UNIFORM_GRID_TEMPLATES[key] = template
+    while len(_UNIFORM_GRID_TEMPLATES) > _UNIFORM_GRID_CACHE_SIZE:
+        _UNIFORM_GRID_TEMPLATES.popitem(last=False)
+    return _grid_from_template(template)
 
 
 def _create_lens_galaxy(lens_config):

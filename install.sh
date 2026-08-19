@@ -12,7 +12,9 @@ ENV_NAME="hwo-slaps"
 PYTHON_VERSION="3.11"
 INSTALL_GPU_JAX=0
 UPDATE_GIT_REPOS=1
-JAX_VERSION="${HWOSLAPS_JAX_VERSION:-0.4.38}"
+JAX_VERSION="0.4.38"
+PYAUTOLENS_COMMIT="10bfea51ea95"
+HCIPY_COMMIT="cc853b392463"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CHECKOUT_ROOT="${HWOSLAPS_DEV_ROOT:-$(dirname "$SCRIPT_DIR")}"
@@ -38,7 +40,6 @@ Options:
 
 Environment overrides:
   HWOSLAPS_DEV_ROOT    Default checkout root.
-  HWOSLAPS_JAX_VERSION JAX version to install. Default: 0.4.38.
   PYAUTOLENS_REPO_URL  PyAutoLens Git URL.
   HCIPY_REPO_URL       HCIPy Git URL.
   PYAUTOLENS_DIR       Existing or desired PyAutoLens checkout path.
@@ -130,6 +131,7 @@ clone_or_update() {
     local repo_url="$1"
     local target_dir="$2"
     local label="$3"
+    local commit="$4"
 
     if [[ -d "$target_dir/.git" ]]; then
         echo "Found existing $label checkout at $target_dir."
@@ -148,22 +150,41 @@ clone_or_update() {
         mkdir -p "$(dirname "$target_dir")"
         git clone "$repo_url" "$target_dir"
     fi
+
+    if ! git -C "$target_dir" cat-file -e "${commit}^{commit}" 2>/dev/null; then
+        if [[ "$UPDATE_GIT_REPOS" -ne 1 ]]; then
+            echo "Pinned $label commit $commit is not available locally."
+            exit 1
+        fi
+        git -C "$target_dir" fetch --quiet origin "$commit"
+    fi
+    git -C "$target_dir" checkout --detach "$commit"
+    [[ "$(git -C "$target_dir" rev-parse HEAD)" == \
+       "$(git -C "$target_dir" rev-parse "${commit}^{commit}")" ]]
 }
 
-clone_or_update "$PYAUTOLENS_REPO_URL" "$PYAUTOLENS_DIR" "PyAutoLens"
-clone_or_update "$HCIPY_REPO_URL" "$HCIPY_DIR" "HCIPy"
+clone_or_update "$PYAUTOLENS_REPO_URL" "$PYAUTOLENS_DIR" "PyAutoLens" "$PYAUTOLENS_COMMIT"
+clone_or_update "$HCIPY_REPO_URL" "$HCIPY_DIR" "HCIPy" "$HCIPY_COMMIT"
 
 echo "Installing base runtime and test dependencies."
 python -m pip install \
-    "numpy<2" \
-    scipy \
+    "numpy==1.26.4" \
+    "scipy==1.17.1" \
+    "scikit-learn==1.8.0" \
+    "threadpoolctl==3.6.0" \
     matplotlib \
     pyyaml \
     astropy \
     tqdm \
     numba \
     pytest \
-    nautilus-sampler
+    "nautilus-sampler==1.0.5" \
+    "autoarray==2026.5.14.2" \
+    "autofit==2026.5.14.2" \
+    "autogalaxy==2026.5.14.2" \
+    "autoconf==2026.5.14.2" \
+    "jax==0.4.38" \
+    "jaxlib==0.4.38"
 
 echo "Installing PyAutoLens from editable Git checkout."
 python -m pip install -e "$PYAUTOLENS_DIR"
@@ -176,10 +197,30 @@ python -m pip install -e "$SCRIPT_DIR"
 
 if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
     echo "Installing JAX $JAX_VERSION with CUDA 12 support."
-    python -m pip install "jax[cuda12]==$JAX_VERSION"
+    python -m pip install \
+        "jax-cuda12-plugin==0.4.38" \
+        "jax-cuda12-pjrt==0.4.38"
 else
     echo "Installing CPU JAX $JAX_VERSION."
-    python -m pip install "jax==$JAX_VERSION"
+fi
+
+echo "Reasserting the validated runtime pins after editable installs."
+python -m pip install --upgrade --no-deps \
+    "numpy==1.26.4" \
+    "scipy==1.17.1" \
+    "scikit-learn==1.8.0" \
+    "threadpoolctl==3.6.0" \
+    "nautilus-sampler==1.0.5" \
+    "autoarray==2026.5.14.2" \
+    "autofit==2026.5.14.2" \
+    "autogalaxy==2026.5.14.2" \
+    "autoconf==2026.5.14.2" \
+    "jax==0.4.38" \
+    "jaxlib==0.4.38"
+if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
+    python -m pip install --upgrade --no-deps \
+        "jax-cuda12-plugin==0.4.38" \
+        "jax-cuda12-pjrt==0.4.38"
 fi
 
 echo ""

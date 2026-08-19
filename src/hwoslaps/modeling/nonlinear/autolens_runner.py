@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import hashlib
+import atexit
+from contextlib import contextmanager
 from importlib import metadata as importlib_metadata
 import inspect
 import json
+import multiprocessing
 import os
 import time
 import zipfile
@@ -18,6 +21,9 @@ import numpy as np
 from .output_schema import NonlinearFitSummary
 
 _VISUALIZATION_ENV = "PYAUTO_SKIP_VISUALIZATION"
+_TRAINING_WORKERS_ENV = "HWOSLAPS_NAUTILUS_TRAINING_WORKERS"
+
+_TRAINING_POOLS = {}
 
 
 @dataclass(frozen=True)
@@ -663,6 +669,131 @@ def _patch_analysis_imaging_adapt_images_compat(al: Any) -> None:
     analysis_cls._hwoslaps_adapt_images_compat = True
 
 
+class _NetworkTrainingPool:
+    """Expose nautilus' ``pool.map`` seam over spawned worker processes.
+
+    Parameters
+    ----------
+    n_workers : `int`
+        Number of worker processes.
+    """
+
+    def __init__(self, n_workers: int):
+        self._pool = multiprocessing.get_context("spawn").Pool(n_workers)
+
+    def map(self, func: Any, iterable: Any) -> list:
+        """Return the results of applying one function across an iterable."""
+        return list(self._pool.map(func, iterable))
+
+    def close(self) -> None:
+        self._pool.close()
+
+    def join(self) -> None:
+        self._pool.join()
+
+    def terminate(self) -> None:
+        self._pool.terminate()
+
+
+def _training_worker_count() -> int:
+    """Return the current requested emulator-training worker count."""
+    raw = os.environ.get(_TRAINING_WORKERS_ENV, "").strip()
+    if not raw:
+        return 1
+    workers = int(raw)
+    return max(1, workers)
+
+
+def _training_pool_for_current_env():
+    """Return the current PID's pool, creating it for a new worker count."""
+    n_workers = _training_worker_count()
+    if n_workers <= 1:
+        return None
+    key = (n_workers, os.getpid())
+    pool = _TRAINING_POOLS.get(key)
+    if pool is None:
+        pool = _NetworkTrainingPool(n_workers)
+        _TRAINING_POOLS[key] = pool
+    return pool
+
+
+def _close_training_pools() -> None:
+    """Close all registered training pools, terminating a failed join."""
+    pools = list(_TRAINING_POOLS.values())
+    _TRAINING_POOLS.clear()
+    for pool in pools:
+        try:
+            pool.close()
+            pool.join()
+        except Exception:
+            try:
+                pool.terminate()
+                pool.join()
+            except Exception:
+                pass
+
+
+atexit.register(_close_training_pools)
+
+
+def _training_runtime_provenance(number_of_cores: int) -> Dict[str, Any]:
+    """Return requested and effective emulator-training parallelism."""
+    requested = _training_worker_count()
+    effective = requested if number_of_cores == 1 else 1
+    return {
+        "requested": requested,
+        "effective": effective,
+        "start_method": "spawn" if effective > 1 else "serial",
+    }
+
+
+@contextmanager
+def _nautilus_training_pool_scope(number_of_cores: int):
+    """Temporarily route eligible emulator training through a spawn pool.
+
+    Nautilus rebuilds its likelihood emulator at every bound update and
+    trains ``n_networks`` independent ``MLPRegressor`` networks per bound,
+    one after another; on the freed nonlinear refit path that serial
+    training is the single largest cost (29 percent of a B6 cell). The
+    upstream ``NeuralNetworkEmulator.train`` already dispatches each network
+    through ``pool.map``, and each dispatched ``train_network`` call is a
+    pure function of the training arrays, the network keyword arguments and
+    the network index used as ``random_state``, pinned by nautilus itself to
+    a single BLAS thread. Trained weights therefore do not depend on which
+    process ran the call, and ``pool.map`` preserves network order.
+
+    The sampler's own ``pool_s`` is deliberately left as AutoFit sets it.
+    That pool is also handed to ``NautilusBound.sample``, which switches to
+    a pool-size-dependent set of spawned RNG streams and would change the
+    sampled chain.
+
+    The patch exists only for the duration of one sampler run.
+    """
+    if number_of_cores != 1 or _training_worker_count() <= 1:
+        yield
+        return
+
+    from nautilus.neural import NeuralNetworkEmulator
+
+    original_descriptor = NeuralNetworkEmulator.__dict__["train"]
+    original_train = NeuralNetworkEmulator.train
+    original_function = original_train.__func__
+
+    def train_via_pool(cls, *args, **kwargs):
+        if kwargs.get("pool") is None:
+            pool = _training_pool_for_current_env()
+            if pool is not None:
+                kwargs["pool"] = pool
+        return original_function(cls, *args, **kwargs)
+
+    NeuralNetworkEmulator.train = classmethod(train_via_pool)
+    try:
+        yield
+    finally:
+        NeuralNetworkEmulator.train = original_descriptor
+        _close_training_pools()
+
+
 class AutoLensFitRunner:
     """Run PyAutoLens validation fits and summarize their outputs.
 
@@ -875,7 +1006,22 @@ class AutoLensFitRunner:
         n_shell_effective = None
         discard_exploration_effective = None
         retention_applied = False
+        training_workers_requested = None
+        training_workers_effective = None
+        training_start_method = None
+        training_runtime_provenance = None
         try:
+            training_provenance = _training_runtime_provenance(
+                self.settings.number_of_cores
+            )
+            training_workers_requested = training_provenance["requested"]
+            training_workers_effective = training_provenance["effective"]
+            training_start_method = training_provenance["start_method"]
+            training_runtime_provenance = {
+                "training_workers_requested": training_workers_requested,
+                "training_workers_effective": training_workers_effective,
+                "training_start_method": training_start_method,
+            }
             search = self._make_search(
                 case_id=case_id,
                 role=role,
@@ -897,7 +1043,10 @@ class AutoLensFitRunner:
                     retention_state = _apply_search_internal_retention()
                     retention_applied = True
                 try:
-                    result = search.fit(model=model, analysis=analysis)
+                    with _nautilus_training_pool_scope(
+                        self.settings.number_of_cores
+                    ):
+                        result = search.fit(model=model, analysis=analysis)
                 finally:
                     if retention_applied:
                         _restore_search_internal_retention(retention_state)
@@ -948,6 +1097,10 @@ class AutoLensFitRunner:
                     self.settings.discard_exploration
                 ),
                 discard_exploration_effective=discard_exploration_effective,
+                training_workers_requested=training_workers_requested,
+                training_workers_effective=training_workers_effective,
+                training_start_method=training_start_method,
+                runtime_provenance=training_runtime_provenance,
                 search_internal_retention_requested=(
                     self.settings.retain_search_internal
                 ),
@@ -977,6 +1130,10 @@ class AutoLensFitRunner:
                     self.settings.discard_exploration
                 ),
                 discard_exploration_effective=discard_exploration_effective,
+                training_workers_requested=training_workers_requested,
+                training_workers_effective=training_workers_effective,
+                training_start_method=training_start_method,
+                runtime_provenance=training_runtime_provenance,
                 search_internal_retention_requested=(
                     self.settings.retain_search_internal
                 ),

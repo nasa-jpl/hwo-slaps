@@ -23,6 +23,18 @@ from hwoslaps.provenance import config_hash
 
 PINNED_UUID = "11111111-2222-3333-4444-555555555555"
 
+
+@pytest.fixture(autouse=True)
+def clean_tree_for_campaign_tests(monkeypatch):
+    """Keep fixture campaigns independent of this test checkout's dirtiness."""
+    monkeypatch.setattr(
+        s1,
+        "revision_provenance",
+        lambda: {"git_dirty": False, "git_dirty_paths": []},
+        raising=False,
+    )
+
+
 _STUB_RUNNER_SOURCE = '''"""Stub campaign runner used only by the S1-lite tests."""
 
 import json
@@ -164,6 +176,24 @@ def _stub_command(tmp_path, control):
     control_path = _control_path(tmp_path)
     control_path.write_text(json.dumps(control), encoding="utf-8")
     return [sys.executable, str(stub_path), "{config}", str(control_path)]
+
+
+def test_s1_lite_clean_tree_gate_requires_explicit_dirty_override(monkeypatch):
+    """Production launch refuses dirty source unless explicitly overridden."""
+    monkeypatch.setattr(
+        s1,
+        "revision_provenance",
+        lambda: {
+            "git_hash": "a" * 40,
+            "git_dirty": True,
+            "git_dirty_paths": ["src/example.py"],
+            "git_diff_sha256": "b" * 64,
+            "worktree_diff_sha256": "b" * 64,
+        },
+    )
+    with pytest.raises(s1.CampaignError, match="dirty"):
+        s1._check_clean_tree(require_clean_tree=True, allow_dirty_tree=False)
+    s1._check_clean_tree(require_clean_tree=True, allow_dirty_tree=True)
 
 
 def _campaign_manifest(

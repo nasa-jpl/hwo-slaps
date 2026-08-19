@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -180,6 +181,9 @@ class FisherGridMapData:
     source_image_asset_sha256_16: Optional[str] = None
     config_hash: Optional[str] = None
     git_hash: Optional[str] = None
+    git_dirty: Optional[bool] = None
+    worktree_diff_sha256: Optional[str] = None
+    runtime_provenance: Optional[Dict[str, Any]] = None
     campaign_uuid: Optional[str] = None
     nuisance_subset: Optional[str] = None
     profiled_nuisance_names: Optional[List[str]] = None
@@ -251,6 +255,16 @@ def save_fisher_grid_map_npz(grid_map: FisherGridMapData, path: Union[str, Path]
         payload['config_hash'] = np.str_(grid_map.config_hash)
     if grid_map.git_hash is not None:
         payload['git_hash'] = np.str_(grid_map.git_hash)
+    if grid_map.git_dirty is not None:
+        payload['git_dirty'] = np.bool_(grid_map.git_dirty)
+    if grid_map.worktree_diff_sha256 is not None:
+        payload['worktree_diff_sha256'] = np.str_(
+            grid_map.worktree_diff_sha256
+        )
+    if grid_map.runtime_provenance is not None:
+        payload['runtime_provenance_json'] = np.str_(
+            json.dumps(grid_map.runtime_provenance, sort_keys=True)
+        )
     if grid_map.campaign_uuid is not None:
         payload['campaign_uuid'] = np.str_(grid_map.campaign_uuid)
     if grid_map.nuisance_subset is not None:
@@ -292,6 +306,16 @@ def load_fisher_grid_map_npz(path: Union[str, Path]) -> FisherGridMapData:
             if name not in files:
                 return None
             return str(np.asarray(data[name]).item())
+
+        def optional_bool(name):
+            if name not in files:
+                return None
+            return bool(np.asarray(data[name]).item())
+
+        def optional_json(name):
+            if name not in files:
+                return None
+            return json.loads(str(np.asarray(data[name]).item()))
 
         def optional_string_list(name):
             if name not in files:
@@ -376,6 +400,9 @@ def load_fisher_grid_map_npz(path: Union[str, Path]) -> FisherGridMapData:
             ),
             config_hash=optional_string('config_hash'),
             git_hash=optional_string('git_hash'),
+            git_dirty=optional_bool('git_dirty'),
+            worktree_diff_sha256=optional_string('worktree_diff_sha256'),
+            runtime_provenance=optional_json('runtime_provenance_json'),
             campaign_uuid=optional_string('campaign_uuid'),
             nuisance_subset=optional_string('nuisance_subset'),
             profiled_nuisance_names=optional_string_list(
@@ -422,6 +449,7 @@ class FisherDetectionData:
     lens_mismatch_enabled: bool = False
     fit_psf_mode: str = "explicit"
     fit_psf_delta: Optional[Dict[str, Any]] = None
+    runtime_provenance: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
         """Stamp the generation timestamp when one was not supplied."""

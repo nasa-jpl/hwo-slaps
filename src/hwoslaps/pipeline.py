@@ -176,7 +176,7 @@ class Pipeline:
         # when plotting is disabled.
         if detection_data.has_grid_map:
             from .modeling.utils_fisher import save_fisher_grid_map_npz
-            from .provenance import _git_hash, config_hash
+            from .provenance import config_hash, revision_provenance
             grid_map_dir = (
                 Path(config['plotting']['output_dir']) / config['run_name'] / 'modeling'
             )
@@ -199,9 +199,19 @@ class Pipeline:
                         "to it."
                     )
                 detection_data.grid_map.config_hash = snapshot_hash
-            detection_data.grid_map.git_hash = _git_hash(
-                Path(__file__).resolve().parent
-            )
+            revision = revision_provenance(Path(__file__).resolve().parent)
+            detection_data.grid_map.git_hash = revision["git_hash"]
+            detection_data.grid_map.git_dirty = revision["git_dirty"]
+            detection_data.grid_map.worktree_diff_sha256 = revision[
+                "worktree_diff_sha256"
+            ]
+            detection_data.grid_map.runtime_provenance = {
+                **(detection_data.grid_map.runtime_provenance or {}),
+                "source_git_dirty": revision["git_dirty"],
+                "source_worktree_diff_sha256": revision[
+                    "worktree_diff_sha256"
+                ],
+            }
             # S1-lite exports HWOSLAPS_CAMPAIGN_UUID to every campaign job;
             # standalone runs stay unbound.
             detection_data.grid_map.campaign_uuid = os.environ.get(

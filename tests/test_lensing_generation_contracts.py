@@ -70,6 +70,53 @@ def test_lensing_data_config_is_immutable_snapshot_of_generation_config():
     assert lensing_data.config["lensing"]["subhalo"]["position"]["centre"] == [0.08, -0.05]
 
 
+def test_repeated_generation_isolates_the_uniform_sub_grid():
+    """Reuse the cached construction without sharing mutable grid state.
+
+    Ray tracing rebuilds the uniform sub-pixel grid from the mask, which
+    dominates per-node cost in a grid map. Repeated generations at one
+    geometry must reuse that sub-grid and still hand each caller its own
+    grid with bit-identical coordinates.
+    """
+    config = _small_lensing_config()
+
+    from hwoslaps.lensing.generator import (
+        _UNIFORM_GRID_TEMPLATES,
+        clear_uniform_grid_cache,
+    )
+
+    clear_uniform_grid_cache()
+    first = generate_lensing_system(config["lensing"], full_config=config)
+    second = generate_lensing_system(config["lensing"], full_config=config)
+
+    assert first.grid is not second.grid
+    assert first.grid.over_sampled is not second.grid.over_sampled
+    assert first.grid.over_sampler is not second.grid.over_sampler
+    np.testing.assert_array_equal(first.grid.array, second.grid.array)
+    np.testing.assert_array_equal(first.image, second.image)
+
+    expected = np.array(second.grid.over_sampled.array, copy=True)
+    try:
+        first.grid.over_sampled.array[0, 0] += 1.0
+    except ValueError:
+        pass
+    third = generate_lensing_system(config["lensing"], full_config=config)
+    np.testing.assert_array_equal(third.grid.over_sampled.array, expected)
+
+    wider = copy.deepcopy(config)
+    wider["lensing"]["grid"]["shape"] = [64, 64]
+    other = generate_lensing_system(wider["lensing"], full_config=wider)
+
+    assert other.grid.over_sampled is not first.grid.over_sampled
+    for size in (8, 16, 32, 48, 80):
+        geometry = copy.deepcopy(config)
+        geometry["lensing"]["grid"]["shape"] = [size, size]
+        generate_lensing_system(geometry["lensing"], full_config=geometry)
+    assert len(_UNIFORM_GRID_TEMPLATES) <= 4
+    clear_uniform_grid_cache()
+    assert not _UNIFORM_GRID_TEMPLATES
+
+
 def test_nfw_concentration_provenance_is_recorded():
     """Record the concentration model, inputs, and derived NFW terms."""
     config = _small_lensing_config()

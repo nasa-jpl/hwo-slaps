@@ -173,6 +173,14 @@ class NonlinearFitSummary:
         Whether the raw sampler state was verified present on disk
         (directory or zipped archive) after the fit; False when
         verified absent, None when indeterminable.
+    training_workers_requested : `int`, optional
+        Worker count requested for emulator training at runtime.
+    training_workers_effective : `int`, optional
+        Worker count used by emulator training at runtime.
+    training_start_method : `str`, optional
+        Runtime training start method, such as ``"spawn"`` or ``"serial"``.
+    runtime_provenance : `dict`, optional
+        Non-semantic runtime parallelism metadata.
     """
 
     model_role: str
@@ -203,6 +211,10 @@ class NonlinearFitSummary:
     discard_exploration_effective: Optional[bool] = None
     search_internal_retention_requested: Optional[bool] = None
     search_internal_retained: Optional[bool] = None
+    training_workers_requested: Optional[int] = None
+    training_workers_effective: Optional[int] = None
+    training_start_method: Optional[str] = None
+    runtime_provenance: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert the fit summary to a JSON-compatible dictionary."""

@@ -441,6 +441,24 @@ def test_fit_summary_serializes_sampler_provenance_fields():
     assert payload["search_internal_retention_requested"] is True
     assert payload["search_internal_retained"] is True
 
+    runtime = NonlinearFitSummary(
+        model_role="smooth",
+        fit_mode="freed",
+        status="success",
+        training_workers_requested=4,
+        training_workers_effective=4,
+        training_start_method="spawn",
+        runtime_provenance={
+            "training_workers_requested": 4,
+            "training_workers_effective": 4,
+            "training_start_method": "spawn",
+        },
+    ).to_dict()
+    assert runtime["training_workers_requested"] == 4
+    assert runtime["training_workers_effective"] == 4
+    assert runtime["training_start_method"] == "spawn"
+    assert runtime["runtime_provenance"]["training_start_method"] == "spawn"
+
     omitted = NonlinearFitSummary(
         model_role="smooth",
         fit_mode="freed",
@@ -454,6 +472,10 @@ def test_fit_summary_serializes_sampler_provenance_fields():
     assert omitted["discard_exploration_effective"] is None
     assert omitted["search_internal_retention_requested"] is None
     assert omitted["search_internal_retained"] is None
+    assert omitted["training_workers_requested"] is None
+    assert omitted["training_workers_effective"] is None
+    assert omitted["training_start_method"] is None
+    assert omitted["runtime_provenance"] is None
 
 
 def test_v2_schema_preserves_v1_column_prefix():

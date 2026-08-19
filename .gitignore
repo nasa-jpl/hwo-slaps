@@ -199,3 +199,4 @@ LSSTDocstringGuide.txt
 .DS_Store
 scratch/
 outputs/
+.claude/

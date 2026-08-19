@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import replace
+import json
 import os
 import sys
 from pathlib import Path
@@ -77,7 +78,18 @@ MATCHED_NPZ_KEYS = {
     "lens_einstein_radius",
     "nuisance_subset",
     "profiled_nuisance_names",
+    "runtime_provenance_json",
 }
+MISMATCH_GRID_ARRAYS = (
+    "amplitude_hat_2d",
+    "q_mismatch_2d",
+    "z_mismatch_2d",
+    "mismatch_detectable_mask_2d",
+    "amplitude_spurious_2d",
+    "q_spurious_2d",
+    "z_spurious_2d",
+    "false_positive_mask_2d",
+)
 
 
 def _load_master_config() -> dict:
@@ -714,8 +726,89 @@ def test_grid_map_parallel_matches_serial(grid_setup):
     assert grid_map_parallel.num_detectable == grid_map_serial.num_detectable
 
 
+@pytest.mark.xtx_gpu
+def test_grid_map_worker_env_override_matches_serial(grid_setup, monkeypatch):
+    """Widen the pool from the environment without changing the map.
+
+    ``num_workers`` is hashed into the run's provenance, so the runtime
+    override exists to fan out a configured serial map. It must leave the
+    map bit-identical and leave the configured value untouched.
+    """
+    monkeypatch.setenv("HWOSLAPS_FISHER_GRID_WORKERS", "2")
+    detector = _make_detector(
+        grid_setup,
+        {
+            "type": "grid",
+            "grid": {
+                "spacing_arcsec": GRID_SPACING,
+                "half_width_arcsec": GRID_HALF_WIDTH,
+                "annulus": None,
+            },
+            "detection_q_threshold": 10.0,
+            "num_workers": 1,
+        },
+    )
+    assert detector._grid_num_workers() == 2
+    assert detector.map_config["num_workers"] == 1
+    grid_map = detector.compute_grid_map()
+    grid_map_serial = grid_setup["grid_map"]
+
+    np.testing.assert_array_equal(
+        grid_map.q_asimov_2d,
+        grid_map_serial.q_asimov_2d,
+    )
+    np.testing.assert_array_equal(
+        grid_map.fisher_raw_2d,
+        grid_map_serial.fisher_raw_2d,
+    )
+    np.testing.assert_array_equal(
+        grid_map.absorbed_fraction_2d,
+        grid_map_serial.absorbed_fraction_2d,
+    )
+    assert grid_map.num_detectable == grid_map_serial.num_detectable
+
+
+@pytest.mark.xtx_gpu
+def test_grid_map_rejects_invalid_worker_env_override(grid_setup, monkeypatch):
+    """Reject a non-positive runtime worker override rather than ignore it."""
+    monkeypatch.setenv("HWOSLAPS_FISHER_GRID_WORKERS", "0")
+    config = copy.deepcopy(grid_setup["config"])
+    config["modeling"]["fisher"]["map"]["engine"] = "reference"
+    detector = _make_detector(
+        grid_setup,
+        config["modeling"]["fisher"]["map"],
+    )
+    with pytest.raises(ValueError, match="HWOSLAPS_FISHER_GRID_WORKERS"):
+        detector.compute_grid_map()
+
+
+@pytest.mark.xtx_gpu
+def test_jax_ignores_invalid_worker_env_override(grid_setup, monkeypatch):
+    """Do not validate a reference-only override on the JAX dispatch path."""
+    monkeypatch.setenv("HWOSLAPS_FISHER_GRID_WORKERS", "junk")
+    map_config = copy.deepcopy(grid_setup["config"]["modeling"]["fisher"]["map"])
+    map_config["engine"] = "jax"
+    detector = _make_detector(grid_setup, map_config)
+    assert detector._grid_num_workers() == int(map_config.get("num_workers", 1))
+
+
+def test_grid_runtime_provenance_separates_requested_and_effective_workers(
+    monkeypatch,
+):
+    """Record runtime parallelism without changing the configured map."""
+    detector = FisherDetector.__new__(FisherDetector)
+    detector.map_config = {"engine": "reference", "num_workers": 1}
+    monkeypatch.setenv("HWOSLAPS_FISHER_GRID_WORKERS", "2")
+    assert detector._grid_runtime_provenance() == {
+        "fisher_grid_workers_requested": 1,
+        "fisher_grid_workers_effective": 2,
+        "fisher_grid_start_method": "spawn",
+    }
+
+
+@pytest.mark.xtx_gpu
 def test_mismatch_grid_map_parallel_matches_serial(grid_setup, mismatch_setup):
-    """Produce identical mismatch statistics with one and two workers."""
+    """Produce every mismatch array identically with one and two workers."""
     map_config = copy.deepcopy(grid_setup["config"]["modeling"]["fisher"]["map"])
     map_config["num_workers"] = 2
     detector = _make_mismatch_detector(
@@ -726,24 +819,49 @@ def test_mismatch_grid_map_parallel_matches_serial(grid_setup, mismatch_setup):
     parallel = detector.compute_grid_map()
     serial = mismatch_setup["grid_map"]
 
-    np.testing.assert_allclose(
-        parallel.q_mismatch_2d,
-        serial.q_mismatch_2d,
-        rtol=1.0e-10,
+    for name in MISMATCH_GRID_ARRAYS:
+        np.testing.assert_array_equal(getattr(parallel, name), getattr(serial, name))
+
+
+@pytest.mark.xtx_gpu
+def test_explicit_fit_lens_grid_map_parallel_matches_serial(grid_setup):
+    """Exercise exact mismatch parity for an explicit fit lens full map."""
+    config = copy.deepcopy(grid_setup["config"])
+    fit_lens = {
+        "mass": copy.deepcopy(config["lensing"]["lens_galaxy"]["mass"])
+    }
+    fit_lens["mass"]["centre"] = [0.01, -0.02]
+    config["modeling"]["fit_lens"] = {
+        "mode": "explicit",
+        "lens_galaxy": fit_lens,
+    }
+
+    parallel_config = copy.deepcopy(config["modeling"]["fisher"]["map"])
+    parallel_config["num_workers"] = 2
+    serial_config = copy.deepcopy(parallel_config)
+    serial_config["num_workers"] = 1
+
+    parallel = FisherDetector(
+        observation_baseline=grid_setup["observation_baseline"],
+        lensing_baseline=grid_setup["lensing_baseline"],
+        psf_data=grid_setup["psf_data"],
+        full_config=config,
+        fisher_config={**config["modeling"]["fisher"], "map": parallel_config},
     )
-    np.testing.assert_allclose(
-        parallel.q_spurious_2d,
-        serial.q_spurious_2d,
-        rtol=1.0e-10,
+    serial = FisherDetector(
+        observation_baseline=grid_setup["observation_baseline"],
+        lensing_baseline=grid_setup["lensing_baseline"],
+        psf_data=grid_setup["psf_data"],
+        full_config=config,
+        fisher_config={**config["modeling"]["fisher"], "map": serial_config},
     )
-    np.testing.assert_array_equal(
-        parallel.mismatch_detectable_mask_2d,
-        serial.mismatch_detectable_mask_2d,
-    )
-    np.testing.assert_array_equal(
-        parallel.false_positive_mask_2d,
-        serial.false_positive_mask_2d,
-    )
+    parallel_map = parallel.compute_grid_map()
+    serial_map = serial.compute_grid_map()
+
+    for name in MISMATCH_GRID_ARRAYS:
+        np.testing.assert_array_equal(
+            getattr(parallel_map, name), getattr(serial_map, name)
+        )
 
 
 def test_generator_dispatches_grid_map(grid_setup):
@@ -763,6 +881,7 @@ def test_generator_dispatches_grid_map(grid_setup):
     assert result.has_grid_map
     assert result.map is None
     assert result.grid_map.num_positions_evaluated == 25
+    assert result.runtime_provenance == result.grid_map.runtime_provenance
 
 
 def test_grid_map_requires_grid_type(grid_setup):
@@ -838,6 +957,13 @@ def test_grid_map_npz_roundtrip_preserves_optional_provenance(grid_setup, tmp_pa
         config_hash="0123456789abcdef",
         git_hash="f"*40,
         campaign_uuid="123e4567-e89b-12d3-a456-426614174000",
+        git_dirty=True,
+        worktree_diff_sha256="e"*64,
+        runtime_provenance={
+            "fisher_grid_workers_requested": 1,
+            "fisher_grid_workers_effective": 2,
+            "fisher_grid_start_method": "spawn",
+        },
     )
     npz_path = save_fisher_grid_map_npz(grid_map, tmp_path / "provenance.npz")
 
@@ -845,10 +971,18 @@ def test_grid_map_npz_roundtrip_preserves_optional_provenance(grid_setup, tmp_pa
         assert str(stored["config_hash"]) == grid_map.config_hash
         assert str(stored["git_hash"]) == grid_map.git_hash
         assert str(stored["campaign_uuid"]) == grid_map.campaign_uuid
+        assert bool(stored["git_dirty"])
+        assert str(stored["worktree_diff_sha256"]) == grid_map.worktree_diff_sha256
+        assert json.loads(str(stored["runtime_provenance_json"])) == (
+            grid_map.runtime_provenance
+        )
     loaded = load_fisher_grid_map_npz(npz_path)
     assert loaded.config_hash == grid_map.config_hash
     assert loaded.git_hash == grid_map.git_hash
     assert loaded.campaign_uuid == grid_map.campaign_uuid
+    assert loaded.git_dirty is True
+    assert loaded.worktree_diff_sha256 == grid_map.worktree_diff_sha256
+    assert loaded.runtime_provenance == grid_map.runtime_provenance
 
 
 def test_grid_map_npz_old_format_loads_missing_provenance_as_none(
@@ -866,12 +1000,22 @@ def test_grid_map_npz_old_format_loads_missing_provenance_as_none(
     old_format = _corrupt_grid_npz(
         current,
         tmp_path / "old-format.npz",
-        delete=("config_hash", "git_hash", "campaign_uuid"),
+        delete=(
+            "config_hash",
+            "git_hash",
+            "git_dirty",
+            "worktree_diff_sha256",
+            "runtime_provenance_json",
+            "campaign_uuid",
+        ),
     )
 
     loaded = load_fisher_grid_map_npz(old_format)
     assert loaded.config_hash is None
     assert loaded.git_hash is None
+    assert loaded.git_dirty is None
+    assert loaded.worktree_diff_sha256 is None
+    assert loaded.runtime_provenance is None
     assert loaded.campaign_uuid is None
 
 
