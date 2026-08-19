@@ -578,6 +578,58 @@ def test_fixed_annulus_rejects_invalid_blocks(annulus, match):
         detector._build_mask()
 
 
+# ----------------------------------------------------------------------
+# PSF-border mask
+# ----------------------------------------------------------------------
+
+
+def _psf_border_detector(kernel_shape):
+    detector, _ = _mask_detector(mask_mode="psf_border")
+    detector.fit_full_config["psf"] = {
+        "kernel": {"shape_native": list(kernel_shape)}
+    }
+    return detector
+
+
+def test_psf_border_mask_matches_the_nonlinear_dataset_support():
+    """Reproduce dataset_builder._exclude_psf_edge_pixels exactly."""
+    pytest.importorskip("autolens")
+    from hwoslaps.modeling.nonlinear.dataset_builder import (
+        _exclude_psf_edge_pixels,
+    )
+
+    for kernel_shape in ((5, 5), (3, 7), (1, 1)):
+        detector = _psf_border_detector(kernel_shape)
+        np.testing.assert_array_equal(
+            detector._build_mask(),
+            _exclude_psf_edge_pixels(
+                np.ones(GRID_SHAPE, dtype=bool),
+                psf_shape=kernel_shape,
+            ),
+        )
+
+
+def test_psf_border_mask_removes_half_kernel_borders():
+    """Keep exactly the interior rectangle inside the half-kernel border."""
+    detector = _psf_border_detector((5, 3))
+
+    mask = detector._build_mask()
+
+    expected = np.zeros(GRID_SHAPE, dtype=bool)
+    expected[2:-2, 1:-1] = True
+    np.testing.assert_array_equal(mask, expected)
+    assert int(np.count_nonzero(mask)) == (11 - 4) * (11 - 2)
+
+
+def test_psf_border_mask_rejects_an_annulus_block():
+    """Reject an annulus block the PSF-border mode never reads."""
+    detector = _psf_border_detector((5, 5))
+    detector.mask_annulus = {"inner_arcsec": 0.1, "outer_arcsec": 0.4}
+
+    with pytest.raises(ValueError, match="only accepted when"):
+        detector._build_mask()
+
+
 @pytest.mark.parametrize("mask_mode", ["source_snr", "all_pixels"])
 def test_annulus_block_is_rejected_for_other_mask_modes(mask_mode):
     """Reject an annulus block that the configured mask mode never reads."""

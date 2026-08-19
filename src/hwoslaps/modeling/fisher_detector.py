@@ -2555,10 +2555,12 @@ class FisherDetector:
             return np.ones_like(self.mu0_adu_2d, dtype=bool)
         if self.mask_mode == "fixed_annulus":
             return self._build_fixed_annulus_mask()
+        if self.mask_mode == "psf_border":
+            return self._build_psf_border_mask()
         if self.mask_mode != "source_snr":
             raise ValueError(
                 "modeling.fisher.mask_mode must be 'source_snr', 'all_pixels', "
-                "or 'fixed_annulus'."
+                "'fixed_annulus', or 'psf_border'."
             )
 
         eps = 1.0e-12
@@ -2566,6 +2568,33 @@ class FisherDetector:
         mask = snr_source > self.snr_threshold
         if not np.any(mask):
             raise ValueError("Degenerate Fisher mask: no pixels above fisher.snr_threshold.")
+        return mask
+
+    def _build_psf_border_mask(self) -> np.ndarray:
+        """Select all pixels whose fit-PSF stencil stays inside the image.
+
+        Reproduces the nonlinear dataset builder's default support (every
+        pixel minus a half-kernel border on each edge) so Fisher maps and
+        nonlinear fits at the same kernel share an identical pixel set.
+        The border semantics must stay equal to
+        ``dataset_builder._exclude_psf_edge_pixels``; a contract test
+        compares the two directly.
+
+        Returns
+        -------
+        mask : `numpy.ndarray`
+            Boolean native-shaped mask, true inside the border.
+        """
+        shape_native = self.fit_full_config["psf"]["kernel"]["shape_native"]
+        y_half = int(shape_native[0]) // 2
+        x_half = int(shape_native[1]) // 2
+        mask = np.ones_like(self.mu0_adu_2d, dtype=bool)
+        if y_half > 0:
+            mask[:y_half, :] = False
+            mask[-y_half:, :] = False
+        if x_half > 0:
+            mask[:, :x_half] = False
+            mask[:, -x_half:] = False
         return mask
 
     def _build_fixed_annulus_mask(self) -> np.ndarray:

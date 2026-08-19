@@ -1313,10 +1313,10 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
     mask_mode = fisher.get('mask_mode', 'source_snr')
     _require_type(mask_mode, str, 'modeling.fisher.mask_mode')
     mask_mode = mask_mode.lower()
-    if mask_mode not in {'source_snr', 'all_pixels', 'fixed_annulus'}:
+    if mask_mode not in {'source_snr', 'all_pixels', 'fixed_annulus', 'psf_border'}:
         raise ValueError(
             "modeling.fisher.mask_mode must be one of: 'source_snr', "
-            "'all_pixels', 'fixed_annulus'"
+            "'all_pixels', 'fixed_annulus', 'psf_border'"
         )
 
     mask_annulus = fisher.get('mask_annulus')

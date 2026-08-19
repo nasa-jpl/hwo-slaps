@@ -302,6 +302,14 @@ def test_fisher_rejects_invalid_mask_mode():
         validation.validate_or_raise(config)
 
 
+def test_fisher_accepts_psf_border_mask():
+    """Accept the PSF-border mask used for support-matched validation."""
+    config = _with_valid_fisher_block(_load_master_config())
+    config["modeling"]["fisher"]["mask_mode"] = "psf_border"
+
+    validation.validate_or_raise(config)
+
+
 def test_fisher_accepts_fixed_annulus_mask():
     """Accept the fixed-annulus mask with a well-formed annulus block."""
     config = _with_valid_fisher_block(_load_master_config())
@@ -324,7 +332,7 @@ def test_fisher_fixed_annulus_requires_annulus_block():
         validation.validate_or_raise(config)
 
 
-@pytest.mark.parametrize("mask_mode", ["source_snr", "all_pixels"])
+@pytest.mark.parametrize("mask_mode", ["source_snr", "all_pixels", "psf_border"])
 def test_fisher_rejects_annulus_block_for_other_mask_modes(mask_mode):
     """Reject an annulus block supplied for a mask mode that ignores it."""
     config = _with_valid_fisher_block(_load_master_config())

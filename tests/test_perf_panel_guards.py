@@ -63,6 +63,47 @@ def test_exact_wave_keeps_v1_job_names():
     assert all("-" in record["id"] for record in panel_driver.extension_jobs())
 
 
+def test_default_half_width_leaves_job_identity_untouched():
+    baseline = panel_driver.job("X1")
+    explicit_none = panel_driver.job("X1", half_width=None)
+    assert "half_width" not in baseline
+    assert baseline["id"] == explicit_none["id"]
+    assert "hw" not in baseline["id"]
+
+    expanded = panel_driver.job("X1", half_width=2.5)
+    assert expanded["half_width"] == 2.5
+    assert "hw2.5" in expanded["id"]
+    assert expanded["id"] != baseline["id"]
+
+
+def test_expanded_job_preserves_physics_and_overrides_extent():
+    original = panel_driver.job(
+        "C", scene="cosmos", ref="RA", logm=9.0, _id_version=1
+    )
+    expanded = panel_driver._expanded_job(
+        "GBX", original, panel_driver.GATE_HALF_WIDTH
+    )
+    assert expanded["family"] == "GBX"
+    assert expanded["half_width"] == panel_driver.GATE_HALF_WIDTH
+    for field in panel_driver._JOB_FIELDS:
+        assert expanded[field] == original[field]
+
+
+def test_common10_alias_expands_only_in_the_config_layer():
+    record = panel_driver.job("GC", nuisance_subset="common10")
+    assert record["nuisance_subset"] == "common10"
+    assert "common10" in record["id"]
+    assert len(panel_driver.COMMON_NUISANCE_10) == 10
+    assert "observation.background_offset_adu" in (
+        panel_driver.COMMON_NUISANCE_10
+    )
+    assert not any(
+        "ell_comp" in name
+        for name in panel_driver.COMMON_NUISANCE_10
+        if name.startswith("source.")
+    )
+
+
 def test_memo_serializer_is_type_aware_and_rejects_unknown_values():
     assert panel_driver._canonical_json([1, 2]) != panel_driver._canonical_json(
         (1, 2)
