@@ -9,6 +9,14 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from .critical_curve import (
+        ApertureDefinition,
+        CriticalCurveError,
+        CriticalCurveGrid,
+        ThetaEExtraction,
+        extract_theta_e,
+        extract_theta_e_from_lens_config,
+    )
     from .image_source import ImageSource, SourceImageAsset, load_source_image_asset
     from .mass_models import (
         concentration_mass_relation,
@@ -17,8 +25,23 @@ if TYPE_CHECKING:
         nfw_scale_parameters,
     )
 
+_CRITICAL_CURVE_NAMES = {
+    "ApertureDefinition",
+    "CriticalCurveError",
+    "CriticalCurveGrid",
+    "ThetaEExtraction",
+    "extract_theta_e",
+    "extract_theta_e_from_lens_config",
+}
+
 __all__ = [
     "generate_lensing_system",
+    "ApertureDefinition",
+    "CriticalCurveError",
+    "CriticalCurveGrid",
+    "ThetaEExtraction",
+    "extract_theta_e",
+    "extract_theta_e_from_lens_config",
     "ImageSource",
     "SourceImageAsset",
     "load_source_image_asset",
@@ -32,6 +55,10 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """Resolve PyAutoLens-backed generation helpers only when requested."""
+    if name in _CRITICAL_CURVE_NAMES:
+        from . import critical_curve
+
+        return getattr(critical_curve, name)
     if name in {
         "ImageSource",
         "SourceImageAsset",
