@@ -17,8 +17,14 @@ Every job configuration starts from the member's own Stage 0 staged
 configuration, which already carries the frozen scene overrides, the
 template asset digest, the extraction settings, the source revision and
 the ``stage0`` block. The ladder adds one top-level ``ladder`` block that
-the engine ignores and the staged configuration hash covers, and resizes
-the production grid from the member's realized aperture.
+the engine ignores and the staged configuration hash covers, resizes
+the production grid from the member's realized aperture, stages the
+committed science35 truth state into ``psf.aberrations``, and re-stamps
+``stage0.code_revision`` with this campaign's own generation revision:
+a ladder job runs at the revision its own campaign was generated at,
+which is what the runner's moved-code gate and the executor's artifact
+binding both enforce, and the Stage 0 generation revision remains
+recoverable through the bound Stage 0 frozen manifest.
 
 The integrity chain is closed at every link before a byte is written.
 The freeze mapping is proved equal to the freeze file whose digest is
@@ -1188,6 +1194,7 @@ def build_ladder_campaign(
         overrides.setdefault("psf", {})["aberrations"] = deepcopy(
             psf_state["aberrations"]
         )
+        overrides["stage0"]["code_revision"] = deepcopy(code_revision)
         scenes[member["scene"]] = stage0_campaign["base_scene_configs"][
             member["scene"]
         ]
@@ -1666,6 +1673,16 @@ def validate_ladder_manifest(manifest_path) -> dict:
                 f"Job '{job['job_id']}' does not stage the committed "
                 "science35 psf.aberrations block; the runner reconstructs "
                 "the truth state from the staged configuration alone"
+            )
+        declared_revision = job["overrides"]["stage0"].get("code_revision")
+        if not isinstance(declared_revision, dict) or str(
+            declared_revision.get("sha256")
+        ) != str(_policy_member(policy, "code_revision_sha256")):
+            raise LadderError(
+                f"Job '{job['job_id']}' declares code revision "
+                f"{declared_revision!r}, not this campaign's generation "
+                "revision; a ladder job runs at the revision its own "
+                "campaign was generated at"
             )
 
     scene_paths = {

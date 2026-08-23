@@ -509,15 +509,21 @@ def test_ladder_is_bound_to_the_stage0_aperture(freeze, parent_campaign):
         )
 
 
-def test_staged_configs_keep_the_stage0_block_verbatim(
+def test_staged_configs_keep_the_stage0_block_except_the_revision(
     freeze, stage0_root, parent_campaign
 ):
-    """The ladder job inherits the Stage 0 provenance block unchanged."""
+    """The Stage 0 block travels unchanged apart from the re-stamped
+    ``code_revision``, which records this campaign's own generation
+    revision so the runner's moved-code gate holds for ladder jobs."""
     frozen = s1_lite._load_frozen_manifest(Path(stage0_root))
     stage0_jobs = {job["job_id"]: job for job in frozen["jobs"]}
+    revision = ladder._code_revision_record()
     for job in parent_campaign["manifest"]["campaign"]["jobs"]:
         system_id = job["job_id"].removeprefix("ladder_parent_")
-        expected = stage0_jobs[system_id]["overrides"]["stage0"]
+        expected = dict(
+            stage0_jobs[system_id]["overrides"]["stage0"],
+            code_revision=revision,
+        )
         assert job["overrides"]["stage0"] == expected
         assert job["overrides"]["psf"]["kernel"]["shape_native"] == [51, 51]
 
@@ -983,6 +989,18 @@ def test_validation_rejects_a_ladder_block_off_the_frozen_policy(manifest_copy):
         ]["coarse"].update({"high": 10.5}),
     )
     with pytest.raises(ladder.LadderError, match="not the frozen"):
+        ladder.validate_ladder_manifest(manifest_copy)
+
+
+def test_validation_rejects_a_job_off_the_campaign_revision(manifest_copy):
+    """A job declaring another code revision than its campaign refuses."""
+    _rewrite_manifest(
+        manifest_copy,
+        lambda campaign: campaign["jobs"][0]["overrides"]["stage0"][
+            "code_revision"
+        ].update({"sha256": "9"*64}),
+    )
+    with pytest.raises(ladder.LadderError, match="generation revision"):
         ladder.validate_ladder_manifest(manifest_copy)
 
 
