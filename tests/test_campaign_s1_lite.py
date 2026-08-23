@@ -903,7 +903,7 @@ def test_override_merge_semantics(tmp_path):
             "overrides": {
                 "psf": {"kernel": {"shape_native": [201, 201]}},
                 "lensing": {"subhalo": {"mass": 5.0e7}},
-                "observation": {"detector": {"read_noise": 3.536}},
+                "observation": {"detector": {"read_noise": 0.28284271247461906}},
                 "tags": ["override"],
             },
         }
@@ -915,7 +915,7 @@ def test_override_merge_semantics(tmp_path):
     assert staged["lensing"]["subhalo"]["mass"] == 5.0e7
     assert staged["lensing"]["subhalo"]["model"] == "NFW"
     assert staged["lensing"]["source_galaxy"]["light"]["intensity"] == 2.0
-    assert staged["observation"]["detector"]["read_noise"] == 3.536
+    assert staged["observation"]["detector"]["read_noise"] == 0.28284271247461906
     assert staged["observation"]["detector"]["sky_background"] == 1.0
     assert staged["observation"]["exposure_time"] == 900.0
     assert staged["psf"]["kernel"]["shape_native"] == [201, 201]
@@ -938,7 +938,7 @@ def test_observing_reference_patches_every_job(tmp_path):
         {
             "observation": {
                 "exposure_time": 1800.0,
-                "detector": {"read_noise": 3.536},
+                "detector": {"read_noise": 0.28284271247461906},
             },
             "source_normalization": {
                 "scene_a": {
@@ -963,7 +963,7 @@ def test_observing_reference_patches_every_job(tmp_path):
 
     staged_a = _staged_config(root, "job_a")
     assert staged_a["observation"]["exposure_time"] == 1800.0
-    assert staged_a["observation"]["detector"]["read_noise"] == 3.536
+    assert staged_a["observation"]["detector"]["read_noise"] == 0.28284271247461906
     assert staged_a["observation"]["detector"]["sky_background"] == 1.0
     assert staged_a["lensing"]["source_galaxy"]["light"]["intensity"] == 0.5
     assert staged_a["lensing"]["source_galaxy"]["light"]["type"] == (

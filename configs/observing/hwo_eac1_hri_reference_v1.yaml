@@ -3,7 +3,7 @@ observation:
   throughput: 1.0
   detector:
     gain: 1.0
-    read_noise: 3.5355339059327378
+    read_noise: 0.28284271247461906
     dark_current: 0.002
     sky_background: 0.002510279845963486
 source_normalization:
@@ -40,8 +40,8 @@ source_normalization:
 metadata:
   reference_name: hwo_eac1_hri_reference_v1
   script: derive_hwo_eac1_hri_reference.py
-  script_version: '2'
-  generation_date: '2026-08-18'
+  script_version: '3'
+  generation_date: '2026-08-23'
   observation_model_semantics: Source normalization is solved so the production render
     sums to the detected e-/s rate, so observation.throughput stays 1.0 and the throughput
     chain below is provenance only; carrying both would double-apply it.
@@ -114,6 +114,37 @@ metadata:
       citation: S3
       used_in_baseline: false
     applied_to: the derived source and sky rates in this artifact only
+  instrument_reference:
+    name: HWO Science Engineering Interface
+    package: hwo_sci_eng
+    version: 0.1.9
+    status: current public HWO working engineering reference adopted for this study
+    vendored_path: scratch/q1_observing_conditions/sei_v0.1.9
+    data_files_read:
+    - HRI.yaml
+    - EAC1.yaml
+    citation: SEI
+    adopted_parameters:
+      read_noise_per_read_e:
+        value: 0.2
+        sei_source: HRI.yaml, UVIS channel detector read noise
+        replaces: LUVOIR HDI Table 8-5 read noise of 2.5 e- per read [S4], retired
+          2026-08-23
+    corroborated_parameters:
+      pixel_scale_arcsec:
+        value: 0.00716
+        sei_value: 0.00716
+        sei_source: HRI.yaml, UVIS plate scale 7.16 mas
+        note: derived independently as Nyquist sampling at 500 nm for the circumscribed
+          pupil diameter and equal to the SEI value
+      dark_current_e_per_pix_s:
+        value: 0.002
+        sei_value: 0.002
+        sei_source: HRI.yaml, UVIS channel dark current
+    caveats: v0.1.9 carries pre-formulation placeholder values and the EAC architectures
+      are exploratory. The UVIS filter transmission curves referenced by HRI.yaml
+      are not shipped in the wheel, so the throughput chain in this artifact is not
+      taken from the SEI.
   detector:
     gain_e_per_adu: 1.0
     pixel_scale_arcsec: 0.00716
@@ -127,17 +158,24 @@ metadata:
     sky_citation: S3
     sky_rate_e_per_pix_s: 0.002510279845963486
     qualification_sky_background_e_per_pix_s: 1.0
-    read_noise_per_read_e: 2.5
+    read_noise_per_read_e: 0.2
     n_reads: 2
-    effective_read_noise_e: 3.5355339059327378
+    effective_read_noise_e: 0.28284271247461906
     effective_read_noise_formula: per_read_e * sqrt(n_reads)
     read_noise_note: The noise model applies exactly one squared read-noise term,
       so observation.detector.read_noise carries the effective combined-image value
       and never the per-read value.
-    read_noise_citation: S4
+    read_noise_citation: SEI
+    read_noise_description: HRI UVIS read noise from the SEI HRI.yaml, the current
+      public HWO working engineering reference adopted for this study
+    read_noise_retired_provenance: 'The derivation carried the LUVOIR HDI Table 8-5
+      value of 2.5 e- per read [S4] until 2026-08-23, when the SEI became the authoritative
+      instrument source. That value is recorded here as provenance history only: it
+      is not a configured value and it is not a bracket.'
     dark_current_e_per_pix_s: 0.002
-    dark_current_description: LUVOIR HDI heritage
+    dark_current_description: LUVOIR HDI heritage, equal to the SEI HRI UVIS value
     dark_current_citation: S4
+    dark_current_corroboration_citation: SEI
   exposure:
     value_s: 2000.0
     description: HST full-orbit-class exposure (~2000 s)
@@ -287,3 +325,8 @@ metadata:
       Survey" (2024), arXiv:2404.05654
     L1: Newton et al. 2011, ApJ 734, 104, arXiv:1104.2608; mean magnification-corrected
       SLACS source magnitude, median mu 8.8
+    SEI: HWO Science Engineering Interface, hwo_sci_eng v0.1.9, B. Sitarski (NASA/GSFC)
+      and J. Tumlinson (STScI), https://github.com/HWO-GOMAP-Working-Groups/Sci-Eng-Interface;
+      consumed by the official HWO ETC (spacetelescope/hwo-tools via syotools, models/camera.py
+      set_from_sei). PyPI wheel and the HRI/EAC1 data files vendored at scratch/q1_observing_conditions/sei_v0.1.9
+      with SHA256SUMS.

@@ -48,11 +48,14 @@ means the render, the grid, or the target rate moved.
 COMMITTED_REFERENCE_PATH = (
     PROJECT_ROOT / 'configs' / 'observing' / 'hwo_eac1_hri_reference_v1.yaml'
 )
-COMMITTED_BLANK_PIXEL_VARIANCE_E2 = 21.52056
-"""Blank-pixel variance the units audit computed for the reference.
+COMMITTED_BLANK_PIXEL_VARIANCE_E2 = 9.10056
+"""Blank-pixel variance of the reference, in electrons squared.
 
-``2000 * (0.00251028 + 0.002) + 3.53553 ** 2`` in electrons squared,
-quoted to the audit's five decimals.
+``2000 * (0.00251028 + 0.002) + 0.28284 ** 2``, quoted to five
+decimals, so the blank-pixel sigma is 3.01671 e-. The retired
+LUVOIR-HDI read noise of 2.5 e- per read gave 21.52056 e^2 and a sigma
+of 4.63903 e-; both are provenance history since the SEI ruling of
+2026-08-23.
 """
 
 AUDIT_ARC_SNR = 303.94
@@ -227,18 +230,54 @@ def test_sky_chain_matches_an_independent_computation_and_stays_physical():
 
 def test_effective_read_noise_is_the_combined_image_value():
     """Pin the combined-image read noise and its provenance pair."""
-    assert DERIVATION.effective_read_noise(2.5, 2) == 2.5 * math.sqrt(2.0)
-    assert DERIVATION.effective_read_noise(2.5, 2) == 3.5355339059327378
+    assert DERIVATION.effective_read_noise(0.2, 2) == 0.2 * math.sqrt(2.0)
+    assert DERIVATION.effective_read_noise(0.2, 2) == 0.28284271247461906
 
     reference = _document()
     detector = reference['observation']['detector']
     provenance = reference['metadata']['detector']
 
-    assert detector['read_noise'] == 3.5355339059327378
-    assert provenance['read_noise_per_read_e'] == 2.5
+    assert detector['read_noise'] == 0.28284271247461906
+    assert provenance['read_noise_per_read_e'] == 0.2
     assert provenance['n_reads'] == 2
     assert detector['read_noise'] != provenance['read_noise_per_read_e']
     assert provenance['effective_read_noise_formula'] == 'per_read_e * sqrt(n_reads)'
+    assert provenance['read_noise_citation'] == 'SEI'
+    assert '2.5 e- per read' in provenance['read_noise_retired_provenance']
+
+
+def test_sei_is_the_named_instrument_reference_for_the_read_noise():
+    """Pin the SEI provenance block and keep 2.5 e- out of the values."""
+    metadata = _document()['metadata']
+    instrument = metadata['instrument_reference']
+
+    assert instrument['package'] == 'hwo_sci_eng'
+    assert instrument['version'] == '0.1.9'
+    assert instrument['status'] == (
+        'current public HWO working engineering reference adopted for this '
+        'study'
+    )
+    assert instrument['vendored_path'] == (
+        'scratch/q1_observing_conditions/sei_v0.1.9'
+    )
+    assert instrument['citation'] == 'SEI'
+    assert 'hwo_sci_eng v0.1.9' in metadata['citations']['SEI']
+
+    adopted = instrument['adopted_parameters']['read_noise_per_read_e']
+    assert adopted['value'] == 0.2
+    assert '2.5 e- per read' in adopted['replaces']
+
+    corroborated = instrument['corroborated_parameters']
+    assert corroborated['pixel_scale_arcsec']['sei_value'] == 0.00716
+    assert corroborated['pixel_scale_arcsec']['value'] == PIXEL_SCALE_ARCSEC
+    assert corroborated['dark_current_e_per_pix_s']['sei_value'] == 0.002
+
+    assert DERIVATION.READ_NOISE_PER_READ_E == 0.2
+    assert 2.5 not in (
+        metadata['detector']['read_noise_per_read_e'],
+        metadata['detector']['effective_read_noise_e'],
+        metadata['detector']['dark_current_e_per_pix_s'],
+    )
 
 
 def test_scene_one_closed_form_reproduces_the_qualification_flux():
@@ -607,7 +646,9 @@ def test_artifact_round_trips_and_validates_as_an_observation_block(tmp_path):
     assert observation['throughput'] == 1.0
     assert observation['detector']['gain'] == 1.0
     assert observation['detector']['dark_current'] == 0.002
-    assert set(reference['metadata']['citations']) == {'S1', 'S3', 'S4', 'S6', 'L1'}
+    assert set(reference['metadata']['citations']) == {
+        'S1', 'S3', 'S4', 'S6', 'L1', 'SEI'
+    }
 
     with pytest.raises(ValueError, match='Refusing to overwrite'):
         DERIVATION.write_reference_document(path, document)
@@ -780,7 +821,7 @@ def test_default_normalization_mode_rebuilds_the_committed_reference(
     rebuilt['metadata'].pop('generation_date')
     committed['metadata'].pop('generation_date')
     assert rebuilt['metadata'] == committed['metadata']
-    assert DERIVATION.SCRIPT_VERSION == '2'
+    assert DERIVATION.SCRIPT_VERSION == '3'
 
 
 def test_default_normalization_mode_is_the_explicit_intrinsic_rate_mode(
@@ -842,7 +883,7 @@ def test_blank_pixel_variance_reproduces_the_units_audit():
     assert variance == pytest.approx(
         COMMITTED_BLANK_PIXEL_VARIANCE_E2, rel=1.0e-5
     )
-    assert math.sqrt(variance) == pytest.approx(4.639, rel=1.0e-3)
+    assert math.sqrt(variance) == pytest.approx(3.01671, rel=1.0e-5)
 
     with pytest.raises(ValueError, match='must be a positive finite number'):
         DERIVATION.blank_pixel_variance_e2(

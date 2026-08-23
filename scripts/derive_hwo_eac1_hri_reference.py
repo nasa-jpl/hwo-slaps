@@ -18,7 +18,9 @@ conventions. Production configurations therefore keep
 ``observation.throughput: 1.0`` and the throughput chain lives in
 provenance metadata only. The detector read noise is likewise the
 EFFECTIVE combined-image value, because the noise model applies exactly
-one squared read-noise term.
+one squared read-noise term. Its per-read value comes from the HWO
+Science Engineering Interface, the current public HWO working
+engineering reference adopted for this study.
 
 That discrete render-and-normalize contract is the ``intrinsic_rate``
 normalization mode and stays the default. The ``arc_snr`` mode instead
@@ -44,7 +46,7 @@ import yaml
 
 
 SCRIPT_NAME = 'derive_hwo_eac1_hri_reference.py'
-SCRIPT_VERSION = '2'
+SCRIPT_VERSION = '3'
 REFERENCE_NAME = 'hwo_eac1_hri_reference_v1'
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -89,9 +91,26 @@ DEFAULT_SKY_MAG = 23.0
 OPTIMISTIC_OPTICAL_THROUGHPUT = 0.56
 OPTIMISTIC_DETECTOR_QE = 0.9
 
+SEI_PACKAGE = 'hwo_sci_eng'
+SEI_VERSION = '0.1.9'
+SEI_VENDOR_RELPATH = 'scratch/q1_observing_conditions/sei_v0.1.9'
+SEI_DESCRIPTION = (
+    'current public HWO working engineering reference adopted for this '
+    'study'
+)
+
 DETECTOR_GAIN_E_PER_ADU = 1.0
 DARK_CURRENT_E_PER_PIX_S = 0.002
-READ_NOISE_PER_READ_E = 2.5
+READ_NOISE_PER_READ_E = 0.2
+"""HRI UVIS per-read noise in electrons, from the SEI ``HRI.yaml``.
+
+Retired provenance, kept as history only: the derivation carried the
+LUVOIR HDI Table 8-5 value of 2.5 e- per read until 2026-08-23, when the
+SEI became the authoritative instrument source for this study. That
+number is neither a configured value nor a bracket anywhere in the
+design.
+"""
+
 N_READS = 2
 QUALIFICATION_SKY_BACKGROUND_E_PER_PIX_S = 1.0
 
@@ -216,6 +235,16 @@ CITATIONS = {
     'L1': (
         'Newton et al. 2011, ApJ 734, 104, arXiv:1104.2608; mean '
         'magnification-corrected SLACS source magnitude, median mu 8.8'
+    ),
+    'SEI': (
+        f'HWO Science Engineering Interface, {SEI_PACKAGE} '
+        f'v{SEI_VERSION}, B. Sitarski (NASA/GSFC) and J. Tumlinson '
+        '(STScI), '
+        'https://github.com/HWO-GOMAP-Working-Groups/Sci-Eng-Interface; '
+        'consumed by the official HWO ETC (spacetelescope/hwo-tools via '
+        'syotools, models/camera.py set_from_sei). PyPI wheel and the '
+        f'HRI/EAC1 data files vendored at {SEI_VENDOR_RELPATH} with '
+        'SHA256SUMS.'
     ),
 }
 
@@ -1334,6 +1363,71 @@ def collecting_area_report(area_m2, pupil_geometry):
     }
 
 
+def _sei_provenance(pixel_scale_arcsec):
+    """Return the SEI instrument-reference provenance block.
+
+    The SEI is the authoritative instrument source for this study as of
+    2026-08-23. Only the detector read noise is adopted from it here; the
+    remaining entries record where the independently derived engine
+    values agree with it, so a future SEI release can be diffed against
+    this artifact.
+
+    Parameters
+    ----------
+    pixel_scale_arcsec : `float`
+        Detector pixel scale in arcseconds, for the plate-scale
+        corroboration.
+
+    Returns
+    -------
+    provenance : `dict`
+        Serializable instrument-reference record.
+    """
+    pixel_scale = _require_positive(pixel_scale_arcsec, 'pixel_scale_arcsec')
+    return {
+        'name': 'HWO Science Engineering Interface',
+        'package': SEI_PACKAGE,
+        'version': SEI_VERSION,
+        'status': SEI_DESCRIPTION,
+        'vendored_path': SEI_VENDOR_RELPATH,
+        'data_files_read': ['HRI.yaml', 'EAC1.yaml'],
+        'citation': 'SEI',
+        'adopted_parameters': {
+            'read_noise_per_read_e': {
+                'value': READ_NOISE_PER_READ_E,
+                'sei_source': 'HRI.yaml, UVIS channel detector read noise',
+                'replaces': (
+                    'LUVOIR HDI Table 8-5 read noise of 2.5 e- per read [S4], '
+                    'retired 2026-08-23'
+                ),
+            },
+        },
+        'corroborated_parameters': {
+            'pixel_scale_arcsec': {
+                'value': pixel_scale,
+                'sei_value': 0.00716,
+                'sei_source': 'HRI.yaml, UVIS plate scale 7.16 mas',
+                'note': (
+                    'derived independently as Nyquist sampling at 500 nm for '
+                    'the circumscribed pupil diameter and equal to the SEI '
+                    'value'
+                ),
+            },
+            'dark_current_e_per_pix_s': {
+                'value': DARK_CURRENT_E_PER_PIX_S,
+                'sei_value': 0.002,
+                'sei_source': 'HRI.yaml, UVIS channel dark current',
+            },
+        },
+        'caveats': (
+            'v0.1.9 carries pre-formulation placeholder values and the EAC '
+            'architectures are exploratory. The UVIS filter transmission '
+            'curves referenced by HRI.yaml are not shipped in the wheel, so '
+            'the throughput chain in this artifact is not taken from the SEI.'
+        ),
+    }
+
+
 def _arc_snr_normalization_provenance(target_arc_snr, observation):
     """Return the arc-S/N provenance block of the normalization record.
 
@@ -1596,6 +1690,7 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
                 'the derived source and sky rates in this artifact only'
             ),
         },
+        'instrument_reference': _sei_provenance(pixel_scale),
         'detector': {
             'gain_e_per_adu': DETECTOR_GAIN_E_PER_ADU,
             'pixel_scale_arcsec': pixel_scale,
@@ -1628,10 +1723,24 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
                 'effective combined-image value and never the per-read '
                 'value.'
             ),
-            'read_noise_citation': 'S4',
+            'read_noise_citation': 'SEI',
+            'read_noise_description': (
+                f'HRI UVIS read noise from the SEI HRI.yaml, the '
+                f'{SEI_DESCRIPTION}'
+            ),
+            'read_noise_retired_provenance': (
+                'The derivation carried the LUVOIR HDI Table 8-5 value of '
+                '2.5 e- per read [S4] until 2026-08-23, when the SEI became '
+                'the authoritative instrument source. That value is recorded '
+                'here as provenance history only: it is not a configured '
+                'value and it is not a bracket.'
+            ),
             'dark_current_e_per_pix_s': DARK_CURRENT_E_PER_PIX_S,
-            'dark_current_description': 'LUVOIR HDI heritage',
+            'dark_current_description': (
+                'LUVOIR HDI heritage, equal to the SEI HRI UVIS value'
+            ),
             'dark_current_citation': 'S4',
+            'dark_current_corroboration_citation': 'SEI',
         },
         'exposure': {
             'value_s': exposure,
