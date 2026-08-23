@@ -1,0 +1,1419 @@
+# DesignFreeze_v1: the single machine-readable design authority for the
+# HWO-SLAPS production campaign.
+#
+# Sol Pro go-time finding P0-4 requires exactly one design artifact that every
+# agent, driver and manifest consumes. This is that artifact. Where any plan
+# document, report or brief disagrees with this file, THIS FILE WINS and the
+# document is stale; the superseded documents carry a banner pointing here.
+#
+# STATUS: PROVISIONAL. Frozen under the 2026-08-23 overnight launch authority
+# so Stage 0 can start tonight. Every entry of `provisional_items` needs
+# George's and Sol Pro's ratification on the morning of 2026-08-24 BEFORE any
+# result produced under this freeze is used in the paper. Stage 0 is cheap and
+# resumable, so an amended design re-runs at small cost.
+#
+# Conventions. Angles are arcseconds. Signal is electrons in the exposure and
+# variance is electrons squared. Masses are log10 solar. Paths are repo-root
+# relative. Every `sha256` is the full 64-hex digest of the named file's bytes.
+#
+# Consumers. `hwoslaps.campaign.design_freeze` loads and validates this file;
+# `hwoslaps.campaign.stage0` turns it into the Stage 0 S1-lite campaign. No
+# driver may re-declare a value that appears here.
+
+schema_version: 1
+
+freeze:
+  name: design_freeze_v1
+  version: 1
+  status: provisional
+  authored: '2026-08-23'
+  ratified: null
+  ratification_owner: George, with Sol Pro concurrence
+  authority: >-
+    Frozen under the overnight launch authority George granted in chat on
+    2026-08-23 and the Sol Pro CONDITIONAL GO ruling archived at
+    scratch/SolPro_gotime_signoff/. The declared deviation is that the B8
+    parent design is frozen provisionally rather than ratified first; see
+    scratch/OvernightExecutionPlan_2026-08-23.md task T10.
+  origin_finding: P0-4
+  supersedes:
+    - path: scratch/RedesignExecutionPlan.md
+      reason: >-
+        Carries the stale Stage 0 = 500 pool with 32/8/4 strata and the retired
+        oracle-subtraction foreground treatment.
+    - path: scratch/q1_observing_conditions/derivation_notes.md
+      reason: >-
+        Pre-P0-3 source-normalization notes; superseded by the discrete
+        detected-rate contract carried on the prepared assets.
+  authoritative_over: >-
+    Campaign counts, strata, seeds, the parent design, the selection rule, the
+    aperture algorithm and its factor, the mass-ladder policy, the detector and
+    throughput values, the template bank, and every claim label.
+
+# ---------------------------------------------------------------------------
+# What still needs a signature in the morning
+# ---------------------------------------------------------------------------
+# Exactly these four items are unratified. Nothing else in this file is open.
+provisional_items:
+  - id: parent_design
+    summary: >-
+      The whole B8 joint parent design embedded below under `parent_design`,
+      including every distribution carrying `provisional: true`.
+    ratify: >-
+      George and Sol Pro accept or amend the marginals, the bounds and the
+      declared couplings. An amendment invalidates this freeze's hash and
+      re-runs Stage 0.
+    reference: scratch/B8ParentDesign_v1.md section 11
+  - id: representative_48_semantics
+    summary: >-
+      The parent tier of 48 is a deterministic stratified representative
+      subsample of the post-cut pool, NOT the top 48 by the selection score.
+    ratify: >-
+      One line from George. The T10 task brief said "top-48 by the T4 score";
+      RedesignExecutionPlan S0 and the Sol Pro W2/W3 three-strata prescription
+      both require a representative draw so the middle stratum can demonstrate
+      the improvement from observable target selection. Resolved here in favour
+      of the representative draw; a top-48 parent would delete main-result
+      item 3.
+    reference: scratch/B8ParentDesign_v1.md section 9 item 1
+  - id: t4_noisy_g_labelling
+    summary: >-
+      Whether the selection is labelled an idealized no-subhalo proxy selection
+      or an operational target selector, which follows from the outcome of the
+      T4 noise-seed rank-stability test on noisy observables.
+    ratify: >-
+      Read the rank-stability numbers (Spearman, top-12 Jaccard,
+      oracle-recovered fraction over the 20 declared replicates) and pick the
+      label. Sol Pro P0-6 verbatim: unless rank stability is demonstrated using
+      noisy or reconstructed observables, call it an idealized no-subhalo proxy
+      selection, not an operational Roman/Euclid/HWO target selector.
+    reference: scratch/q1_observing_conditions/selection_rule.md section 4
+  - id: template_83935_resolution_caveat
+    summary: >-
+      The compact template cosmos_83935_hlr011 is stored at 0.012148903205522409
+      arcsec per pixel, coarser than the 0.00716 arcsec production pixel scale,
+      so it is interpolated up on every render and is the least well sampled
+      member of the bank.
+    ratify: >-
+      Accept the caveat and its wording, or replace the compact anchor with the
+      declared alternative (ident 174776). The complexity statistic C is a
+      gradient statistic, so the compact stratum is the one whose C is most
+      exposed to template sampling rather than to source morphology.
+    reference: scratch/f3_source_gallery/README.md
+
+# ---------------------------------------------------------------------------
+# Claim labels, binding on every sentence that quotes a number from this study
+# ---------------------------------------------------------------------------
+foreground_free_ceiling: true
+
+claim_labels:
+  central_result: >-
+    foreground-free, source-only information ceiling
+  central_result_rule: >-
+    Every central result of this study carries the foreground-free/source-only
+    information ceiling label. No lens light and no lens photon noise enter any
+    render (D-F6 is ceiling-only), so every sensitivity is an upper bound on
+    what a real observation with a lens galaxy in the frame would deliver.
+  counts: >-
+    idealized upper-bound yields
+  counts_rule: >-
+    Every expected count, every mu_i and every P(>=1) is an idealized
+    upper-bound yield under the ceiling above. Never quote a count as a
+    predicted detection number.
+  ensemble: >-
+    reference ensemble, not a survey population
+  ensemble_rule: >-
+    Report conditional design quantiles of the reference ensemble, never a
+    population mean or a survey-population expectation. The five morphology
+    anchors carry equal design allocation rather than population frequencies,
+    and the lens-galaxy distributions are calibrated to an observed strong-lens
+    sample rather than derived from a velocity-dispersion function with lensing
+    cross-section weights. Bootstrap intervals quantify subsampling variability
+    WITHIN this ensemble under this design and are never survey-population
+    confidence intervals.
+  templates: >-
+    templates, not a source population
+  templates_rule: >-
+    The five source anchors are declared morphology TEMPLATES. They are not a
+    sample of, and carry no weights toward, the population of lensed sources.
+    Any pooled summary over templates is a design average over five declared
+    levels, and is always reported beside the five per-template conditional
+    summaries.
+  provisionality: >-
+    Every number produced under this freeze is provisional until the
+    2026-08-24 review, and artifacts are labelled accordingly.
+  forbidden_phrases:
+    - survey population
+    - population expectation
+    - representative of the lens population
+    - expected number of HWO lenses
+    - predicted detections
+
+# ---------------------------------------------------------------------------
+# Stage 0: the no-subhalo observation pool
+# ---------------------------------------------------------------------------
+stage0:
+  n_systems: 1000
+  subhalo: absent
+  observation_layer_only: true
+  cosmology: Planck15
+  pixel_scale_arcsec: 0.00716
+  exposure_time_s: 2000.0
+  psf_kernel_shape_native: [51, 51]
+  psf_state: perfect
+  psf_state_note: >-
+    Scene PSFs carry no wavefront error. PSF states are sweep axes and are
+    never a system property, so Stage 0 renders at the perfect PSF.
+  base_scene_config: configs/scenes/scene4_cosmos.yaml
+  base_scene_label: scene4_cosmos
+  base_scene_note: >-
+    Every Stage 0 system is the canonical Image-source scene with the sampled
+    macro, source template, geometry and normalization applied as manifest
+    overrides. The scene label is also the key the observing reference's
+    source_normalization block is read under.
+  runner: scripts/run_stage0_observation.py
+  artifact: stage0_observation.npz
+  job_config_stage0_block: >-
+    Every staged job configuration carries a top-level `stage0` block holding
+    its system id, template, sampled source magnitude, design theta_E, the
+    target unlensed detected rate and the rate-contract tolerance. The engine
+    ignores the block; it exists so the P0-3 contract is checkable inside the
+    job that renders it rather than by cross-referencing the catalogue after
+    the fact, and it is covered by the staged configuration hash.
+  artifact_contents: >-
+    Per-system selection observables (S, G, C, theta_res), the T7 theta_E_eff
+    with its contour and aperture hashes, the aperture census, the realized
+    unlensed detected rate against its target, the realized lensed rate, and
+    the mandatory campaign_uuid and config_hash identity members. The full
+    electron maps are NOT stored: Stage 0 exists to produce selection
+    statistics, and every later stage re-renders from the staged config.
+
+# ---------------------------------------------------------------------------
+# Strata
+# ---------------------------------------------------------------------------
+strata:
+  parent:
+    name: reference ensemble
+    size: 48
+    mode: stratified_representative_subsample
+    provisional: true
+    semantics: >-
+      A deterministic stratified representative subsample of the post-cut pool,
+      NOT the top 48 by the selection score. The score selects only the 12 and
+      the 5. The parent tier exists to answer what distribution of selection
+      functions a declared parent produces, and to give the paper the
+      unselected baseline against which observable target selection is shown to
+      improve.
+    algorithm:
+      - 'Partition the post-cut pool by source template, in the declared level order.'
+      - 'Sort each template stratum ascending by theta_E_eff, ties broken by system id.'
+      - 'Allocate 9 per template (45); give the remaining 3 to the templates with the largest post-cut counts, ties by declared level order.'
+      - 'Within each stratum take the systematic sample at indices floor((j + 0.5) * |P_t| / n_t) for j = 0 .. n_t - 1.'
+    rng: none
+    properties: >-
+      Exactly balanced in morphology and evenly spread over the theta_E design
+      quantiles within each morphology. Being a design-quantile-spread
+      subsample rather than a random draw is why its summaries are reported as
+      conditional design quantiles.
+  selected:
+    name: operational HWO follow-up sample
+    size: 12
+    mode: top_by_score
+    drawn_from: post_cut_pool
+    overlap_with_parent: allowed, expected, recorded as an explicit per-system membership flag
+  golden:
+    name: sampled golden frontier
+    size: 5
+    mode: top_by_score_within_selected
+    drawn_from: selected
+    prohibition: >-
+      Sol Pro W2/W3 verbatim: "Do not select the primary 'golden' sample after
+      inspecting its true injected-subhalo M_lim." The ranking is frozen and
+      hashed into provenance BEFORE the manifest generator emits any
+      injected-subhalo job.
+  oracle:
+    name: oracle top-sensitivity subset
+    size: 12
+    mode: top_by_measured_M_lim
+    status: labelled_upper_bound
+    note: >-
+      Formed only after the ladders are measured and shown as an explicitly
+      labelled upper bound, never as operational selection.
+  freeze_order:
+    - 'Stage 0 renders 1000 no-subhalo observations.'
+    - 'Selection statistics computed on the noiseless source-only truth.'
+    - 'Floor cuts applied; post-cut pool fixed.'
+    - 'Score computed and standardized over the post-cut pool.'
+    - 'Parent 48, selected 12, golden 5 frozen and hashed into provenance.'
+    - 'Only then may the manifest generator emit an injected-subhalo job.'
+
+# ---------------------------------------------------------------------------
+# Instrument: detector, throughput, and the labelled R arms
+# ---------------------------------------------------------------------------
+observing:
+  reference:
+    path: configs/observing/hwo_eac1_hri_reference_v1.yaml
+    sha256: fa6cca9391028f18bd13f53a0f86d294b2751062797c9210f63d18a184a065c7
+    reference_name: hwo_eac1_hri_reference_v1
+    script: scripts/derive_hwo_eac1_hri_reference.py
+    generated: '2026-08-23'
+    semantics: >-
+      Source normalization is solved so the production render sums to the
+      detected e-/s rate, so observation.throughput stays 1.0 in the rendered
+      configuration and the throughput chain is provenance only. Carrying both
+      would double-apply the throughput.
+  detector:
+    read_noise_per_read_e: 0.2
+    n_reads: 2
+    effective_read_noise_e: 0.28284271247461906
+    effective_read_noise_formula: per_read_e * sqrt(n_reads)
+    dark_current_e_per_pix_s: 0.002
+    sky_background_e_per_pix_s: 0.002510279845963486
+    gain_e_per_adu: 1.0
+    pixel_scale_arcsec: 0.00716
+    source: >-
+      HWO Science Engineering Interface package hwo_sci_eng v0.1.9
+      (Sitarski/Tumlinson, GOMAP), HRI UVIS channel, vendored at
+      scratch/q1_observing_conditions/sei_v0.1.9/.
+    wording: >-
+      current public HWO working engineering reference adopted for this study
+    ruling: >-
+      P0-1, George 2026-08-23: SEI is the bible. 0.2 e- per read is CENTRAL and
+      there is NO 2.5 e- conservative bracket anywhere in this design. The
+      retired LUVOIR-HDI heritage value 2.5 e- per read must not appear as a
+      current design value in any artifact.
+    blank_pixel_check:
+      formula: 'sigma = sqrt((sky + dark) * t + read_noise^2)'
+      exposure_time_s: 2000.0
+      variance_e2: 9.100559691926971
+      sigma_e: 3.0167133
+      note: >-
+        Recomputed here and measured by the Stage 0 runner, which reports
+        blank_variance_e2 = 9.100559691926971. It matches the P0-1 review value
+        3.017. The 3.0146 quoted in
+        scratch/OvernightExecutionPlan_2026-08-23.md is an arithmetic slip in
+        that note and is superseded by this entry.
+  throughput:
+    baseline: 0.21
+    baseline_status: ruled baseline and standard
+    baseline_provenance: >-
+      LUVOIR HDI Table 8-5 end-to-end system QE at V, detector included. It
+      equals the SEI HRI UVIS chain (13 Al+XeLiF surfaces at R(500 nm) =
+      0.9073, COSMOS CMOS QE 0.894, implying 0.20-0.24 with filters) at a
+      filter transmission of 0.832.
+    optimistic_arm: 0.504
+    optimistic_arm_status: labelled full-train hypothetical ceiling
+    optimistic_arm_caveat: >-
+      SILVER ENVELOPE CAVEAT, binding on every quoted R1 and R3 number. The
+      former "optimistic instrument" provenance (Stark et al. 2025 coronagraph
+      ETC fiducial, which disclaims representing HWO) is RETIRED. Re-derived
+      from the SEI coating curves the defensible visible-channel trade with the
+      telescope still UV-capable is 0.36-0.43 instrument-only protected silver;
+      full-train silver is 0.47-0.56, where 0.504 sits, and implies recoating
+      the UV-serving telescope. 0.504 is kept ONLY as a clearly labelled
+      full-train hypothetical ceiling. The partial- versus full-train labelling
+      is an OPEN RIDER with George's advisor.
+  r_arms:
+    role: >-
+      The R arms are controlled factorization canaries. They are NOT re-imposed
+      on Stage-0-selected systems: the selected and golden frontier numbers are
+      reported at the NATIVE source magnitudes of the selected systems with
+      their parent quantiles stated (P0-7).
+    reference_dir: scratch/panel/refs
+    arms:
+      R0:
+        label: baseline
+        source_magnitude_ab: 24.845
+        throughput: 0.21
+        detected_rate_e_per_s: 8.951505744562876
+        ref_yaml: scratch/panel/refs/R0.yaml
+        meaning: >-
+          The reference arm. D1 source magnitude at the ruled baseline
+          throughput. Every central number of the study is an R0 number unless
+          it is explicitly labelled otherwise.
+      R1:
+        label: instrument/throughput arm
+        source_magnitude_ab: 24.845
+        throughput: 0.504
+        detected_rate_e_per_s: 21.483613786950905
+        ref_yaml: scratch/panel/refs/R1.yaml
+        meaning: >-
+          The instrument trade bracket: R0's target seen through the
+          full-train hypothetical throughput ceiling. Carries the silver
+          envelope caveat above wherever it is quoted, and is never presented
+          as the reference instrument.
+      R2:
+        label: bright-target arm
+        source_magnitude_ab: 23.345
+        throughput: 0.21
+        detected_rate_e_per_s: 35.63658624161314
+        ref_yaml: scratch/panel/refs/R2.yaml
+        meaning: >-
+          The target-selection arm: a bright source under the BASELINE
+          instrument. This is the arm that carries the "down to 10^7 under the
+          reference instrument" statement.
+        caveat: >-
+          The canary magnitude 23.345 lies OUTSIDE the declared parent
+          source-magnitude range (bright bound 23.745) by construction, and
+          must be labelled as outside the declared parent wherever it appears.
+      R3:
+        label: combined favorable ceiling
+        source_magnitude_ab: 23.345
+        throughput: 0.504
+        detected_rate_e_per_s: 85.52780697987154
+        ref_yaml: scratch/panel/refs/R3.yaml
+        meaning: >-
+          Bright target AND the full-train hypothetical throughput: the
+          combined favorable ceiling. It carries both the silver envelope
+          caveat and the outside-the-declared-parent magnitude caveat, and is
+          never the headline number.
+      RA:
+        label: equal-arc-S/N cross-source normalization
+        source_magnitude_ab: 24.845
+        throughput: 0.21
+        detected_rate_e_per_s: 8.951505744562876
+        ref_yaml: scratch/panel/refs/RA.yaml
+        meaning: >-
+          Not a physical arm. Per-scene normalizations chosen so the three
+          engineering scenes carry equal arc signal-to-noise, so that
+          cross-source comparisons isolate morphology from brightness. Used by
+          the engineering ladders only, never by Stage 0.
+
+# ---------------------------------------------------------------------------
+# The five-template source bank
+# ---------------------------------------------------------------------------
+templates:
+  count: 5
+  allocation: balanced
+  per_level: 200
+  assignment: >-
+    Exactly 200 systems per level, assigned by a single seeded permutation of
+    the 1000 labels under spawn key (3,). Balanced allocation, not a
+    multinomial draw, so the morphology factor is exactly orthogonal to pool
+    size and the variance decomposition is exactly balanced.
+  canonical_half_light_arcsec: 0.11
+  size_scale_rule: 'size_scale = source_half_light_radius_arcsec / 0.11'
+  rate_contract_policy: >-
+    Each asset carries the P0-3 discrete detected-rate contract solved at the
+    canonical geometry (size_scale 1.0, rotation 0, the 500 x 500 production
+    grid at 0.00716 arcsec per pixel): the unlensed render's discrete sum
+    equals the committed detected rate 8.951505744562876 e-/s for the D1
+    magnitude 24.845. The Image source evaluates
+    total_flux * sb(theta / size_scale) and is exactly linear in total_flux, so
+    the manifest sets
+    total_flux = canonical_total_flux * 10^(-0.4 * (m_AB - 24.845)) /
+    size_scale^2
+    and the Stage 0 runner records the REALIZED unlensed rate on that system's
+    own grid and size_scale against the target rate
+    8.951505744562876 * 10^(-0.4 * (m_AB - 24.845)). The value 0.289151264 is
+    an internal morphology-preparation convention only and is never a detected
+    e-/s rate.
+  size_scale_flux_rule: >-
+    Dividing by size_scale^2 is required, not cosmetic: stretching the stamp
+    over a larger angular area at fixed surface brightness would otherwise
+    multiply its integrated flux by size_scale^2 and silently decouple the
+    rendered brightness from the sampled magnitude. The design samples an
+    intrinsic magnitude and an intrinsic half-light radius independently, so
+    the size factor is divided out and the source carries exactly the sampled
+    magnitude's total flux at any sampled size.
+  rate_contract_production_tolerance: 0.05
+  rate_contract_production_tolerance_rule: >-
+    The canonical solve is exact to about one part in 10^4 at the canonical
+    geometry. At a sampled size_scale and rotation the bilinear stamp
+    resampling moves the discrete sum a little further, so the Stage 0 runner
+    fails closed if the realized unlensed rate departs from its target by more
+    than this fraction, and records the realized rate and ratio for every
+    system either way. A system inside the tolerance but outside one per cent
+    is a flag for the harvest, not a failure.
+  rate_contract_grid_rule: >-
+    The contract is evaluated on a grid sized to contain the whole scaled
+    stamp about the sampled source centre, at the production pixel scale, NOT
+    on the system's production grid. The production grid is theta_E driven and
+    a large sampled source can be wider than it, so gating the normalization on
+    the production grid would confound the normalization with grid truncation.
+    The unlensed sum on the production grid is recorded separately as
+    production_grid_flux_fraction, a truncation diagnostic that says how much
+    of the intrinsic source footprint the theta_E-driven map covers.
+  magnification_rule: >-
+    Magnification is applied exactly once, emergently, by the engine evaluating
+    the same surface brightness at ray-traced source-plane positions. No
+    magnification factor multiplies any normalization anywhere, and the
+    magnitudes of the parent design are unlensed intrinsic source-plane totals.
+  declared_idealization: >-
+    F814W stamps of z ~ 0.35-1.2 galaxies are used as the sampled z_s source at
+    500 nm. The band and rest-frame mismatch is inherited from the existing
+    anchor asset, is declared, and is not new to this design.
+  levels:
+    - id: cosmos_48849
+      morphology_class: clumpy_sbar_spiral_existing_anchor
+      asset_path: configs/source_assets/cosmos_48849_hlr011.npz
+      sha256: fb51b801b98653f6a263016fa55ae0e1194734c197081d652ee00c51077ccd60
+      asset_pixel_scale_arcsec: 0.002732128852944742
+      canonical_total_flux: 0.0004588946736860948
+      canonical_total_flux_source: >-
+        The committed observing reference's scene4_cosmos source_normalization
+        patch. This legacy anchor predates the P0-3 contract block and carries
+        no embedded provenance.rate_contract; its normalization is the
+        committed reference value and tests/test_source_bank_assets.py
+        re-solves it against the same target rate.
+      catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 48849
+    - id: cosmos_62410
+      morphology_class: smooth_disk
+      asset_path: configs/source_assets/cosmos_62410_hlr011.npz
+      sha256: b3fdc541c3e31013d5bb37c9e948fa74a9ce485cbb6dd1d959d3c4f0a5392376
+      asset_pixel_scale_arcsec: 0.005553115716269291
+      canonical_total_flux: 0.0004589089094626745
+      canonical_total_flux_source: provenance.rate_contract.total_flux
+      catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 62410
+    - id: cosmos_159916
+      morphology_class: clumpy
+      asset_path: configs/source_assets/cosmos_159916_hlr011.npz
+      sha256: 1d601a6c3e969d558102c72b25307b2328a044396adcafbb63f3721aae435aa0
+      asset_pixel_scale_arcsec: 0.005965587590013045
+      canonical_total_flux: 0.000458924098862195
+      canonical_total_flux_source: provenance.rate_contract.total_flux
+      catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 159916
+    - id: cosmos_162893
+      morphology_class: irregular_merger
+      asset_path: configs/source_assets/cosmos_162893_hlr011.npz
+      sha256: 795d2f5eb636cbb59440547950260b70032f6e52540ac1c582e58ad0daf8ee4b
+      asset_pixel_scale_arcsec: 0.005584403908234906
+      canonical_total_flux: 0.0004589439758914851
+      canonical_total_flux_source: provenance.rate_contract.total_flux
+      catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 162893
+    - id: cosmos_83935
+      morphology_class: compact
+      asset_path: configs/source_assets/cosmos_83935_hlr011.npz
+      sha256: 50ae26b0bb66d75e0147b669f40028f5333e665ff16e5444326fa682e6723ef9
+      asset_pixel_scale_arcsec: 0.012148903205522409
+      canonical_total_flux: 0.0004588806668010262
+      canonical_total_flux_source: provenance.rate_contract.total_flux
+      catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 83935
+      caveat: >-
+        PROVISIONAL, see provisional_items/template_83935_resolution_caveat.
+        The stored sampling 0.012148903205522409 arcsec per pixel is coarser
+        than the 0.00716 arcsec production pixel scale, so this template is
+        interpolated up on every render and is the least well sampled member of
+        the bank.
+
+# ---------------------------------------------------------------------------
+# Selection: floor cuts, score, tiers
+# ---------------------------------------------------------------------------
+selection:
+  pre_registration:
+    path: scratch/q1_observing_conditions/selection_rule.md
+    sha256: 3ce648bbe65ced35a5773cae691ce8822930076ea2f151dde0de2594974cb9f5
+    version: 2
+    signed: 'George, 2026-08-23'
+    authority: >-
+      The pre-registration document is the signed definition and this block
+      restates it. Where the two disagree the document wins and the code is the
+      bug. The v1 document carrying z(log S) + z(log G) is void.
+  module: src/hwoslaps/analysis/selection_score.py
+  observables:
+    plane: >-
+      The noiseless PSF-convolved lensed-source electrons of the no-subhalo
+      truth. No noise realization enters any selection statistic.
+    aperture: 'R <= 2 theta_E_eff about the lens centre, radius closed'
+    blank_variance_e2: 'B = (sky_background + dark_current) * exposure_time + read_noise^2'
+    pixel_variance_e2: 'sigma_i^2 = s_i + B'
+    arc_snr: 'S = sqrt( sum_i s_i^2 / sigma_i^2 )'
+    gradient_power: 'G = sum_i |grad s|_i^2 / sigma_i^2'
+    gradient_stencil: >-
+      numpy.gradient with the pixel scale as the spacing on both axes:
+      second-order central differences in the array interior and first-order
+      one-sided differences on the border. The gradient is an ANGULAR
+      derivative in e- arcsec^-1, so G carries arcsec^-2.
+    diffraction_scale: 'theta_res = lambda / D'
+    complexity: 'C = theta_res^2 * G / S^2, dimensionless'
+    complexity_rationale: >-
+      G scales approximately as S^2 under flux rescaling, so the retired
+      z(log S) + z(log G) score counted brightness twice. Dividing by S^2 and
+      putting the statistic on the delivered resolution element removes the
+      double count and isolates the morphology information.
+  score:
+    expression: 'score = z(log S) + z(log C)'
+    standardization: 'population z-score, ddof = 0, over the post-floor-cut pool being ranked'
+    zero_spread_rule: 'a pool with exactly zero spread standardizes to zeros'
+    log_domain_rule: >-
+      log S and log C require strictly positive finite inputs. A ranked member
+      with zero or non-finite S or C raises: the pool is rejected loudly rather
+      than silently reordered.
+    tie_rule: >-
+      Equal scores break on the ascending sha256 hex digest of the system id,
+      which depends on neither pool membership nor input order.
+    variants:
+      - id: s_only
+        expression: 'z(log S)'
+        role: pre-registered comparison curve
+      - id: s_plus_c
+        expression: 'z(log S) + z(log C)'
+        role: the frozen operational score
+      - id: oracle_by_sensitivity
+        expression: 'ascending measured log10(M_lim)'
+        role: >-
+          Not a score. Post-campaign only, reported as a labelled upper bound.
+  floor_cuts:
+    theta_e_arcsec_min: 0.5
+    arc_snr_min: 20.0
+    strict: true
+    strict_note: 'A member exactly on a floor fails it.'
+    applied_to: all 1000 Stage 0 members
+    theta_e_used: 'theta_E_eff from the T7 extraction, not the sampled macro parameter'
+    source: >-
+      Verbatim Collett 2015 as adopted by O'Riordan et al. 2023
+      (arXiv:2211.15679): "lenses must have an Einstein radius theta_E > 0.5
+      arcsec and a total signal to noise ratio S/N > 20".
+    expected_survival_note: >-
+      The design sanity check measures 96.6 per cent survival of the theta_E
+      floor and 96.2 per cent of both cuts together. The arc S/N floor is
+      calibrated to Euclid VIS and is nearly non-binding at HWO depth, so
+      selection is driven by the ranking rather than by the cuts.
+  tier_sizes:
+    selected: 12
+    golden: 5
+  module_constants:
+    FLOOR_THETA_E_ARCSEC: 0.5
+    FLOOR_ARC_SNR: 20.0
+    SELECTED_TIER_SIZE: 12
+    GOLDEN_TIER_SIZE: 5
+    APERTURE_THETA_E_MULTIPLE: 2.0
+    constants_rule: >-
+      hwoslaps.campaign.design_freeze cross-checks these against the module
+      every time this freeze is loaded. A divergence is a fail-closed
+      condition, not a warning.
+  rank_stability:
+    replicates: 20
+    statistics: [spearman_rank_correlation, top_k_jaccard, oracle_recovered_fraction]
+    k: 12
+    noisy_variance_rule: 'max(signal, 0) + B, so no truth enters the noisy path'
+    labelling_decision: see provisional_items/t4_noisy_g_labelling
+
+# ---------------------------------------------------------------------------
+# Aperture: the single source of truth for the factor 2
+# ---------------------------------------------------------------------------
+aperture:
+  ruling: D-F7
+  theta_e_factor: 2.0
+  theta_e_factor_authority: >-
+    PINNED HERE, ONCE. This is the single source of truth for the aperture
+    factor. The module defaults
+    hwoslaps.lensing.critical_curve.DEFAULT_APERTURE_THETA_E_FACTOR and
+    hwoslaps.analysis.selection_score.APERTURE_THETA_E_MULTIPLE must equal this
+    value and the loader checks that they do. No driver, config or manifest may
+    re-declare it.
+  provenance: >-
+    The Euclid reporting unit, verified: "per cent of pixels inside twice the
+    Einstein radius". It replaces the retired fixed 1.5 arcsec aperture.
+  radius_rule: 'radius = theta_e_factor * theta_E_eff, centred on the lens, closed interval'
+  computational_margin_fraction: 0.1
+  margin_rule: >-
+    The Fisher map and mask machinery cannot evaluate the aperture rim on a map
+    that merely reaches it, so every map extent is sized from
+    required_map_half_width = radius * (1 + computational_margin_fraction).
+  mask_policy: >-
+    all valid pixels inside the fixed aperture, per the fixed-aperture mask
+    ruling.
+  theta_e_algorithm:
+    module: src/hwoslaps/lensing/critical_curve.py
+    algorithm_id: tangential_critical_curve_marching_squares_v1
+    choice_rule_id: largest_area_closed_curve_enclosing_lens_centre
+    definition: 'theta_E_eff = sqrt(A_crit / pi)'
+    a_crit: >-
+      Image-plane area enclosed by the main tangential critical curve of the
+      TRUTH macro model, extracted from the zero contour of the tangential
+      eigenvalue 1 - kappa - |gamma| on a declared uniform grid.
+    choice_rule: >-
+      Among the extracted tangential critical curves keep the closed ones whose
+      polygon encloses the declared lens centre under the even-odd
+      ray-crossing test, and take the one enclosing the largest area. Exactly
+      equal areas break on the lexicographically smallest canonical start
+      vertex.
+    extraction_grid:
+      pixel_scale_arcsec: 0.01
+      half_width_factor: 4.0
+      half_width_factor_note: >-
+        Half width in units of the macro einstein_radius parameter. The
+        realized half width is rounded up to a whole number of pixels so the
+        grid is symmetric about the origin.
+    guards:
+      closure_tolerance_pixels: 0.5
+      border_margin_pixels: 2.0
+      min_contour_vertices: 32
+    failure_behavior: >-
+      Every failure mode raises a typed CriticalCurveError subclass. There is
+      no silent fallback, so no failed extraction can reach an aperture
+      definition.
+    provenance_hashes:
+      contour_sha256: >-
+        SHA-256 of the algorithm identity, the vertex count, and the contiguous
+        float64 bytes of the canonical contour polyline. Canonicalization makes
+        it invariant to traversal start vertex and direction but NOT to the
+        declared grid, so the grid declaration travels with the hash.
+      aperture_sha256: >-
+        SHA-256 of the canonical JSON aperture declaration: centre,
+        theta_E_eff, factor, radius, margin, and the derived map extents.
+      recorded_in: 'the Stage 0 catalogue and every Stage 0 job artifact'
+
+# ---------------------------------------------------------------------------
+# Per-system grid sizing
+# ---------------------------------------------------------------------------
+grid_sizing:
+  pixel_scale_arcsec: 0.00716
+  rule: >-
+    side_px = ceil(required_map_extent_arcsec / pixel_scale_arcsec), rounded up
+    to the next even number, with required_map_extent_arcsec =
+    2 * aperture.theta_e_factor * theta_E_eff * (1 + computational_margin_fraction)
+    taken from the T7 ApertureDefinition of that system.
+  supersedes: >-
+    The fixed 0.30 arcsec additive margin sketched in
+    scratch/B8ParentDesign_v1.md section 5. The T7 fractional margin rule is
+    the authority because it is the rule the aperture machinery itself
+    enforces; the two agree to within a few per cent over the design range.
+    RECORDED DEVIATION, not silent.
+  fixed_500_retired: >-
+    The grid is theta_E driven. The fixed 500 x 500 scene grid is retired for
+    production systems.
+  max_side_px: 2048
+  max_side_px_rationale: >-
+    2048 pixels is 14.66 arcsec across, which covers theta_E_eff up to 3.33
+    arcsec, beyond the design maximum of about 3.05 arcsec. It costs 4.19
+    Mpixel, about 16.8 times the pixel count of the retired 500 x 500 scene.
+  cap_policy: >-
+    A system whose required side exceeds max_side_px is CAPPED at max_side_px
+    and flagged in the catalogue with grid_capped true, the required side, and
+    the realized aperture coverage in units of theta_E_eff. A capped system's
+    aperture estimands are lower bounds and must be reported as such. The
+    manifest generator records the cap count; a non-zero count is a morning
+    agenda item, not a silent truncation.
+
+# ---------------------------------------------------------------------------
+# Mass ladder policy
+# ---------------------------------------------------------------------------
+mass_ladder:
+  quantity: log10 subhalo mass M200 in solar masses
+  coarse:
+    step_dex: 0.25
+    low: 6.0
+    high: 9.5
+  refine:
+    step_dex: 0.1
+    where: 'around every detection-threshold crossing found on the coarse ladder'
+  extend_down:
+    zero_rungs: 2
+    rule: >-
+      Continue two rungs below the lowest rung with any detected area, so every
+      curve closes on measured zeros rather than on an extrapolation.
+  extend_up:
+    stop: 'the first of M50 or aperture saturation'
+    rule: >-
+      Climb until the detected-area fraction reaches M50 or saturates inside
+      the aperture, whichever comes first, so M_best, M10 and M50 are all
+      measured rather than interpolated.
+  threshold: 'q_F >= 10'
+  estimands: ['A(M) inside R <= 2 theta_E', M_best, M10, M50, 'mu_i', 'P(>=1)']
+  literature_rule: >-
+    Never quote a literature M_low without stating both detection thresholds.
+    Despali et al. 2022 uses Delta logE >= 50, about 10 sigma, against our
+    q_F >= 10, about 3.16 sigma.
+
+# ---------------------------------------------------------------------------
+# Seeds: the complete declared list
+# ---------------------------------------------------------------------------
+# Every random number consumed anywhere in this campaign comes from one of the
+# streams below. Introducing another stream requires amending this freeze.
+seeds:
+  generator: 'numpy.random.SeedSequence -> numpy.random.Generator(PCG64)'
+  entropy: 20260823
+  streams:
+    parent_design:
+      spawn_key: [0]
+      per_system: 'spawn_key (0, i) for system index i'
+      purpose: 'every design draw of system i, in the frozen draw order'
+    primary_noise:
+      spawn_key: [1]
+      per_system: 'spawn_key (1, i)'
+      purpose: 'the primary noise realization of system i'
+      engine_seed_rule: >-
+        The engine takes one integer global_seed and uses it as the noise seed,
+        so the manifest sets
+        global_seed = int(SeedSequence(entropy=20260823, spawn_key=(1, i))
+        .generate_state(1, dtype=uint32)[0])
+        for system i. Declared here because it is the only place a design seed
+        is narrowed to a 32-bit engine input.
+    rank_stability_noise:
+      spawn_key: [2]
+      per_replicate: 'spawn_key (2, k, i) for replicate k and system i'
+      replicates: 20
+      replicate_indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+      purpose: >-
+        The T4 noise-seed rank-stability harness. Declared in full now, before
+        any ranking exists, so the replicate count cannot be chosen after
+        seeing the stability numbers.
+    template_permutation:
+      spawn_key: [3]
+      purpose: 'the single balanced template assignment permutation of the 1000 labels'
+    bootstrap:
+      spawn_key: [4]
+      resamples: 10000
+      purpose: 'stratified non-parametric bootstrap over the reference ensemble'
+  determinism_property: >-
+    A system's parameters depend only on the entropy, its index and the draw
+    order. They do not depend on the pool size, on the order in which systems
+    are generated, on how the work is split across GPUs, or on how many times a
+    job restarts. Any system can be regenerated in isolation bit-identically,
+    which is what makes Stage 0 resumable under a hard wall-clock stop.
+  draw_order:
+    - z_lens
+    - z_source
+    - sigma_v
+    - lens_axis_ratio
+    - lens_position_angle_deg
+    - caustic_offset_fraction
+    - caustic_offset_azimuth_deg
+    - source_magnitude_ab
+    - source_half_light_radius_arcsec
+    - source_rotation_deg
+  draw_order_rule: >-
+    The draw order is part of the design and each variable consumes exactly one
+    uniform variate by inverse CDF. Reordering it changes every sampled system
+    and invalidates this freeze's hash.
+
+# ---------------------------------------------------------------------------
+# Derived quantities the generator computes, and how
+# ---------------------------------------------------------------------------
+derived:
+  einstein_radius:
+    sampled_formula: 'theta_E = 4 * pi * (sigma_v / c)^2 * D_ls(z_l, z_s) / D_s(z_s)'
+    cosmology: Planck15
+    distance_kind: angular_diameter
+    macro_parameter_rule: >-
+      The sampled theta_E is the AREA-EQUIVALENT Einstein radius the aperture
+      is built on, so the isothermal macro parameter written to
+      lensing.lens_galaxy.mass.einstein_radius is solved for it:
+      einstein_radius = theta_E * (1 + q) / (2 * sqrt(q)).
+    macro_parameter_rationale: >-
+      For the isothermal ellipsoid the extracted area-equivalent radius obeys
+      theta_E_eff = einstein_radius * 2 * sqrt(q) / (1 + q) exactly, a purely
+      geometric axis-ratio factor that reaches 0.943 at the design's flattest
+      allowed q = 0.5 and would otherwise break B8's own two per cent
+      sampled-versus-realized agreement clause for every flattened lens.
+      Writing the sampled theta_E straight into the parameter would have made
+      the realized theta_E distribution systematically smaller than the design
+      quantiles the sanity check reports. RECORDED DEVIATION from the literal
+      wording of scratch/B8ParentDesign_v1.md, adopted because it is what makes
+      the design self-consistent; tests/test_campaign_stage0.py pins the
+      relation against the T7 extraction.
+    verification:
+      tolerance_fractional: 0.02
+      rule: >-
+        The realized theta_E_eff from the T7 extraction must agree with the
+        sampled theta_E to within two per cent. A larger disagreement is a
+        fail-closed condition, not a warning.
+    truncation_policy: >-
+      theta_E is NOT truncated at the 0.5 arcsec selection floor. The parent is
+      sampled honestly through sigma_v and the cut is allowed to act, so the
+      floor's survival fraction is a reported property of the design rather
+      than an assumption built into it.
+  source_centre:
+    formula: >-
+      centre = (beta * sin(psi), beta * cos(psi)) with
+      beta = caustic_offset_fraction * theta_E and psi the sampled azimuth,
+      written in the engine's (y, x) centre convention.
+  lens_ell_comps:
+    formula: 'autogalaxy.convert.ell_comps_from(axis_ratio=q, angle=phi_lens_deg)'
+    implementation_rule: >-
+      The generator MUST call the library conversion. Hand-rolling the
+      ellipticity components would re-derive sign and angle-origin conventions
+      the validated suite already relies on.
+  source_total_flux:
+    formula: >-
+      total_flux = canonical_total_flux(template) *
+      10^(-0.4 * (m_AB - 24.845)) / size_scale^2
+    target_rate_formula: >-
+      target_unlensed_rate_e_per_s = 8.951505744562876 *
+      10^(-0.4 * (m_AB - 24.845))
+    plane: 'unlensed intrinsic source-plane total detected rate in e-/s'
+    note: >-
+      See templates.size_scale_flux_rule for why the size factor is divided
+      out. The target rate travels in each job's `stage0` configuration block
+      so the P0-3 contract is checkable inside the job that renders it.
+  magnification:
+    status: EMERGENT
+    rule: >-
+      Magnification is never sampled and never written. The production value is
+      computed by the engine from the actual deflection field and the finite
+      source, and is recorded per system as the ratio of the realized lensed
+      rate to the realized unlensed rate.
+
+# ---------------------------------------------------------------------------
+# Reporting
+# ---------------------------------------------------------------------------
+reporting:
+  primary_estimands:
+    - 'A(M) inside R <= 2 theta_E'
+    - M_best
+    - M10
+    - M50
+    - 'expected counts mu_i and P(>=1)'
+    - cumulative yield versus selection rank
+  uncertainty:
+    method: stratified_nonparametric_bootstrap
+    strata: source_template
+    resamples: 10000
+    interval: 'percentile, 16th-84th and 2.5th-97.5th'
+    seed_stream: bootstrap
+    secondary: 'unstratified bootstrap over the 48, reported alongside'
+  conditional_reporting:
+    - 'Every pooled summary is accompanied by the five per-template conditional summaries.'
+    - 'A variance decomposition attributes ensemble spread to morphology, theta_E, magnification and source magnitude.'
+    - 'Design quantiles of theta_E, magnification and source magnitude are tabulated so any reader can locate a quoted system in the design.'
+
+# ---------------------------------------------------------------------------
+# The B8 parent / reference-ensemble design, embedded verbatim
+# ---------------------------------------------------------------------------
+# PROVISIONAL pending morning ratification; see
+# provisional_items/parent_design. The block below is the byte content of
+# scratch/B8ParentDesign_v1.yaml indented under `parent_design`, because that
+# file lives in the untracked scratch tree and this freeze must stand alone.
+# `parent_design_source` records where it came from and the digest of the
+# bytes that were embedded.
+parent_design_source:
+  path: scratch/B8ParentDesign_v1.yaml
+  sha256: e4e8fb20d4cf768927bea06005257591bcdc6d690752ca9371297335a679b265
+  document: scratch/B8ParentDesign_v1.md
+  status: provisional
+  embedded: true
+  precedence: >-
+    Where this embedded copy and any other block of this freeze disagree, the
+    other block of this freeze wins: the freeze is the authority and the
+    embedded design is the input it was built from. The two known divergences
+    are recorded at grid_sizing.supersedes and
+    derived.einstein_radius.macro_parameter_rationale.
+
+parent_design:
+  # B8 parent / reference-ensemble design, version 1 (PROVISIONAL).
+  #
+  # Machine-readable core of scratch/B8ParentDesign_v1.md. This file is the
+  # object hashed into DesignFreeze_v1 and consumed directly by the Stage 0
+  # generator. It is frozen PROVISIONALLY under the 2026-08-23 overnight launch
+  # authority; George and Sol Pro ratify or amend before any Stage 0 result is
+  # used in the paper.
+  #
+  # Every value carrying a [PROVISIONAL] flag in the design document is marked
+  # here with `provisional: true` on its block.
+
+  schema: hwoslaps.parent_design
+  version: 1
+  status: provisional
+  label: reference_ensemble
+  authored: '2026-08-23'
+  ratified: null
+  document: scratch/B8ParentDesign_v1.md
+  supersedes: []
+
+  # ---------------------------------------------------------------------------
+  # Naming and claim discipline
+  # ---------------------------------------------------------------------------
+  naming:
+    ensemble_name: HWO-SLAPS reference ensemble
+    forbidden_phrases:
+      - survey population
+      - population expectation
+      - representative of the lens population
+      - expected number of HWO lenses
+    required_qualifier: >-
+      A reference ensemble, not a statistically weighted survey population: the
+      five morphology anchors carry equal design allocation rather than
+      population frequencies, and the lens-galaxy distributions are calibrated to
+      an observed strong-lens sample (SLACS) rather than derived from a
+      velocity-dispersion function with lensing cross-section weights.
+    reporting_rule: >-
+      Report conditional design quantiles of the ensemble, never a population
+      mean. Every pooled summary is accompanied by the per-template conditional
+      summary.
+
+  # ---------------------------------------------------------------------------
+  # Stage 0 pool
+  # ---------------------------------------------------------------------------
+  stage0:
+    n_systems: 1000
+    subhalo: absent
+    observation_layer_only: true
+    cosmology: Planck15
+    pixel_scale_arcsec: 0.00716
+    grid_margin_arcsec: 0.30
+    grid_rule: >-
+      Per-system grid side in pixels = ceil(2 * (2 * theta_E + grid_margin) /
+      pixel_scale), rounded up to the next even number. The grid must cover the
+      D-F7 aperture R <= 2 theta_E with margin; it is NOT a fixed 500 x 500.
+    observing_reference: configs/observing/hwo_eac1_hri_reference_v1.yaml
+    observing_reference_note: >-
+      Post-T1 artifact at read_noise_per_read_e = 0.2 (SEI v0.1.9). The Stage 0
+      generator must consume the regenerated reference, not the 2.5 e- version.
+
+  # ---------------------------------------------------------------------------
+  # Seeds
+  # ---------------------------------------------------------------------------
+  seeds:
+    generator: numpy.random.SeedSequence -> numpy.random.Generator(PCG64)
+    entropy: 20260823
+    streams:
+      parent_design: [0]        # spawn_key (0, i) for system index i
+      primary_noise: [1]        # spawn_key (1, i)
+      rank_stability_noise: [2] # spawn_key (2, k, i) for replicate k
+      template_permutation: [3] # spawn_key (3,)
+      bootstrap: [4]            # spawn_key (4,)
+    rank_stability_replicates: 20
+    bootstrap_resamples: 10000
+    mapping_rule: >-
+      System i is drawn from Generator(PCG64(SeedSequence(entropy=20260823,
+      spawn_key=(0, i)))) using the frozen draw_order below and nothing else. A
+      system's parameters therefore depend only on the entropy, its index, and
+      the draw order: they do not depend on the pool size, on the order in which
+      systems are generated, or on any parallel decomposition. Stage 0 is
+      resumable and re-runnable system-by-system.
+    draw_order:
+      - z_lens
+      - z_source
+      - sigma_v
+      - lens_axis_ratio
+      - lens_position_angle_deg
+      - caustic_offset_fraction
+      - caustic_offset_azimuth_deg
+      - source_magnitude_ab
+      - source_half_light_radius_arcsec
+      - source_rotation_deg
+    draw_order_note: >-
+      The draw order is part of the design. Reordering it changes every sampled
+      system and invalidates the DesignFreeze hash.
+
+  # ---------------------------------------------------------------------------
+  # Joint sampling design
+  # ---------------------------------------------------------------------------
+  # The design is a product of independent marginals EXCEPT for two declared
+  # conditional couplings: z_source | z_lens (support constraint) and theta_E,
+  # which is a deterministic function of (sigma_v, z_lens, z_source). Everything
+  # else is independent by design so that the morphology and geometry levers stay
+  # separable in the variance decomposition.
+  distributions:
+
+    z_lens:
+      distribution: truncated_normal
+      mu: 0.22
+      sigma: 0.09
+      low: 0.08
+      high: 0.50
+      provisional: true
+      rationale: >-
+        Centred on the study's ruled z_l = 0.2 anchor (every measured W3/W4
+        result sits there) and spread over the low-redshift discovered-lens range
+        where HWO follow-up is most favourable. Low z_l is a declared advantage of
+        this study over Despali et al. 2022 (z_l 0.56-1.15).
+
+    z_source:
+      distribution: truncated_normal
+      mu: 0.65
+      sigma: 0.22
+      low_floor: 0.35
+      high: 1.20
+      min_separation: 0.20
+      conditional_on: z_lens
+      support_rule: 'low = max(low_floor, z_lens + min_separation)'
+      provisional: true
+      rationale: >-
+        Brackets the ruled z_s = 0.6 anchor and the SLACS emission-line source
+        range z_s ~ 0.4-0.8 (lensing_anchors.md). The [0.35, 1.20] bounds are the
+        photometric-redshift window of the D-F3 source-bank base cuts, so the
+        sampled z_s never leaves the redshift range of the stamps actually used.
+
+    sigma_v:
+      distribution: truncated_lognormal
+      median: 245.0
+      sigma_ln: 0.18
+      low: 130.0
+      high: 360.0
+      units: km/s
+      provisional: true
+      rationale: >-
+        Calibrated so the INDUCED theta_E distribution reproduces the verified
+        SLACS mean theta_E ~ 1.2 arcsec (lensing_anchors.md, SEAGLE I
+        arXiv:1802.06629) at the ensemble's typical geometry. Declared as a
+        discovered-lens-like velocity-dispersion distribution, already
+        cross-section biased by being calibrated on an observed lens sample; it
+        is NOT the field velocity-dispersion function and carries no
+        cross-section weights. The lower bound 130 km/s sits well below the
+        sigma_v that yields theta_E = 0.5 arcsec, so the floor cut acts on an
+        untruncated tail.
+
+    lens_axis_ratio:
+      distribution: truncated_normal
+      mu: 0.75
+      sigma: 0.12
+      low: 0.40
+      high: 0.95
+      provisional: true
+      rationale: >-
+        Standard early-type lens-galaxy axis-ratio range. Kept away from the
+        near-circular limit (where the tangential caustic degenerates) and away
+        from extreme flattening (where the isothermal macro model strains).
+
+    lens_position_angle_deg:
+      distribution: uniform
+      bounds: [0.0, 180.0]
+      rationale: 'Isotropy. No preferred sky orientation.'
+
+    caustic_offset_fraction:
+      symbol: y = beta / theta_E
+      distribution: loguniform
+      low: 0.05
+      high: 1.00
+      provisional: true
+      magnification_status: EMERGENT
+      rationale: >-
+        The source-plane offset is sampled; magnification is never sampled. A
+        log-uniform y is exactly the SIS-equivalent of the cross-section density
+        p(beta) d beta ~ beta d beta weighted by a magnification bias mu^(a-1)
+        with number-count slope a = 2, appropriate for the strongly
+        magnification-biased spectroscopically selected samples our source
+        photometry is anchored to. Its induced point-source magnification range
+        is [2, 40] against the verified SLACS range 2.4-44.3, with median 2 /
+        sqrt(0.05) = 8.94 against the verified SLACS median 8.8. The inner bound
+        0.05 keeps the caustic divergence finite; the outer bound 1.0 is the SIS
+        multiple-imaging boundary.
+      emergent_check: >-
+        The production magnification is computed by the engine from the actual
+        SIE deflection field and the finite source, and recorded per system. The
+        analytic 2/y form appears only in the design sanity script and in this
+        rationale; it is never used to set a system property.
+
+    caustic_offset_azimuth_deg:
+      distribution: uniform
+      bounds: [0.0, 360.0]
+      rationale: >-
+        Isotropic source placement relative to the lens major axis, so fold,
+        cusp, and off-axis configurations arise at their natural rates.
+
+    source_magnitude_ab:
+      distribution: truncated_normal
+      mu: 24.845
+      sigma: 0.80
+      low: 23.745
+      high: 27.545
+      band: HRI-V
+      plane: unlensed intrinsic source-plane total
+      provisional: true
+      rationale: >-
+        Centre is George's D1 ruling (measured V-band photometry of the SLACS
+        median source, 24.3 AB F814W -> 24.845 AB HRI-V). The bounds are the
+        verified SLACS emission-line source range 23.2-27.0 AB F814W carried
+        through the same +0.545 mag D1 offset. sigma = 0.80 makes the expected
+        range of 46 draws match the observed 3.8 mag spread of the 46-source
+        Newton et al. 2011 sample. The magnitudes are magnification-corrected
+        (intrinsic) in the source, exactly matching the reference artifact's
+        declared normalization plane, so magnification is applied once, by the
+        lensing, and never double-counted.
+
+    source_half_light_radius_arcsec:
+      distribution: truncated_lognormal
+      median: 0.15
+      sigma_ln: 0.35
+      low: 0.06
+      high: 0.40
+      provisional: true
+      applied_as: 'size_scale = r_half / 0.11 on the prepared template asset'
+      rationale: >-
+        The 16-84 per cent interval 0.106-0.213 arcsec brackets both available
+        anchors: the prepared assets' canonical half-light radius 0.11 arcsec and
+        the SEAGLE I source scale ~0.2 arcsec quoted in lensing_anchors.md.
+        Log-normal because sizes are positive and right-skewed.
+
+    source_rotation_deg:
+      distribution: uniform
+      bounds: [0.0, 360.0]
+      rationale: >-
+        The stamp's intrinsic morphology has no preferred orientation relative to
+        the caustic; rotating it decorrelates template identity from arc
+        geometry.
+
+    source_template:
+      type: declared_factor
+      n_levels: 5
+      allocation: balanced
+      per_level: 200
+      assignment: >-
+        Exactly 200 systems per level, assigned by a single seeded permutation of
+        the 1000 labels under spawn_key (3,). Balanced allocation, not a
+        multinomial draw, so the morphology factor is exactly orthogonal to pool
+        size and the variance decomposition is exactly balanced.
+      levels:
+        - cosmos_48849
+        - cosmos_62410
+        - cosmos_159916
+        - cosmos_162893
+        - cosmos_83935
+      level_classes:
+        cosmos_48849: clumpy_sbar_spiral_existing_anchor
+        cosmos_62410: smooth_disk
+        cosmos_159916: clumpy
+        cosmos_162893: irregular_merger
+        cosmos_83935: compact
+      asset_hashes: PENDING_T5
+      asset_hash_note: >-
+        The five prepared-asset sha256 values are written into DesignFreeze_v1 by
+        T5; this design binds the identifiers, T5 binds the bytes.
+      flux_convention: >-
+        All five assets are flux-matched under the Item 4 convention and carry
+        the P0-3 discrete detected-rate contract, so morphology is the only
+        factor varied between levels at fixed source magnitude.
+      declared_idealization: >-
+        F814W stamps of z ~ 0.35-1.2 galaxies are used as the sampled z_s source
+        at 500 nm. The band and rest-frame mismatch is inherited from the
+        existing asset and is declared, not new.
+
+    exposure_time_s:
+      type: fixed
+      value: 2000.0
+      provisional: true
+      rationale: >-
+        Depth is deliberately NOT a Stage 0 factor. The frozen D-F4 score
+        standardizes log S over the whole post-cut pool, so a depth factor inside
+        Stage 0 would make the operational selection partly a selection on
+        programme depth rather than on system properties, corrupting the
+        middle-stratum claim. Depth is instead carried by the separately measured
+        exposure lever (q ~ t^1.12-1.28) and, if wanted, by a post-selection depth
+        arm on already-selected systems.
+      alternative_pending_ratification: >-
+        Two-level factor {2000 s, 6000 s} at 750/250 with the score standardized
+        WITHIN depth level. Only adopt this if the within-level standardization is
+        also adopted in T4.
+
+    external_shear:
+      type: fixed
+      value: [0.0, 0.0]
+      provisional: true
+      rationale: >-
+        Zero external shear, inherited unchanged from every validated measurement
+        in the suite. Adding shear would add two macro nuisance parameters to the
+        Fisher model that no existing receipt covers, which is scope expansion
+        under the standing rail.
+
+    lens_mass_profile:
+      type: fixed
+      model: Isothermal
+      slope: 2.0
+      provisional: true
+      rationale: >-
+        Singular isothermal ellipsoid for every system, matching the entire
+        validated measurement suite. A power-law slope axis is a real physical
+        lever but is an added, unreceipted dimension.
+
+  # ---------------------------------------------------------------------------
+  # Deterministic derived quantities
+  # ---------------------------------------------------------------------------
+  derived:
+
+    einstein_radius_arcsec:
+      formula: 'theta_E = 4 * pi * (sigma_v / c)^2 * D_ls(z_l, z_s) / D_s(z_s)'
+      units: arcsec
+      cosmology: Planck15
+      distance_kind: angular_diameter
+      written_to: 'lensing.lens_galaxy.mass.einstein_radius'
+      verification: >-
+        The realized effective Einstein radius is recomputed from the truth macro
+        by the T7 tangential-critical-curve algorithm (theta_E_eff =
+        sqrt(A_crit / pi)) and recorded in provenance. The sampled and realized
+        values must agree to within 2 per cent; a larger disagreement is a
+        fail-closed condition, not a warning.
+      truncation_policy: >-
+        theta_E is NOT truncated at the 0.5 arcsec selection floor. The parent is
+        sampled honestly through sigma_v and the cut is allowed to act, so the
+        floor's survival fraction is a reported property of the design rather
+        than an assumption built into it.
+
+    source_centre_arcsec:
+      formula: >-
+        centre = (beta * sin(psi), beta * cos(psi)) with
+        beta = caustic_offset_fraction * theta_E and psi the sampled azimuth,
+        written in the engine's (y, x) centre convention.
+
+    lens_ell_comps:
+      formula: 'ag.convert.ell_comps_from(axis_ratio=q, angle=phi_lens_deg)'
+      implementation_rule: >-
+        The generator MUST call the library conversion. Do not hand-roll the
+        ellipticity components; the sign and angle-origin conventions are the
+        library's and are already relied on by the validated suite.
+
+    lens_magnitude_descriptive:
+      status: descriptive_only
+      rendered: false
+      anchor_mag_ab: 17.5
+      anchor_sigma_v: 250.0
+      anchor_z_l: 0.2
+      faber_jackson_index: 4.0
+      formula: >-
+        V_lens = anchor_mag_ab - 2.5 * index * log10(sigma_v / anchor_sigma_v)
+        + (DM(z_l) - DM(anchor_z_l))
+      provisional: true
+      rationale: >-
+        Anchored on the W4 foreground bracket's z_l = 0.2 de Vaucouleurs at
+        V ~ 17.5 at 500 nm, scaled by Faber-Jackson L ~ sigma^4 and the
+        luminosity-distance modulus. No K-correction and no passive evolution: it
+        is a descriptive catalogue column, never a rendered photon source.
+      d_f6_compliance: >-
+        D-F6 is ceiling-only. No lens light and no lens photon noise enter any
+        render. This column exists so the selected tier's contrast properties can
+        be displayed, and it carries the W4 limitations sentence wherever quoted.
+
+    lens_source_contrast_descriptive:
+      formula: 'contrast = V_lens - source_magnitude_ab'
+      status: descriptive_only
+      note: >-
+        Recorded per pool member. Dropped from the selection score by George's
+        2026-08-23 ruling (incoherent to validate under ceiling-only physics);
+        retained purely as a catalogue column with the W4 bracket caveat.
+
+  # ---------------------------------------------------------------------------
+  # Selection: 1000 -> post-cut pool -> 48 / 12 / 5
+  # ---------------------------------------------------------------------------
+  selection:
+    pre_registration_doc: scratch/q1_observing_conditions/selection_rule.md
+    pre_registration_note: >-
+      The score, its statistics, standardization, zero handling, and tie policy
+      are defined ONLY in the T4 pre-registration document and its module. This
+      design deliberately does not restate them; if the two ever disagree, the
+      T4 document wins.
+
+    floor_cuts:
+      theta_e_arcsec_min: 0.5
+      arc_snr_min: 20.0
+      source: >-
+        Verbatim Collett 2015 cuts as adopted by O'Riordan et al. 2023
+        (arXiv:2211.15679): "lenses must have an Einstein radius theta_E > 0.5
+        arcsec and a total signal to noise ratio S/N > 20".
+      applied_to: all 1000 Stage 0 members
+      output: post_cut_pool
+
+    score:
+      definition_owner: T4 module and scratch/q1_observing_conditions/selection_rule.md
+      expression: 'z(log S) + z(log C)'
+      complexity: 'C = theta_res^2 * G / S^2, theta_res = lambda / D'
+      standardized_over: post_cut_pool
+      amended_by: >-
+        George's 2026-08-23 ruling adopting Sol Pro P0-6 verbatim. The older
+        z(log S) + z(log G) form in the un-amended selection_rule.md is
+        SUPERSEDED; T4 re-signs that document tonight.
+
+    parent_tier:
+      name: reference ensemble
+      size: 48
+      mode: stratified_representative_subsample
+      provisional: true
+      conflict_note: >-
+        RESOLVED IN FAVOUR OF A REPRESENTATIVE DRAW. The T10 task brief reads
+        "top-48 by the T4 score"; RedesignExecutionPlan S0 and the Sol Pro W2/W3
+        three-strata prescription both require the 48 to be a REPRESENTATIVE draw
+        so that the middle stratum can demonstrate the improvement from
+        observable target selection. A top-48 parent tier would leave the paper
+        with no unselected baseline and would destroy result sequence item 3
+        ("improvement from observable target selection"). Needs one line of
+        ratification from George.
+      algorithm:
+        - 'Partition the post-cut pool by source_template, in the declared level order.'
+        - 'Sort each template stratum ascending by theta_E, ties broken by system id.'
+        - 'Allocate n_t = 9 per template (45); give the remaining 3 to the templates with the largest post-cut counts, ties by declared level order.'
+        - 'Within each stratum take the systematic sample at indices floor((j + 0.5) * |P_t| / n_t) for j = 0 .. n_t - 1.'
+      properties: >-
+        Deterministic (no RNG), exactly balanced in the morphology factor,
+        and evenly spread over the theta_E design quantiles within each
+        morphology. It is a design-quantile-spread subsample, not a random draw,
+        which is why its summaries are reported as conditional design quantiles.
+
+    selected_tier:
+      name: operational HWO follow-up sample
+      size: 12
+      mode: top_by_score
+      drawn_from: post_cut_pool
+      note: >-
+        The top 12 of the whole post-cut pool by the frozen score, independent of
+        the parent tier. Overlap with the 48 is allowed, expected, and recorded
+        per system as an explicit membership flag.
+
+    golden_tier:
+      name: sampled golden frontier
+      size: 5
+      mode: top_by_score_within_selected
+      drawn_from: selected_tier
+      prohibition: >-
+        Sol Pro W2/W3 verbatim: "Do not select the primary 'golden' sample after
+        inspecting its true injected-subhalo M_lim." The ranking is frozen and
+        hashed into provenance BEFORE the manifest generator emits any
+        injected-subhalo job.
+
+    oracle_subset:
+      size: 12
+      mode: top_by_measured_M_lim
+      status: labelled_upper_bound
+      note: >-
+        Computed after the fact and shown as an explicitly labelled upper bound,
+        never as operational selection. Sol Pro sanctioned.
+
+    freeze_order:
+      - 'Stage 0 renders 1000 no-subhalo observations.'
+      - 'Selection statistics computed on the noiseless source-only truth.'
+      - 'Floor cuts applied; post-cut pool fixed.'
+      - 'Score computed and standardized over the post-cut pool.'
+      - 'Parent 48, selected 12, golden 5 frozen and hashed into provenance.'
+      - 'Only then may the manifest generator emit injected-subhalo jobs.'
+
+  # ---------------------------------------------------------------------------
+  # Reporting
+  # ---------------------------------------------------------------------------
+  reporting:
+    primary_estimands:
+      - 'A(M) inside R <= 2 theta_E'
+      - M_best
+      - M10
+      - M50
+      - 'expected counts mu_i and P(>=1)'
+      - cumulative yield versus selection rank
+    uncertainty:
+      method: stratified_nonparametric_bootstrap
+      strata: source_template
+      resamples: 10000
+      interval: 'percentile, 16th-84th and 2.5th-97.5th'
+      seed_stream: bootstrap
+      secondary: 'unstratified bootstrap over the 48, reported alongside'
+      interpretation_rule: >-
+        Bootstrap intervals quantify subsampling variability WITHIN the reference
+        ensemble under this design. They are NOT survey-population confidence
+        intervals and must never be presented as such. Any sentence quoting a
+        bootstrap interval carries the reference-ensemble qualifier.
+    conditional_reporting:
+      - 'Every pooled summary is accompanied by the five per-template conditional summaries.'
+      - 'A variance decomposition attributes ensemble spread to morphology, theta_E, magnification, and source magnitude.'
+      - 'Design quantiles of theta_E, mu, and source magnitude are tabulated so any reader can locate a quoted system in the design.'
+    p0_7_bookkeeping: >-
+      The selected and golden frontier numbers are reported at the NATIVE source
+      magnitudes of the selected systems, with their parent quantiles stated. The
+      R0/R1/R2/R3 arms stay controlled factorization canaries and are not
+      re-imposed on selected systems. The R2/R3 canary magnitude 23.345 lies
+      outside the declared parent range and must be labelled as such wherever it
+      appears.
+
+  # ---------------------------------------------------------------------------
+  # Provisional-flag index (see the design document for the rationales)
+  # ---------------------------------------------------------------------------
+  provisional_flags:
+    - distributions.z_lens
+    - distributions.z_source
+    - distributions.sigma_v
+    - distributions.lens_axis_ratio
+    - distributions.caustic_offset_fraction
+    - distributions.source_magnitude_ab
+    - distributions.source_half_light_radius_arcsec
+    - distributions.exposure_time_s
+    - distributions.external_shear
+    - distributions.lens_mass_profile
+    - derived.lens_magnitude_descriptive
+    - selection.parent_tier
