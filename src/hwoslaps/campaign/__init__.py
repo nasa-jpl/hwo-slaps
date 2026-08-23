@@ -8,7 +8,9 @@ __all__ = [
     "CampaignError",
     "DesignFreezeError",
     "JobResult",
+    "LadderError",
     "Stage0Error",
+    "build_ladder_campaign",
     "build_stage0_campaign",
     "design_freeze_digest",
     "freeze_campaign",
@@ -18,8 +20,10 @@ __all__ = [
     "sample_pool",
     "validate_campaign_manifest",
     "validate_design_freeze",
+    "validate_ladder_manifest",
     "validate_stage0_manifest",
     "verify_bound_artifacts",
+    "write_ladder_campaign",
     "write_stage0_campaign",
 ]
 
@@ -48,6 +52,13 @@ _STAGE0_NAMES = frozenset({
     "write_stage0_campaign",
 })
 
+_LADDER_NAMES = frozenset({
+    "LadderError",
+    "build_ladder_campaign",
+    "validate_ladder_manifest",
+    "write_ladder_campaign",
+})
+
 if TYPE_CHECKING:
     from .design_freeze import (
         DesignFreezeError,
@@ -55,6 +66,12 @@ if TYPE_CHECKING:
         load_design_freeze,
         validate_design_freeze,
         verify_bound_artifacts,
+    )
+    from .ladder import (
+        LadderError,
+        build_ladder_campaign,
+        validate_ladder_manifest,
+        write_ladder_campaign,
     )
     from .s1_lite import (
         CampaignError,
@@ -87,6 +104,10 @@ def __getattr__(name: str) -> Any:
         from . import stage0
 
         return getattr(stage0, name)
+    if name in _LADDER_NAMES:
+        from . import ladder
+
+        return getattr(ladder, name)
     raise AttributeError(name)
 
 
