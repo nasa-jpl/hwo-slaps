@@ -16,15 +16,20 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from prepare_source_image import (  # noqa: E402
+    OBSERVING_REFERENCE_RELPATH,
+    PRODUCTION_SCENE_RELPATH,
     SCRIPT_VERSION,
     bin_image,
     centre_on_centroid,
+    detected_rate_reference,
     footprint_mask,
     half_light_radius_pixels,
     load_input_image,
     main,
     normalize_unit_flux,
+    production_render_config,
     rescale_to_half_light,
+    solve_detected_rate_normalization,
     subtract_background,
     write_asset,
 )
@@ -394,3 +399,130 @@ def test_prepare_cli_bin_two_records_crop_and_bins(tmp_path):
     assert provenance["k_sigma"] == pytest.approx(2.0)
     assert provenance["mask_threshold"] >= 0.0
     assert provenance["output_path"] == str(output_path.resolve())
+
+
+def _resolved_source(shape=(96, 96), background=2.0):
+    """Return a background-plus-Gaussian source resolved over many pixels."""
+    rows, cols = np.indices(shape, dtype=float)
+    radius = np.hypot(rows - 47.0, cols - 47.0)
+    source = np.where(radius <= 30.0, 50.0 * np.exp(-0.5 * (radius / 10.0) ** 2), 0.0)
+    return background + source
+
+
+def _unit_asset(tmp_path, target_half_light_arcsec=0.05):
+    """Prepare one synthetic unit-integral asset and return its path."""
+    input_path = tmp_path / "resolved.npy"
+    np.save(input_path, _resolved_source())
+    output_path = tmp_path / "resolved.npz"
+    assert (
+        main(
+            [
+                str(input_path),
+                str(output_path),
+                "--target-half-light-arcsec",
+                str(target_half_light_arcsec),
+            ]
+        )
+        == 0
+    )
+    return output_path
+
+
+def test_detected_rate_reference_reads_the_committed_physical_rate():
+    """The target rate is the reference photometry, never the convention."""
+    reference = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)
+
+    assert reference["target_rate_e_per_s"] > 0.0
+    assert reference["target_rate_e_per_s"] != pytest.approx(0.289151264)
+    assert reference["pixel_scale_arcsec"] > 0.0
+    assert len(reference["reference_sha256"]) == 64
+
+
+def test_production_render_config_rejects_a_foreign_pixel_scale():
+    """A scene sampled off the reference pixel scale fails loudly."""
+    reference = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)
+    grid_config, source_config = production_render_config(
+        PROJECT_ROOT / PRODUCTION_SCENE_RELPATH, reference["pixel_scale_arcsec"]
+    )
+
+    assert source_config["light"]["type"] == "Image"
+    assert grid_config["pixel_scale"] == pytest.approx(
+        reference["pixel_scale_arcsec"], rel=0.0, abs=0.0
+    )
+    with pytest.raises(ValueError, match="observing reference declares"):
+        production_render_config(
+            PROJECT_ROOT / PRODUCTION_SCENE_RELPATH,
+            2.0 * reference["pixel_scale_arcsec"],
+        )
+
+
+def test_solve_detected_rate_normalization_hits_the_requested_rate(tmp_path):
+    """The solved normalization makes the discrete pixel sum the target."""
+    asset_path = _unit_asset(tmp_path)
+    grid_config = {"shape": [128, 128], "pixel_scale": 0.00716}
+    source_config = {
+        "redshift": 0.6,
+        "light": {
+            "type": "Image",
+            "asset_path": str(asset_path),
+            "centre": [0.0, 0.0],
+            "rotation_deg": 0.0,
+            "total_flux": 1.0,
+            "flux_scale": 1.0,
+            "size_scale": 1.0,
+        },
+    }
+    reference = {
+        "target_rate_e_per_s": 5.0,
+        "reference_path": "unit-test",
+        "reference_sha256": "0" * 64,
+        "reference_name": "unit-test",
+        "source_magnitude_ab": None,
+        "source_band": None,
+        "pixel_scale_arcsec": 0.00716,
+    }
+
+    contract = solve_detected_rate_normalization(
+        asset_path,
+        reference,
+        grid_config,
+        source_config,
+        PROJECT_ROOT / PRODUCTION_SCENE_RELPATH,
+    )
+
+    assert contract["target_rate_e_per_s"] == 5.0
+    assert contract["realized_rate_e_per_s"] == pytest.approx(5.0, rel=1.0e-12)
+    assert contract["total_flux"] == pytest.approx(
+        5.0 / contract["unit_total_flux_discrete_sum"], rel=1.0e-15
+    )
+    assert contract["discrete_mapping_ratio"] == pytest.approx(1.0, abs=1.0e-2)
+    assert contract["units"].startswith("detected electrons per second")
+
+
+def test_prepare_cli_rate_contract_stores_target_and_realized_rates(tmp_path):
+    """The CLI stores a verified contract against the committed reference."""
+    input_path = tmp_path / "resolved.npy"
+    np.save(input_path, _resolved_source())
+    output_path = tmp_path / "contracted.npz"
+
+    status = main(
+        [
+            str(input_path),
+            str(output_path),
+            "--target-half-light-arcsec",
+            "0.11",
+            "--rate-contract",
+        ]
+    )
+
+    assert status == 0
+    reference = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)
+    contract = load_source_image_asset(output_path).metadata["provenance"][
+        "rate_contract"
+    ]
+    assert contract["target_rate_e_per_s"] == reference["target_rate_e_per_s"]
+    assert contract["realized_rate_e_per_s"] == pytest.approx(
+        reference["target_rate_e_per_s"], rel=1.0e-12
+    )
+    assert contract["grid_shape"] == [500, 500]
+    assert contract["render_geometry"]["flux_scale"] == 1.0

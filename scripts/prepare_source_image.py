@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import hashlib
 import json
 import math
@@ -14,7 +15,30 @@ from astropy.stats import sigma_clipped_stats
 from scipy import ndimage
 
 
-SCRIPT_VERSION = 1
+SCRIPT_VERSION = 2
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+OBSERVING_REFERENCE_RELPATH = 'configs/observing/hwo_eac1_hri_reference_v1.yaml'
+"""Committed physical observing reference carrying the detected source rate."""
+
+PRODUCTION_SCENE_RELPATH = 'configs/scenes/scene4_cosmos.yaml'
+"""Production Image-source scene supplying the contract render geometry."""
+
+PIXEL_SCALE_ABS_TOLERANCE = 1.0e-12
+"""Accepted departure between the scene and reference pixel scales."""
+
+DISCRETE_MAPPING_TOLERANCE = 1.0e-2
+"""Accepted ``pixel_area * discrete_sum`` departure from the unit integral.
+
+An asset integrates to one at its own pixel scale, so a unit-``total_flux``
+render on the production grid must sum to ``1 / pixel_area``. A wider miss
+means the asset spills off the production grid or the interpolation loses
+flux, not sub-pixel sampling.
+"""
+
+RATE_CONTRACT_RELATIVE_TOLERANCE = 1.0e-12
+"""Accepted ``|realized / target - 1|`` for a solved detected rate."""
 
 
 def _finite_2d_image(image, name="image"):
@@ -370,6 +394,407 @@ def normalize_unit_flux(image, pixel_scale_arcsec):
     return image / normalization
 
 
+def _read_yaml(path):
+    """Parse one committed YAML configuration or fail with its path."""
+    import yaml
+
+    path = Path(path).expanduser().resolve()
+    if not path.exists():
+        raise ValueError(f'Configuration {path} does not exist')
+    with path.open('r', encoding='utf-8') as stream:
+        document = yaml.safe_load(stream)
+    if not isinstance(document, dict):
+        raise ValueError(f'Configuration {path} must parse to a mapping')
+    return document
+
+
+def _positive_float(value, name):
+    """Return one strictly positive finite float or fail loudly."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'{name} must be a positive finite number, got {value!r}')
+    number = float(value)
+    if not math.isfinite(number) or number <= 0.0:
+        raise ValueError(f'{name} must be a positive finite number, got {value!r}')
+    return number
+
+
+def detected_rate_reference(reference_path):
+    """Read the committed unlensed detected source rate and pixel scale.
+
+    The rate is the physical photometry of the observing reference, in
+    detected electrons per second for the unlensed intrinsic source. It
+    is never the qualification profile angular integral.
+
+    Parameters
+    ----------
+    reference_path : `str` or `pathlib.Path`
+        Committed observing-reference YAML.
+
+    Returns
+    -------
+    reference : `dict`
+        Target rate, reference pixel scale, source magnitude, and the
+        reference file identity.
+    """
+    reference_path = Path(reference_path).expanduser().resolve()
+    document = _read_yaml(reference_path)
+    metadata = document.get('metadata')
+    if not isinstance(metadata, dict):
+        raise ValueError(f'{reference_path} carries no metadata block')
+    photometry = metadata.get('source_photometry')
+    detector = metadata.get('detector')
+    if not isinstance(photometry, dict) or not isinstance(detector, dict):
+        raise ValueError(
+            f'{reference_path} must carry metadata.source_photometry and '
+            'metadata.detector'
+        )
+    return {
+        'reference_path': _provenance_path(reference_path),
+        'reference_sha256': _sha256(reference_path),
+        'reference_name': metadata.get('reference_name'),
+        'target_rate_e_per_s': _positive_float(
+            photometry.get('detected_rate_e_per_s'),
+            'metadata.source_photometry.detected_rate_e_per_s',
+        ),
+        'source_magnitude_ab': photometry.get('derived_magnitude_ab'),
+        'source_band': photometry.get('derived_band'),
+        'pixel_scale_arcsec': _positive_float(
+            detector.get('pixel_scale_arcsec'),
+            'metadata.detector.pixel_scale_arcsec',
+        ),
+    }
+
+
+def production_render_config(scene_path, reference_pixel_scale_arcsec):
+    """Read the production grid and Image-source geometry of one scene.
+
+    Parameters
+    ----------
+    scene_path : `str` or `pathlib.Path`
+        Committed production scene carrying an ``Image`` source.
+    reference_pixel_scale_arcsec : `float`
+        Reference detector pixel scale the scene grid must match.
+
+    Returns
+    -------
+    grid_config : `dict`
+        ``lensing.grid`` block of the scene.
+    source_config : `dict`
+        ``lensing.source_galaxy`` block of the scene.
+    """
+    scene_path = Path(scene_path).expanduser().resolve()
+    document = _read_yaml(scene_path)
+    lensing = document.get('lensing')
+    if not isinstance(lensing, dict):
+        raise ValueError(f'{scene_path} carries no lensing block')
+    grid_config = deepcopy(lensing.get('grid'))
+    source_config = deepcopy(lensing.get('source_galaxy'))
+    if not isinstance(grid_config, dict) or not isinstance(source_config, dict):
+        raise ValueError(
+            f'{scene_path} must carry lensing.grid and lensing.source_galaxy'
+        )
+    light = source_config.get('light')
+    if not isinstance(light, dict) or light.get('type') != 'Image':
+        raise ValueError(
+            f'{scene_path} must carry an Image source light block, got '
+            f'{None if not isinstance(light, dict) else light.get("type")!r}'
+        )
+    for field in ('flux_scale', 'size_scale'):
+        if float(light.get(field, 0.0)) != 1.0:
+            raise ValueError(
+                f'{scene_path} source light {field} must be 1 for the rate '
+                f'contract, got {light.get(field)!r}; the contract normalizes '
+                'total_flux at unit flux and size scales'
+            )
+    scene_pixel_scale = _positive_float(
+        grid_config.get('pixel_scale'), f'{scene_path} lensing.grid.pixel_scale'
+    )
+    if abs(scene_pixel_scale - reference_pixel_scale_arcsec) > PIXEL_SCALE_ABS_TOLERANCE:
+        raise ValueError(
+            f'{scene_path} samples at {scene_pixel_scale} arcsec while the '
+            f'observing reference declares {reference_pixel_scale_arcsec} '
+            'arcsec; the detected per-pixel rates would not apply to it'
+        )
+    return grid_config, source_config
+
+
+def render_unlensed_asset(asset_path, grid_config, source_config, total_flux):
+    """Render one asset unlensed on the production grid.
+
+    The grid and the light profile are built by the production
+    constructors in ``hwoslaps.lensing.generator``, so the samples carry
+    the exact production geometry, asset loader, and sub-pixel
+    oversampling. No lensing and therefore no magnification is applied.
+
+    Parameters
+    ----------
+    asset_path : `str` or `pathlib.Path`
+        Prepared unit-integral source-image asset.
+    grid_config : `dict`
+        ``lensing.grid`` block.
+    source_config : `dict`
+        ``lensing.source_galaxy`` block carrying an ``Image`` light type.
+    total_flux : `float`
+        Intrinsic flux normalization to render at.
+
+    Returns
+    -------
+    image : `numpy.ndarray`
+        Unlensed source samples in the per-pixel convention the
+        observation layer reads as detected electrons per second.
+    """
+    from hwoslaps.lensing.generator import _create_grid, _create_source_galaxy
+
+    source_config = deepcopy(source_config)
+    light = source_config['light']
+    light['asset_path'] = str(Path(asset_path).expanduser().resolve())
+    light['total_flux'] = _positive_float(total_flux, 'total_flux')
+    galaxy = _create_source_galaxy(source_config)
+    image = galaxy.image_2d_from(grid=_create_grid(grid_config))
+    return np.asarray(image, dtype=float)
+
+
+def solve_detected_rate_normalization(asset_path, reference, grid_config,
+                                      source_config, scene_path):
+    """Solve one asset's ``total_flux`` for the target detected rate.
+
+    The ``Image`` source is exactly linear in ``total_flux`` at unit flux
+    and size scales, so a single unit render fixes the solution; the
+    solved normalization is then rendered again and its discrete pixel
+    sum is recorded as the realized rate rather than assumed.
+
+    Parameters
+    ----------
+    asset_path : `str` or `pathlib.Path`
+        Prepared unit-integral source-image asset.
+    reference : `dict`
+        Record from :func:`detected_rate_reference`.
+    grid_config : `dict`
+        ``lensing.grid`` block of the production scene.
+    source_config : `dict`
+        ``lensing.source_galaxy`` block of the production scene.
+    scene_path : `str` or `pathlib.Path`
+        Production scene the grid and geometry were read from.
+
+    Returns
+    -------
+    contract : `dict`
+        Target rate, solved ``total_flux``, realized rate, and the render
+        that maps between them.
+    """
+    scene_path = Path(scene_path).expanduser().resolve()
+    target_rate = _positive_float(
+        reference['target_rate_e_per_s'], 'target_rate_e_per_s'
+    )
+    pixel_scale = _positive_float(
+        grid_config['pixel_scale'], 'lensing.grid.pixel_scale'
+    )
+    pixel_area = pixel_scale ** 2
+    unit_sum = float(
+        np.sum(render_unlensed_asset(asset_path, grid_config, source_config, 1.0))
+    )
+    if not math.isfinite(unit_sum) or unit_sum <= 0.0:
+        raise ValueError(
+            f'Asset {asset_path} renders a unit-total_flux discrete sum of '
+            f'{unit_sum}; the prepared source carries no light on the '
+            'production grid'
+        )
+    mapping_ratio = pixel_area * unit_sum
+    if abs(mapping_ratio - 1.0) > DISCRETE_MAPPING_TOLERANCE:
+        raise ValueError(
+            f'Asset {asset_path} renders a unit-total_flux discrete sum whose '
+            f'pixel-area integral is {mapping_ratio} instead of 1; the asset '
+            'spills off the production grid or loses flux in interpolation'
+        )
+    total_flux = target_rate / unit_sum
+    realized_rate = float(
+        np.sum(
+            render_unlensed_asset(
+                asset_path, grid_config, source_config, total_flux
+            )
+        )
+    )
+    if abs(realized_rate / target_rate - 1.0) > RATE_CONTRACT_RELATIVE_TOLERANCE:
+        raise ValueError(
+            f'Asset {asset_path} realizes {realized_rate} e-/s against the '
+            f'target {target_rate} e-/s; the Image source is not linear in '
+            'total_flux as the solve assumes'
+        )
+    light = source_config['light']
+    return {
+        'target_rate_e_per_s': target_rate,
+        'realized_rate_e_per_s': realized_rate,
+        'total_flux': total_flux,
+        'units': 'detected electrons per second, unlensed intrinsic source total',
+        'unit_total_flux_discrete_sum': unit_sum,
+        'discrete_mapping_ratio': mapping_ratio,
+        'grid_shape': [int(value) for value in grid_config['shape']],
+        'pixel_scale_arcsec': pixel_scale,
+        'pixel_area_arcsec2': pixel_area,
+        'render_geometry': {
+            'centre': [float(value) for value in light['centre']],
+            'rotation_deg': float(light['rotation_deg']),
+            'flux_scale': float(light['flux_scale']),
+            'size_scale': float(light['size_scale']),
+            'source_redshift': float(source_config['redshift']),
+        },
+        'render_method': (
+            'unlensed source galaxy from '
+            'hwoslaps.lensing.generator._create_source_galaxy evaluated on '
+            'hwoslaps.lensing.generator._create_grid: the exact production '
+            'constructors, asset loader, grid geometry, and sub-pixel '
+            'oversampling'
+        ),
+        'magnification_note': (
+            'This contract is unlensed. The lensed pipeline applies '
+            'magnification exactly once, emergently, by evaluating this same '
+            'surface brightness at ray-traced source-plane positions; no '
+            'magnification factor multiplies the normalization anywhere.'
+        ),
+        'qualification_convention_note': (
+            'The 0.289151264 qualification value is a profile angular '
+            'integral in profile units and is never a detected electron rate.'
+        ),
+        'observing_reference': {
+            'path': reference['reference_path'],
+            'sha256': reference['reference_sha256'],
+            'reference_name': reference['reference_name'],
+            'source_magnitude_ab': reference['source_magnitude_ab'],
+            'source_band': reference['source_band'],
+            'note': (
+                'recorded at preparation time; the contract is gated on '
+                'target_rate_e_per_s, not on this file hash'
+            ),
+        },
+        'production_scene': {
+            'path': _provenance_path(scene_path),
+            'sha256': _sha256(scene_path),
+        },
+    }
+
+
+def _clear_asset_loader_cache():
+    """Drop the in-process source-image asset cache.
+
+    The production loader keeps one immutable view per absolute path, so
+    a freshly written asset at a path already read in this process would
+    otherwise be re-rendered from the stale view.
+    """
+    from hwoslaps.lensing.image_source import _load_source_image_asset_absolute
+
+    _load_source_image_asset_absolute.cache_clear()
+
+
+def _solved_rate_contract(sb, pixel_scale_arcsec, reference_path, scene_path):
+    """Solve the rate contract for samples not yet written to their asset.
+
+    The solve needs the production asset loader, which reads a file, so
+    the samples are staged into a temporary asset first. The staged
+    samples and pixel scale are the ones written to the final asset, so
+    the render is identical; :func:`verify_asset_rate_contract` proves
+    that against the written file afterwards.
+    """
+    import tempfile
+
+    reference = detected_rate_reference(reference_path)
+    grid_config, source_config = production_render_config(
+        scene_path, reference['pixel_scale_arcsec']
+    )
+    with tempfile.TemporaryDirectory() as staging:
+        staged_path = Path(staging) / 'rate_contract_solve.npz'
+        write_asset(
+            staged_path,
+            sb,
+            pixel_scale_arcsec,
+            {'note': 'temporary staging asset for the rate-contract solve'},
+        )
+        _clear_asset_loader_cache()
+        contract = solve_detected_rate_normalization(
+            staged_path, reference, grid_config, source_config, scene_path
+        )
+    _clear_asset_loader_cache()
+    return contract
+
+
+def verify_asset_rate_contract(asset_path, scene_path=None,
+                               reference_path=None):
+    """Re-render one written asset and check its stored rate contract.
+
+    Parameters
+    ----------
+    asset_path : `str` or `pathlib.Path`
+        Prepared asset carrying ``provenance.rate_contract``.
+    scene_path : `str` or `pathlib.Path`, optional
+        Production scene to render on. Defaults to the committed
+        production Image scene.
+    reference_path : `str` or `pathlib.Path`, optional
+        Observing reference the stored target rate must still match.
+        Defaults to the committed observing reference.
+
+    Returns
+    -------
+    contract : `dict`
+        The stored contract, once re-rendering has reproduced it.
+    """
+    from hwoslaps.lensing import load_source_image_asset
+
+    asset_path = Path(asset_path).expanduser().resolve()
+    scene_path = Path(
+        scene_path
+        if scene_path is not None
+        else PROJECT_ROOT / PRODUCTION_SCENE_RELPATH
+    ).expanduser().resolve()
+    reference_path = Path(
+        reference_path
+        if reference_path is not None
+        else PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH
+    ).expanduser().resolve()
+
+    _clear_asset_loader_cache()
+    asset = load_source_image_asset(asset_path)
+    provenance = asset.metadata.get('provenance')
+    if not isinstance(provenance, dict) or 'rate_contract' not in provenance:
+        raise ValueError(
+            f'Asset {asset_path} carries no provenance.rate_contract block'
+        )
+    contract = provenance['rate_contract']
+    reference = detected_rate_reference(reference_path)
+    target_rate = _positive_float(
+        contract['target_rate_e_per_s'], 'rate_contract.target_rate_e_per_s'
+    )
+    if target_rate != reference['target_rate_e_per_s']:
+        raise ValueError(
+            f'Asset {asset_path} stores target rate {target_rate} e-/s while '
+            f'{reference_path} now declares '
+            f'{reference["target_rate_e_per_s"]} e-/s'
+        )
+    grid_config, source_config = production_render_config(
+        scene_path, reference['pixel_scale_arcsec']
+    )
+    realized_rate = float(
+        np.sum(
+            render_unlensed_asset(
+                asset_path,
+                grid_config,
+                source_config,
+                _positive_float(
+                    contract['total_flux'], 'rate_contract.total_flux'
+                ),
+            )
+        )
+    )
+    for name, expected in (
+        ('target_rate_e_per_s', target_rate),
+        ('realized_rate_e_per_s', float(contract['realized_rate_e_per_s'])),
+    ):
+        if abs(realized_rate / expected - 1.0) > RATE_CONTRACT_RELATIVE_TOLERANCE:
+            raise ValueError(
+                f'Asset {asset_path} re-renders {realized_rate} e-/s against '
+                f'its stored {name} of {expected} e-/s'
+            )
+    return contract
+
+
 def write_asset(path, sb, pixel_scale_arcsec, provenance):
     """Write the version-one source-image NPZ asset.
 
@@ -420,6 +845,20 @@ def write_asset(path, sb, pixel_scale_arcsec, provenance):
     return path
 
 
+def _provenance_path(path):
+    """Return a repository-relative path where one exists.
+
+    Paths inside the repository are recorded relative to its root so that
+    an asset prepared from repository inputs is byte-identical on every
+    machine; paths outside it are recorded absolute.
+    """
+    path = Path(path).expanduser().resolve()
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _sha256(path):
     """Return the full SHA-256 hex digest of a local file."""
     digest = hashlib.sha256()
@@ -441,6 +880,25 @@ def _argument_parser():
     parser.add_argument('--k-sigma', type=float, default=2.0)
     parser.add_argument('--catalog-id', default='')
     parser.add_argument('--note', default='')
+    parser.add_argument(
+        '--rate-contract',
+        action='store_true',
+        help=(
+            'solve and store the discrete detected-rate contract: render the '
+            'asset unlensed on the production grid and normalize total_flux '
+            'so the discrete pixel sum equals the committed detected rate'
+        ),
+    )
+    parser.add_argument(
+        '--rate-contract-reference',
+        default=str(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH),
+        help='observing reference supplying the target detected rate',
+    )
+    parser.add_argument(
+        '--rate-contract-scene',
+        default=str(PROJECT_ROOT / PRODUCTION_SCENE_RELPATH),
+        help='production Image-source scene supplying the contract render',
+    )
     return parser
 
 
@@ -474,8 +932,8 @@ def main(argv=None):
     )
     sb = normalize_unit_flux(image, pixel_scale_arcsec)
     provenance = {
-        'input_path': str(input_path),
-        'output_path': str(output_path),
+        'input_path': _provenance_path(input_path),
+        'output_path': _provenance_path(output_path),
         'input_sha256': _sha256(input_path),
         'target_half_light_arcsec': float(args.target_half_light_arcsec),
         'bin': int(args.bin),
@@ -493,11 +951,31 @@ def main(argv=None):
         'pixel_scale_arcsec': pixel_scale_arcsec,
         'script_version': SCRIPT_VERSION,
     }
+    if args.rate_contract:
+        provenance['rate_contract'] = _solved_rate_contract(
+            sb,
+            pixel_scale_arcsec,
+            args.rate_contract_reference,
+            args.rate_contract_scene,
+        )
     write_asset(output_path, sb, pixel_scale_arcsec, provenance)
     print(f"{'background':<24} {background:.12g}")
     print(f"{'r_half_pixels':<24} {r_half_pixels:.12g}")
     print(f"{'pixel_scale_arcsec':<24} {pixel_scale_arcsec:.12g}")
     print(f"{'pixel_scale^2 * sb.sum':<24} {pixel_scale_arcsec**2 * sb.sum():.12g}")
+    if args.rate_contract:
+        contract = verify_asset_rate_contract(
+            output_path,
+            args.rate_contract_scene,
+            args.rate_contract_reference,
+        )
+        print(f"{'target_rate_e_per_s':<24} {contract['target_rate_e_per_s']:.12g}")
+        print(f"{'realized_rate_e_per_s':<24} {contract['realized_rate_e_per_s']:.12g}")
+        print(f"{'contract_total_flux':<24} {contract['total_flux']:.12g}")
+        print(
+            f"{'discrete_mapping_ratio':<24} "
+            f"{contract['discrete_mapping_ratio']:.12g}"
+        )
     return 0
 
 
