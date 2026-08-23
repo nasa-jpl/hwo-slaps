@@ -15,6 +15,7 @@ import copy
 from pathlib import Path
 
 import pytest
+import yaml
 
 from hwoslaps.campaign import design_freeze as df
 
@@ -27,6 +28,14 @@ FREEZE_PATH = REPO_ROOT/"configs"/"design"/"design_freeze_v1.yaml"
 def freeze():
     """Load the committed design freeze once."""
     return df.load_design_freeze(FREEZE_PATH)
+
+
+def _write_freeze(directory, document):
+    """Write one freeze document to a temporary file and return its path."""
+    path = Path(directory)/"design_freeze.yaml"
+    with path.open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(document, stream, sort_keys=True)
+    return path
 
 
 def test_committed_freeze_loads_and_validates(freeze):
@@ -272,3 +281,87 @@ def test_verification_rejects_a_changed_asset(freeze, tmp_path):
     broken["templates"]["levels"][0]["sha256"] = "0"*64
     with pytest.raises(df.DesignFreezeError, match="does not match the frozen"):
         df.verify_bound_artifacts(broken, root=REPO_ROOT)
+
+
+def test_loading_verifies_changed_template_bytes(freeze, tmp_path):
+    """A freeze whose template digest moved cannot be loaded at all."""
+    broken = copy.deepcopy(freeze)
+    broken["templates"]["levels"][0]["sha256"] = "0"*64
+    path = _write_freeze(tmp_path, broken)
+    with pytest.raises(df.DesignFreezeError, match="does not match the frozen"):
+        df.load_design_freeze(path)
+
+
+def test_loading_verifies_the_observing_reference(freeze, tmp_path):
+    """A freeze whose observing reference moved cannot be loaded at all."""
+    broken = copy.deepcopy(freeze)
+    broken["observing"]["reference"]["sha256"] = "0"*64
+    path = _write_freeze(tmp_path, broken)
+    with pytest.raises(df.DesignFreezeError, match="observing_reference"):
+        df.load_design_freeze(path)
+
+
+def test_loading_rejects_a_missing_committed_artifact(freeze, tmp_path):
+    """A committed artifact that is not on disk is never optional."""
+    broken = copy.deepcopy(freeze)
+    broken["observing"]["reference"]["path"] = "configs/observing/absent.yaml"
+    path = _write_freeze(tmp_path, broken)
+    with pytest.raises(df.DesignFreezeError, match="does not exist"):
+        df.load_design_freeze(path)
+
+
+def test_the_verification_opt_out_is_explicit(freeze, tmp_path):
+    """A hash-only caller must ask for the unverified load by name."""
+    broken = copy.deepcopy(freeze)
+    broken["templates"]["levels"][0]["sha256"] = "0"*64
+    path = _write_freeze(tmp_path, broken)
+    loaded = df.load_design_freeze(path, skip_bound_artifact_verification=True)
+    assert loaded["templates"]["levels"][0]["sha256"] == "0"*64
+
+
+def test_extraction_settings_are_declared_in_full(freeze):
+    """The grid and the guards the runner consumes are part of the design."""
+    algorithm = freeze["aperture"]["theta_e_algorithm"]
+    assert algorithm["extraction_grid"]["pixel_scale_arcsec"] == 0.01
+    assert algorithm["extraction_grid"]["half_width_factor"] == 4.0
+    assert algorithm["guards"]["closure_tolerance_pixels"] == 0.5
+    assert algorithm["guards"]["border_margin_pixels"] == 2.0
+    assert algorithm["guards"]["min_contour_vertices"] == 32
+
+
+def test_loader_rejects_a_missing_extraction_grid(freeze):
+    """Dropping the extraction grid fails closed."""
+    broken = copy.deepcopy(freeze)
+    del broken["aperture"]["theta_e_algorithm"]["extraction_grid"]
+    with pytest.raises(df.DesignFreezeError, match="extraction_grid"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_non_positive_extraction_pixel_scale(freeze):
+    """An extraction grid the extraction cannot use fails closed."""
+    broken = copy.deepcopy(freeze)
+    broken["aperture"]["theta_e_algorithm"]["extraction_grid"][
+        "pixel_scale_arcsec"
+    ] = 0.0
+    with pytest.raises(df.DesignFreezeError, match="pixel_scale_arcsec"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_negative_border_margin(freeze):
+    """A negative contour guard fails closed."""
+    broken = copy.deepcopy(freeze)
+    broken["aperture"]["theta_e_algorithm"]["guards"][
+        "border_margin_pixels"
+    ] = -1.0
+    with pytest.raises(df.DesignFreezeError, match="border_margin_pixels"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_an_unusable_min_contour_vertices(freeze):
+    """A vertex floor below the extraction's own minimum fails closed."""
+    broken = copy.deepcopy(freeze)
+    broken["aperture"]["theta_e_algorithm"]["guards"][
+        "min_contour_vertices"
+    ] = 3
+    with pytest.raises(df.DesignFreezeError, match="min_contour_vertices"):
+        df.validate_design_freeze(broken)

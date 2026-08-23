@@ -72,7 +72,9 @@ Deterministic rules, each covered by a unit test:
 
 - Floor cuts are strict: ``theta_E > 0.5`` arcsec and ``S > 20``. A
   member exactly on a floor fails it.
-- Standardization is the population z-score. A pool with exactly zero
+- Standardization is the population z-score, accumulated exactly, so
+  any permutation of one pool standardizes to bitwise identical
+  z-scores and therefore ranks identically. A pool with exactly zero
   spread standardizes to all zeros rather than dividing by zero.
 - ``log S`` and ``log C`` require strictly positive finite inputs. A
   ranked member with zero or non-finite ``S`` or ``C`` raises: a flat
@@ -581,6 +583,17 @@ def apply_floor_cuts(theta_e_arcsec, arc_snr_values):
     return (theta_e > FLOOR_THETA_E_ARCSEC) & (snr > FLOOR_ARC_SNR)
 
 
+def _exact_mean(array: np.ndarray) -> float:
+    """Return the mean of one array under exact accumulation.
+
+    `math.fsum` carries the exact sum and rounds once, so the result is
+    a function of the multiset of values alone. `numpy.mean` and
+    `numpy.std` sum pairwise over the memory order instead, which makes
+    their last bit depend on where a member happens to sit in the pool.
+    """
+    return math.fsum(array.tolist()) / array.size
+
+
 def standardize(values):
     """Standardize one pool to zero mean and unit spread.
 
@@ -588,6 +601,13 @@ def standardize(values):
     z-scores depend only on the pool and not on a sample correction. A
     pool with exactly zero spread standardizes to zeros: every member is
     identical, so no member can rank above another on this statistic.
+
+    Both reductions accumulate exactly, so the mean and the spread are
+    functions of the pool alone and a permuted pool standardizes to
+    bitwise identical z-scores. That is the contract the ranking rests
+    on: a one-ulp difference in the score of a near-tied pair would
+    otherwise order them ahead of the digest tie rule, and a re-ordered
+    re-run of the identical pool could return a different ranking.
 
     Parameters
     ----------
@@ -597,7 +617,8 @@ def standardize(values):
     Returns
     -------
     z : `numpy.ndarray`
-        Standardized statistic.
+        Standardized statistic, invariant under a permutation of the
+        pool up to that same permutation.
 
     Raises
     ------
@@ -605,10 +626,11 @@ def standardize(values):
         Raised for an empty or non-finite input.
     """
     array = _require_finite_array(values, "values", ndim=1)
-    spread = float(np.std(array))
+    deviations = array - _exact_mean(array)
+    spread = math.sqrt(_exact_mean(deviations ** 2))
     if spread == 0.0:
         return np.zeros_like(array)
-    return (array - float(np.mean(array))) / spread
+    return deviations / spread
 
 
 def _require_log_ready(values, name: str) -> np.ndarray:

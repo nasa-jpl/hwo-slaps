@@ -45,6 +45,37 @@ def _zscore(values):
     return (array - array.mean()) / array.std()
 
 
+MIRRORED_POOL_SIZE = 400
+"""Member count of the constructed near-tie pool."""
+
+PERMUTATION_TRIALS = 32
+"""Permutations each determinism test re-scores the pool under.
+
+The property under test is exactness, not a lucky ordering: pairwise
+reductions survive some permutations of a pool this size and not
+others, so one permutation is not evidence either way.
+"""
+
+
+def _mirrored_near_tie_pool():
+    """Return a pool whose every member exactly ties one other member.
+
+    ``log C`` is the reverse of ``log S``, so the two statistics share
+    one multiset and therefore one spread, and member ``i`` scores
+    exactly what member ``size - 1 - i`` scores. Every pair is a true
+    tie the digest rule must break. A mean or a spread that moved by one
+    ulp when the pool was re-ordered would resolve those pairs on
+    floating point instead, ahead of the tie rule, so this pool is the
+    sharpest available probe of standardization determinism. The
+    complexity values are algebraic rather than physical: what is under
+    test is the arithmetic, not the scene.
+    """
+    rng = np.random.default_rng(20260823)
+    log_snr = rng.uniform(3.5, 7.0, size=MIRRORED_POOL_SIZE)
+    ids = tuple(f"id{index:04d}" for index in range(MIRRORED_POOL_SIZE))
+    return ids, np.exp(log_snr), np.exp(log_snr[::-1])
+
+
 def test_blank_variance_matches_the_declared_noise_chain():
     """``B = (sky + dark) * t + read_noise ** 2`` exactly."""
     assert ss.blank_variance_e2(1.0e-3, 1.0e-3, 2.0, 1000.0) == pytest.approx(6.0)
@@ -318,6 +349,22 @@ def test_standardize_rejects_non_finite_input():
         ss.standardize([1.0, np.inf, 3.0])
 
 
+def test_standardize_is_bitwise_invariant_under_a_permutation():
+    """Re-ordering a pool returns the identical z-scores, bit for bit.
+
+    ``numpy.mean`` and ``numpy.std`` accumulate pairwise over the memory
+    order, so their last bit moves under most permutations of a pool
+    this size. Exact accumulation makes both reductions functions of the
+    pool alone.
+    """
+    rng = np.random.default_rng(20260823)
+    values = rng.uniform(3.5, 7.0, size=MIRRORED_POOL_SIZE)
+    forward = ss.standardize(values)
+    for _ in range(PERMUTATION_TRIALS):
+        order = rng.permutation(values.size)
+        assert np.array_equal(ss.standardize(values[order]), forward[order])
+
+
 def test_selection_scores_are_the_sum_of_two_standardized_logs():
     """``s_plus_c`` cancels exactly on a mirrored pool."""
     snr = np.exp([1.0, 2.0, 3.0])
@@ -364,13 +411,66 @@ def test_ranking_breaks_ties_on_the_system_id_digest():
 
 
 def test_ranking_is_independent_of_the_input_order():
-    """A re-ordered pool produces the identical ranking."""
+    """A re-ordered pool re-scores and re-ranks identically.
+
+    The scores are recomputed from the re-ordered statistics rather than
+    re-ordered themselves, so the standardization runs on the permuted
+    pool and the test covers the whole score path and not only the sort.
+    """
     ids = ("s1", "s2", "s3", "s4")
-    scores = [1.0, 3.0, 3.0, 2.0]
-    forward = ss.rank_by_score(ids, scores)
-    reverse = ss.rank_by_score(ids[::-1], scores[::-1])
+    snr = np.array([25.0, 400.0, 400.0, 100.0])
+    complexity_values = np.array([8.0e-3, 1.0e-3, 1.0e-3, 3.0e-3])
+    forward_scores = ss.selection_scores(snr, complexity_values)
+    reverse_scores = ss.selection_scores(snr[::-1], complexity_values[::-1])
+    assert np.array_equal(reverse_scores, forward_scores[::-1])
+    forward = ss.rank_by_score(ids, forward_scores)
+    reverse = ss.rank_by_score(ids[::-1], reverse_scores)
     assert forward == reverse
     assert forward[-1] == "s1"
+
+
+def test_a_near_tie_pool_re_scores_and_re_ranks_identically():
+    """A permuted near-tie pool scores bit for bit and ranks the same.
+
+    Under pairwise reductions the mirrored pool's two spreads no longer
+    coincide once the pool is re-ordered, every exact tie becomes a
+    one-ulp difference, and the pairs resolve on floating point instead
+    of on the digest rule.
+    """
+    ids, snr, complexity_values = _mirrored_near_tie_pool()
+    rng = np.random.default_rng(1)
+    forward_scores = ss.selection_scores(snr, complexity_values)
+    forward = ss.rank_by_score(ids, forward_scores)
+
+    assert len(set(forward_scores.tolist())) == len(ids) // 2
+
+    for _ in range(PERMUTATION_TRIALS):
+        order = rng.permutation(len(ids))
+        permuted_scores = ss.selection_scores(snr[order], complexity_values[order])
+        assert np.array_equal(permuted_scores, forward_scores[order])
+        assert ss.rank_by_score(
+            tuple(ids[index] for index in order), permuted_scores
+        ) == forward
+
+
+def test_rank_pool_is_invariant_under_a_permutation_of_the_pool():
+    """The whole frozen rule returns one ranking and one golden tier."""
+    ids, snr, complexity_values = _mirrored_near_tie_pool()
+    theta_e = np.full(len(ids), 1.0)
+    rng = np.random.default_rng(7)
+    forward = ss.rank_pool(ids, theta_e, snr, complexity_values)
+
+    for _ in range(PERMUTATION_TRIALS):
+        order = rng.permutation(len(ids))
+        permuted = ss.rank_pool(
+            tuple(ids[index] for index in order),
+            theta_e[order],
+            snr[order],
+            complexity_values[order],
+        )
+        assert permuted.ranking == forward.ranking
+        assert permuted.selected_ids == forward.selected_ids
+        assert permuted.golden_ids == forward.golden_ids
 
 
 def test_ranking_rejects_duplicate_ids():

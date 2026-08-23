@@ -662,8 +662,9 @@ def solve_detected_rate_normalization(asset_path, reference, grid_config,
             'source_magnitude_ab': reference['source_magnitude_ab'],
             'source_band': reference['source_band'],
             'note': (
-                'recorded at preparation time; the contract is gated on '
-                'target_rate_e_per_s, not on this file hash'
+                'recorded at preparation time and recomputed by '
+                'verify_asset_rate_contract, which fails closed when the '
+                'file no longer hashes to it'
             ),
         },
         'production_scene': {
@@ -716,9 +717,43 @@ def _solved_rate_contract(sb, pixel_scale_arcsec, reference_path, scene_path):
     return contract
 
 
+def _verify_contract_input(contract, key, path, description):
+    """Fail unless one recorded contract input still hashes to its digest.
+
+    A rate contract is a claim about a render made from two committed
+    files. Re-rendering cannot see an edit to either of them that leaves
+    the target rate alone, so the digests stored beside the contract are
+    recomputed here. There is deliberately no escape: verifying against a
+    different reference or scene is verifying a different contract.
+    """
+    record = contract.get(key)
+    if not isinstance(record, dict) or not isinstance(record.get('sha256'), str):
+        raise ValueError(
+            f'rate_contract.{key} carries no sha256, so the contract cannot '
+            f'be checked against the {description} it was solved against'
+        )
+    path = Path(path).expanduser().resolve()
+    if not path.exists():
+        raise ValueError(
+            f'The {description} {path} does not exist, so the stored '
+            f'rate_contract.{key}.sha256 cannot be checked'
+        )
+    digest = _sha256(path)
+    if digest != record['sha256']:
+        raise ValueError(
+            f'The {description} {path} now hashes to {digest} while the '
+            f'stored rate_contract.{key}.sha256 is {record["sha256"]}; the '
+            'contract was solved against different bytes'
+        )
+
+
 def verify_asset_rate_contract(asset_path, scene_path=None,
                                reference_path=None):
     """Re-render one written asset and check its stored rate contract.
+
+    The stored observing-reference and production-scene digests are
+    recomputed before anything is rendered, so an edit to either file
+    fails closed even when it leaves the target rate untouched.
 
     Parameters
     ----------
@@ -726,10 +761,12 @@ def verify_asset_rate_contract(asset_path, scene_path=None,
         Prepared asset carrying ``provenance.rate_contract``.
     scene_path : `str` or `pathlib.Path`, optional
         Production scene to render on. Defaults to the committed
-        production Image scene.
+        production Image scene. It must be the byte-identical file the
+        contract was solved against.
     reference_path : `str` or `pathlib.Path`, optional
         Observing reference the stored target rate must still match.
-        Defaults to the committed observing reference.
+        Defaults to the committed observing reference. It must be the
+        byte-identical file the contract was solved against.
 
     Returns
     -------
@@ -758,6 +795,12 @@ def verify_asset_rate_contract(asset_path, scene_path=None,
             f'Asset {asset_path} carries no provenance.rate_contract block'
         )
     contract = provenance['rate_contract']
+    _verify_contract_input(
+        contract, 'observing_reference', reference_path, 'observing reference'
+    )
+    _verify_contract_input(
+        contract, 'production_scene', scene_path, 'production scene'
+    )
     reference = detected_rate_reference(reference_path)
     target_rate = _positive_float(
         contract['target_rate_e_per_s'], 'rate_contract.target_rate_e_per_s'

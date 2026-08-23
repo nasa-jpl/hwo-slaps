@@ -253,7 +253,7 @@ strata:
 observing:
   reference:
     path: configs/observing/hwo_eac1_hri_reference_v1.yaml
-    sha256: fa6cca9391028f18bd13f53a0f86d294b2751062797c9210f63d18a184a065c7
+    sha256: ac64aa1bde9e834babfe5201d28442d4950f7ce943a97748cab313abbfeda322
     reference_name: hwo_eac1_hri_reference_v1
     script: scripts/derive_hwo_eac1_hri_reference.py
     generated: '2026-08-23'
@@ -447,20 +447,15 @@ templates:
     - id: cosmos_48849
       morphology_class: clumpy_sbar_spiral_existing_anchor
       asset_path: configs/source_assets/cosmos_48849_hlr011.npz
-      sha256: fb51b801b98653f6a263016fa55ae0e1194734c197081d652ee00c51077ccd60
+      sha256: 4736aefff8cddbe5670de0a031e2580170bfea548eca77a273c9e12978e7a2a9
       asset_pixel_scale_arcsec: 0.002732128852944742
-      canonical_total_flux: 0.0004588946736860948
-      canonical_total_flux_source: >-
-        The committed observing reference's scene4_cosmos source_normalization
-        patch. This legacy anchor predates the P0-3 contract block and carries
-        no embedded provenance.rate_contract; its normalization is the
-        committed reference value and tests/test_source_bank_assets.py
-        re-solves it against the same target rate.
+      canonical_total_flux: 0.00045889467368609476
+      canonical_total_flux_source: provenance.rate_contract.total_flux
       catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 48849
     - id: cosmos_62410
       morphology_class: smooth_disk
       asset_path: configs/source_assets/cosmos_62410_hlr011.npz
-      sha256: b3fdc541c3e31013d5bb37c9e948fa74a9ce485cbb6dd1d959d3c4f0a5392376
+      sha256: 947cbeb9bdcc01425b43040fa805a3b5b765460eb8c8b3fccbba98e29e76fb64
       asset_pixel_scale_arcsec: 0.005553115716269291
       canonical_total_flux: 0.0004589089094626745
       canonical_total_flux_source: provenance.rate_contract.total_flux
@@ -468,7 +463,7 @@ templates:
     - id: cosmos_159916
       morphology_class: clumpy
       asset_path: configs/source_assets/cosmos_159916_hlr011.npz
-      sha256: 1d601a6c3e969d558102c72b25307b2328a044396adcafbb63f3721aae435aa0
+      sha256: fae4e04d6052291da80c5e5b46d06cc0ad7a4effe3d2e6600f43c6d682e3c071
       asset_pixel_scale_arcsec: 0.005965587590013045
       canonical_total_flux: 0.000458924098862195
       canonical_total_flux_source: provenance.rate_contract.total_flux
@@ -476,7 +471,7 @@ templates:
     - id: cosmos_162893
       morphology_class: irregular_merger
       asset_path: configs/source_assets/cosmos_162893_hlr011.npz
-      sha256: 795d2f5eb636cbb59440547950260b70032f6e52540ac1c582e58ad0daf8ee4b
+      sha256: 0fc1669b362baebabd0c121f235980a4d5c3b897e3d57a4a8574c25293a9e170
       asset_pixel_scale_arcsec: 0.005584403908234906
       canonical_total_flux: 0.0004589439758914851
       canonical_total_flux_source: provenance.rate_contract.total_flux
@@ -484,7 +479,7 @@ templates:
     - id: cosmos_83935
       morphology_class: compact
       asset_path: configs/source_assets/cosmos_83935_hlr011.npz
-      sha256: 50ae26b0bb66d75e0147b669f40028f5333e665ff16e5444326fa682e6723ef9
+      sha256: 3b691be272e0acdd4ffa1b2a2ee1060b1fbdc1e23ca3ed4b69bd3dfe84f857c4
       asset_pixel_scale_arcsec: 0.012148903205522409
       canonical_total_flux: 0.0004588806668010262
       canonical_total_flux_source: provenance.rate_contract.total_flux

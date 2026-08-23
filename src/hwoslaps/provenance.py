@@ -7,6 +7,7 @@ stable hash of the exact configuration used.
 
 import hashlib
 import importlib.metadata
+import json
 import platform
 import subprocess
 from pathlib import Path
@@ -83,6 +84,25 @@ def config_hash(config):
     """
     rendered = yaml.safe_dump(config, sort_keys=True).encode('utf-8')
     return hashlib.sha256(rendered).hexdigest()[:16]
+
+
+def revision_digest(revision):
+    """Return one scalar identifying a source-revision record.
+
+    Parameters
+    ----------
+    revision : `dict`
+        Record from `revision_provenance`.
+
+    Returns
+    -------
+    digest : `str`
+        Full SHA-256 of the canonical JSON rendering, so a single string
+        identifies the commit, the dirty flag and the working-tree diff
+        a result was produced at.
+    """
+    rendered = json.dumps(revision, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(rendered.encode('utf-8')).hexdigest()
 
 
 def _git_hash(repo_dir=None):

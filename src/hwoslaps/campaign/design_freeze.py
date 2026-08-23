@@ -9,7 +9,9 @@ The loader is fail-closed. It requires every block the campaign depends
 on, cross-checks the pinned module constants against the modules that
 declare them, and verifies the digests of the artifacts the freeze binds
 by hash: the observing reference, the pre-registration document and the
-five template assets.
+five template assets. The verification runs inside `load_design_freeze`
+itself, so no caller can hold a validated freeze whose bound bytes have
+moved without having asked for that explicitly.
 
 The freeze file's own digest is deliberately NOT pinned in code. The
 freeze is expected to be amended at ratification, and a self-pinned hash
@@ -147,6 +149,18 @@ def _require_positive_float(value: Any, path: str) -> float:
     return number
 
 
+def _require_nonnegative_float(value: Any, path: str) -> float:
+    """Return a non-negative finite float or raise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise DesignFreezeError(f"{path} must be a number, got {value!r}")
+    number = float(value)
+    if not number >= 0.0 or number == float("inf"):
+        raise DesignFreezeError(
+            f"{path} must be non-negative and finite, got {value!r}"
+        )
+    return number
+
+
 def _require_sha256(value: Any, path: str) -> str:
     """Return a full hexadecimal SHA-256 digest string or raise."""
     if not isinstance(value, str) or len(value) != 64:
@@ -227,6 +241,57 @@ def _validate_module_constants(freeze: dict) -> None:
                 f"aperture.theta_e_algorithm.{key} is {frozen!r} but the "
                 f"module declares {module_value!r}"
             )
+
+
+def _validate_extraction_settings(freeze: dict) -> None:
+    """Validate the frozen ``theta_E`` extraction grid and contour guards.
+
+    Every Stage 0 job configuration carries these settings and the
+    runner consumes exactly them, so they are part of the design rather
+    than a module default a runner may inherit. The values themselves
+    are the freeze's to choose; what is checked is that each one exists
+    and is usable by the extraction.
+    """
+    aperture = _require_mapping(freeze["aperture"], "aperture")
+    algorithm = _require_mapping(
+        _required(aperture, "theta_e_algorithm", "aperture"),
+        "aperture.theta_e_algorithm",
+    )
+    grid_path = "aperture.theta_e_algorithm.extraction_grid"
+    grid = _require_mapping(
+        _required(algorithm, "extraction_grid", "aperture.theta_e_algorithm"),
+        grid_path,
+    )
+    _require_positive_float(
+        _required(grid, "pixel_scale_arcsec", grid_path),
+        f"{grid_path}.pixel_scale_arcsec",
+    )
+    _require_positive_float(
+        _required(grid, "half_width_factor", grid_path),
+        f"{grid_path}.half_width_factor",
+    )
+    guards_path = "aperture.theta_e_algorithm.guards"
+    guards = _require_mapping(
+        _required(algorithm, "guards", "aperture.theta_e_algorithm"), guards_path
+    )
+    _require_positive_float(
+        _required(guards, "closure_tolerance_pixels", guards_path),
+        f"{guards_path}.closure_tolerance_pixels",
+    )
+    _require_nonnegative_float(
+        _required(guards, "border_margin_pixels", guards_path),
+        f"{guards_path}.border_margin_pixels",
+    )
+    vertices = _require_positive_int(
+        _required(guards, "min_contour_vertices", guards_path),
+        f"{guards_path}.min_contour_vertices",
+    )
+    if vertices < 4:
+        raise DesignFreezeError(
+            f"{guards_path}.min_contour_vertices is {vertices}; the extraction "
+            "rejects anything below 4 because a polygon needs three vertices "
+            "and a repeated closing one"
+        )
 
 
 def _validate_templates(freeze: dict) -> None:
@@ -359,8 +424,9 @@ def validate_design_freeze(document: dict) -> dict:
         Raised for an unsupported schema version, a missing block, a
         malformed digest, a template bank that does not fill the pool, a
         seed declaration that disagrees with the embedded parent design,
-        a provisional-item list that is not exactly the declared set, or
-        a pinned constant that disagrees with the module owning it.
+        a provisional-item list that is not exactly the declared set, an
+        unusable ``theta_E`` extraction grid or contour guard, or a
+        pinned constant that disagrees with the module owning it.
     """
     freeze = _require_mapping(document, "design freeze")
     version = _required(freeze, "schema_version", "design freeze")
@@ -540,29 +606,45 @@ def validate_design_freeze(document: dict) -> dict:
 
     _validate_templates(freeze)
     _validate_seeds(freeze)
+    _validate_extraction_settings(freeze)
     _validate_module_constants(freeze)
     return freeze
 
 
-def load_design_freeze(path=None) -> dict:
-    """Load and validate the design freeze.
+def load_design_freeze(
+    path=None, skip_bound_artifact_verification: bool = False
+) -> dict:
+    """Load, validate and verify the design freeze.
+
+    Loading is the only supported way to obtain a freeze mapping, so the
+    load also hashes every artifact the freeze binds. A freeze whose
+    observing reference or template assets no longer carry the frozen
+    digests cannot be loaded at all.
 
     Parameters
     ----------
     path : path-like, optional
         Freeze artifact to read. Defaults to
         `DEFAULT_DESIGN_FREEZE_PATH`.
+    skip_bound_artifact_verification : `bool`, optional
+        Skip the `verify_bound_artifacts` pass. This exists for the
+        hash-only contexts that read the design without ever rendering
+        with the assets, and it is deliberately verbose because using it
+        on a production path removes the guarantee the loader exists to
+        give.
 
     Returns
     -------
     freeze : `dict`
-        Validated freeze document.
+        Validated freeze document whose bound artifacts have been
+        verified unless the caller explicitly opted out.
 
     Raises
     ------
     DesignFreezeError
-        Raised when the file is missing, is not a YAML mapping, or fails
-        `validate_design_freeze`.
+        Raised when the file is missing, is not a YAML mapping, fails
+        `validate_design_freeze`, or binds an artifact that is missing
+        or no longer hashes to the frozen digest.
     """
     resolved = Path(path or DEFAULT_DESIGN_FREEZE_PATH).expanduser().resolve()
     if not resolved.is_file():
@@ -571,7 +653,10 @@ def load_design_freeze(path=None) -> dict:
         document = yaml.safe_load(stream)
     if not isinstance(document, dict):
         raise DesignFreezeError(f"Design freeze {resolved} must contain a mapping")
-    return validate_design_freeze(document)
+    freeze = validate_design_freeze(document)
+    if not skip_bound_artifact_verification:
+        verify_bound_artifacts(freeze)
+    return freeze
 
 
 def design_freeze_digest(path=None) -> str:
@@ -611,11 +696,20 @@ def verify_bound_artifacts(freeze: dict, root: Optional[Path] = None) -> dict:
     """Verify every file the freeze binds by digest.
 
     The observing reference and the five template assets are committed
-    artifacts and must be present. The selection pre-registration
-    document and the parent design source live in the untracked scratch
-    tree, so they are verified when present and reported as absent
-    otherwise: their content is embedded in, or restated by, this freeze
-    precisely so the freeze stands alone without them.
+    artifacts. They are always required: a clone of this repository at
+    the freeze's revision has them, so their absence is a broken
+    checkout rather than a legitimate state.
+
+    Exactly two bound references are genuinely optional, and only these
+    two. The selection pre-registration document and the parent design
+    source live in the untracked ``scratch`` tree, which is not
+    distributed with the repository, so a clean clone cannot have them.
+    Both are embedded in, or restated by, this freeze precisely so the
+    freeze stands alone without them: the pre-registration's definitions
+    are restated block by block under ``selection`` and the whole parent
+    design travels under ``parent_design``. They are verified whenever
+    they are on disk and named in the report's ``absent`` list when they
+    are not, so their absence is recorded rather than assumed.
 
     Parameters
     ----------

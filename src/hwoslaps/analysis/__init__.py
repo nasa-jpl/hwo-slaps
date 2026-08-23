@@ -17,6 +17,28 @@ _FORECAST_NAMES = (
     "wdm_suppression",
 )
 
+_RANK_STABILITY_NAMES = (
+    "MEMBER_SCALARS",
+    "NOISE_STREAM",
+    "compare_rankings",
+    "curve_comparison",
+    "definitions_block",
+    "estimator_ratios",
+    "load_member",
+    "load_pool",
+    "member_geometry",
+    "noiseless_observables",
+    "noisy_observables",
+    "rank_measured_pool",
+    "replicate_indices",
+    "replicate_noise_seed",
+    "replicate_stability",
+    "run_rank_stability",
+    "seed_binding",
+    "stability_tier_size",
+    "system_index",
+)
+
 _SELECTION_NAMES = (
     "APERTURE_THETA_E_MULTIPLE",
     "FLOOR_ARC_SNR",
@@ -45,9 +67,30 @@ _SELECTION_NAMES = (
     "top_k_jaccard",
 )
 
-__all__ = sorted(_FORECAST_NAMES + _SELECTION_NAMES)
+__all__ = sorted(_FORECAST_NAMES + _RANK_STABILITY_NAMES + _SELECTION_NAMES)
 
 if TYPE_CHECKING:
+    from .rank_stability import (
+        MEMBER_SCALARS,
+        NOISE_STREAM,
+        compare_rankings,
+        curve_comparison,
+        definitions_block,
+        estimator_ratios,
+        load_member,
+        load_pool,
+        member_geometry,
+        noiseless_observables,
+        noisy_observables,
+        rank_measured_pool,
+        replicate_indices,
+        replicate_noise_seed,
+        replicate_stability,
+        run_rank_stability,
+        seed_binding,
+        stability_tier_size,
+        system_index,
+    )
     from .selection_score import (
         APERTURE_THETA_E_MULTIPLE,
         FLOOR_ARC_SNR,
@@ -95,6 +138,10 @@ def __getattr__(name: str) -> Any:
         from . import subhalo_forecast
 
         return getattr(subhalo_forecast, name)
+    if name in _RANK_STABILITY_NAMES:
+        from . import rank_stability
+
+        return getattr(rank_stability, name)
     if name in _SELECTION_NAMES:
         from . import selection_score
 

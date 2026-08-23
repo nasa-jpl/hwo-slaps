@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import math
 from pathlib import Path
@@ -155,13 +156,102 @@ def _synthetic_forward_model(monkeypatch, baseline_sums):
 
 
 def _stub_area_report():
-    """Return a minimal collecting-area report for offline document tests."""
-    return {'value_m2': STUB_AREA_M2, 'method': 'offline test stub'}
+    """Return a minimal collecting-area report for offline document tests.
+
+    Only the area itself is a stub. The geometry entries come from the
+    committed artifact, because the SEI instrument-reference block checks
+    them against the vendored EAC1 prescription and a hand-written
+    geometry would drift from the production pupil.
+    """
+    committed = _committed_reference()['metadata']['collecting_area']
+    return {
+        'value_m2': STUB_AREA_M2,
+        'method': 'offline test stub',
+        'num_segments': committed['num_segments'],
+        'geometry': committed['geometry'],
+    }
+
+
+def _require_vendored_sei():
+    """Skip unless the vendored SEI data files are present.
+
+    The SEI files live under the gitignored ``scratch`` tree, so a
+    checkout without them cannot build a document at all. Every honesty
+    check on the SEI read itself runs against synthetic files in a
+    temporary directory and needs no skip.
+    """
+    for filename in (DERIVATION.SEI_HRI_FILENAME, DERIVATION.SEI_EAC1_FILENAME):
+        if not (DERIVATION.SEI_VENDOR_PATH / filename).is_file():
+            pytest.skip(
+                f'Vendored SEI file {filename} is absent from '
+                f'{DERIVATION.SEI_VENDOR_RELPATH}.'
+            )
+
+
+def _sei_hri_document(read_noise_e=0.2, dark_current=0.002,
+                      plate_scale_mas=7.16):
+    """Build the ``HRI.yaml`` subset the derivation reads."""
+    return {
+        'UVIS': {
+            'plate_scale': [plate_scale_mas, 'mas'],
+            'detector': {
+                'detector_RN': [read_noise_e, 'electrons'],
+                'detector_DC': [dark_current, 'electrons/pixel/second'],
+            },
+        },
+    }
+
+
+def _sei_eac1_document(segment_size=1.65, optical_gap=0.006, num_rings=2,
+                       num_segments=19, circumscribing_diameter=7.225765):
+    """Build the ``EAC1.yaml`` subset the derivation reads."""
+    return {
+        'PM': {
+            'circumscribing_diameter': [circumscribing_diameter, 'meters'],
+            'segmentation_parameters': {
+                'segment_size': [segment_size, 'meters'],
+                'optical_gap': [optical_gap, 'meters'],
+                'number_rings': [num_rings, 'unitless'],
+                'number_segments': [num_segments, 'unitless'],
+            },
+        },
+    }
+
+
+def _write_sei_vendor(path, hri=None, eac1=None):
+    """Write one SEI vendor directory and return its path.
+
+    A ``None`` document leaves that file out, which is the removed-file
+    case; a raw string is written verbatim, which is the unparsable case.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    for filename, document in (
+        (DERIVATION.SEI_HRI_FILENAME, hri),
+        (DERIVATION.SEI_EAC1_FILENAME, eac1),
+    ):
+        if document is None:
+            continue
+        with (path / filename).open('w', encoding='utf-8') as stream:
+            if isinstance(document, str):
+                stream.write(document)
+            else:
+                yaml.safe_dump(document, stream, sort_keys=False)
+    return path
+
+
+def _synthetic_sei_vendor(tmp_path, hri=None, eac1=None):
+    """Write a faithful synthetic SEI vendor directory, edits applied."""
+    return _write_sei_vendor(
+        tmp_path / 'sei',
+        hri=_sei_hri_document() if hri is None else hri,
+        eac1=_sei_eac1_document() if eac1 is None else eac1,
+    )
 
 
 def _document(**overrides):
     """Build one reference document without touching the pupil model."""
     pytest.importorskip('autolens')
+    _require_vendored_sei()
 
     parameters = {
         'area_report': _stub_area_report(),
@@ -271,6 +361,12 @@ def test_sei_is_the_named_instrument_reference_for_the_read_noise():
     assert corroborated['pixel_scale_arcsec']['sei_value'] == 0.00716
     assert corroborated['pixel_scale_arcsec']['value'] == PIXEL_SCALE_ARCSEC
     assert corroborated['dark_current_e_per_pix_s']['sei_value'] == 0.002
+    geometry = corroborated['telescope_geometry']['value']
+    assert geometry['segment_point_to_point_m'] == 1.65
+    assert geometry['gap_size_m'] == 0.006
+    assert geometry['pupil_diameter_m'] == 7.225765
+    assert geometry['num_rings'] == 2
+    assert geometry['num_segments'] == 19
 
     assert DERIVATION.READ_NOISE_PER_READ_E == 0.2
     assert 2.5 not in (
@@ -278,6 +374,158 @@ def test_sei_is_the_named_instrument_reference_for_the_read_noise():
         metadata['detector']['effective_read_noise_e'],
         metadata['detector']['dark_current_e_per_pix_s'],
     )
+
+
+def test_the_sei_values_come_out_of_the_vendored_files():
+    """Read the real vendored files and pin what they supply.
+
+    This is the check that the declared constants are the SEI's own
+    numbers rather than a restatement of them: every value the artifact
+    attributes to the SEI is parsed back out of the vendored bytes here,
+    and the recorded digests are recomputed independently.
+    """
+    _require_vendored_sei()
+
+    sei = DERIVATION.read_sei_instrument_parameters()
+
+    assert sei['read_noise_per_read_e'] == DERIVATION.READ_NOISE_PER_READ_E
+    assert sei['dark_current_e_per_pix_s'] == (
+        DERIVATION.DARK_CURRENT_E_PER_PIX_S
+    )
+    assert sei['plate_scale_arcsec'] == pytest.approx(
+        DERIVATION.SEI_PLATE_SCALE_ARCSEC, rel=1.0e-12
+    )
+    assert sei['segment_point_to_point_m'] == 1.65
+    assert sei['gap_size_m'] == 0.006
+    assert sei['num_rings'] == 2
+    assert sei['num_segments'] == 19
+    assert sei['pupil_diameter_m'] == 7.225765
+
+    expected_digests = {
+        filename: hashlib.sha256(
+            (DERIVATION.SEI_VENDOR_PATH / filename).read_bytes()
+        ).hexdigest()
+        for filename in (
+            DERIVATION.SEI_HRI_FILENAME, DERIVATION.SEI_EAC1_FILENAME
+        )
+    }
+    instrument = DERIVATION._sei_provenance(
+        PIXEL_SCALE_ARCSEC, _stub_area_report()
+    )
+
+    assert sei['sha256'] == expected_digests
+    assert instrument['data_file_sha256'] == expected_digests
+    assert instrument['data_files_read'] == list(expected_digests)
+    assert 'fails the run' in instrument['data_file_note']
+    assert instrument == _committed_reference()['metadata'][
+        'instrument_reference'
+    ]
+
+
+def test_a_missing_vendored_sei_file_fails_the_derivation(tmp_path):
+    """Refuse to claim SEI provenance without the SEI files."""
+    area_report = _stub_area_report()
+    empty = _write_sei_vendor(tmp_path / 'empty')
+    hri_only = _write_sei_vendor(
+        tmp_path / 'hri_only', hri=_sei_hri_document()
+    )
+
+    with pytest.raises(ValueError, match=r'HRI\.yaml does not exist'):
+        DERIVATION._sei_provenance(
+            PIXEL_SCALE_ARCSEC, area_report, vendor_path=empty
+        )
+    with pytest.raises(ValueError, match=r'EAC1\.yaml does not exist'):
+        DERIVATION._sei_provenance(
+            PIXEL_SCALE_ARCSEC, area_report, vendor_path=hri_only
+        )
+
+
+def test_an_edited_vendored_sei_value_fails_the_derivation(tmp_path):
+    """Every declared constant must still match its edited source."""
+    area_report = _stub_area_report()
+    faithful = _synthetic_sei_vendor(tmp_path / 'faithful')
+
+    assert DERIVATION._sei_provenance(
+        PIXEL_SCALE_ARCSEC, area_report, vendor_path=faithful
+    )['adopted_parameters']['read_noise_per_read_e']['value'] == 0.2
+
+    edits = {
+        'read_noise_per_read_e': {'hri': _sei_hri_document(read_noise_e=2.5)},
+        'dark_current_e_per_pix_s': {
+            'hri': _sei_hri_document(dark_current=0.02)
+        },
+        'plate_scale_arcsec': {
+            'hri': _sei_hri_document(plate_scale_mas=14.32)
+        },
+        'segment_point_to_point_m': {
+            'eac1': _sei_eac1_document(segment_size=1.7)
+        },
+        'gap_size_m': {'eac1': _sei_eac1_document(optical_gap=0.004)},
+        'pupil_diameter_m': {
+            'eac1': _sei_eac1_document(circumscribing_diameter=5.976938)
+        },
+        'num_rings': {'eac1': _sei_eac1_document(num_rings=3)},
+        'num_segments': {'eac1': _sei_eac1_document(num_segments=18)},
+    }
+    for name, edit in edits.items():
+        vendor = _synthetic_sei_vendor(tmp_path / name, **edit)
+        with pytest.raises(ValueError, match=f'{name} is declared as'):
+            DERIVATION._sei_provenance(
+                PIXEL_SCALE_ARCSEC, area_report, vendor_path=vendor
+            )
+
+
+def test_a_malformed_vendored_sei_leaf_fails_the_derivation(tmp_path):
+    """Reject a missing key, a wrong unit, or a non-numeric value."""
+    area_report = _stub_area_report()
+    without_read_noise = _sei_hri_document()
+    del without_read_noise['UVIS']['detector']['detector_RN']
+    wrong_unit = _sei_hri_document()
+    wrong_unit['UVIS']['detector']['detector_RN'] = [0.2, 'ADU']
+    not_a_pair = _sei_hri_document()
+    not_a_pair['UVIS']['detector']['detector_RN'] = 0.2
+    not_a_number = _sei_hri_document()
+    not_a_number['UVIS']['detector']['detector_RN'] = ['0.2', 'electrons']
+
+    cases = (
+        (without_read_noise, r'missing UVIS\.detector\.detector_RN'),
+        (wrong_unit, r"quoted in 'ADU', expected 'electrons'"),
+        (not_a_pair, r'is not a \[value, unit\] pair'),
+        (not_a_number, r'is not a number'),
+        ('- a bare sequence\n', 'does not parse as a YAML mapping'),
+    )
+    for index, (hri, message) in enumerate(cases):
+        vendor = _synthetic_sei_vendor(tmp_path / f'case{index}', hri=hri)
+        with pytest.raises(ValueError, match=message):
+            DERIVATION._sei_provenance(
+                PIXEL_SCALE_ARCSEC, area_report, vendor_path=vendor
+            )
+
+
+def test_the_sei_check_guards_both_sides_of_every_corroboration(tmp_path):
+    """Fail when the derivation moves away from the unchanged SEI files."""
+    vendor = _synthetic_sei_vendor(tmp_path)
+    area_report = _stub_area_report()
+    moved_geometry = _stub_area_report()
+    moved_geometry['geometry'] = dict(moved_geometry['geometry'])
+    moved_geometry['geometry']['gap_size_m'] = 0.004
+
+    with pytest.raises(ValueError, match='gap_size_m is declared as'):
+        DERIVATION._sei_provenance(
+            PIXEL_SCALE_ARCSEC, moved_geometry, vendor_path=vendor
+        )
+    with pytest.raises(
+        ValueError, match='derived pixel_scale_arcsec is declared as'
+    ):
+        DERIVATION._sei_provenance(
+            2.0 * PIXEL_SCALE_ARCSEC, area_report, vendor_path=vendor
+        )
+    with pytest.raises(ValueError, match='must carry the geometry'):
+        DERIVATION._sei_provenance(
+            PIXEL_SCALE_ARCSEC,
+            {'value_m2': STUB_AREA_M2},
+            vendor_path=vendor,
+        )
 
 
 def test_scene_one_closed_form_reproduces_the_qualification_flux():
@@ -800,6 +1048,7 @@ def test_default_normalization_mode_rebuilds_the_committed_reference(
     date and so a rebuild on any later day differs from the committed
     artifact in that one field alone.
     """
+    _require_vendored_sei()
     committed = _committed_reference()
     _freeze_baseline_sums(monkeypatch)
     photometry = committed['metadata']['source_photometry']
@@ -828,6 +1077,7 @@ def test_default_normalization_mode_is_the_explicit_intrinsic_rate_mode(
     monkeypatch,
 ):
     """Pin the default mode and its identity with the explicit request."""
+    _require_vendored_sei()
     _freeze_baseline_sums(monkeypatch)
 
     implicit = DERIVATION.build_reference_document(
@@ -1067,6 +1317,7 @@ def test_arc_snr_mode_equalizes_the_arc_and_records_both_conventions(
     so equal arc S/N means unequal intrinsic rates. Both numbers, the
     request, and the solver effort must survive into the artifact.
     """
+    _require_vendored_sei()
     baseline_sums = _freeze_baseline_sums(monkeypatch)
     magnifications = _synthetic_forward_model(monkeypatch, baseline_sums)
     target = 250.0
@@ -1129,6 +1380,7 @@ def test_arc_snr_mode_equalizes_the_arc_and_records_both_conventions(
 
 def test_arc_snr_mode_leaves_the_observation_block_untouched(monkeypatch):
     """Change only the source normalization, never the detector."""
+    _require_vendored_sei()
     baseline_sums = _freeze_baseline_sums(monkeypatch)
     _synthetic_forward_model(monkeypatch, baseline_sums)
     parameters = {

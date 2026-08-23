@@ -7,8 +7,12 @@ extracts each system's ``theta_E_eff`` with the frozen D-F7 algorithm,
 sizes each grid from that aperture, and writes the campaign manifest
 beside the design catalogue.
 
+The freeze is authoritative. The pool size and the runner are read from
+it and this driver offers no flag that could re-declare either, so a
+generated campaign always carries the design its freeze digest names.
+
 This generator never runs a job. Pass ``--validate`` to check the written
-manifest against the S1-lite schema and stop.
+manifest against the S1-lite schema and the digests it binds, and stop.
 """
 
 from __future__ import annotations
@@ -46,12 +50,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Interpreter the runner command invokes",
     )
     parser.add_argument(
-        "--n-systems",
-        type=int,
-        default=None,
-        help="Pool size override; defaults to the frozen stage0.n_systems",
-    )
-    parser.add_argument(
         "--campaign-name",
         default="stage0_pool",
         help="S1-lite campaign name",
@@ -64,7 +62,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--validate",
         action="store_true",
-        help="Validate the written manifest against the S1-lite schema",
+        help="Validate the written manifest and the digests it binds",
     )
     parser.add_argument(
         "--progress-every",
@@ -110,11 +108,10 @@ def main(argv=None) -> None:
         output_root=args.output_root,
         runner_command=[
             args.python,
-            "scripts/run_stage0_observation.py",
+            str(freeze["stage0"]["runner"]),
             "{config}",
         ],
         freeze_path=args.design_freeze,
-        n_systems=args.n_systems,
         campaign_name=args.campaign_name,
         campaign_uuid=args.campaign_uuid,
         progress=_progress_reporter(args.progress_every),

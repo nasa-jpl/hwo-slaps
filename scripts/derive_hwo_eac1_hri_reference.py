@@ -20,7 +20,11 @@ provenance metadata only. The detector read noise is likewise the
 EFFECTIVE combined-image value, because the noise model applies exactly
 one squared read-noise term. Its per-read value comes from the HWO
 Science Engineering Interface, the current public HWO working
-engineering reference adopted for this study.
+engineering reference adopted for this study. The vendored SEI data
+files are parsed on every run and every value this module attributes to
+them is checked against them, so a missing file, or one whose cited
+values moved, fails the derivation instead of passing an unread claim
+into the artifact.
 
 That discrete render-and-normalize contract is the ``intrinsic_rate``
 normalization mode and stays the default. The ``arc_snr`` mode instead
@@ -37,6 +41,7 @@ import argparse
 from copy import deepcopy
 from datetime import date
 from functools import lru_cache
+import hashlib
 import math
 from pathlib import Path
 
@@ -94,21 +99,47 @@ OPTIMISTIC_DETECTOR_QE = 0.9
 SEI_PACKAGE = 'hwo_sci_eng'
 SEI_VERSION = '0.1.9'
 SEI_VENDOR_RELPATH = 'scratch/q1_observing_conditions/sei_v0.1.9'
+SEI_VENDOR_PATH = PROJECT_ROOT / SEI_VENDOR_RELPATH
+SEI_HRI_FILENAME = 'HRI.yaml'
+SEI_EAC1_FILENAME = 'EAC1.yaml'
 SEI_DESCRIPTION = (
     'current public HWO working engineering reference adopted for this '
     'study'
 )
+
+MAS_TO_ARCSEC = 1.0e-3
+"""One milliarcsecond expressed in arcseconds."""
+
+SEI_AGREEMENT_RELATIVE_TOLERANCE = 1.0e-9
+"""Accepted departure between a declared constant and its SEI value.
+
+The vendored files quote the same decimals this module declares, so the
+only departure a faithful pair can carry is unit-conversion round-off at
+the 1e-16 level. Any real edit to a vendored value is orders of
+magnitude wider than this window and fails the run.
+"""
 
 DETECTOR_GAIN_E_PER_ADU = 1.0
 DARK_CURRENT_E_PER_PIX_S = 0.002
 READ_NOISE_PER_READ_E = 0.2
 """HRI UVIS per-read noise in electrons, from the SEI ``HRI.yaml``.
 
+Checked against the vendored file on every run by
+:func:`read_sei_instrument_parameters`.
+
 Retired provenance, kept as history only: the derivation carried the
 LUVOIR HDI Table 8-5 value of 2.5 e- per read until 2026-08-23, when the
 SEI became the authoritative instrument source for this study. That
 number is neither a configured value nor a bracket anywhere in the
 design.
+"""
+
+SEI_PLATE_SCALE_ARCSEC = 0.00716
+"""HRI UVIS plate scale in arcseconds, the SEI 7.16 mas converted.
+
+Written as the exact decimal the artifact quotes, because the float
+product of 7.16 and 1e-3 carries a round-off tail. The conversion is
+checked against ``HRI.yaml`` on every run.
 """
 
 N_READS = 2
@@ -1363,20 +1394,174 @@ def collecting_area_report(area_m2, pupil_geometry):
     }
 
 
-def _sei_provenance(pixel_scale_arcsec):
+def _sei_leaf(document, keys, expected_unit, path):
+    """Return one SEI ``[value, unit]`` leaf as a float, unit checked.
+
+    Parameters
+    ----------
+    document : `dict`
+        Parsed SEI data file.
+    keys : `tuple` of `str`
+        Key path to the leaf.
+    expected_unit : `str`
+        Unit the derivation reads the leaf in.
+    path : `str` or `pathlib.Path`
+        File the document came from, for the failure messages.
+
+    Returns
+    -------
+    value : `float`
+        Leaf value in ``expected_unit``.
+    """
+    node = document
+    for depth, key in enumerate(keys, start=1):
+        if not isinstance(node, dict) or key not in node:
+            raise ValueError(f'{path} is missing {".".join(keys[:depth])}.')
+        node = node[key]
+    trail = '.'.join(keys)
+    if not isinstance(node, list) or len(node) != 2:
+        raise ValueError(
+            f'{path} {trail} is not a [value, unit] pair, got {node!r}.'
+        )
+    value, unit = node
+    if unit != expected_unit:
+        raise ValueError(
+            f'{path} {trail} is quoted in {unit!r}, expected {expected_unit!r}.'
+        )
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f'{path} {trail} is not a number, got {value!r}.')
+    return float(value)
+
+
+def read_sei_data_file(filename, vendor_path=SEI_VENDOR_PATH):
+    """Parse one vendored SEI data file and digest the bytes parsed.
+
+    Parameters
+    ----------
+    filename : `str`
+        File name inside the vendored SEI directory.
+    vendor_path : `str` or `pathlib.Path`, optional
+        Directory holding the vendored SEI data files.
+
+    Returns
+    -------
+    document : `dict`
+        Parsed YAML mapping.
+    sha256 : `str`
+        Hex digest of the exact bytes that were parsed.
+    """
+    path = Path(vendor_path) / filename
+    if not path.is_file():
+        raise ValueError(
+            f'Vendored SEI file {path} does not exist; the derivation reads '
+            f'{SEI_VENDOR_RELPATH} for its instrument parameters and cannot '
+            'claim SEI provenance without it.'
+        )
+    payload = path.read_bytes()
+    document = yaml.safe_load(payload.decode('utf-8'))
+    if not isinstance(document, dict):
+        raise ValueError(f'{path} does not parse as a YAML mapping.')
+    return document, hashlib.sha256(payload).hexdigest()
+
+
+def read_sei_instrument_parameters(vendor_path=SEI_VENDOR_PATH):
+    """Read every SEI value this derivation attributes to the SEI.
+
+    The vendored ``HRI.yaml`` and ``EAC1.yaml`` are parsed on each run
+    rather than restated here, so a removed file, or one whose cited
+    values moved, fails the derivation instead of passing an unread
+    claim into the artifact. The returned digests are the ones the
+    provenance record carries, and they change with any edit at all.
+
+    Parameters
+    ----------
+    vendor_path : `str` or `pathlib.Path`, optional
+        Directory holding the vendored SEI data files.
+
+    Returns
+    -------
+    parameters : `dict`
+        Parsed SEI values keyed by the quantity they supply, plus a
+        ``sha256`` mapping from file name to hex digest.
+    """
+    hri, hri_digest = read_sei_data_file(SEI_HRI_FILENAME, vendor_path)
+    eac1, eac1_digest = read_sei_data_file(SEI_EAC1_FILENAME, vendor_path)
+    hri_path = Path(vendor_path) / SEI_HRI_FILENAME
+    eac1_path = Path(vendor_path) / SEI_EAC1_FILENAME
+    segmentation = ('PM', 'segmentation_parameters')
+    return {
+        'read_noise_per_read_e': _sei_leaf(
+            hri, ('UVIS', 'detector', 'detector_RN'), 'electrons', hri_path
+        ),
+        'dark_current_e_per_pix_s': _sei_leaf(
+            hri,
+            ('UVIS', 'detector', 'detector_DC'),
+            'electrons/pixel/second',
+            hri_path,
+        ),
+        'plate_scale_arcsec': MAS_TO_ARCSEC * _sei_leaf(
+            hri, ('UVIS', 'plate_scale'), 'mas', hri_path
+        ),
+        'segment_point_to_point_m': _sei_leaf(
+            eac1, segmentation + ('segment_size',), 'meters', eac1_path
+        ),
+        'gap_size_m': _sei_leaf(
+            eac1, segmentation + ('optical_gap',), 'meters', eac1_path
+        ),
+        'num_rings': _sei_leaf(
+            eac1, segmentation + ('number_rings',), 'unitless', eac1_path
+        ),
+        'num_segments': _sei_leaf(
+            eac1, segmentation + ('number_segments',), 'unitless', eac1_path
+        ),
+        'pupil_diameter_m': _sei_leaf(
+            eac1, ('PM', 'circumscribing_diameter'), 'meters', eac1_path
+        ),
+        'sha256': {
+            SEI_HRI_FILENAME: hri_digest,
+            SEI_EAC1_FILENAME: eac1_digest,
+        },
+    }
+
+
+def _require_sei_agreement(name, sei_value, declared_value, path):
+    """Fail unless a declared value matches the SEI value it cites."""
+    declared = float(declared_value)
+    if not math.isclose(
+        sei_value,
+        declared,
+        rel_tol=SEI_AGREEMENT_RELATIVE_TOLERANCE,
+        abs_tol=0.0,
+    ):
+        raise ValueError(
+            f'{name} is declared as {declared_value} but {path} carries '
+            f'{sei_value}; this derivation cites the SEI for that value, so '
+            'the two must agree.'
+        )
+
+
+def _sei_provenance(pixel_scale_arcsec, area_report,
+                    vendor_path=SEI_VENDOR_PATH):
     """Return the SEI instrument-reference provenance block.
 
     The SEI is the authoritative instrument source for this study as of
-    2026-08-23. Only the detector read noise is adopted from it here; the
-    remaining entries record where the independently derived engine
-    values agree with it, so a future SEI release can be diffed against
-    this artifact.
+    2026-08-23. Every value attributed to it below is parsed out of the
+    vendored files here and checked against the value this derivation
+    declares, and the digests of the files parsed are recorded. Only the
+    detector read noise is adopted from it; the remaining entries record
+    where the independently derived engine values agree with it, so a
+    future SEI release can be diffed against this artifact.
 
     Parameters
     ----------
     pixel_scale_arcsec : `float`
         Detector pixel scale in arcseconds, for the plate-scale
         corroboration.
+    area_report : `dict`
+        Report from :func:`collecting_area_report`, carrying the pupil
+        geometry for the EAC1 prescription corroboration.
+    vendor_path : `str` or `pathlib.Path`, optional
+        Directory holding the vendored SEI data files.
 
     Returns
     -------
@@ -1384,13 +1569,53 @@ def _sei_provenance(pixel_scale_arcsec):
         Serializable instrument-reference record.
     """
     pixel_scale = _require_positive(pixel_scale_arcsec, 'pixel_scale_arcsec')
+    sei = read_sei_instrument_parameters(vendor_path)
+    hri_path = Path(vendor_path) / SEI_HRI_FILENAME
+    eac1_path = Path(vendor_path) / SEI_EAC1_FILENAME
+    if 'geometry' not in area_report or 'num_segments' not in area_report:
+        raise ValueError(
+            'area_report must carry the geometry and num_segments entries '
+            'from collecting_area_report for the EAC1 corroboration.'
+        )
+    geometry = area_report['geometry']
+    telescope_geometry = {
+        key: geometry[key]
+        for key in (
+            'segment_point_to_point_m', 'gap_size_m', 'pupil_diameter_m',
+            'num_rings',
+        )
+    }
+    telescope_geometry['num_segments'] = area_report['num_segments']
+    declared = {
+        'read_noise_per_read_e': (READ_NOISE_PER_READ_E, hri_path),
+        'dark_current_e_per_pix_s': (DARK_CURRENT_E_PER_PIX_S, hri_path),
+        'plate_scale_arcsec': (SEI_PLATE_SCALE_ARCSEC, hri_path),
+        **{
+            key: (value, eac1_path)
+            for key, value in telescope_geometry.items()
+        },
+    }
+    for name, (value, path) in declared.items():
+        _require_sei_agreement(name, sei[name], value, path)
+    _require_sei_agreement(
+        'derived pixel_scale_arcsec', sei['plate_scale_arcsec'], pixel_scale,
+        hri_path,
+    )
     return {
         'name': 'HWO Science Engineering Interface',
         'package': SEI_PACKAGE,
         'version': SEI_VERSION,
         'status': SEI_DESCRIPTION,
         'vendored_path': SEI_VENDOR_RELPATH,
-        'data_files_read': ['HRI.yaml', 'EAC1.yaml'],
+        'data_files_read': list(sei['sha256']),
+        'data_file_sha256': dict(sei['sha256']),
+        'data_file_note': (
+            'Every value attributed to the SEI below is parsed out of these '
+            'files on each run and checked against the value this derivation '
+            'declares; a missing file, or one whose cited values moved, '
+            'fails the run. The digests are of the exact bytes parsed, so '
+            'they move with any edit at all.'
+        ),
         'citation': 'SEI',
         'adopted_parameters': {
             'read_noise_per_read_e': {
@@ -1405,7 +1630,7 @@ def _sei_provenance(pixel_scale_arcsec):
         'corroborated_parameters': {
             'pixel_scale_arcsec': {
                 'value': pixel_scale,
-                'sei_value': 0.00716,
+                'sei_value': SEI_PLATE_SCALE_ARCSEC,
                 'sei_source': 'HRI.yaml, UVIS plate scale 7.16 mas',
                 'note': (
                     'derived independently as Nyquist sampling at 500 nm for '
@@ -1415,8 +1640,20 @@ def _sei_provenance(pixel_scale_arcsec):
             },
             'dark_current_e_per_pix_s': {
                 'value': DARK_CURRENT_E_PER_PIX_S,
-                'sei_value': 0.002,
+                'sei_value': sei['dark_current_e_per_pix_s'],
                 'sei_source': 'HRI.yaml, UVIS channel dark current',
+            },
+            'telescope_geometry': {
+                'value': telescope_geometry,
+                'sei_source': (
+                    'EAC1.yaml, PM segmentation_parameters and '
+                    'circumscribing_diameter'
+                ),
+                'note': (
+                    'the production pupil geometry read from '
+                    f'{MASTER_CONFIG_RELPATH} psf.telescope equals the SEI '
+                    'EAC1 prescription value for value'
+                ),
             },
         },
         'caveats': (
@@ -1690,7 +1927,7 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
                 'the derived source and sky rates in this artifact only'
             ),
         },
-        'instrument_reference': _sei_provenance(pixel_scale),
+        'instrument_reference': _sei_provenance(pixel_scale, area_report),
         'detector': {
             'gain_e_per_adu': DETECTOR_GAIN_E_PER_ADU,
             'pixel_scale_arcsec': pixel_scale,

@@ -34,6 +34,25 @@ def freeze():
     return df.load_design_freeze(FREEZE_PATH)
 
 
+def _write_freeze(directory, document):
+    """Write one freeze document to a temporary file and return its path."""
+    path = Path(directory)/"design_freeze.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(document, stream, sort_keys=True)
+    return path
+
+
+def _rewrite_manifest(manifest_path, mutate):
+    """Rewrite one manifest through a mutation of its campaign block."""
+    with manifest_path.open("r", encoding="utf-8") as stream:
+        manifest = yaml.safe_load(stream)
+    mutate(manifest["campaign"])
+    with manifest_path.open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(manifest, stream, sort_keys=True)
+    return manifest
+
+
 @pytest.fixture(scope="module")
 def pool(freeze):
     """Sample the full declared Stage 0 pool once."""
@@ -232,6 +251,7 @@ def small_campaign(freeze, runner_command, tmp_path_factory):
         runner_command=runner_command,
         freeze_path=FREEZE_PATH,
         n_systems=SMALL_POOL,
+        allow_unfrozen_pool=True,
         campaign_uuid="11111111-2222-3333-4444-555555555555",
     )
 
@@ -368,6 +388,111 @@ def test_source_flux_carries_the_magnitude_at_the_sampled_size(
         ] == pytest.approx(8.951505744562876*magnitude_scale, rel=1e-12)
 
 
+def test_each_job_binds_its_template_asset_by_digest(freeze, small_campaign):
+    """The asset digest travels inside the job, not only in the catalogue."""
+    templates = {level["id"]: level for level in freeze["templates"]["levels"]}
+    for job in small_campaign["manifest"]["campaign"]["jobs"]:
+        block = job["overrides"]["stage0"]
+        template = templates[block["source_template"]]
+        assert block["source_asset_path"] == template["asset_path"]
+        assert block["source_asset_sha256"] == template["sha256"]
+        assert block["source_asset_path"] == job["overrides"]["lensing"][
+            "source_galaxy"
+        ]["light"]["asset_path"]
+
+
+def test_each_job_carries_the_generating_source_revision(small_campaign):
+    """A resume under moved code is detectable from the job alone."""
+    from hwoslaps.provenance import revision_digest, revision_provenance
+
+    expected = revision_digest(revision_provenance())
+    jobs = small_campaign["manifest"]["campaign"]["jobs"]
+    for job in jobs:
+        revision = job["overrides"]["stage0"]["code_revision"]
+        assert revision["sha256"] == expected
+        assert set(revision) == {"git_hash", "git_dirty", "sha256"}
+    assert small_campaign["catalogue"]["code_revision"]["sha256"] == expected
+
+
+def test_each_job_carries_the_frozen_extraction_settings(freeze, small_campaign):
+    """The runner is handed the extraction the design declares."""
+    algorithm = freeze["aperture"]["theta_e_algorithm"]
+    for system, job in zip(
+        small_campaign["catalogue"]["systems"],
+        small_campaign["manifest"]["campaign"]["jobs"],
+    ):
+        block = job["overrides"]["stage0"]
+        settings = block["theta_e_extraction"]
+        assert settings["algorithm_id"] == algorithm["algorithm_id"]
+        assert settings["choice_rule_id"] == algorithm["choice_rule_id"]
+        assert settings["extraction_grid"] == {
+            "pixel_scale_arcsec": algorithm["extraction_grid"][
+                "pixel_scale_arcsec"
+            ],
+            "half_width_factor": algorithm["extraction_grid"][
+                "half_width_factor"
+            ],
+        }
+        assert settings["guards"] == {
+            "closure_tolerance_pixels": algorithm["guards"][
+                "closure_tolerance_pixels"
+            ],
+            "border_margin_pixels": algorithm["guards"]["border_margin_pixels"],
+            "min_contour_vertices": algorithm["guards"]["min_contour_vertices"],
+        }
+        assert settings["theta_e_factor"] == freeze["aperture"]["theta_e_factor"]
+        assert settings["computational_margin_fraction"] == freeze["aperture"][
+            "computational_margin_fraction"
+        ]
+        assert block["theta_e_eff_arcsec"] == pytest.approx(
+            system["theta_e_eff_arcsec"], rel=1e-12
+        )
+        assert block["theta_e_eff_tolerance_fractional"] == freeze["derived"][
+            "einstein_radius"
+        ]["verification"]["tolerance_fractional"]
+
+
+def test_non_default_extraction_settings_reach_every_job(
+    freeze, runner_command, tmp_path
+):
+    """A freeze that moves the extraction moves what the runner is given."""
+    amended = copy.deepcopy(freeze)
+    algorithm = amended["aperture"]["theta_e_algorithm"]
+    algorithm["extraction_grid"]["half_width_factor"] = 4.5
+    algorithm["guards"]["closure_tolerance_pixels"] = 0.75
+    algorithm["guards"]["border_margin_pixels"] = 3.0
+    algorithm["guards"]["min_contour_vertices"] = 40
+    amended_path = _write_freeze(tmp_path/"design", amended)
+    built = stage0.build_stage0_campaign(
+        amended,
+        output_root=str(tmp_path/"root"),
+        runner_command=runner_command,
+        freeze_path=amended_path,
+        n_systems=5,
+        allow_unfrozen_pool=True,
+    )
+    for job in built["manifest"]["campaign"]["jobs"]:
+        settings = job["overrides"]["stage0"]["theta_e_extraction"]
+        assert settings["extraction_grid"]["half_width_factor"] == 4.5
+        assert settings["guards"] == {
+            "closure_tolerance_pixels": 0.75,
+            "border_margin_pixels": 3.0,
+            "min_contour_vertices": 40,
+        }
+    for system in built["catalogue"]["systems"]:
+        grid = system["theta_e_extraction"]["grid"]
+        assert grid["requested_half_width_arcsec"] == pytest.approx(
+            4.5*system["macro_einstein_radius_arcsec"], rel=1e-12
+        )
+
+
+def test_pool_size_deviation_is_recorded_in_the_manifest(small_campaign):
+    """A campaign that is not the frozen pool says so in its seed policy."""
+    policy = small_campaign["manifest"]["campaign"]["seed_policy"]
+    assert policy["stage0_n_systems"] == SMALL_POOL
+    assert policy["stage0_n_systems_frozen"] == 1000
+
+
 def test_each_job_carries_its_rate_contract_target(freeze, small_campaign):
     """The P0-3 target rate travels inside the job that renders it."""
     tolerance = freeze["templates"]["rate_contract_production_tolerance"]
@@ -401,6 +526,7 @@ def test_written_campaign_is_byte_identical_on_a_rerun(
         runner_command=runner_command,
         freeze_path=FREEZE_PATH,
         n_systems=SMALL_POOL,
+        allow_unfrozen_pool=True,
         campaign_uuid="11111111-2222-3333-4444-555555555555",
     )
     second = stage0.write_stage0_campaign(
@@ -410,6 +536,7 @@ def test_written_campaign_is_byte_identical_on_a_rerun(
         runner_command=runner_command,
         freeze_path=FREEZE_PATH,
         n_systems=SMALL_POOL,
+        allow_unfrozen_pool=True,
         campaign_uuid="11111111-2222-3333-4444-555555555555",
     )
     assert first["manifest_sha256"] == second["manifest_sha256"]
@@ -422,28 +549,135 @@ def test_written_campaign_is_byte_identical_on_a_rerun(
     )
 
 
-def test_manifest_binds_the_catalogue_and_the_freeze_by_digest(
-    freeze, runner_command, tmp_path
-):
-    """The seed policy carries both digests, so the chain is closed."""
-    written = stage0.write_stage0_campaign(
-        tmp_path/"campaign",
+@pytest.fixture(scope="module")
+def written_campaign(freeze, runner_command, tmp_path_factory):
+    """Write one small Stage 0 campaign to disk once."""
+    directory = tmp_path_factory.mktemp("written")
+    return stage0.write_stage0_campaign(
+        directory/"campaign",
         freeze,
-        output_root=str(tmp_path/"root"),
+        output_root=str(directory/"root"),
         runner_command=runner_command,
         freeze_path=FREEZE_PATH,
         n_systems=SMALL_POOL,
+        allow_unfrozen_pool=True,
     )
-    with written["manifest_path"].open("r", encoding="utf-8") as stream:
+
+
+@pytest.fixture
+def campaign_copy(written_campaign, tmp_path):
+    """Copy the written campaign so one test can tamper with it freely."""
+    destination = tmp_path/"campaign"
+    destination.mkdir(parents=True)
+    for source in (
+        written_campaign["manifest_path"],
+        written_campaign["catalogue_path"],
+    ):
+        (destination/source.name).write_bytes(source.read_bytes())
+    return destination/written_campaign["manifest_path"].name
+
+
+def test_manifest_binds_the_catalogue_and_the_freeze_by_digest(written_campaign):
+    """The seed policy carries both digests and validation re-hashes them."""
+    with written_campaign["manifest_path"].open("r", encoding="utf-8") as stream:
         manifest = yaml.safe_load(stream)
     policy = manifest["campaign"]["seed_policy"]
     assert policy["design_freeze_sha256"] == df.design_freeze_digest(FREEZE_PATH)
+    assert policy["design_freeze_path"] == str(FREEZE_PATH)
     assert policy["catalogue_sha256"] == hashlib.sha256(
-        written["catalogue_path"].read_bytes()
+        written_campaign["catalogue_path"].read_bytes()
     ).hexdigest()
     assert policy["entropy"] == 20260823
     assert policy["foreground_free_ceiling"] is True
-    assert stage0.validate_stage0_manifest(written["manifest_path"])
+    assert stage0.validate_stage0_manifest(written_campaign["manifest_path"])
+
+
+def test_manifest_validation_rejects_a_byte_flipped_catalogue(campaign_copy):
+    """One changed catalogue byte breaks the manifest's binding."""
+    catalogue_path = campaign_copy.parent/"stage0_catalogue.json"
+    payload = bytearray(catalogue_path.read_bytes())
+    payload[-2] ^= 0x20
+    catalogue_path.write_bytes(bytes(payload))
+    with pytest.raises(stage0.Stage0Error, match="hash to"):
+        stage0.validate_stage0_manifest(campaign_copy)
+
+
+def test_manifest_validation_rejects_a_missing_catalogue(campaign_copy):
+    """A manifest cannot carry a digest for a catalogue that is not there."""
+    (campaign_copy.parent/"stage0_catalogue.json").unlink()
+    with pytest.raises(stage0.Stage0Error, match="does not exist"):
+        stage0.validate_stage0_manifest(campaign_copy)
+
+
+def test_manifest_validation_rejects_a_garbage_catalogue_digest(campaign_copy):
+    """A digest string that is not a sha256 fails closed, not silently."""
+    _rewrite_manifest(
+        campaign_copy,
+        lambda campaign: campaign["seed_policy"].update(
+            {"catalogue_sha256": "not-a-digest"}
+        ),
+    )
+    with pytest.raises(stage0.Stage0Error, match="lowercase sha256 digest"):
+        stage0.validate_stage0_manifest(campaign_copy)
+
+
+def test_manifest_validation_rejects_an_all_zero_catalogue_digest(campaign_copy):
+    """The digest a stub would carry no longer passes validation."""
+    _rewrite_manifest(
+        campaign_copy,
+        lambda campaign: campaign["seed_policy"].update(
+            {"catalogue_sha256": "0"*64}
+        ),
+    )
+    with pytest.raises(stage0.Stage0Error, match="hash to"):
+        stage0.validate_stage0_manifest(campaign_copy)
+
+
+def test_manifest_validation_rejects_a_missing_design_freeze(campaign_copy):
+    """The freeze the manifest names must be on disk."""
+    _rewrite_manifest(
+        campaign_copy,
+        lambda campaign: campaign["seed_policy"].update(
+            {"design_freeze_path": str(campaign_copy.parent/"absent.yaml")}
+        ),
+    )
+    with pytest.raises(stage0.Stage0Error, match="does not exist"):
+        stage0.validate_stage0_manifest(campaign_copy)
+
+
+def test_manifest_validation_rejects_a_moved_design_freeze(campaign_copy):
+    """A freeze whose bytes changed after generation fails closed."""
+    amended = campaign_copy.parent/"amended_freeze.yaml"
+    amended.write_bytes(FREEZE_PATH.read_bytes() + b"\n# amended\n")
+    _rewrite_manifest(
+        campaign_copy,
+        lambda campaign: campaign["seed_policy"].update(
+            {"design_freeze_path": str(amended)}
+        ),
+    )
+    with pytest.raises(stage0.Stage0Error, match="hash to"):
+        stage0.validate_stage0_manifest(campaign_copy)
+
+
+def test_manifest_validation_rejects_a_catalogue_naming_another_freeze(
+    campaign_copy,
+):
+    """The catalogue and the manifest must agree on which design ran."""
+    catalogue_path = campaign_copy.parent/"stage0_catalogue.json"
+    catalogue = json.loads(catalogue_path.read_text(encoding="utf-8"))
+    catalogue["design_freeze"]["sha256"] = "1"*64
+    payload = (json.dumps(catalogue, sort_keys=True, indent=2) + "\n").encode(
+        "utf-8"
+    )
+    catalogue_path.write_bytes(payload)
+    _rewrite_manifest(
+        campaign_copy,
+        lambda campaign: campaign["seed_policy"].update(
+            {"catalogue_sha256": hashlib.sha256(payload).hexdigest()}
+        ),
+    )
+    with pytest.raises(stage0.Stage0Error, match="records design freeze"):
+        stage0.validate_stage0_manifest(campaign_copy)
 
 
 def test_catalogue_records_the_provisional_status_and_claim_labels(
@@ -457,6 +691,7 @@ def test_catalogue_records_the_provisional_status_and_claim_labels(
         runner_command=runner_command,
         freeze_path=FREEZE_PATH,
         n_systems=SMALL_POOL,
+        allow_unfrozen_pool=True,
     )
     catalogue = json.loads(written["catalogue_path"].read_text(encoding="utf-8"))
     assert catalogue["design_freeze"]["status"] == "provisional"
@@ -479,13 +714,89 @@ def test_generator_rejects_a_system_whose_extraction_disagrees(
     broken["derived"]["einstein_radius"]["verification"][
         "tolerance_fractional"
     ] = 1.0e-9
+    broken_path = _write_freeze(tmp_path/"design", broken)
     with pytest.raises(stage0.Stage0Error, match="outside the declared"):
         stage0.build_stage0_campaign(
             broken,
             output_root=str(tmp_path/"root"),
             runner_command=runner_command,
+            freeze_path=broken_path,
+            n_systems=5,
+            allow_unfrozen_pool=True,
+        )
+
+
+def test_builder_rejects_a_freeze_that_is_not_the_file_it_names(
+    freeze, runner_command, tmp_path
+):
+    """A mutated in-memory freeze cannot travel under the committed digest."""
+    mutated = copy.deepcopy(freeze)
+    mutated["stage0"]["exposure_time_s"] = 1000.0
+    with pytest.raises(stage0.Stage0Error, match="is not the content of"):
+        stage0.build_stage0_campaign(
+            mutated,
+            output_root=str(tmp_path/"root"),
+            runner_command=runner_command,
             freeze_path=FREEZE_PATH,
             n_systems=5,
+            allow_unfrozen_pool=True,
+        )
+
+
+def test_builder_rejects_a_freeze_whose_bound_asset_moved(
+    freeze, runner_command, tmp_path
+):
+    """A freeze that no longer matches its assets never reaches a build."""
+    broken = copy.deepcopy(freeze)
+    broken["templates"]["levels"][0]["sha256"] = "0"*64
+    broken_path = _write_freeze(tmp_path/"design", broken)
+    with pytest.raises(df.DesignFreezeError, match="does not match the frozen"):
+        stage0.build_stage0_campaign(
+            broken,
+            output_root=str(tmp_path/"root"),
+            runner_command=runner_command,
+            freeze_path=broken_path,
+            n_systems=5,
+            allow_unfrozen_pool=True,
+        )
+
+
+def test_builder_rejects_an_unfrozen_pool_size_without_the_flag(
+    freeze, runner_command, tmp_path
+):
+    """The freeze declares the pool; a deviation must be asked for by name."""
+    with pytest.raises(stage0.Stage0Error, match="allow_unfrozen_pool"):
+        stage0.build_stage0_campaign(
+            freeze,
+            output_root=str(tmp_path/"root"),
+            runner_command=runner_command,
+            freeze_path=FREEZE_PATH,
+            n_systems=5,
+        )
+
+
+def test_each_job_binds_the_extracted_contour_by_digest(small_campaign):
+    """The generator's exact curve travels inside the job it sized."""
+    for system, job in zip(
+        small_campaign["catalogue"]["systems"],
+        small_campaign["manifest"]["campaign"]["jobs"],
+    ):
+        block = job["overrides"]["stage0"]
+        extraction = system["theta_e_extraction"]
+        assert block["theta_e_contour_sha256"] == extraction["contour_sha256"]
+        assert block["theta_e_aperture_sha256"] == extraction["aperture_sha256"]
+
+
+def test_builder_rejects_a_runner_that_is_not_the_frozen_one(freeze, tmp_path):
+    """The freeze declares the runner and no driver may substitute another."""
+    with pytest.raises(stage0.Stage0Error, match="frozen Stage 0 runner"):
+        stage0.build_stage0_campaign(
+            freeze,
+            output_root=str(tmp_path/"root"),
+            runner_command=["python", "scripts/run_something_else.py", "{config}"],
+            freeze_path=FREEZE_PATH,
+            n_systems=5,
+            allow_unfrozen_pool=True,
         )
 
 

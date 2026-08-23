@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -31,6 +32,7 @@ from prepare_source_image import (  # noqa: E402
     rescale_to_half_light,
     solve_detected_rate_normalization,
     subtract_background,
+    verify_asset_rate_contract,
     write_asset,
 )
 
@@ -526,3 +528,94 @@ def test_prepare_cli_rate_contract_stores_target_and_realized_rates(tmp_path):
     )
     assert contract["grid_shape"] == [500, 500]
     assert contract["render_geometry"]["flux_scale"] == 1.0
+
+
+def _contracted_asset(tmp_path, name="contracted.npz"):
+    """Prepare one synthetic asset carrying a solved rate contract."""
+    input_path = tmp_path / "resolved.npy"
+    np.save(input_path, _resolved_source())
+    output_path = tmp_path / name
+    assert (
+        main(
+            [
+                str(input_path),
+                str(output_path),
+                "--target-half-light-arcsec",
+                "0.11",
+                "--rate-contract",
+            ]
+        )
+        == 0
+    )
+    return output_path
+
+
+def _copy_with_appended_comment(source_path, destination_path):
+    """Copy a committed configuration, changing bytes but not content."""
+    text = Path(source_path).read_text(encoding="utf-8")
+    destination_path.write_text(f"{text}\n# byte-level canary\n", encoding="utf-8")
+    return destination_path
+
+
+def test_verify_asset_rate_contract_rejects_an_edited_reference(tmp_path):
+    """An edited observing reference fails even at the same target rate."""
+    asset_path = _contracted_asset(tmp_path)
+    reference_path = PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH
+    edited_path = _copy_with_appended_comment(
+        reference_path, tmp_path / "reference.yaml"
+    )
+    assert (
+        detected_rate_reference(edited_path)["target_rate_e_per_s"]
+        == detected_rate_reference(reference_path)["target_rate_e_per_s"]
+    )
+
+    with pytest.raises(ValueError, match="observing reference.*now hashes to"):
+        verify_asset_rate_contract(
+            asset_path, PROJECT_ROOT / PRODUCTION_SCENE_RELPATH, edited_path
+        )
+
+
+def test_verify_asset_rate_contract_rejects_an_edited_scene(tmp_path):
+    """An edited production scene fails even at the same render geometry."""
+    asset_path = _contracted_asset(tmp_path)
+    scene_path = PROJECT_ROOT / PRODUCTION_SCENE_RELPATH
+    edited_path = _copy_with_appended_comment(scene_path, tmp_path / "scene.yaml")
+    pixel_scale = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)[
+        "pixel_scale_arcsec"
+    ]
+    assert production_render_config(
+        edited_path, pixel_scale
+    ) == production_render_config(scene_path, pixel_scale)
+
+    with pytest.raises(ValueError, match="production scene.*now hashes to"):
+        verify_asset_rate_contract(
+            asset_path, edited_path, PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH
+        )
+
+
+def test_verify_asset_rate_contract_rejects_a_missing_contract_input(tmp_path):
+    """A contract input that no longer exists fails instead of skipping."""
+    asset_path = _contracted_asset(tmp_path)
+
+    with pytest.raises(ValueError, match="does not exist"):
+        verify_asset_rate_contract(
+            asset_path,
+            PROJECT_ROOT / PRODUCTION_SCENE_RELPATH,
+            tmp_path / "absent_reference.yaml",
+        )
+
+
+def test_verify_asset_rate_contract_rejects_a_contract_without_digests(tmp_path):
+    """A contract recording no input digest cannot be verified at all."""
+    asset = load_source_image_asset(_contracted_asset(tmp_path))
+    provenance = deepcopy(asset.metadata["provenance"])
+    provenance["rate_contract"].pop("observing_reference")
+    stripped_path = write_asset(
+        tmp_path / "stripped.npz",
+        asset.sb,
+        asset.pixel_scale_arcsec,
+        provenance,
+    )
+
+    with pytest.raises(ValueError, match="carries no sha256"):
+        verify_asset_rate_contract(stripped_path)

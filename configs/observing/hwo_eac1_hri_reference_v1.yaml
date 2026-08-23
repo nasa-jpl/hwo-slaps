@@ -123,6 +123,13 @@ metadata:
     data_files_read:
     - HRI.yaml
     - EAC1.yaml
+    data_file_sha256:
+      HRI.yaml: 8b9c902f58a9af3e5272833dc3d893b8e29a4ace20b12ed84f7ceabb35d5d2e9
+      EAC1.yaml: dbb35fd845c37302ef25f095eb4e04c40bad879f084d7febc9bf7f7c27113992
+    data_file_note: Every value attributed to the SEI below is parsed out of these
+      files on each run and checked against the value this derivation declares; a
+      missing file, or one whose cited values moved, fails the run. The digests are
+      of the exact bytes parsed, so they move with any edit at all.
     citation: SEI
     adopted_parameters:
       read_noise_per_read_e:
@@ -141,6 +148,16 @@ metadata:
         value: 0.002
         sei_value: 0.002
         sei_source: HRI.yaml, UVIS channel dark current
+      telescope_geometry:
+        value:
+          segment_point_to_point_m: 1.65
+          gap_size_m: 0.006
+          pupil_diameter_m: 7.225765
+          num_rings: 2
+          num_segments: 19
+        sei_source: EAC1.yaml, PM segmentation_parameters and circumscribing_diameter
+        note: the production pupil geometry read from configs/master_config.yaml psf.telescope
+          equals the SEI EAC1 prescription value for value
     caveats: v0.1.9 carries pre-formulation placeholder values and the EAC architectures
       are exploratory. The UVIS filter transmission curves referenced by HRI.yaml
       are not shipped in the wheel, so the throughput chain in this artifact is not

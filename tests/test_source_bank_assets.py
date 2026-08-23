@@ -51,10 +51,19 @@ LEGACY_ANCHOR = {
     "morphology_class": "clumpy_s_bar",
     "filename": "cosmos_48849_hlr011.npz",
     "sha256": (
-        "fb51b801b98653f6a263016fa55ae0e1194734c197081d652ee00c51077ccd60"
+        "4736aefff8cddbe5670de0a031e2580170bfea548eca77a273c9e12978e7a2a9"
     ),
     "script_version": 1,
+    "pixel_scale_arcsec": 0.002732128852944742,
+    "total_flux": 0.00045889467368609476,
 }
+"""The anchor prepared before the contract solve existed.
+
+Its contract was embedded by ``scripts/retrofit_rate_contract.py``, which
+rewrites the asset and prints the sha256 that repins it here and in the
+design freeze. Every bank anchor is held to the contract, so this entry is
+parametrized alongside the four prepared with it.
+"""
 
 NEW_ANCHORS = (
     {
@@ -62,7 +71,7 @@ NEW_ANCHORS = (
         "morphology_class": "smooth_disk",
         "filename": "cosmos_62410_hlr011.npz",
         "sha256": (
-            "b3fdc541c3e31013d5bb37c9e948fa74a9ce485cbb6dd1d959d3c4f0a5392376"
+            "947cbeb9bdcc01425b43040fa805a3b5b765460eb8c8b3fccbba98e29e76fb64"
         ),
         "script_version": 2,
         "pixel_scale_arcsec": 0.005553115716269291,
@@ -73,7 +82,7 @@ NEW_ANCHORS = (
         "morphology_class": "clumpy",
         "filename": "cosmos_159916_hlr011.npz",
         "sha256": (
-            "1d601a6c3e969d558102c72b25307b2328a044396adcafbb63f3721aae435aa0"
+            "fae4e04d6052291da80c5e5b46d06cc0ad7a4effe3d2e6600f43c6d682e3c071"
         ),
         "script_version": 2,
         "pixel_scale_arcsec": 0.005965587590013045,
@@ -84,7 +93,7 @@ NEW_ANCHORS = (
         "morphology_class": "irregular_merger",
         "filename": "cosmos_162893_hlr011.npz",
         "sha256": (
-            "795d2f5eb636cbb59440547950260b70032f6e52540ac1c582e58ad0daf8ee4b"
+            "0fc1669b362baebabd0c121f235980a4d5c3b897e3d57a4a8574c25293a9e170"
         ),
         "script_version": 2,
         "pixel_scale_arcsec": 0.005584403908234906,
@@ -95,7 +104,7 @@ NEW_ANCHORS = (
         "morphology_class": "compact",
         "filename": "cosmos_83935_hlr011.npz",
         "sha256": (
-            "50ae26b0bb66d75e0147b669f40028f5333e665ff16e5444326fa682e6723ef9"
+            "3b691be272e0acdd4ffa1b2a2ee1060b1fbdc1e23ca3ed4b69bd3dfe84f857c4"
         ),
         "script_version": 2,
         "pixel_scale_arcsec": 0.012148903205522409,
@@ -104,6 +113,36 @@ NEW_ANCHORS = (
 )
 
 BANK = (LEGACY_ANCHOR,) + NEW_ANCHORS
+
+ANALYTIC_CANARY_ANCHOR = NEW_ANCHORS[0]
+"""Bank anchor the analytic magnification canary is rendered from.
+
+The canary needs a template whose whole lit footprint fits inside the
+two-image regime of one circular lens, which the two widest templates do
+not at a tractable grid size.
+"""
+
+ANALYTIC_CANARY_EINSTEIN_RADIUS_ARCSEC = 2.0
+ANALYTIC_CANARY_SOURCE_CENTRE_ARCSEC = (0.0, 1.0)
+ANALYTIC_CANARY_GRID_SHAPE = (400, 400)
+ANALYTIC_CANARY_PIXEL_SCALE_ARCSEC = 0.02
+"""Circular-lens canary geometry.
+
+The Einstein radius and the source offset put the whole lit footprint of
+the anchor inside the two-image regime, and the grid half width of 3.99
+arcsec contains both images of every lit sample, so the canary compares
+total fluxes rather than truncated ones.
+"""
+
+ANALYTIC_CANARY_TOLERANCE = 1.0e-2
+"""Accepted departure from the analytic canary prediction.
+
+The engine sums the source brightness at image-plane pixel centres while
+the prediction sums it at asset sample centres, and the two quadratures of
+the same integral part company at the few parts in a thousand for a
+template sampled more finely than the canary grid. The canary is a guard
+against a magnification factor of about four, not a convergence test.
+"""
 
 
 def _sha256(path):
@@ -173,8 +212,8 @@ def test_bank_asset_loads_with_prepared_conventions(anchor):
     )
 
 
-@pytest.mark.parametrize("anchor", NEW_ANCHORS, ids=_ids(NEW_ANCHORS))
-def test_new_bank_asset_stores_the_detected_rate_contract(anchor, reference):
+@pytest.mark.parametrize("anchor", BANK, ids=_ids(BANK))
+def test_bank_asset_stores_the_detected_rate_contract(anchor, reference):
     """The stored contract is the committed detected rate, not a convention."""
     asset = load_source_image_asset(_asset_path(anchor))
     contract = asset.metadata["provenance"]["rate_contract"]
@@ -199,8 +238,8 @@ def test_new_bank_asset_stores_the_detected_rate_contract(anchor, reference):
     assert geometry["size_scale"] == 1.0
 
 
-@pytest.mark.parametrize("anchor", NEW_ANCHORS, ids=_ids(NEW_ANCHORS))
-def test_new_bank_asset_re_renders_to_its_target_rate(anchor):
+@pytest.mark.parametrize("anchor", BANK, ids=_ids(BANK))
+def test_bank_asset_re_renders_to_its_target_rate(anchor):
     """Re-rendering the committed asset reproduces the stored contract."""
     contract = verify_asset_rate_contract(_asset_path(anchor))
     assert contract["realized_rate_e_per_s"] == pytest.approx(
@@ -246,7 +285,7 @@ def _lensed_scene(anchor, total_flux):
     return generate_lensing_system(scene["lensing"], scene)
 
 
-@pytest.mark.parametrize("anchor", NEW_ANCHORS, ids=_ids(NEW_ANCHORS))
+@pytest.mark.parametrize("anchor", BANK, ids=_ids(BANK))
 def test_lensed_render_applies_magnification_exactly_once(
     anchor, production_render
 ):
@@ -284,11 +323,12 @@ def test_lensed_render_applies_magnification_exactly_once(
 def test_lensed_render_is_exactly_linear_in_the_contract_normalization():
     """Doubling the contract flux doubles the lensed image exactly.
 
-    A magnification applied a second time anywhere in the pipeline would
-    break this identity, because it would multiply a quantity that is not
-    the configured normalization.
+    Linearity in the configured normalization is necessary but not
+    sufficient: a constant spurious magnification factor would survive it
+    unchanged. The absolute anchor that excludes such a factor is
+    :func:`test_lensed_flux_matches_the_analytic_circular_lens_anchor`.
     """
-    anchor = NEW_ANCHORS[0]
+    anchor = ANALYTIC_CANARY_ANCHOR
     asset = load_source_image_asset(_asset_path(anchor))
     total_flux = asset.metadata["provenance"]["rate_contract"]["total_flux"]
 
@@ -296,3 +336,115 @@ def test_lensed_render_is_exactly_linear_in_the_contract_normalization():
     doubled = np.asarray(_lensed_scene(anchor, 2.0 * total_flux).image, dtype=float)
 
     np.testing.assert_array_equal(doubled, 2.0 * single)
+
+
+def _source_plane_radii(asset):
+    """Return every asset sample's distance from the canary lens centre.
+
+    The ``Image`` profile lays sample ``(row, col)`` at the sky offset
+    ``(row - row_c, col - col_c) * pixel_scale_arcsec`` from its centre at
+    unit size scale and zero rotation, so the source-plane radius of each
+    sample follows from the asset geometry alone.
+    """
+    rows, cols = np.indices(asset.sb.shape, dtype=float)
+    offset_y = (rows - (asset.sb.shape[0] - 1) / 2.0) * asset.pixel_scale_arcsec
+    offset_x = (cols - (asset.sb.shape[1] - 1) / 2.0) * asset.pixel_scale_arcsec
+    return np.hypot(
+        ANALYTIC_CANARY_SOURCE_CENTRE_ARCSEC[0] + offset_y,
+        ANALYTIC_CANARY_SOURCE_CENTRE_ARCSEC[1] + offset_x,
+    )
+
+
+def _analytic_canary_render_config(anchor):
+    """Return the canary grid and Image-source blocks of one anchor."""
+    grid_config = {
+        "shape": list(ANALYTIC_CANARY_GRID_SHAPE),
+        "pixel_scale": ANALYTIC_CANARY_PIXEL_SCALE_ARCSEC,
+    }
+    source_config = {
+        "redshift": 0.6,
+        "light": {
+            "type": "Image",
+            "asset_path": str(_asset_path(anchor)),
+            "centre": list(ANALYTIC_CANARY_SOURCE_CENTRE_ARCSEC),
+            "rotation_deg": 0.0,
+            "total_flux": 1.0,
+            "flux_scale": 1.0,
+            "size_scale": 1.0,
+        },
+    }
+    return grid_config, source_config
+
+
+def _analytic_canary_system(anchor, total_flux):
+    """Return the circular-lens canary system of one anchor at one flux."""
+    grid_config, source_config = _analytic_canary_render_config(anchor)
+    source_config["light"]["total_flux"] = float(total_flux)
+    lensing = {
+        "grid": grid_config,
+        "lens_galaxy": {
+            "redshift": 0.2,
+            "mass": {
+                "type": "Isothermal",
+                "centre": [0.0, 0.0],
+                "ell_comps": [0.0, 0.0],
+                "einstein_radius": ANALYTIC_CANARY_EINSTEIN_RADIUS_ARCSEC,
+            },
+        },
+        "source_galaxy": source_config,
+        "subhalo": {"enabled": False},
+        "cosmology": "Planck15",
+    }
+    full_config = {
+        "run_name": "analytic-magnification-canary",
+        "global_seed": 5,
+        "lensing": lensing,
+    }
+    return generate_lensing_system(lensing, full_config)
+
+
+def test_lensed_flux_matches_the_analytic_circular_lens_anchor():
+    """The lensed flux is the contract flux magnified exactly once.
+
+    A circular isothermal lens magnifies a source at ``0 < |beta| <
+    theta_E`` by ``mu(beta) = 2 theta_E / |beta|``, and the lensed flux of
+    an extended source is that magnification integrated against its own
+    surface brightness. The prediction is therefore an absolute flux built
+    from the asset samples and the stored contract normalization alone,
+    with no ratio of two pipeline renders in it: a pipeline that applied
+    magnification a second time would land on the ``mu**2`` prediction,
+    four times the right answer, and a pipeline that applied none would
+    land on the unlensed flux.
+    """
+    anchor = ANALYTIC_CANARY_ANCHOR
+    asset = load_source_image_asset(_asset_path(anchor))
+    total_flux = asset.metadata["provenance"]["rate_contract"]["total_flux"]
+    pixel_area = ANALYTIC_CANARY_PIXEL_SCALE_ARCSEC**2
+
+    radius = _source_plane_radii(asset)
+    lit = asset.sb > 0.0
+    assert float(radius[lit].min()) > 0.0
+    assert float(radius[lit].max()) < ANALYTIC_CANARY_EINSTEIN_RADIUS_ARCSEC
+
+    magnification = 2.0 * ANALYTIC_CANARY_EINSTEIN_RADIUS_ARCSEC / radius
+    weight = asset.sb * asset.pixel_scale_arcsec**2
+    once = total_flux * float((weight * magnification).sum())
+    twice = total_flux * float((weight * magnification**2).sum())
+    assert twice / once > 3.0
+
+    grid_config, source_config = _analytic_canary_render_config(anchor)
+    unlensed = render_unlensed_asset(
+        _asset_path(anchor), grid_config, source_config, total_flux
+    )
+    assert float(unlensed.sum()) * pixel_area == pytest.approx(
+        total_flux, rel=ANALYTIC_CANARY_TOLERANCE
+    )
+
+    lensed = np.asarray(_analytic_canary_system(anchor, total_flux).image, dtype=float)
+    for border in (lensed[0], lensed[-1], lensed[:, 0], lensed[:, -1]):
+        assert float(np.abs(border).max()) == 0.0
+
+    assert float(lensed.sum()) * pixel_area == pytest.approx(
+        once, rel=ANALYTIC_CANARY_TOLERANCE
+    )
+    assert float(lensed.sum()) * pixel_area != pytest.approx(twice, rel=0.5)

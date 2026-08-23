@@ -21,6 +21,14 @@ extracts ``theta_E_eff`` and the aperture with the frozen D-F7 algorithm,
 and sizes each system's grid from the aperture's own margin rule. Its
 two outputs are byte-deterministic for a given freeze and output root.
 
+The integrity chain is closed at every link. The consumed freeze mapping
+is proved equal to the freeze file whose digest is recorded, the
+manifest binds the catalogue and the freeze by digest and
+`validate_stage0_manifest` re-hashes both, and every job configuration
+carries the template asset digest, the frozen extraction settings and
+the source revision the campaign was generated at, so all three travel
+inside the staged configuration hash the executor already validates.
+
 Outputs
 -------
 ``manifest.yaml``
@@ -45,7 +53,14 @@ from typing import Any, Optional
 import numpy as np
 import yaml
 
-from .design_freeze import design_freeze_digest, repo_root
+from hwoslaps.provenance import revision_digest, revision_provenance
+
+from .design_freeze import (
+    DEFAULT_DESIGN_FREEZE_PATH,
+    file_sha256,
+    load_design_freeze,
+    repo_root,
+)
 
 
 __all__ = [
@@ -75,6 +90,8 @@ _ARCSEC_PER_RADIAN = 180.0*3600.0/math.pi
 
 _MANIFEST_NAME = "manifest.yaml"
 _CATALOGUE_NAME = "stage0_catalogue.json"
+
+_HEX_DIGITS = frozenset("0123456789abcdef")
 
 
 class Stage0Error(ValueError):
@@ -657,6 +674,129 @@ def selection_observable_plan(freeze: dict) -> dict:
     }
 
 
+def _freeze_artifact_path(freeze_path) -> Path:
+    """Return the resolved freeze artifact one build consumes."""
+    return Path(
+        freeze_path if freeze_path is not None else DEFAULT_DESIGN_FREEZE_PATH
+    ).expanduser().resolve()
+
+
+def _verified_freeze_artifact(freeze: dict, freeze_path) -> Path:
+    """Prove the consumed freeze mapping is the artifact on disk.
+
+    Every campaign artifact records the digest of the freeze *file*, so
+    a mapping that has drifted from the file would travel under a digest
+    describing a different design. The file is re-read through
+    `load_design_freeze`, which also verifies the artifacts the freeze
+    binds by hash, and compared with the consumed mapping for exact
+    structural equality.
+
+    Parameters
+    ----------
+    freeze : `dict`
+        Freeze mapping handed to the builder.
+    freeze_path : path-like or `None`
+        Freeze artifact whose digest is recorded. `None` means the
+        committed freeze.
+
+    Returns
+    -------
+    resolved : `pathlib.Path`
+        The freeze artifact the campaign is built from.
+
+    Raises
+    ------
+    Stage0Error
+        Raised when the mapping does not equal the file, which includes
+        every case where it never went through the verifying loader.
+    """
+    resolved = _freeze_artifact_path(freeze_path)
+    if freeze != load_design_freeze(resolved):
+        raise Stage0Error(
+            "The design freeze mapping handed to the campaign builder is not "
+            f"the content of {resolved}; the recorded design freeze digest "
+            "would describe a different design than the one being built"
+        )
+    return resolved
+
+
+def _verified_runner_command(freeze: dict, runner_command) -> list:
+    """Return the runner command, proved to be the frozen runner.
+
+    ``stage0.runner`` is the design's declaration of what renders a
+    Stage 0 job, so a manifest that points somewhere else is refused
+    rather than recorded.
+    """
+    parts = [str(part) for part in runner_command]
+    declared = str(freeze["stage0"]["runner"])
+    if not any(
+        part == declared or part.endswith("/" + declared) for part in parts
+    ):
+        raise Stage0Error(
+            f"The runner command {parts} does not invoke the frozen Stage 0 "
+            f"runner {declared!r}; the freeze declares the runner and no "
+            "driver may substitute another"
+        )
+    return parts
+
+
+def _extraction_settings(freeze: dict) -> dict:
+    """Return the frozen ``theta_E`` extraction settings as one record.
+
+    The generator and every job configuration read this single record,
+    so a runner cannot silently fall back on a module default the design
+    never declared.
+
+    Parameters
+    ----------
+    freeze : `dict`
+        Validated design freeze.
+
+    Returns
+    -------
+    settings : `dict`
+        Algorithm identities, the extraction grid, the aperture factor
+        and margin, and the contour guards.
+    """
+    algorithm = freeze["aperture"]["theta_e_algorithm"]
+    grid = algorithm["extraction_grid"]
+    guards = algorithm["guards"]
+    return {
+        "algorithm_id": str(algorithm["algorithm_id"]),
+        "choice_rule_id": str(algorithm["choice_rule_id"]),
+        "extraction_grid": {
+            "pixel_scale_arcsec": float(grid["pixel_scale_arcsec"]),
+            "half_width_factor": float(grid["half_width_factor"]),
+        },
+        "theta_e_factor": float(freeze["aperture"]["theta_e_factor"]),
+        "computational_margin_fraction": float(
+            freeze["aperture"]["computational_margin_fraction"]
+        ),
+        "guards": {
+            "closure_tolerance_pixels": float(guards["closure_tolerance_pixels"]),
+            "border_margin_pixels": float(guards["border_margin_pixels"]),
+            "min_contour_vertices": int(guards["min_contour_vertices"]),
+        },
+    }
+
+
+def _code_revision_record() -> dict:
+    """Return the source revision this campaign is being generated at.
+
+    Stage 0 is resumable, so a job can start long after its campaign was
+    generated. The record travels inside every staged configuration and
+    the runner refuses to render under a different revision, which is
+    what makes a resume from moved code fail closed instead of quietly
+    mixing two code states into one pool.
+    """
+    revision = revision_provenance()
+    return {
+        "git_hash": revision["git_hash"],
+        "git_dirty": revision["git_dirty"],
+        "sha256": revision_digest(revision),
+    }
+
+
 def _template_index(freeze: dict) -> dict:
     """Return the template bank keyed by identifier."""
     return {level["id"]: level for level in freeze["templates"]["levels"]}
@@ -701,8 +841,9 @@ def _extract_theta_e(freeze: dict, record: dict, ell_comps) -> Any:
 
     from hwoslaps.lensing import critical_curve as cc
 
-    algorithm = freeze["aperture"]["theta_e_algorithm"]
-    extraction_grid = algorithm["extraction_grid"]
+    settings = _extraction_settings(freeze)
+    extraction_grid = settings["extraction_grid"]
+    guards = settings["guards"]
     galaxy = al.Galaxy(
         redshift=record["z_lens"],
         mass=al.mp.Isothermal(
@@ -713,23 +854,20 @@ def _extract_theta_e(freeze: dict, record: dict, ell_comps) -> Any:
     )
     grid = cc.CriticalCurveGrid(
         requested_half_width_arcsec=(
-            float(extraction_grid["half_width_factor"])
+            extraction_grid["half_width_factor"]
             * record["macro_einstein_radius_arcsec"]
         ),
-        pixel_scale_arcsec=float(extraction_grid["pixel_scale_arcsec"]),
+        pixel_scale_arcsec=extraction_grid["pixel_scale_arcsec"],
     )
-    guards = algorithm["guards"]
     return cc.extract_theta_e(
         galaxy,
         lens_centre_arcsec=(0.0, 0.0),
         grid=grid,
-        theta_e_factor=float(freeze["aperture"]["theta_e_factor"]),
-        computational_margin_fraction=float(
-            freeze["aperture"]["computational_margin_fraction"]
-        ),
-        closure_tolerance_pixels=float(guards["closure_tolerance_pixels"]),
-        border_margin_pixels=float(guards["border_margin_pixels"]),
-        min_contour_vertices=int(guards["min_contour_vertices"]),
+        theta_e_factor=settings["theta_e_factor"],
+        computational_margin_fraction=settings["computational_margin_fraction"],
+        closure_tolerance_pixels=guards["closure_tolerance_pixels"],
+        border_margin_pixels=guards["border_margin_pixels"],
+        min_contour_vertices=guards["min_contour_vertices"],
     )
 
 
@@ -762,8 +900,19 @@ def _resolve_system(freeze: dict, record: dict) -> dict:
     return resolved
 
 
-def _job_overrides(freeze: dict, resolved: dict, template: dict) -> dict:
-    """Build the S1-lite job overrides of one resolved system."""
+def _job_overrides(
+    freeze: dict, resolved: dict, template: dict, code_revision: dict
+) -> dict:
+    """Build the S1-lite job overrides of one resolved system.
+
+    The ``stage0`` block carries everything the runner must be held to
+    rather than allowed to re-derive: the template asset digest, the
+    extraction settings, the realized ``theta_E_eff`` with its
+    verification tolerance, the exact contour and aperture digests the
+    generator extracted, and the source revision the campaign was
+    generated at. All of it is covered by the staged configuration hash
+    the executor validates against every job artifact.
+    """
     stage0 = freeze["stage0"]
     return {
         "global_seed": int(resolved["engine_noise_seed"]),
@@ -778,6 +927,22 @@ def _job_overrides(freeze: dict, resolved: dict, template: dict) -> dict:
             "rate_contract_tolerance": float(
                 freeze["templates"]["rate_contract_production_tolerance"]
             ),
+            "source_asset_path": str(template["asset_path"]),
+            "source_asset_sha256": str(template["sha256"]),
+            "theta_e_contour_sha256": str(
+                resolved["theta_e_extraction"]["contour_sha256"]
+            ),
+            "theta_e_aperture_sha256": str(
+                resolved["theta_e_extraction"]["aperture_sha256"]
+            ),
+            "theta_e_eff_arcsec": float(resolved["theta_e_eff_arcsec"]),
+            "theta_e_eff_tolerance_fractional": float(
+                freeze["derived"]["einstein_radius"]["verification"][
+                    "tolerance_fractional"
+                ]
+            ),
+            "theta_e_extraction": _extraction_settings(freeze),
+            "code_revision": dict(code_revision),
         },
         "lensing": {
             "grid": {
@@ -837,24 +1002,33 @@ def build_stage0_campaign(
     campaign_uuid: Optional[str] = None,
     root=None,
     progress=None,
+    allow_unfrozen_pool: bool = False,
 ) -> dict:
     """Build the Stage 0 manifest and catalogue from the design freeze.
+
+    The freeze mapping is proved to be the content of ``freeze_path``
+    before its digest is recorded, so the digest every artifact carries
+    always describes the design that was actually built.
 
     Parameters
     ----------
     freeze : `dict`
-        Validated design freeze.
+        Validated design freeze, which must equal the content of
+        ``freeze_path``.
     output_root : `str`
         Campaign output root written into the manifest verbatim.
     runner_command : sequence of `str`
         S1-lite runner command, which must carry the ``{config}``
-        placeholder.
+        placeholder and must invoke the frozen ``stage0.runner``.
     freeze_path : path-like, optional
         Freeze artifact whose digest is recorded. Defaults to the
         committed freeze.
     n_systems : `int`, optional
         Pool size override, used by tests. Defaults to
-        ``stage0.n_systems``.
+        ``stage0.n_systems``. Any other size is refused unless
+        ``allow_unfrozen_pool`` is passed; an allowed deviation records
+        both numbers in its ``seed_policy`` so a reader can see at once
+        that it is not the frozen pool.
     campaign_name : `str`, optional
         S1-lite campaign name.
     campaign_uuid : `str`, optional
@@ -869,6 +1043,11 @@ def build_stage0_campaign(
     progress : callable, optional
         Called as ``progress(done, total)`` after each system resolves.
         It has no effect on the emitted bytes.
+    allow_unfrozen_pool : `bool`, optional
+        Permit a pool size other than the frozen ``stage0.n_systems``.
+        This exists for engineering probes and tests; the freeze is the
+        authority on the production pool, so a deviation must be asked
+        for by name rather than passed as a number.
 
     Returns
     -------
@@ -876,9 +1055,27 @@ def build_stage0_campaign(
         ``manifest``, ``catalogue``, ``summary`` and ``pool``. The
         catalogue digest is injected into the manifest by
         `write_stage0_campaign`, which is what binds the two.
+
+    Raises
+    ------
+    Stage0Error
+        Raised when the freeze mapping is not the content of
+        ``freeze_path``, when the runner command does not invoke the
+        frozen Stage 0 runner, or when a pool size other than the
+        frozen one is requested without ``allow_unfrozen_pool``.
     """
+    freeze_artifact = _verified_freeze_artifact(freeze, freeze_path)
+    command = _verified_runner_command(freeze, runner_command)
+    code_revision = _code_revision_record()
     base = Path(root if root is not None else repo_root()).resolve()
-    size = int(n_systems if n_systems is not None else freeze["stage0"]["n_systems"])
+    frozen_size = int(freeze["stage0"]["n_systems"])
+    size = int(n_systems if n_systems is not None else frozen_size)
+    if size != frozen_size and not allow_unfrozen_pool:
+        raise Stage0Error(
+            f"A pool of {size} systems is not the frozen stage0.n_systems "
+            f"{frozen_size}; the freeze declares the pool and an engineering "
+            "deviation must pass allow_unfrozen_pool explicitly"
+        )
     templates = _template_index(freeze)
     pool = sample_pool(freeze, size)
 
@@ -887,7 +1084,7 @@ def build_stage0_campaign(
     for record in pool:
         resolved = _resolve_system(freeze, record)
         template = templates[resolved["source_template"]]
-        overrides = _job_overrides(freeze, resolved, template)
+        overrides = _job_overrides(freeze, resolved, template, code_revision)
         resolved["source_total_flux"] = overrides["lensing"]["source_galaxy"][
             "light"
         ]["total_flux"]
@@ -927,21 +1124,19 @@ def build_stage0_campaign(
         ),
     }
 
-    digest = design_freeze_digest(freeze_path)
+    digest = file_sha256(freeze_artifact)
     catalogue = {
         "schema_version": int(freeze["schema_version"]),
         "campaign_name": campaign_name,
         "design_freeze": {
-            "path": str(
-                Path(freeze_path).name if freeze_path is not None
-                else "configs/design/design_freeze_v1.yaml"
-            ),
+            "path": freeze_artifact.name,
             "sha256": digest,
             "status": str(freeze["freeze"]["status"]),
             "provisional_items": [
                 item["id"] for item in freeze["provisional_items"]
             ],
         },
+        "code_revision": dict(code_revision),
         "claim_labels": dict(freeze["claim_labels"]),
         "foreground_free_ceiling": bool(freeze["foreground_free_ceiling"]),
         "n_systems": size,
@@ -970,7 +1165,7 @@ def build_stage0_campaign(
         "campaign": {
             "name": campaign_name,
             "output_root": str(output_root),
-            "runner_command": list(runner_command),
+            "runner_command": command,
             "base_scene_configs": {
                 str(freeze["stage0"]["base_scene_label"]): str(
                     base/freeze["stage0"]["base_scene_config"]
@@ -980,8 +1175,12 @@ def build_stage0_campaign(
             "expected_artifacts": [str(freeze["stage0"]["artifact"])],
             "expected_job_count": len(jobs),
             "seed_policy": {
+                "design_freeze_path": str(freeze_artifact),
                 "design_freeze_sha256": digest,
                 "design_freeze_status": str(freeze["freeze"]["status"]),
+                "code_revision_sha256": str(code_revision["sha256"]),
+                "stage0_n_systems": size,
+                "stage0_n_systems_frozen": int(freeze["stage0"]["n_systems"]),
                 "entropy": int(freeze["seeds"]["entropy"]),
                 "parent_design_spawn_key": list(
                     freeze["seeds"]["streams"]["parent_design"]["spawn_key"]
@@ -1034,6 +1233,7 @@ def write_stage0_campaign(
     campaign_uuid: Optional[str] = None,
     root=None,
     progress=None,
+    allow_unfrozen_pool: bool = False,
 ) -> dict:
     """Write the Stage 0 catalogue and manifest into one directory.
 
@@ -1054,7 +1254,7 @@ def write_stage0_campaign(
     freeze_path : path-like, optional
         Freeze artifact whose digest is recorded.
     n_systems : `int`, optional
-        Pool size override.
+        Pool size override, refused without ``allow_unfrozen_pool``.
     campaign_name : `str`, optional
         S1-lite campaign name.
     campaign_uuid : `str`, optional
@@ -1063,6 +1263,8 @@ def write_stage0_campaign(
         Repository root the freeze's repo-relative paths resolve against.
     progress : callable, optional
         Called as ``progress(done, total)`` after each system resolves.
+    allow_unfrozen_pool : `bool`, optional
+        Permit a pool size other than the frozen ``stage0.n_systems``.
 
     Returns
     -------
@@ -1080,6 +1282,7 @@ def write_stage0_campaign(
         campaign_uuid=campaign_uuid,
         root=root,
         progress=progress,
+        allow_unfrozen_pool=allow_unfrozen_pool,
     )
     target = Path(directory).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
@@ -1106,13 +1309,62 @@ def write_stage0_campaign(
     }
 
 
+def _policy_member(policy: dict, key: str) -> Any:
+    """Return one required ``seed_policy`` member or raise."""
+    if key not in policy:
+        raise Stage0Error(
+            f"campaign.seed_policy is missing '{key}'; a Stage 0 manifest "
+            "binds its catalogue and its design freeze by digest"
+        )
+    return policy[key]
+
+
+def _require_digest(value: Any, description: str) -> str:
+    """Return a full lowercase SHA-256 digest string or raise."""
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in _HEX_DIGITS for character in value)
+    ):
+        raise Stage0Error(
+            f"{description} must be a 64-character lowercase sha256 digest, "
+            f"got {value!r}"
+        )
+    return value
+
+
+def _verify_bound_file(path: Path, expected: str, description: str) -> str:
+    """Hash one bound file and compare it with the recorded digest."""
+    if not path.is_file():
+        raise Stage0Error(
+            f"The manifest binds {description} {path}, which does not exist"
+        )
+    digest = file_sha256(path)
+    if digest != expected:
+        raise Stage0Error(
+            f"The manifest binds {description} {path} at {expected} but its "
+            f"bytes hash to {digest}"
+        )
+    return digest
+
+
 def validate_stage0_manifest(manifest_path) -> dict:
-    """Validate one written Stage 0 manifest against the S1-lite schema.
+    """Validate one written Stage 0 manifest and the files it binds.
+
+    The S1-lite schema check is the first half. The second half opens
+    the catalogue and the design freeze the manifest claims to bind,
+    hashes their bytes and compares them with the recorded digests, so a
+    manifest cannot carry a digest for a file that is missing, has moved
+    or has been rewritten. The catalogue's own record of the design
+    freeze digest is cross-checked against the manifest's, which closes
+    the loop between the two written artifacts.
 
     Parameters
     ----------
     manifest_path : path-like
-        Manifest written by `write_stage0_campaign`.
+        Manifest written by `write_stage0_campaign`. The catalogue is
+        resolved against this file's own directory, as S1-lite resolves
+        every other manifest-relative path.
 
     Returns
     -------
@@ -1121,10 +1373,47 @@ def validate_stage0_manifest(manifest_path) -> dict:
 
     Raises
     ------
+    Stage0Error
+        Raised when a bound digest is malformed, its file is missing, or
+        its bytes hash to a different value.
     hwoslaps.campaign.s1_lite.CampaignError
         Raised for any schema violation. Nothing is repaired.
     """
     from .s1_lite import validate_campaign_manifest
 
-    with Path(manifest_path).open("r", encoding="utf-8") as stream:
-        return validate_campaign_manifest(yaml.safe_load(stream))
+    path = Path(manifest_path).expanduser().resolve()
+    with path.open("r", encoding="utf-8") as stream:
+        normalized = validate_campaign_manifest(yaml.safe_load(stream))
+
+    policy = normalized["campaign"]["seed_policy"]
+    catalogue_name = _policy_member(policy, "catalogue")
+    if not isinstance(catalogue_name, str) or not catalogue_name:
+        raise Stage0Error(
+            f"campaign.seed_policy.catalogue must name a file, got "
+            f"{catalogue_name!r}"
+        )
+    catalogue_digest = _require_digest(
+        _policy_member(policy, "catalogue_sha256"),
+        "campaign.seed_policy.catalogue_sha256",
+    )
+    catalogue_path = path.parent/catalogue_name
+    _verify_bound_file(catalogue_path, catalogue_digest, "the design catalogue")
+
+    freeze_digest = _require_digest(
+        _policy_member(policy, "design_freeze_sha256"),
+        "campaign.seed_policy.design_freeze_sha256",
+    )
+    freeze_artifact = Path(
+        str(_policy_member(policy, "design_freeze_path"))
+    ).expanduser()
+    _verify_bound_file(freeze_artifact, freeze_digest, "the design freeze")
+
+    catalogue = json.loads(catalogue_path.read_text(encoding="utf-8"))
+    block = catalogue.get("design_freeze") if isinstance(catalogue, dict) else None
+    recorded = block.get("sha256") if isinstance(block, dict) else None
+    if recorded != freeze_digest:
+        raise Stage0Error(
+            f"The design catalogue {catalogue_path} records design freeze "
+            f"digest {recorded!r} but the manifest records {freeze_digest!r}"
+        )
+    return normalized
