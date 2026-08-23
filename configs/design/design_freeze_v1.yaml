@@ -6,11 +6,15 @@
 # document, report or brief disagrees with this file, THIS FILE WINS and the
 # document is stale; the superseded documents carry a banner pointing here.
 #
-# STATUS: PROVISIONAL. Frozen under the 2026-08-23 overnight launch authority
-# so Stage 0 can start tonight. Every entry of `provisional_items` needs
-# George's and Sol Pro's ratification on the morning of 2026-08-24 BEFORE any
-# result produced under this freeze is used in the paper. Stage 0 is cheap and
-# resumable, so an amended design re-runs at small cost.
+# STATUS: RATIFIED, version 2 (amended 2026-08-23 evening). Every item the
+# version-1 freeze left provisional was ruled by George on 2026-08-23; the
+# rulings are recorded under `ratifications` below and the provisional list is
+# empty. The version-2 amendment also carries the A2 declared spacing
+# systematic, the A5 compact-template swap (cosmos_127283 for cosmos_83935),
+# the A6-2 golden-magnitude re-anchor (23.795 V), the A6-1 XeLiF-only ruling,
+# the SEI promotion into configs/, and the committed pre-registration and
+# golden-anchor bindings. Numbers remain provisional until the GPT Pro review
+# per `claim_labels.provisionality`.
 #
 # Conventions. Angles are arcseconds. Signal is electrons in the exposure and
 # variance is electrons squared. Masses are log10 solar. Paths are repo-root
@@ -24,11 +28,23 @@ schema_version: 1
 
 freeze:
   name: design_freeze_v1
-  version: 1
-  status: provisional
+  version: 2
+  status: ratified
   authored: '2026-08-23'
-  ratified: null
+  amended: '2026-08-23'
+  ratified: '2026-08-23'
   ratification_owner: George, with Sol Pro concurrence
+  amendment: >-
+    Version 2, 2026-08-23 evening, under George's ruling slate recorded in
+    `ratifications`: A2 spacing systematic declared; A3 B8 ratified as
+    flagged; A4 idealized-proxy label adopted; A5 compact template
+    cosmos_127283 replaces cosmos_83935; A6-1 XeLiF only; A6-2 golden
+    canary re-anchored to 23.795 V; observing reference regenerated with
+    the SEI files promoted to configs/observing/sei_v0.1.9 and the Newton
+    Table 1 provenance sentence; all five template assets re-solved
+    against the regenerated reference; committed pre-registration and
+    golden-anchor documents bound fail-closed. George's commit approval of
+    this file constitutes the signature.
   authority: >-
     Frozen under the overnight launch authority George granted in chat on
     2026-08-23 and the Sol Pro CONDITIONAL GO ruling archived at
@@ -51,55 +67,88 @@ freeze:
     throughput values, the template bank, and every claim label.
 
 # ---------------------------------------------------------------------------
-# What still needs a signature in the morning
+# Ratification record (2026-08-23 evening): nothing remains provisional
 # ---------------------------------------------------------------------------
-# Exactly these four items are unratified. Nothing else in this file is open.
-provisional_items:
+# Exactly these rulings closed the version-1 provisional items and amended the
+# design. Chat rulings by George, logged in scratch/FableRASTISummary.md.
+
+provisional_items: []
+
+ratifications:
   - id: parent_design
-    summary: >-
-      The whole B8 joint parent design embedded below under `parent_design`,
-      including every distribution carrying `provisional: true`.
-    ratify: >-
-      George and Sol Pro accept or amend the marginals, the bounds and the
-      declared couplings. An amendment invalidates this freeze's hash and
-      re-runs Stage 0.
-    reference: scratch/B8ParentDesign_v1.md section 11
+    ruled: '2026-08-23'
+    ruling: >-
+      A3: the B8 joint parent design is RATIFIED exactly as flagged. All 12
+      provisional markers in the embedded `parent_design` block, including
+      every distribution carrying `provisional: true`, are ratified as
+      written; the flags are retained as authorship markers, not open items.
   - id: representative_48_semantics
-    summary: >-
-      The parent tier of 48 is a deterministic stratified representative
-      subsample of the post-cut pool, NOT the top 48 by the selection score.
-    ratify: >-
-      One line from George. The T10 task brief said "top-48 by the T4 score";
-      RedesignExecutionPlan S0 and the Sol Pro W2/W3 three-strata prescription
-      both require a representative draw so the middle stratum can demonstrate
-      the improvement from observable target selection. Resolved here in favour
-      of the representative draw; a top-48 parent would delete main-result
-      item 3.
-    reference: scratch/B8ParentDesign_v1.md section 9 item 1
+    ruled: '2026-08-23'
+    ruling: >-
+      A3: the parent tier of 48 is the deterministic stratified
+      representative subsample of the post-cut pool, NOT the top 48 by the
+      selection score.
   - id: t4_noisy_g_labelling
-    summary: >-
-      Whether the selection is labelled an idealized no-subhalo proxy selection
-      or an operational target selector, which follows from the outcome of the
-      T4 noise-seed rank-stability test on noisy observables.
-    ratify: >-
-      Read the rank-stability numbers (Spearman, top-12 Jaccard,
-      oracle-recovered fraction over the 20 declared replicates) and pick the
-      label. Sol Pro P0-6 verbatim: unless rank stability is demonstrated using
-      noisy or reconstructed observables, call it an idealized no-subhalo proxy
-      selection, not an operational Roman/Euclid/HWO target selector.
-    reference: scratch/q1_observing_conditions/selection_rule.md section 4
+    ruled: '2026-08-23'
+    ruling: >-
+      A4: the selection is labelled an "idealized no-subhalo proxy
+      selector" per the pre-registered failure branch. Evidence on the real
+      1000-member pool: noisy gradient statistic inflated ~373x, s_plus_c
+      noisy-vs-noiseless Spearman -0.191 with seed-to-seed agreement
+      >= 0.9999 (bias, not variance). No reconstructed-source estimator is
+      commissioned.
   - id: template_83935_resolution_caveat
-    summary: >-
-      The compact template cosmos_83935_hlr011 is stored at 0.012148903205522409
-      arcsec per pixel, coarser than the 0.00716 arcsec production pixel scale,
-      so it is interpolated up on every render and is the least well sampled
-      member of the bank.
-    ratify: >-
-      Accept the caveat and its wording, or replace the compact anchor with the
-      declared alternative (ident 174776). The complexity statistic C is a
-      gradient statistic, so the compact stratum is the one whose C is most
-      exposed to template sampling rather than to source morphology.
-    reference: scratch/f3_source_gallery/README.md
+    ruled: '2026-08-23'
+    ruling: >-
+      A5: SUPERSEDED by replacement. The compact anchor is cosmos_127283
+      (prepared at 0.005185449728701348 arcsec/px = 0.72x the production
+      pixel, so it downsamples like the rest of the bank and the resolution
+      caveat is closed). Selection method and gallery record:
+      scratch/f3_source_gallery/README.md A5 amendment section and
+      scratch/f3_source_gallery/compact_alternatives/.
+  - id: spacing_systematic
+    ruled: '2026-08-23'
+    ruling: >-
+      A2 (T8c option 2): production Fisher maps stay at 0.05 arcsec node
+      spacing; every quoted M_lim carries the declared systematic recorded
+      under `declared_systematics.spatial_sampling_qmax`.
+  - id: throughput_bracket
+    ruled: '2026-08-23'
+    ruling: >-
+      A6-1: XeLiF only. No silver-coating bracket is adopted into the
+      design; the 0.504 arms survive only as labelled
+      hypothetical-diagnostic axes outside the headline scope and no
+      silver-throughput number is quoted in central results.
+  - id: golden_magnitude_anchor
+    ruled: '2026-08-23'
+    ruling: >-
+      A6-2: the typical source stays at the D1 SLACS median (24.845 V);
+      the golden brightness canary is re-anchored to 23.795 V, the
+      measured brightest-decile (p10) magnitude of the z_s 0.4-0.8 SLACS
+      sample (23.25 F814W, Newton et al. 2011 Table 1) through the D1
+      +0.545 color. The retired ad-hoc 23.345 sat 0.40 mag outside the
+      declared parent. Full derivation and the Vegetti-2014 golden-lens
+      finding: the bound document at `observing.golden_anchor`.
+
+# ---------------------------------------------------------------------------
+# Declared systematics, binding on every quoted number they cover
+# ---------------------------------------------------------------------------
+declared_systematics:
+  spatial_sampling_qmax:
+    value_dex: -0.004
+    sign: one-signed conservative (quoted M_lim is biased high; true reach
+      is slightly better)
+    scope: >-
+      Every M_lim quoted from 0.05 arcsec node-spacing Fisher maps. The
+      aperture q_max at 0.05 arcsec is systematically low by 0.9-1.4
+      percent because the q peak falls between coarse nodes; the measured
+      crossing cost at the two golden cells is -0.00424 and -0.00375 dex,
+      12x below the 0.05 dex mass-ladder refinement step.
+    provenance:
+      - scratch/receipts/t8c_convergence_report.md
+      - scratch/receipts/t8c_convergence_report.json
+    ruling: A2, T8c option 2, George 2026-08-23.
+
 
 # ---------------------------------------------------------------------------
 # Claim labels, binding on every sentence that quotes a number from this study
@@ -253,7 +302,7 @@ strata:
 observing:
   reference:
     path: configs/observing/hwo_eac1_hri_reference_v1.yaml
-    sha256: ac64aa1bde9e834babfe5201d28442d4950f7ce943a97748cab313abbfeda322
+    sha256: 5bc91a91bb2e1b29fa8b94de51404929cd602e5837e029e344636e8f1c477530
     reference_name: hwo_eac1_hri_reference_v1
     script: scripts/derive_hwo_eac1_hri_reference.py
     generated: '2026-08-23'
@@ -262,6 +311,17 @@ observing:
       detected e-/s rate, so observation.throughput stays 1.0 in the rendered
       configuration and the throughput chain is provenance only. Carrying both
       would double-apply the throughput.
+  golden_anchor:
+    path: configs/design/golden_magnitude_anchor.md
+    sha256: 28ebbf67187be8ac5a6362e3146d1924c7158c66ae71f920e482b26214e9b227
+    scratch_source: scratch/q1_observing_conditions/golden_magnitude_anchor.md
+    meaning: >-
+      The G-A source-magnitude anchor document, ruled 2026-08-23 (A6-2):
+      typical source = D1 SLACS median 24.845 V; golden brightness canary
+      = 23.795 V, the measured brightest-decile (p10) magnitude of the
+      z_s 0.4-0.8 SLACS sample (23.25 F814W, Newton et al. 2011 Table 1)
+      through the D1 +0.545 color. Bound fail-closed by
+      verify_bound_artifacts.
   detector:
     read_noise_per_read_e: 0.2
     n_reads: 2
@@ -274,7 +334,9 @@ observing:
     source: >-
       HWO Science Engineering Interface package hwo_sci_eng v0.1.9
       (Sitarski/Tumlinson, GOMAP), HRI UVIS channel, vendored at
-      scratch/q1_observing_conditions/sei_v0.1.9/.
+      configs/observing/sei_v0.1.9/ (promoted from scratch in the
+      version-2 amendment so a clean clone rebuilds and fully tests the
+      reference).
     wording: >-
       current public HWO working engineering reference adopted for this study
     ruling: >-
@@ -311,8 +373,10 @@ observing:
       telescope still UV-capable is 0.36-0.43 instrument-only protected silver;
       full-train silver is 0.47-0.56, where 0.504 sits, and implies recoating
       the UV-serving telescope. 0.504 is kept ONLY as a clearly labelled
-      full-train hypothetical ceiling. The partial- versus full-train labelling
-      is an OPEN RIDER with George's advisor.
+      full-train hypothetical ceiling. RULED 2026-08-23 (A6-1): XeLiF only.
+      No silver bracket is adopted into the design; no silver-throughput
+      number appears in central results. The partial- versus full-train
+      question remains with George's advisor as paper wording only.
   r_arms:
     role: >-
       The R arms are controlled factorization canaries. They are NOT re-imposed
@@ -320,6 +384,12 @@ observing:
       reported at the NATIVE source magnitudes of the selected systems with
       their parent quantiles stated (P0-7).
     reference_dir: scratch/panel/refs
+    refs_note: >-
+      R2.yaml and R3.yaml were regenerated 2026-08-23 at the A6-2 anchor
+      23.795 V against the version-2 reference (sha256 499254ea... and
+      17708c87...); the superseded 23.345 files are archived at
+      scratch/panel/refs_superseded/{R2,R3}_mag23.345.yaml. R0/R1/RA are
+      unchanged by the amendment (their magnitudes and rates did not move).
     arms:
       R0:
         label: baseline
@@ -341,32 +411,37 @@ observing:
           The instrument trade bracket: R0's target seen through the
           full-train hypothetical throughput ceiling. Carries the silver
           envelope caveat above wherever it is quoted, and is never presented
-          as the reference instrument.
+          as the reference instrument. Per the A6-1 XeLiF-only ruling
+          (2026-08-23) this arm is a hypothetical-diagnostic axis outside the
+          headline scope; no central result quotes it.
       R2:
         label: bright-target arm
-        source_magnitude_ab: 23.345
+        source_magnitude_ab: 23.795
         throughput: 0.21
-        detected_rate_e_per_s: 35.63658624161314
+        detected_rate_e_per_s: 23.54485903919137
         ref_yaml: scratch/panel/refs/R2.yaml
         meaning: >-
           The target-selection arm: a bright source under the BASELINE
-          instrument. This is the arm that carries the "down to 10^7 under the
-          reference instrument" statement.
-        caveat: >-
-          The canary magnitude 23.345 lies OUTSIDE the declared parent
-          source-magnitude range (bright bound 23.745) by construction, and
-          must be labelled as outside the declared parent wherever it appears.
+          instrument, anchored per A6-2 (2026-08-23) at the measured
+          brightest-decile (p10) magnitude of the z_s 0.4-0.8 SLACS sample
+          through the D1 color (see observing.golden_anchor). The canary sits
+          0.05 mag INSIDE the declared parent bright bound 23.745, so it is
+          in-population. The retired 23.345 anchor and the "down to 10^7
+          under the reference instrument" statement it produced are
+          superseded; R2 crossings are re-measured at this anchor before any
+          headline is quoted (expected ~10^7.1 by the 0.39 dex/mag lever).
       R3:
         label: combined favorable ceiling
-        source_magnitude_ab: 23.345
+        source_magnitude_ab: 23.795
         throughput: 0.504
-        detected_rate_e_per_s: 85.52780697987154
+        detected_rate_e_per_s: 56.50766169405929
         ref_yaml: scratch/panel/refs/R3.yaml
         meaning: >-
           Bright target AND the full-train hypothetical throughput: the
-          combined favorable ceiling. It carries both the silver envelope
-          caveat and the outside-the-declared-parent magnitude caveat, and is
-          never the headline number.
+          combined favorable ceiling. It carries the silver envelope caveat,
+          uses the same in-population golden anchor as R2, and per the A6-1
+          XeLiF-only ruling is a hypothetical-diagnostic axis outside the
+          headline scope; it is never the headline number.
       RA:
         label: equal-arc-S/N cross-source normalization
         source_magnitude_ab: 24.845
@@ -447,7 +522,7 @@ templates:
     - id: cosmos_48849
       morphology_class: clumpy_sbar_spiral_existing_anchor
       asset_path: configs/source_assets/cosmos_48849_hlr011.npz
-      sha256: 4736aefff8cddbe5670de0a031e2580170bfea548eca77a273c9e12978e7a2a9
+      sha256: c67570fdc56068fc900e3428f6b6ff2d5ffce8f459858c302c6de1461d24ed21
       asset_pixel_scale_arcsec: 0.002732128852944742
       canonical_total_flux: 0.00045889467368609476
       canonical_total_flux_source: provenance.rate_contract.total_flux
@@ -455,7 +530,7 @@ templates:
     - id: cosmos_62410
       morphology_class: smooth_disk
       asset_path: configs/source_assets/cosmos_62410_hlr011.npz
-      sha256: 947cbeb9bdcc01425b43040fa805a3b5b765460eb8c8b3fccbba98e29e76fb64
+      sha256: 5b716e7bb61b36e385394be32faf3e64fbcfd9a7f543779b491ed8603ddc2b4d
       asset_pixel_scale_arcsec: 0.005553115716269291
       canonical_total_flux: 0.0004589089094626745
       canonical_total_flux_source: provenance.rate_contract.total_flux
@@ -463,7 +538,7 @@ templates:
     - id: cosmos_159916
       morphology_class: clumpy
       asset_path: configs/source_assets/cosmos_159916_hlr011.npz
-      sha256: fae4e04d6052291da80c5e5b46d06cc0ad7a4effe3d2e6600f43c6d682e3c071
+      sha256: 6aa84a2874aef1d30d1292f3ec29163f70f6dd78b155f45f43db044a31ae6222
       asset_pixel_scale_arcsec: 0.005965587590013045
       canonical_total_flux: 0.000458924098862195
       canonical_total_flux_source: provenance.rate_contract.total_flux
@@ -471,25 +546,27 @@ templates:
     - id: cosmos_162893
       morphology_class: irregular_merger
       asset_path: configs/source_assets/cosmos_162893_hlr011.npz
-      sha256: 0fc1669b362baebabd0c121f235980a4d5c3b897e3d57a4a8574c25293a9e170
+      sha256: 76e61166e4f44d946a122131533a3520b135a5704938931e3f2397437616f18e
       asset_pixel_scale_arcsec: 0.005584403908234906
       canonical_total_flux: 0.0004589439758914851
       canonical_total_flux_source: provenance.rate_contract.total_flux
       catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 162893
-    - id: cosmos_83935
+    - id: cosmos_127283
       morphology_class: compact
-      asset_path: configs/source_assets/cosmos_83935_hlr011.npz
-      sha256: 3b691be272e0acdd4ffa1b2a2ee1060b1fbdc1e23ca3ed4b69bd3dfe84f857c4
-      asset_pixel_scale_arcsec: 0.012148903205522409
-      canonical_total_flux: 0.0004588806668010262
+      asset_path: configs/source_assets/cosmos_127283_hlr011.npz
+      sha256: 686e17abd6643219231a56249eb86a67ab940164c4521da1f55d87e4255dee5b
+      asset_pixel_scale_arcsec: 0.005185449728701348
+      canonical_total_flux: 0.00045889704537767584
       canonical_total_flux_source: provenance.rate_contract.total_flux
-      catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 83935
-      caveat: >-
-        PROVISIONAL, see provisional_items/template_83935_resolution_caveat.
-        The stored sampling 0.012148903205522409 arcsec per pixel is coarser
-        than the 0.00716 arcsec production pixel scale, so this template is
-        interpolated up on every render and is the least well sampled member of
-        the bank.
+      catalog: GalSim COSMOS 23.5 real-galaxy sample (Zenodo 3242143) ident 127283
+      note: >-
+        A5 amendment 2026-08-23: replaces cosmos_83935, closing the
+        template_83935_resolution_caveat. Stored sampling
+        0.005185449728701348 arcsec per pixel is 0.72x the 0.00716 arcsec
+        production pixel, so this template downsamples on render like the
+        rest of the bank. Selection: concentration-ranked downsample-capable
+        scan, scratch/f3_source_gallery/compact_alternatives/ and the
+        gallery README A5 amendment section.
 
 # ---------------------------------------------------------------------------
 # Selection: floor cuts, score, tiers
@@ -497,6 +574,7 @@ templates:
 selection:
   pre_registration:
     path: scratch/q1_observing_conditions/selection_rule.md
+    committed_path: configs/design/selection_rule_v2.md
     sha256: 3ce648bbe65ced35a5773cae691ce8822930076ea2f151dde0de2594974cb9f5
     version: 2
     signed: 'George, 2026-08-23'
@@ -875,7 +953,7 @@ reporting:
 # bytes that were embedded.
 parent_design_source:
   path: scratch/B8ParentDesign_v1.yaml
-  sha256: e4e8fb20d4cf768927bea06005257591bcdc6d690752ca9371297335a679b265
+  sha256: 8d69f813ebacdba54012695aba54f47aed40a1515b8b49d3e19e17de1b97fea2
   document: scratch/B8ParentDesign_v1.md
   status: provisional
   embedded: true
@@ -1146,13 +1224,13 @@ parent_design:
         - cosmos_62410
         - cosmos_159916
         - cosmos_162893
-        - cosmos_83935
+        - cosmos_127283
       level_classes:
         cosmos_48849: clumpy_sbar_spiral_existing_anchor
         cosmos_62410: smooth_disk
         cosmos_159916: clumpy
         cosmos_162893: irregular_merger
-        cosmos_83935: compact
+        cosmos_127283: compact
       asset_hashes: PENDING_T5
       asset_hash_note: >-
         The five prepared-asset sha256 values are written into DesignFreeze_v1 by

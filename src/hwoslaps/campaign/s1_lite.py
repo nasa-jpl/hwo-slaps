@@ -45,6 +45,9 @@ that declaration for staging inspection, but it can neither run nor
 harvest until it declares them. Every job subprocess receives
 ``HWOSLAPS_CAMPAIGN_UUID`` in its environment, and every declared
 artifact must embed both that value and the staged configuration hash.
+A staged configuration that pins provenance digests, as a Stage 0
+configuration pins the source revision and the template asset, also
+requires the artifact to carry those digests unchanged.
 Declared artifacts must be regular files: any symlink in a job output
 tree, or a declared artifact resolving outside it, fails validation
 and harvest reconciliation.
@@ -1072,12 +1075,61 @@ def _scalar_text(value: Any, path: Path, member: str) -> str:
     return str(array.reshape(-1)[0])
 
 
+def _declared_provenance_digests(staged_config: dict) -> dict:
+    """Return the provenance digests one staged configuration declares.
+
+    A Stage 0 configuration pins the source revision the campaign was
+    generated at and the template asset the design selected, and the
+    Stage 0 runner refuses to render unless this checkout and the asset
+    on disk carry exactly those digests. That check lives inside the
+    runner, so a job invoked through a wrapper that never reaches the
+    runner would produce an artifact nobody held to the pinned values.
+    Re-checking the digests the runner stamped into the artifact closes
+    that path. It protects against an honest mistake, a stale resume or
+    a hand-edited command, not against a determined tamperer: anyone who
+    can write the artifact can write the members too.
+
+    Parameters
+    ----------
+    staged_config : `dict`
+        Staged merged configuration of one job.
+
+    Returns
+    -------
+    declared : `dict`
+        Artifact member name to the digest the configuration pins.
+        Empty for a configuration carrying no ``stage0`` block, which
+        is every non-Stage-0 campaign.
+    """
+    stage0 = staged_config.get("stage0")
+    if not isinstance(stage0, dict):
+        return {}
+    code_revision = stage0.get("code_revision")
+    declared = {}
+    for member, value in (
+        (
+            "code_revision_sha256",
+            code_revision.get("sha256") if isinstance(code_revision, dict) else None,
+        ),
+        ("source_asset_sha256", stage0.get("source_asset_sha256")),
+    ):
+        if value is not None:
+            declared[member] = str(value)
+    return declared
+
+
 def _validate_job_artifacts(
     output_root: Path,
     campaign: dict,
     job: dict,
 ) -> list[dict]:
-    """Validate one job's declared artifacts and return sentinel records."""
+    """Validate one job's declared artifacts and return sentinel records.
+
+    Beyond the campaign identity members, every provenance digest the
+    staged configuration pins must be embedded in the artifact and must
+    match; see `_declared_provenance_digests` for what that binding is
+    and is not worth.
+    """
     import numpy as np
 
     from hwoslaps.provenance import config_hash
@@ -1115,9 +1167,11 @@ def _validate_job_artifacts(
             f"Staged config {staged_path} sha256 {digest} does not match the "
             f"frozen manifest record {job['staged_config_sha256']}"
         )
-    expected_config_hash = config_hash(
-        _load_yaml_mapping(staged_path, "Staged campaign config")
-    )
+    staged_config = _load_yaml_mapping(staged_path, "Staged campaign config")
+    expected_members = (
+        ("config_hash", config_hash(staged_config)),
+        ("campaign_uuid", campaign["campaign_uuid"]),
+    ) + tuple(_declared_provenance_digests(staged_config).items())
 
     records = []
     for relative in job["expected_artifacts"]:
@@ -1125,7 +1179,7 @@ def _validate_job_artifacts(
         embedded = {}
         try:
             with np.load(path, allow_pickle=False) as stored:
-                for member in ("config_hash", "campaign_uuid"):
+                for member, _ in expected_members:
                     if member in stored.files:
                         embedded[member] = _scalar_text(
                             stored[member],
@@ -1138,14 +1192,11 @@ def _validate_job_artifacts(
             raise CampaignError(
                 f"Job '{job_id}' artifact {path} does not load: {exc}"
             ) from exc
-        for member, expected in (
-            ("config_hash", expected_config_hash),
-            ("campaign_uuid", campaign["campaign_uuid"]),
-        ):
+        for member, expected in expected_members:
             if member not in embedded:
                 raise CampaignError(
                     f"Job '{job_id}' artifact {path} does not embed the "
-                    f"required '{member}' member"
+                    f"required '{member}' member, expected {expected}"
                 )
             if embedded[member] != expected:
                 raise CampaignError(

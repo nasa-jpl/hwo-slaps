@@ -1,0 +1,21 @@
+Metadata-Version: 2.4
+Name: hwo_sci_eng
+Version: 0.1.9
+Summary: HWO Science Engineering Interface
+Home-page: https://github.com/HWO-GOMAP-Working-Groups/Sci-Eng-Interface
+Author: Breann Sitarski, NASA/GSFC, Jason Tumlinson, STScI
+Author-email:  
+License: CC
+Keywords: simulation,astronomy,astrophysics
+Classifier: Programming Language :: Python :: 3.12
+License-File: LICENSE
+Requires-Dist: setuptools>=61.0
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: home-page
+Dynamic: keywords
+Dynamic: license
+Dynamic: license-file
+Dynamic: requires-dist
+Dynamic: summary

@@ -22,6 +22,7 @@ from hwoslaps.campaign import design_freeze as df
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FREEZE_PATH = REPO_ROOT/"configs"/"design"/"design_freeze_v1.yaml"
+COMMITTED_PRE_REGISTRATION = "configs/design/selection_rule_v2.md"
 
 
 @pytest.fixture(scope="module")
@@ -42,7 +43,8 @@ def test_committed_freeze_loads_and_validates(freeze):
     """The committed artifact passes its own validation."""
     assert freeze["schema_version"] == df.DESIGN_FREEZE_SCHEMA_VERSION
     assert freeze["freeze"]["name"] == "design_freeze_v1"
-    assert freeze["freeze"]["status"] == "provisional"
+    assert freeze["freeze"]["status"] == "ratified"
+    assert freeze["freeze"]["version"] == 2
 
 
 def test_required_blocks_are_all_present(freeze):
@@ -80,12 +82,13 @@ def test_r_arms_are_labelled_with_their_meanings(freeze):
     assert set(arms) >= {"R0", "R1", "R2", "R3"}
     assert arms["R0"]["throughput"] == 0.21
     assert arms["R1"]["throughput"] == 0.504
-    assert arms["R2"]["source_magnitude_ab"] == 23.345
-    assert arms["R3"]["source_magnitude_ab"] == 23.345
+    assert arms["R2"]["source_magnitude_ab"] == 23.795
+    assert arms["R3"]["source_magnitude_ab"] == 23.795
     assert "silver" in arms["R1"]["meaning"].lower() or "silver" in str(
         freeze["observing"]["throughput"]["optimistic_arm_caveat"]
     ).lower()
-    assert "outside the declared parent" in arms["R2"]["caveat"]
+    assert "brightest-decile" in arms["R2"]["meaning"]
+    assert "caveat" not in arms["R2"]
 
 
 def test_aperture_factor_is_pinned_once_and_matches_both_modules(freeze):
@@ -161,13 +164,25 @@ def test_claim_labels_and_ceiling_flag(freeze):
     assert "survey population" in labels["forbidden_phrases"]
 
 
-def test_provisional_items_are_exactly_the_declared_four(freeze):
-    """The morning ratification list names exactly four open items."""
-    identifiers = [item["id"] for item in freeze["provisional_items"]]
-    assert identifiers == list(df.REQUIRED_PROVISIONAL_ITEMS)
-    for item in freeze["provisional_items"]:
-        assert item["summary"].strip()
-        assert item["ratify"].strip()
+def test_nothing_remains_provisional_and_rulings_are_recorded(freeze):
+    """The 2026-08-23 ratification emptied the provisional list."""
+    assert freeze["provisional_items"] == []
+    assert list(df.REQUIRED_PROVISIONAL_ITEMS) == []
+    rulings = {item["id"] for item in freeze["ratifications"]}
+    assert {
+        "parent_design",
+        "representative_48_semantics",
+        "t4_noisy_g_labelling",
+        "template_83935_resolution_caveat",
+        "spacing_systematic",
+        "throughput_bracket",
+        "golden_magnitude_anchor",
+    } <= rulings
+    for item in freeze["ratifications"]:
+        assert item["ruled"] == "2026-08-23"
+        assert item["ruling"].strip()
+    systematic = freeze["declared_systematics"]["spatial_sampling_qmax"]
+    assert systematic["value_dex"] == -0.004
 
 
 def test_parent_design_is_embedded_and_hash_referenced(freeze):
@@ -259,9 +274,9 @@ def test_loader_rejects_a_cleared_ceiling_flag(freeze):
 
 
 def test_loader_rejects_a_changed_provisional_item_list(freeze):
-    """Silently dropping an unratified item fails closed."""
+    """Reintroducing a provisional item after ratification fails closed."""
     broken = copy.deepcopy(freeze)
-    broken["provisional_items"] = broken["provisional_items"][:2]
+    broken["provisional_items"] = [{"id": "resurrected_item"}]
     with pytest.raises(df.DesignFreezeError, match="provisional_items"):
         df.validate_design_freeze(broken)
 
@@ -308,6 +323,97 @@ def test_loading_rejects_a_missing_committed_artifact(freeze, tmp_path):
     path = _write_freeze(tmp_path, broken)
     with pytest.raises(df.DesignFreezeError, match="does not exist"):
         df.load_design_freeze(path)
+
+
+def test_declared_committed_pre_registration_is_verified(freeze, tmp_path):
+    """A declared committed copy of the signed rule is re-hashed on load."""
+    bound = copy.deepcopy(freeze)
+    bound["selection"]["pre_registration"]["committed_path"] = (
+        COMMITTED_PRE_REGISTRATION
+    )
+    loaded = df.load_design_freeze(_write_freeze(tmp_path, bound))
+    report = df.verify_bound_artifacts(loaded, root=REPO_ROOT)
+    assert report["verified"]["selection_pre_registration_committed"] == (
+        freeze["selection"]["pre_registration"]["sha256"]
+    )
+
+
+def test_golden_anchor_is_bound_and_verified(freeze):
+    """The A6-2 anchor document is a required committed binding."""
+    anchor = freeze["observing"]["golden_anchor"]
+    assert anchor["path"] == "configs/design/golden_magnitude_anchor.md"
+    report = df.verify_bound_artifacts(freeze, root=REPO_ROOT)
+    assert report["verified"]["golden_magnitude_anchor"] == anchor["sha256"]
+
+
+def test_golden_anchor_mismatch_fails_closed(freeze):
+    """A golden-anchor document with a different digest fails."""
+    broken = copy.deepcopy(freeze)
+    broken["observing"]["golden_anchor"]["sha256"] = "0" * 64
+    with pytest.raises(df.DesignFreezeError, match="golden_magnitude_anchor"):
+        df.verify_bound_artifacts(broken, root=REPO_ROOT)
+
+
+def test_golden_anchor_missing_file_fails_closed(freeze):
+    """A golden-anchor path that does not exist fails as committed."""
+    broken = copy.deepcopy(freeze)
+    broken["observing"]["golden_anchor"]["path"] = (
+        "configs/design/no_such_anchor.md"
+    )
+    with pytest.raises(df.DesignFreezeError, match="does not exist"):
+        df.verify_bound_artifacts(broken, root=REPO_ROOT)
+
+
+def test_loader_rejects_a_malformed_golden_anchor_path(freeze):
+    """A non-string golden-anchor path is a DesignFreezeError."""
+    broken = copy.deepcopy(freeze)
+    broken["observing"]["golden_anchor"]["path"] = 7
+    with pytest.raises(df.DesignFreezeError, match="golden_anchor"):
+        df.validate_design_freeze(broken)
+
+
+def test_committed_pre_registration_mismatch_fails_closed(freeze, tmp_path):
+    """A committed copy that does not carry the frozen digest fails."""
+    broken = copy.deepcopy(freeze)
+    broken["selection"]["pre_registration"]["committed_path"] = (
+        "configs/design/design_freeze_v1.yaml"
+    )
+    path = _write_freeze(tmp_path, broken)
+    with pytest.raises(df.DesignFreezeError) as excinfo:
+        df.load_design_freeze(path)
+    message = str(excinfo.value)
+    assert "selection_pre_registration_committed" in message
+    assert "design_freeze_v1.yaml" in message
+    assert freeze["selection"]["pre_registration"]["sha256"] in message
+
+
+def test_committed_pre_registration_missing_file_fails_closed(freeze, tmp_path):
+    """A declared committed copy is required, never optional."""
+    broken = copy.deepcopy(freeze)
+    broken["selection"]["pre_registration"]["committed_path"] = (
+        "configs/design/absent_selection_rule.md"
+    )
+    path = _write_freeze(tmp_path, broken)
+    with pytest.raises(df.DesignFreezeError, match="does not exist"):
+        df.load_design_freeze(path)
+
+
+def test_absent_committed_path_leaves_verification_unchanged(freeze):
+    """A freeze that declares no committed copy is verified without it."""
+    without = copy.deepcopy(freeze)
+    del without["selection"]["pre_registration"]["committed_path"]
+    df.validate_design_freeze(without)
+    report = df.verify_bound_artifacts(without, root=REPO_ROOT)
+    assert "selection_pre_registration_committed" not in report["verified"]
+    assert "selection_pre_registration_committed" not in report["absent"]
+
+
+def test_loader_rejects_a_malformed_committed_path(freeze):
+    """A committed path that is not a repo-relative string fails closed."""
+    broken = copy.deepcopy(freeze)
+    broken["selection"]["pre_registration"]["committed_path"] = 7
+    with pytest.raises(df.DesignFreezeError, match="committed_path"):
+        df.validate_design_freeze(broken)
 
 
 def test_the_verification_opt_out_is_explicit(freeze, tmp_path):

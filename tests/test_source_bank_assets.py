@@ -51,7 +51,7 @@ LEGACY_ANCHOR = {
     "morphology_class": "clumpy_s_bar",
     "filename": "cosmos_48849_hlr011.npz",
     "sha256": (
-        "4736aefff8cddbe5670de0a031e2580170bfea548eca77a273c9e12978e7a2a9"
+        "c67570fdc56068fc900e3428f6b6ff2d5ffce8f459858c302c6de1461d24ed21"
     ),
     "script_version": 1,
     "pixel_scale_arcsec": 0.002732128852944742,
@@ -71,7 +71,7 @@ NEW_ANCHORS = (
         "morphology_class": "smooth_disk",
         "filename": "cosmos_62410_hlr011.npz",
         "sha256": (
-            "947cbeb9bdcc01425b43040fa805a3b5b765460eb8c8b3fccbba98e29e76fb64"
+            "5b716e7bb61b36e385394be32faf3e64fbcfd9a7f543779b491ed8603ddc2b4d"
         ),
         "script_version": 2,
         "pixel_scale_arcsec": 0.005553115716269291,
@@ -82,7 +82,7 @@ NEW_ANCHORS = (
         "morphology_class": "clumpy",
         "filename": "cosmos_159916_hlr011.npz",
         "sha256": (
-            "fae4e04d6052291da80c5e5b46d06cc0ad7a4effe3d2e6600f43c6d682e3c071"
+            "6aa84a2874aef1d30d1292f3ec29163f70f6dd78b155f45f43db044a31ae6222"
         ),
         "script_version": 2,
         "pixel_scale_arcsec": 0.005965587590013045,
@@ -93,22 +93,22 @@ NEW_ANCHORS = (
         "morphology_class": "irregular_merger",
         "filename": "cosmos_162893_hlr011.npz",
         "sha256": (
-            "0fc1669b362baebabd0c121f235980a4d5c3b897e3d57a4a8574c25293a9e170"
+            "76e61166e4f44d946a122131533a3520b135a5704938931e3f2397437616f18e"
         ),
         "script_version": 2,
         "pixel_scale_arcsec": 0.005584403908234906,
         "total_flux": 0.0004589439758914851,
     },
     {
-        "ident": 83935,
+        "ident": 127283,
         "morphology_class": "compact",
-        "filename": "cosmos_83935_hlr011.npz",
+        "filename": "cosmos_127283_hlr011.npz",
         "sha256": (
-            "3b691be272e0acdd4ffa1b2a2ee1060b1fbdc1e23ca3ed4b69bd3dfe84f857c4"
+            "686e17abd6643219231a56249eb86a67ab940164c4521da1f55d87e4255dee5b"
         ),
         "script_version": 2,
-        "pixel_scale_arcsec": 0.012148903205522409,
-        "total_flux": 0.0004588806668010262,
+        "pixel_scale_arcsec": 0.005185449728701348,
+        "total_flux": 0.00045889704537767584,
     },
 )
 

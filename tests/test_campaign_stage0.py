@@ -683,7 +683,7 @@ def test_manifest_validation_rejects_a_catalogue_naming_another_freeze(
 def test_catalogue_records_the_provisional_status_and_claim_labels(
     freeze, runner_command, tmp_path
 ):
-    """A downstream reader learns the design is unratified from the file."""
+    """A downstream reader learns the freeze status from the file itself."""
     written = stage0.write_stage0_campaign(
         tmp_path/"campaign",
         freeze,
@@ -694,10 +694,8 @@ def test_catalogue_records_the_provisional_status_and_claim_labels(
         allow_unfrozen_pool=True,
     )
     catalogue = json.loads(written["catalogue_path"].read_text(encoding="utf-8"))
-    assert catalogue["design_freeze"]["status"] == "provisional"
-    assert catalogue["design_freeze"]["provisional_items"] == list(
-        df.REQUIRED_PROVISIONAL_ITEMS
-    )
+    assert catalogue["design_freeze"]["status"] == "ratified"
+    assert catalogue["design_freeze"]["provisional_items"] == []
     assert catalogue["foreground_free_ceiling"] is True
     assert "source-only information ceiling" in catalogue["claim_labels"][
         "central_result"

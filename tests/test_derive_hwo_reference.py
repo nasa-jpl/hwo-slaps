@@ -173,19 +173,18 @@ def _stub_area_report():
 
 
 def _require_vendored_sei():
-    """Skip unless the vendored SEI data files are present.
+    """Fail unless the vendored SEI data files are present.
 
-    The SEI files live under the gitignored ``scratch`` tree, so a
-    checkout without them cannot build a document at all. Every honesty
-    check on the SEI read itself runs against synthetic files in a
-    temporary directory and needs no skip.
+    The SEI files are committed under ``configs/observing``, so every
+    checkout carries them and their absence is a broken tree rather than
+    an unavailable optional input. Every honesty check on the SEI read
+    itself runs against synthetic files in a temporary directory.
     """
     for filename in (DERIVATION.SEI_HRI_FILENAME, DERIVATION.SEI_EAC1_FILENAME):
-        if not (DERIVATION.SEI_VENDOR_PATH / filename).is_file():
-            pytest.skip(
-                f'Vendored SEI file {filename} is absent from '
-                f'{DERIVATION.SEI_VENDOR_RELPATH}.'
-            )
+        assert (DERIVATION.SEI_VENDOR_PATH / filename).is_file(), (
+            f'Vendored SEI file {filename} is absent from '
+            f'{DERIVATION.SEI_VENDOR_RELPATH}.'
+        )
 
 
 def _sei_hri_document(read_noise_e=0.2, dark_current=0.002,
@@ -347,9 +346,7 @@ def test_sei_is_the_named_instrument_reference_for_the_read_noise():
         'current public HWO working engineering reference adopted for this '
         'study'
     )
-    assert instrument['vendored_path'] == (
-        'scratch/q1_observing_conditions/sei_v0.1.9'
-    )
+    assert instrument['vendored_path'] == 'configs/observing/sei_v0.1.9'
     assert instrument['citation'] == 'SEI'
     assert 'hwo_sci_eng v0.1.9' in metadata['citations']['SEI']
 

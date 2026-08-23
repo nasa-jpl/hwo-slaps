@@ -98,7 +98,7 @@ OPTIMISTIC_DETECTOR_QE = 0.9
 
 SEI_PACKAGE = 'hwo_sci_eng'
 SEI_VERSION = '0.1.9'
-SEI_VENDOR_RELPATH = 'scratch/q1_observing_conditions/sei_v0.1.9'
+SEI_VENDOR_RELPATH = 'configs/observing/sei_v0.1.9'
 SEI_VENDOR_PATH = PROJECT_ROOT / SEI_VENDOR_RELPATH
 SEI_HRI_FILENAME = 'HRI.yaml'
 SEI_EAC1_FILENAME = 'EAC1.yaml'
@@ -1878,9 +1878,13 @@ def build_reference_document(area_report, pixel_scale_arcsec, sed_mode,
             'input_magnitude_ab': SOURCE_MAG_F814W_AB,
             'input_band': SOURCE_BAND,
             'input_magnitude_note': (
-                'Mean magnification-corrected apparent magnitude of the '
+                'Median magnification-corrected apparent magnitude of the '
                 '46-source SLACS emission-line sample; the anchor is '
-                'intrinsic, not observed through the lens.'
+                'intrinsic, not observed through the lens. Newton et al. '
+                '2011 Table 1 measured medians: I814 24.13 (full '
+                '46-source sample) and 24.20 (z_s 0.4-0.8 subset, n=34), '
+                'per-source photometric uncertainty 0.3 mag; the ruled D1 '
+                'value adopts 24.3 F814W + 0.545 color to V at 500 nm.'
             ),
             'input_citation': 'L1',
             'sed_mode': sed_mode,

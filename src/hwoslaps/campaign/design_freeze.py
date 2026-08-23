@@ -70,13 +70,15 @@ REQUIRED_BLOCKS = (
 )
 """Top-level blocks every freeze document must carry (`tuple` of `str`)."""
 
-REQUIRED_PROVISIONAL_ITEMS = (
-    "parent_design",
-    "representative_48_semantics",
-    "t4_noisy_g_labelling",
-    "template_83935_resolution_caveat",
-)
-"""Identifiers of the items awaiting ratification (`tuple` of `str`)."""
+REQUIRED_PROVISIONAL_ITEMS = ()
+"""Identifiers of the items awaiting ratification (`tuple` of `str`).
+
+Empty since the 2026-08-23 ratification: every item the version-1
+freeze listed was ruled by George that evening and the rulings are
+recorded in the freeze's ``ratifications`` block. A freeze document
+naming any provisional item now fails validation, because nothing is
+open.
+"""
 
 
 class DesignFreezeError(ValueError):
@@ -507,6 +509,20 @@ def validate_design_freeze(document: dict) -> dict:
         _required(reference, "sha256", "observing.reference"),
         "observing.reference.sha256",
     )
+    if "golden_anchor" in observing:
+        golden_anchor = _require_mapping(
+            observing["golden_anchor"], "observing.golden_anchor"
+        )
+        anchor_path = _required(golden_anchor, "path", "observing.golden_anchor")
+        if not isinstance(anchor_path, str) or not anchor_path:
+            raise DesignFreezeError(
+                "observing.golden_anchor.path must be a repo-relative path, "
+                f"got {anchor_path!r}"
+            )
+        _require_sha256(
+            _required(golden_anchor, "sha256", "observing.golden_anchor"),
+            "observing.golden_anchor.sha256",
+        )
     detector = _require_mapping(
         _required(observing, "detector", "observing"), "observing.detector"
     )
@@ -550,6 +566,13 @@ def validate_design_freeze(document: dict) -> dict:
         _required(pre_registration, "sha256", "selection.pre_registration"),
         "selection.pre_registration.sha256",
     )
+    if "committed_path" in pre_registration:
+        committed_path = pre_registration["committed_path"]
+        if not isinstance(committed_path, str) or not committed_path:
+            raise DesignFreezeError(
+                "selection.pre_registration.committed_path must be a "
+                f"repo-relative path, got {committed_path!r}"
+            )
     score = _require_mapping(
         _required(selection, "score", "selection"), "selection.score"
     )
@@ -711,6 +734,13 @@ def verify_bound_artifacts(freeze: dict, root: Optional[Path] = None) -> dict:
     they are on disk and named in the report's ``absent`` list when they
     are not, so their absence is recorded rather than assumed.
 
+    The optional ``selection.pre_registration.committed_path`` names a
+    committed copy of the pre-registration document carrying the same
+    frozen digest. When the freeze declares it, that copy is a required
+    artifact like any other committed one, so the signed selection rule
+    is bound into a clean clone rather than reachable only through an
+    untracked ``scratch`` tree that may never have been distributed.
+
     Parameters
     ----------
     freeze : `dict`
@@ -741,10 +771,22 @@ def verify_bound_artifacts(freeze: dict, root: Optional[Path] = None) -> dict:
     }
     for level in template_levels(freeze):
         committed[f"template_{level['id']}"] = (level["asset_path"], level["sha256"])
+    pre_registration = freeze["selection"]["pre_registration"]
+    if "committed_path" in pre_registration:
+        committed["selection_pre_registration_committed"] = (
+            pre_registration["committed_path"],
+            pre_registration["sha256"],
+        )
+    golden_anchor = freeze["observing"].get("golden_anchor")
+    if golden_anchor is not None:
+        committed["golden_magnitude_anchor"] = (
+            golden_anchor["path"],
+            golden_anchor["sha256"],
+        )
     untracked = {
         "selection_pre_registration": (
-            freeze["selection"]["pre_registration"]["path"],
-            freeze["selection"]["pre_registration"]["sha256"],
+            pre_registration["path"],
+            pre_registration["sha256"],
         ),
         "parent_design_source": (
             freeze["parent_design_source"]["path"],

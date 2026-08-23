@@ -48,9 +48,12 @@ metadata:
   source_photometry:
     input_magnitude_ab: 24.3
     input_band: F814W
-    input_magnitude_note: Mean magnification-corrected apparent magnitude of the 46-source
-      SLACS emission-line sample; the anchor is intrinsic, not observed through the
-      lens.
+    input_magnitude_note: 'Median magnification-corrected apparent magnitude of the
+      46-source SLACS emission-line sample; the anchor is intrinsic, not observed
+      through the lens. Newton et al. 2011 Table 1 measured medians: I814 24.13 (full
+      46-source sample) and 24.20 (z_s 0.4-0.8 subset, n=34), per-source photometric
+      uncertainty 0.3 mag; the ruled D1 value adopts 24.3 F814W + 0.545 color to V
+      at 500 nm.'
     input_citation: L1
     sed_mode: vband_photometry
     sed_mode_description: measured V-band source photometry used directly
@@ -119,7 +122,7 @@ metadata:
     package: hwo_sci_eng
     version: 0.1.9
     status: current public HWO working engineering reference adopted for this study
-    vendored_path: scratch/q1_observing_conditions/sei_v0.1.9
+    vendored_path: configs/observing/sei_v0.1.9
     data_files_read:
     - HRI.yaml
     - EAC1.yaml
@@ -345,5 +348,5 @@ metadata:
     SEI: HWO Science Engineering Interface, hwo_sci_eng v0.1.9, B. Sitarski (NASA/GSFC)
       and J. Tumlinson (STScI), https://github.com/HWO-GOMAP-Working-Groups/Sci-Eng-Interface;
       consumed by the official HWO ETC (spacetelescope/hwo-tools via syotools, models/camera.py
-      set_from_sei). PyPI wheel and the HRI/EAC1 data files vendored at scratch/q1_observing_conditions/sei_v0.1.9
+      set_from_sei). PyPI wheel and the HRI/EAC1 data files vendored at configs/observing/sei_v0.1.9
       with SHA256SUMS.

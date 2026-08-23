@@ -66,6 +66,17 @@ def main():
         "config_hash": np.asarray(config_hash(config)),
         "campaign_uuid": np.asarray(os.environ["HWOSLAPS_CAMPAIGN_UUID"]),
     }
+    stage0 = config.get("stage0")
+    if isinstance(stage0, dict):
+        identity["code_revision_sha256"] = np.asarray(
+            str(stage0["code_revision"]["sha256"])
+        )
+        identity["source_asset_sha256"] = np.asarray(
+            str(stage0["source_asset_sha256"])
+        )
+    forged = control.get("forge_identity", {}).get(job_id, {})
+    for member, value in forged.items():
+        identity[member] = np.asarray(value)
     for member in control.get("omit_identity", {}).get(job_id, []):
         del identity[member]
     output_dir = Path(config["plotting"]["output_dir"]) / job_id
@@ -121,6 +132,38 @@ def _default_jobs():
             "job_id": "job_c",
             "scene": "scene_b",
             "overrides": {"psf": {"kernel": {"shape_native": [201, 201]}}},
+        },
+    ]
+
+
+STAGE0_CODE_REVISION_SHA256 = "c" * 64
+STAGE0_SOURCE_ASSET_SHA256 = "d" * 64
+
+STAGE0_DECLARED_DIGESTS = {
+    "code_revision_sha256": STAGE0_CODE_REVISION_SHA256,
+    "source_asset_sha256": STAGE0_SOURCE_ASSET_SHA256,
+}
+
+
+def _stage0_jobs():
+    """Build one job whose staged config pins Stage 0 provenance digests."""
+    return [
+        {
+            "job_id": "job_a",
+            "scene": "scene_a",
+            "overrides": {
+                "psf": {"kernel": {"shape_native": [101, 101]}},
+                "stage0": {
+                    "system_id": "job_a",
+                    "source_asset_path": "data/templates/stub_template.npz",
+                    "source_asset_sha256": STAGE0_SOURCE_ASSET_SHA256,
+                    "code_revision": {
+                        "git_hash": "a" * 40,
+                        "git_dirty": False,
+                        "sha256": STAGE0_CODE_REVISION_SHA256,
+                    },
+                },
+            },
         },
     ]
 
@@ -385,6 +428,96 @@ def test_gate3_artifact_missing_one_identity_member(tmp_path, member):
 
     assert not (root / "sentinels" / "job_a.DONE").exists()
     assert not (root / "sentinels" / "CAMPAIGN_COMPLETE").exists()
+
+
+def test_gate3_declared_stage0_digests_are_bound_into_the_artifact(tmp_path):
+    """A job pinning provenance digests validates when the artifact agrees."""
+    root = (tmp_path / "campaign").resolve()
+    manifest = _campaign_manifest(
+        tmp_path,
+        root,
+        jobs=_stage0_jobs(),
+    )
+    s1.freeze_campaign(manifest)
+    summary = s1.run_campaign(root, 1, timeout_s=120.0)
+
+    assert summary["executed_job_ids"] == ["job_a"]
+    assert (root / "sentinels" / "job_a.DONE").is_file()
+    assert (root / "sentinels" / "CAMPAIGN_COMPLETE").is_file()
+
+    staged = _staged_config(root, "job_a")
+    assert staged["stage0"]["code_revision"]["sha256"] == (
+        STAGE0_CODE_REVISION_SHA256
+    )
+    with np.load(root / "outputs" / "job_a" / "result.npz") as stored:
+        for member, expected in STAGE0_DECLARED_DIGESTS.items():
+            assert str(stored[member]) == expected
+
+    assert s1.harvest_campaign(root).is_file()
+
+
+@pytest.mark.parametrize("member", sorted(STAGE0_DECLARED_DIGESTS))
+def test_gate3_mismatched_stage0_digest_fails_validation(tmp_path, member):
+    """An artifact carrying a digest the staged config never pinned fails."""
+    forged = "e" * 64
+    root = (tmp_path / "campaign").resolve()
+    manifest = _campaign_manifest(
+        tmp_path,
+        root,
+        control={"forge_identity": {"job_a": {member: forged}}},
+        jobs=_stage0_jobs(),
+    )
+    s1.freeze_campaign(manifest)
+
+    with pytest.raises(s1.CampaignError) as run_error:
+        s1.run_campaign(root, 1, timeout_s=120.0)
+    message = str(run_error.value)
+    assert "job_a" in message
+    assert "validation_failed" in message
+    assert member in message
+    assert forged in message
+    assert STAGE0_DECLARED_DIGESTS[member] in message
+
+    assert not (root / "sentinels" / "job_a.DONE").exists()
+    assert not (root / "sentinels" / "CAMPAIGN_COMPLETE").exists()
+
+
+@pytest.mark.parametrize("member", sorted(STAGE0_DECLARED_DIGESTS))
+def test_gate3_missing_declared_stage0_digest_fails_validation(tmp_path, member):
+    """A declared provenance digest the artifact omits fails the job."""
+    root = (tmp_path / "campaign").resolve()
+    manifest = _campaign_manifest(
+        tmp_path,
+        root,
+        control={"omit_identity": {"job_a": [member]}},
+        jobs=_stage0_jobs(),
+    )
+    s1.freeze_campaign(manifest)
+
+    with pytest.raises(s1.CampaignError) as run_error:
+        s1.run_campaign(root, 1, timeout_s=120.0)
+    message = str(run_error.value)
+    assert "job_a" in message
+    assert "validation_failed" in message
+    assert f"required '{member}'" in message
+    assert STAGE0_DECLARED_DIGESTS[member] in message
+
+    assert not (root / "sentinels" / "job_a.DONE").exists()
+    assert not (root / "sentinels" / "CAMPAIGN_COMPLETE").exists()
+
+
+def test_gate3_jobs_without_stage0_declarations_need_no_digests(tmp_path):
+    """A campaign that pins nothing is not asked for provenance members."""
+    root = (tmp_path / "campaign").resolve()
+    manifest = _campaign_manifest(tmp_path, root, jobs=_default_jobs()[:1])
+    s1.freeze_campaign(manifest)
+    s1.run_campaign(root, 1, timeout_s=120.0)
+
+    assert "stage0" not in _staged_config(root, "job_a")
+    with np.load(root / "outputs" / "job_a" / "result.npz") as stored:
+        assert "code_revision_sha256" not in stored.files
+        assert "source_asset_sha256" not in stored.files
+    assert (root / "sentinels" / "job_a.DONE").is_file()
 
 
 def test_gate3_successful_no_op_cannot_certify_a_prior_artifact(tmp_path):
