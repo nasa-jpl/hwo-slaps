@@ -1165,35 +1165,50 @@ class JaxGridTemplateEngine:
                 "JAX grid engine was built without sigma_masked; whitened "
                 "reductions are unavailable."
             )
+        pending = None
+        for batch in self._position_batches(positions):
+            current = self._batch_reductions(batch, self._alpha_radial)
+            if pending is not None:
+                yield self._materialize_reductions(pending)
+            pending = current
+        if pending is not None:
+            yield self._materialize_reductions(pending)
+
+    def _materialize_reductions(self, reductions) -> GridReductionBatch:
+        """Bring one batch of device reductions onto the host.
+
+        Dispatch is asynchronous, so the conversion here is where the host
+        actually waits on the device.  The iterator dispatches the next
+        batch before materializing the previous one, letting the device
+        compute one batch ahead of the transfer it overlaps.
+        """
         mismatch = self._truth_kernel_fft is not None
         biased = self._bias_whitened is not None
-        for batch in self._position_batches(positions):
-            reductions = self._batch_reductions(batch, self._alpha_radial)
-            yield GridReductionBatch(
-                raw=np.asarray(reductions["raw"], dtype=float),
-                cross=np.asarray(reductions["cross"], dtype=float),
-                finite=np.asarray(reductions["finite"], dtype=bool),
-                signal_data_inner=(
-                    np.asarray(reductions["signal_data_inner"], dtype=float)
-                    if mismatch
-                    else None
-                ),
-                data_cross=(
-                    np.asarray(reductions["data_cross"], dtype=float)
-                    if mismatch
-                    else None
-                ),
-                data_finite=(
-                    np.asarray(reductions["data_finite"], dtype=bool)
-                    if mismatch
-                    else None
-                ),
-                signal_bias_inner=(
-                    np.asarray(reductions["signal_bias_inner"], dtype=float)
-                    if biased
-                    else None
-                ),
-            )
+        return GridReductionBatch(
+            raw=np.asarray(reductions["raw"], dtype=float),
+            cross=np.asarray(reductions["cross"], dtype=float),
+            finite=np.asarray(reductions["finite"], dtype=bool),
+            signal_data_inner=(
+                np.asarray(reductions["signal_data_inner"], dtype=float)
+                if mismatch
+                else None
+            ),
+            data_cross=(
+                np.asarray(reductions["data_cross"], dtype=float)
+                if mismatch
+                else None
+            ),
+            data_finite=(
+                np.asarray(reductions["data_finite"], dtype=bool)
+                if mismatch
+                else None
+            ),
+            signal_bias_inner=(
+                np.asarray(reductions["signal_bias_inner"], dtype=float)
+                if biased
+                else None
+            ),
+        )
 
     def _position_batches(self, positions: Sequence[Tuple[float, float]]):
         """Yield device-resident position batches, bounds-checked."""
