@@ -1126,51 +1126,48 @@ class FisherDetector:
         threshold = float(self.map_config.get("detection_q_threshold", 10.0))
 
         start = perf_counter()
-        on_device = self._grid_device_projection_enabled()
-        if on_device:
-            signal_iter: Iterator[Any] = self._grid_reduction_iterator(positions)
+        if self._grid_device_projection_enabled():
+            results = self._stream_reduction_batches(positions, n_positions)
         else:
-            signal_iter = self._grid_signal_iterator(
+            signal_iter: Iterator[Any] = self._grid_signal_iterator(
                 positions, num_workers=num_workers
             )
-        progressed = self._progress_iter(
-            signal_iter,
-            desc="Fisher grid map templates",
-            total=n_positions,
-        )
+            progressed = self._progress_iter(
+                signal_iter,
+                desc="Fisher grid map templates",
+                total=n_positions,
+            )
 
-        batch: List[Any] = []
-        results = []
+            batch: List[Any] = []
+            results = []
 
-        def _flush() -> None:
-            if not batch:
-                return
-            if on_device:
-                results.append(self._evaluate_reduction_batch(batch))
-            elif self.mismatch_enabled:
-                signal_matrix = np.column_stack([pair[0] for pair in batch])
-                data_matrix = np.column_stack([pair[1] for pair in batch])
-                signal_whitened = self.whitener.apply(signal_matrix)
-                data_whitened = self.whitener.apply(data_matrix)
-                assert self._bias_whitened is not None
-                results.append(
-                    self.workspace.evaluate_signal_bank(
-                        signal_whitened.T,
-                        data_bank_whitened=data_whitened.T,
-                        bias_whitened=self._bias_whitened,
+            def _flush() -> None:
+                if not batch:
+                    return
+                if self.mismatch_enabled:
+                    signal_matrix = np.column_stack([pair[0] for pair in batch])
+                    data_matrix = np.column_stack([pair[1] for pair in batch])
+                    signal_whitened = self.whitener.apply(signal_matrix)
+                    data_whitened = self.whitener.apply(data_matrix)
+                    assert self._bias_whitened is not None
+                    results.append(
+                        self.workspace.evaluate_signal_bank(
+                            signal_whitened.T,
+                            data_bank_whitened=data_whitened.T,
+                            bias_whitened=self._bias_whitened,
+                        )
                     )
-                )
-            else:
-                signal_matrix = np.column_stack(batch)
-                whitened = self.whitener.apply(signal_matrix)
-                results.append(self.workspace.evaluate_signal_bank(whitened.T))
-            batch.clear()
+                else:
+                    signal_matrix = np.column_stack(batch)
+                    whitened = self.whitener.apply(signal_matrix)
+                    results.append(self.workspace.evaluate_signal_bank(whitened.T))
+                batch.clear()
 
-        for signal in progressed:
-            batch.append(signal if on_device else np.asarray(signal, dtype=float))
-            if len(batch) >= self._GRID_EVAL_BATCH:
-                _flush()
-        _flush()
+            for signal in progressed:
+                batch.append(np.asarray(signal, dtype=float))
+                if len(batch) >= self._GRID_EVAL_BATCH:
+                    _flush()
+            _flush()
         self._log_timing(
             "grid map streaming evaluation",
             perf_counter() - start,
@@ -1317,16 +1314,47 @@ class FisherDetector:
             profiled_nuisance_names=list(self.nuisance_names),
         )
 
-    def _evaluate_reduction_batch(self, batch: Sequence[Any]):
-        """Evaluate one flush batch of device-computed whitened reductions."""
-        count = len(batch)
-        raw = np.fromiter(
-            (item.raw for item in batch), dtype=float, count=count
+    def _stream_reduction_batches(
+        self,
+        positions: Sequence[Tuple[float, float]],
+        n_positions: int,
+    ) -> List[Any]:
+        """Evaluate the workspace over device-reduced grid batches.
+
+        The engine returns one object of arrays per device batch, so nothing
+        on this side is ever per node: whole batches accumulate until the
+        flush size is reached and are then concatenated into a single bank
+        evaluation, leaving the evaluation cadence of the dense path intact.
+        """
+        results: List[Any] = []
+        pending: List[Any] = []
+        pending_positions = 0
+        progress = self._progress_bar(
+            desc="Fisher grid map templates",
+            total=n_positions,
         )
-        cross = np.stack([item.cross for item in batch])
-        signals_finite = np.fromiter(
-            (item.finite for item in batch), dtype=bool, count=count
-        )
+        try:
+            for reductions in self._grid_reduction_iterator(positions):
+                pending.append(reductions)
+                pending_positions += reductions.raw.shape[0]
+                if progress is not None:
+                    progress.update(reductions.raw.shape[0])
+                if pending_positions >= self._GRID_EVAL_BATCH:
+                    results.append(self._evaluate_reduction_batches(pending))
+                    pending = []
+                    pending_positions = 0
+            if pending:
+                results.append(self._evaluate_reduction_batches(pending))
+        finally:
+            if progress is not None:
+                progress.close()
+        return results
+
+    def _evaluate_reduction_batches(self, batches: Sequence[Any]):
+        """Evaluate one flush of device-computed whitened reduction batches."""
+        raw = np.concatenate([item.raw for item in batches])
+        cross = np.concatenate([item.cross for item in batches])
+        signals_finite = np.concatenate([item.finite for item in batches])
         if not self.mismatch_enabled:
             return self.workspace.evaluate_signal_bank_reduced(
                 raw=raw,
@@ -1341,15 +1369,13 @@ class FisherDetector:
             cross=cross,
             signals_finite=signals_finite,
             whitened_size=self.pixels_unmasked,
-            signal_data_inner=np.fromiter(
-                (item.signal_data_inner for item in batch), dtype=float, count=count
+            signal_data_inner=np.concatenate(
+                [item.signal_data_inner for item in batches]
             ),
-            data_cross=np.stack([item.data_cross for item in batch]),
-            data_finite=np.fromiter(
-                (item.data_finite for item in batch), dtype=bool, count=count
-            ),
-            signal_bias_inner=np.fromiter(
-                (item.signal_bias_inner for item in batch), dtype=float, count=count
+            data_cross=np.concatenate([item.data_cross for item in batches]),
+            data_finite=np.concatenate([item.data_finite for item in batches]),
+            signal_bias_inner=np.concatenate(
+                [item.signal_bias_inner for item in batches]
             ),
             bias_whitened=self._bias_whitened,
         )
@@ -1416,7 +1442,7 @@ class FisherDetector:
         self,
         positions: Sequence[Tuple[float, float]],
     ) -> Iterator[Any]:
-        """Yield device-computed whitened reductions for grid nodes."""
+        """Yield device-computed whitened reduction batches for grid nodes."""
         if self._jax_grid_engine is None:
             self._jax_grid_engine = self._build_jax_grid_engine(positions)
         yield from self._jax_grid_engine.reduction_iterator(positions)
@@ -1638,6 +1664,28 @@ class FisherDetector:
             return iterable
         return _tqdm(
             iterable,
+            desc=desc,
+            total=total,
+            dynamic_ncols=True,
+            leave=False,
+            mininterval=0.2,
+        )
+
+    def _progress_bar(
+        self,
+        *,
+        desc: str,
+        total: Optional[int] = None,
+    ):
+        """Return a progress bar the caller advances itself, or `None`.
+
+        Producers that hand back batches still have to report progress in
+        the units the bar counts, so the bar is advanced by the batch length
+        rather than once per yielded object.
+        """
+        if not self.show_progress:
+            return None
+        return _tqdm(
             desc=desc,
             total=total,
             dynamic_ncols=True,
