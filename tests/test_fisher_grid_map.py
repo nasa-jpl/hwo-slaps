@@ -2078,3 +2078,62 @@ def test_jax_radial_table_covers_far_grid_and_guard_rejects_truncation(grid_setu
     jax_detector._jax_grid_engine._radial_r_max = 0.5
     with pytest.raises(ValueError, match="radial deflection table is too small"):
         next(jax_detector._jax_grid_engine.signal_iterator([(12.0, 12.0)]))
+
+
+def test_jax_engine_retarget_reproduces_a_rebuilt_engine(grid_setup):
+    """A retargeted rung must equal the rung a fresh engine would render.
+
+    Advancing the mass in place keeps the macro deflections, the source
+    profiles, the kernel FFTs, the mask and the compiled batch executable
+    of the first rung, so the only defensible retarget is one whose map is
+    bit-identical to the map an engine built at that mass produces.
+    """
+    pytest.importorskip("jax")
+    detector = _make_jax_detector(grid_setup)
+    detector.compute_grid_map()
+    engine = detector._jax_grid_engine
+    assert engine is not None
+
+    heavier = 4.0*float(detector.map_config_template["lensing"]["subhalo"]["mass"])
+    for template in (
+        detector.full_config,
+        detector.map_config_template,
+        detector.map_config_template_truth,
+    ):
+        template["lensing"]["subhalo"]["mass"] = heavier
+    detector.retarget_grid_engine()
+    assert detector._jax_grid_engine is engine
+    retargeted = detector.compute_grid_map()
+
+    heavier_setup = dict(grid_setup)
+    heavier_config = copy.deepcopy(grid_setup["config"])
+    heavier_config["lensing"]["subhalo"]["mass"] = heavier
+    heavier_setup["config"] = heavier_config
+    rebuilt_detector = _make_jax_detector(heavier_setup)
+    rebuilt = rebuilt_detector.compute_grid_map()
+    rebuilt_engine = rebuilt_detector._jax_grid_engine
+
+    assert retargeted.subhalo_mass == pytest.approx(heavier)
+    np.testing.assert_array_equal(engine._radii, rebuilt_engine._radii)
+    np.testing.assert_array_equal(
+        np.asarray(engine._alpha_radial),
+        np.asarray(rebuilt_engine._alpha_radial),
+    )
+    np.testing.assert_array_equal(retargeted.q_asimov_2d, rebuilt.q_asimov_2d)
+    np.testing.assert_array_equal(retargeted.fisher_raw_2d, rebuilt.fisher_raw_2d)
+
+
+def test_jax_engine_retarget_refuses_a_template_that_moved_elsewhere(grid_setup):
+    """Only the subhalo mass may change under a retarget.
+
+    Every other build product is retained, so a template that drifted
+    anywhere else would be rendered against stale macro deflections,
+    sources or kernels. That is a science error, not a cache miss.
+    """
+    pytest.importorskip("jax")
+    detector = _make_jax_detector(grid_setup)
+    detector.compute_grid_map()
+
+    detector.map_config_template["observation"]["exposure_time"] *= 2.0
+    with pytest.raises(ValueError, match="changed subhalo mass only"):
+        detector.retarget_grid_engine()

@@ -29,10 +29,16 @@ block-mean binning, FFT PSF convolution (equivalent to the simulator's
 zero-padded same-mode convolution), the ADU transform, and the masked
 signal vector.  Accuracy relative to the reference path is set by the
 radial table and FFT round-off and is gated by the equivalence tests.
+
+The radial deflection table is the one build product that carries the
+subhalo mass, and it enters the jitted kernel as a traced argument, so a
+mass ladder retargets one engine through ``retarget_subhalo`` instead of
+rebuilding the macro deflections, sources, kernels and executable per rung.
 """
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
@@ -303,6 +309,9 @@ class JaxGridTemplateEngine:
             centre_yx=self._query_centre_yx,
         )
         self._radial_r_max = float(radii[-1])
+        self._radii = radii
+        self._lensing_baseline = lensing_baseline
+        self._map_config_template = deepcopy(map_config_template)
 
         source_profiles, image_profiles = self._extract_source_profiles(
             tracer=tracer,
@@ -402,7 +411,13 @@ class JaxGridTemplateEngine:
         self._offset_adu = (sky_e + dark_e) / gain
         self._gain = gain
 
-        self._batch_signals = jax.jit(jax.vmap(self._signal_for_position))
+        # The radial deflection table is the only build product that carries
+        # the subhalo mass, so it enters the jitted kernel as a traced
+        # argument: retargeting a rung then swaps one device array instead of
+        # invalidating the executable.
+        self._batch_signals = jax.jit(
+            jax.vmap(self._signal_for_position, in_axes=(0, None))
+        )
 
         self._sigma_masked = None
         self._nuisance_whitened = None
@@ -460,7 +475,9 @@ class JaxGridTemplateEngine:
         self._sigma_masked = jnp.asarray(sigma)
         self._nuisance_whitened = jnp.asarray(nuisance)
         self._bias_whitened = None if bias is None else jnp.asarray(bias)
-        self._batch_reductions = jax.jit(jax.vmap(self._reduction_for_position))
+        self._batch_reductions = jax.jit(
+            jax.vmap(self._reduction_for_position, in_axes=(0, None))
+        )
 
     # ------------------------------------------------------------------
     # Build-time extraction
@@ -558,8 +575,6 @@ class JaxGridTemplateEngine:
         candidate_positions: Optional[np.ndarray] = None,
         centre_yx: Optional[np.ndarray] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        import autolens as al
-
         if centre_yx is None:
             centre_yx = np.zeros(2, dtype=float)
         centre_yx = np.asarray(centre_yx, dtype=float)
@@ -595,6 +610,18 @@ class JaxGridTemplateEngine:
             np.log10(r_max),
             sample_count,
         )
+        return radii, cls._radial_deflection_on(subhalo_profile, radii)
+
+    @staticmethod
+    def _radial_deflection_on(subhalo_profile, radii: np.ndarray) -> np.ndarray:
+        """Evaluate one subhalo profile on a fixed radius table.
+
+        The radius table depends only on the grid geometry and the candidate
+        positions, so a mass change is absorbed entirely by re-evaluating the
+        profile on the radii the engine was built with.
+        """
+        import autolens as al
+
         sample_grid = al.Grid2DIrregular(
             values=np.column_stack([np.zeros_like(radii), radii])
         )
@@ -604,7 +631,7 @@ class JaxGridTemplateEngine:
         alpha_radial = deflections[:, 1]
         if not np.all(np.isfinite(alpha_radial)):
             raise ValueError("Subhalo radial deflection table contains non-finite values.")
-        return radii, alpha_radial
+        return alpha_radial
 
     @staticmethod
     def _sersic_params_from_profile(light_profile) -> Dict[str, float]:
@@ -950,14 +977,14 @@ class JaxGridTemplateEngine:
         image = brightness.reshape(n_pix, self._sub_per_pix).mean(axis=1)
         return image.reshape(self._shape_native)
 
-    def _signal_for_position(self, position_yx):
+    def _signal_for_position(self, position_yx, alpha_radial):
         jnp = self._jnp
 
         delta = self._coords - position_yx[None, :]
         radius = jnp.sqrt(delta[:, 0] ** 2 + delta[:, 1] ** 2)
         radius_safe = jnp.clip(radius, jnp.exp(self._log_radii[0]), None)
         alpha_r = jnp.interp(
-            jnp.log(radius_safe), self._log_radii, self._alpha_radial
+            jnp.log(radius_safe), self._log_radii, alpha_radial
         )
         alpha_sub = alpha_r[:, None] * delta / radius_safe[:, None]
         image = self._render_for_macro(self._alpha_macro_fit, alpha_sub)
@@ -1008,7 +1035,7 @@ class JaxGridTemplateEngine:
         data_residual = (mu1_truth_flat - self._mu0_flat)[self._mask_flat_idx]
         return jnp.stack((model_signal, data_residual), axis=0)
 
-    def _reduction_for_position(self, position_yx):
+    def _reduction_for_position(self, position_yx, alpha_radial):
         """Whiten one node's signal vector and reduce it on the device.
 
         The whitening is the same elementwise division by the per-pixel
@@ -1016,7 +1043,7 @@ class JaxGridTemplateEngine:
         quantities the profiled-likelihood algebra needs from the data axis.
         """
         jnp = self._jnp
-        signal = self._signal_for_position(position_yx)
+        signal = self._signal_for_position(position_yx, alpha_radial)
 
         if self._truth_kernel_fft is None:
             model_whitened = signal / self._sigma_masked
@@ -1042,6 +1069,52 @@ class JaxGridTemplateEngine:
     # Public API
     # ------------------------------------------------------------------
 
+    def retarget_subhalo(self, map_config_template: Dict[str, Any]) -> None:
+        """Point the engine at a new subhalo mass without rebuilding it.
+
+        Every other build product -- the over-sampled grid, the macro
+        deflection fields, the extracted source profiles, the kernel FFTs,
+        the mask and the compiled batch executable -- describes the baseline
+        scene and is independent of the injected mass, so only the radial
+        deflection table is resampled and swapped onto the device.
+
+        Parameters
+        ----------
+        map_config_template : `dict`
+            Config template carrying the new subhalo mass. It must differ
+            from the template the engine was built with in the subhalo mass
+            alone.
+
+        Raises
+        ------
+        ValueError
+            If the template differs anywhere outside the subhalo mass, since
+            the retained build products would then be stale.
+        """
+        template = deepcopy(map_config_template)
+        self._verify_retarget_template(template)
+        subhalo_profile = self._build_subhalo_profile(
+            lensing_baseline=self._lensing_baseline,
+            map_config_template=template,
+        )
+        self._alpha_radial = self._jnp.asarray(
+            self._radial_deflection_on(subhalo_profile, self._radii)
+        )
+        self._map_config_template = template
+
+    def _verify_retarget_template(self, template: Dict[str, Any]) -> None:
+        """Fail unless a retarget template changes the subhalo mass alone."""
+        previous = deepcopy(self._map_config_template)
+        current = deepcopy(template)
+        for config in (previous, current):
+            config["lensing"]["subhalo"].pop("mass", None)
+        if previous != current:
+            raise ValueError(
+                "Retargeting the JAX grid engine supports a changed subhalo "
+                "mass only; the rest of the map config template must be "
+                "identical to the one the engine was built from."
+            )
+
     def signal_iterator(
         self, positions: Sequence[Tuple[float, float]]
     ) -> Iterator[np.ndarray]:
@@ -1060,7 +1133,7 @@ class JaxGridTemplateEngine:
             kernel was supplied.
         """
         for batch in self._position_batches(positions):
-            signals = np.asarray(self._batch_signals(batch))
+            signals = np.asarray(self._batch_signals(batch, self._alpha_radial))
             for row in signals:
                 yield row
 
@@ -1092,7 +1165,7 @@ class JaxGridTemplateEngine:
         mismatch = self._truth_kernel_fft is not None
         biased = self._bias_whitened is not None
         for batch in self._position_batches(positions):
-            reductions = self._batch_reductions(batch)
+            reductions = self._batch_reductions(batch, self._alpha_radial)
             raw = np.asarray(reductions["raw"], dtype=float)
             cross = np.asarray(reductions["cross"], dtype=float)
             finite = np.asarray(reductions["finite"], dtype=bool)

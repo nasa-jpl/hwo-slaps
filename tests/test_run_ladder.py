@@ -1262,3 +1262,31 @@ def test_the_ladder_consumes_no_random_stream(monkeypatch):
     )
     assert str(payload["stop_reason"]) == stop_reason
     assert payload["rung_logm"].size == len(table)
+
+
+def test_the_jax_compilation_cache_is_off_unless_a_directory_is_named(
+    monkeypatch, tmp_path
+):
+    """The persistent compilation cache is opt-in and never on by default.
+
+    A production ladder must behave the same whether or not a machine
+    happens to carry a cache, so the hook does nothing at all until
+    `HWOSLAPS_JAX_CACHE_DIR` names a directory, and then points JAX at
+    exactly that directory.
+    """
+    jax = pytest.importorskip("jax")
+
+    monkeypatch.delenv(runner.JAX_CACHE_DIR_ENV, raising=False)
+    monkeypatch.setattr(
+        jax.config, "update", lambda *args: pytest.fail("cache configured")
+    )
+    runner._enable_jax_compilation_cache()
+
+    updates = {}
+    monkeypatch.setattr(
+        jax.config, "update", lambda name, value: updates.__setitem__(name, value)
+    )
+    monkeypatch.setenv(runner.JAX_CACHE_DIR_ENV, str(tmp_path/"jax-cache"))
+    runner._enable_jax_compilation_cache()
+    assert updates["jax_compilation_cache_dir"] == str(tmp_path/"jax-cache")
+    assert updates["jax_persistent_cache_min_compile_time_secs"] == 0.0

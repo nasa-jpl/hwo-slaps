@@ -109,6 +109,9 @@ APERTURE_THETA_E_FACTOR = 2.0
 TIERS = ("parent", "selected")
 """Tiers a ladder job may belong to (`tuple`)."""
 
+JAX_CACHE_DIR_ENV = "HWOSLAPS_JAX_CACHE_DIR"
+"""Environment variable holding an optional JAX compilation cache (`str`)."""
+
 
 def _build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser."""
@@ -148,6 +151,28 @@ def _enable_float64() -> None:
             "The ladder renders in float64, but JAX 64-bit mode could not be "
             "enabled"
         )
+
+
+def _enable_jax_compilation_cache() -> None:
+    """Point JAX at a persistent compilation cache when one is asked for.
+
+    The grid engine compiles one batch executable per distinct batch
+    shape, which is cold work every job repeats from scratch. Setting
+    ``HWOSLAPS_JAX_CACHE_DIR`` lets jobs on one machine share those
+    executables; leaving it unset keeps JAX's default of no on-disk cache,
+    so a production run is unaffected by this hook.
+    """
+    cache_dir = os.environ.get(JAX_CACHE_DIR_ENV, "").strip()
+    if not cache_dir:
+        return
+
+    import jax
+
+    jax.config.update("jax_compilation_cache_dir", cache_dir)
+    # Every executable the ladder compiles is worth keeping; JAX otherwise
+    # caches only those that took longer than a wall-clock threshold, which
+    # would make the cache's contents depend on machine load.
+    jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
 
 
 def _verify_ladder_block(config: dict) -> dict:
@@ -443,10 +468,10 @@ def _build_detector(rung_config: dict, psf_data):
 def _point_detector_at_rung(detector, logm: float) -> None:
     """Point the reused detector at the next mass rung.
 
-    Only the template configurations and the cached grid template engine
-    carry the injected mass, so a rung is advanced by rewriting those and
-    dropping the engine built for the previous rung. Everything the
-    detector spent its construction on is baseline work and survives.
+    Only the template configurations and the grid engine's radial deflection
+    table carry the injected mass, so a rung is advanced by rewriting the
+    templates and retargeting the engine. Everything the detector and the
+    engine spent their construction on is baseline work and survives.
 
     Parameters
     ----------
@@ -462,7 +487,7 @@ def _point_detector_at_rung(detector, logm: float) -> None:
         detector.map_config_template_truth,
     ):
         template["lensing"]["subhalo"]["mass"] = mass
-    detector._jax_grid_engine = None
+    detector.retarget_grid_engine()
 
 
 def _rung_metrics(
@@ -704,6 +729,7 @@ def main(argv=None) -> None:
     _verify_psf_state(config)
 
     _enable_float64()
+    _enable_jax_compilation_cache()
 
     from hwoslaps.config.validation import validate_or_raise
     from hwoslaps.provenance import config_hash, write_provenance
