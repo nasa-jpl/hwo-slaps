@@ -443,10 +443,10 @@ def _build_detector(rung_config: dict, psf_data):
 def _point_detector_at_rung(detector, logm: float) -> None:
     """Point the reused detector at the next mass rung.
 
-    Only the template configurations and the cached grid template engine
-    carry the injected mass, so a rung is advanced by rewriting those and
-    dropping the engine built for the previous rung. Everything the
-    detector spent its construction on is baseline work and survives.
+    Only the template configurations and the grid engine's radial deflection
+    table carry the injected mass, so a rung is advanced by rewriting the
+    templates and retargeting the engine. Everything the detector and the
+    engine spent their construction on is baseline work and survives.
 
     Parameters
     ----------
@@ -462,7 +462,7 @@ def _point_detector_at_rung(detector, logm: float) -> None:
         detector.map_config_template_truth,
     ):
         template["lensing"]["subhalo"]["mass"] = mass
-    detector._jax_grid_engine = None
+    detector.retarget_grid_engine()
 
 
 def _rung_metrics(

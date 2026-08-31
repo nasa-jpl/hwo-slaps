@@ -1347,6 +1347,18 @@ class FisherDetector:
             return
         yield from self._grid_signal_iterator_parallel(positions, num_workers)
 
+    def retarget_grid_engine(self) -> None:
+        """Point a built JAX grid engine at the current subhalo template.
+
+        The engine's build products all describe the baseline scene, so a
+        changed subhalo mass is absorbed by resampling its radial deflection
+        table rather than by dropping the engine.
+        """
+        if self._jax_grid_engine is not None:
+            self._jax_grid_engine.retarget_subhalo(
+                deepcopy(self.map_config_template)
+            )
+
     def _grid_signal_iterator_jax(
         self,
         positions: Sequence[Tuple[float, float]],
