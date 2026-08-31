@@ -121,25 +121,26 @@ def _sersic_constant(sersic_index: float) -> float:
     )
 
 
-class GridReduction(NamedTuple):
-    """Whitened reductions for one grid node.
+class GridReductionBatch(NamedTuple):
+    """Whitened reductions for one batch of grid nodes.
 
     Every field is a reduction over the masked data axis, so the whitened
-    signal vector itself never has to leave the device.  ``cross`` and
-    ``data_cross`` have one entry per nuisance parameter; the remaining
-    fields are scalars.  ``finite`` and ``data_finite`` carry the all-finite
-    verdict for the whitened vectors the reductions were taken over, so the
+    signal vectors themselves never have to leave the device.  The leading
+    axis of each field is the batch axis, one entry per node; ``cross`` and
+    ``data_cross`` carry a further axis with one column per nuisance
+    parameter.  ``finite`` and ``data_finite`` carry the all-finite verdict
+    for the whitened vectors the reductions were taken over, so the
     fail-closed validation the host used to perform on the dense bank
     survives.
     """
 
-    raw: float
+    raw: np.ndarray
     cross: np.ndarray
-    finite: bool
-    signal_data_inner: Optional[float] = None
+    finite: np.ndarray
+    signal_data_inner: Optional[np.ndarray] = None
     data_cross: Optional[np.ndarray] = None
-    data_finite: Optional[bool] = None
-    signal_bias_inner: Optional[float] = None
+    data_finite: Optional[np.ndarray] = None
+    signal_bias_inner: Optional[np.ndarray] = None
 
 
 class JaxGridTemplateEngine:
@@ -1139,13 +1140,15 @@ class JaxGridTemplateEngine:
 
     def reduction_iterator(
         self, positions: Sequence[Tuple[float, float]]
-    ) -> Iterator[GridReduction]:
-        """Yield whitened reductions for each position.
+    ) -> Iterator[GridReductionBatch]:
+        """Yield whitened reductions one device batch at a time.
 
         Requires the engine to have been built with ``sigma_masked``.  The
         signal vectors are whitened and reduced inside the batched device
         kernel, so only a scalar and one entry per nuisance parameter cross
-        the bus for each node.
+        the bus for each node.  A whole batch of those reductions travels as
+        one object of arrays, so the host never builds a Python object per
+        node.
 
         Parameters
         ----------
@@ -1154,8 +1157,8 @@ class JaxGridTemplateEngine:
 
         Yields
         ------
-        reduction : `GridReduction`
-            Whitened reductions for one position.
+        reductions : `GridReductionBatch`
+            Whitened reductions for one batch of positions.
         """
         if self._batch_reductions is None:
             raise RuntimeError(
@@ -1166,33 +1169,31 @@ class JaxGridTemplateEngine:
         biased = self._bias_whitened is not None
         for batch in self._position_batches(positions):
             reductions = self._batch_reductions(batch, self._alpha_radial)
-            raw = np.asarray(reductions["raw"], dtype=float)
-            cross = np.asarray(reductions["cross"], dtype=float)
-            finite = np.asarray(reductions["finite"], dtype=bool)
-            if mismatch:
-                signal_data_inner = np.asarray(
-                    reductions["signal_data_inner"], dtype=float
-                )
-                data_cross = np.asarray(reductions["data_cross"], dtype=float)
-                data_finite = np.asarray(reductions["data_finite"], dtype=bool)
-            if biased:
-                signal_bias_inner = np.asarray(
-                    reductions["signal_bias_inner"], dtype=float
-                )
-            for index in range(raw.shape[0]):
-                yield GridReduction(
-                    raw=raw[index],
-                    cross=cross[index],
-                    finite=finite[index],
-                    signal_data_inner=(
-                        signal_data_inner[index] if mismatch else None
-                    ),
-                    data_cross=data_cross[index] if mismatch else None,
-                    data_finite=data_finite[index] if mismatch else None,
-                    signal_bias_inner=(
-                        signal_bias_inner[index] if biased else None
-                    ),
-                )
+            yield GridReductionBatch(
+                raw=np.asarray(reductions["raw"], dtype=float),
+                cross=np.asarray(reductions["cross"], dtype=float),
+                finite=np.asarray(reductions["finite"], dtype=bool),
+                signal_data_inner=(
+                    np.asarray(reductions["signal_data_inner"], dtype=float)
+                    if mismatch
+                    else None
+                ),
+                data_cross=(
+                    np.asarray(reductions["data_cross"], dtype=float)
+                    if mismatch
+                    else None
+                ),
+                data_finite=(
+                    np.asarray(reductions["data_finite"], dtype=bool)
+                    if mismatch
+                    else None
+                ),
+                signal_bias_inner=(
+                    np.asarray(reductions["signal_bias_inner"], dtype=float)
+                    if biased
+                    else None
+                ),
+            )
 
     def _position_batches(self, positions: Sequence[Tuple[float, float]]):
         """Yield device-resident position batches, bounds-checked."""
@@ -1220,4 +1221,4 @@ class JaxGridTemplateEngine:
             yield jnp.asarray(batch_positions)
 
 
-__all__ = ["GridReduction", "JaxGridTemplateEngine"]
+__all__ = ["GridReductionBatch", "JaxGridTemplateEngine"]
