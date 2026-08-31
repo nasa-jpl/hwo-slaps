@@ -1556,6 +1556,78 @@ def _make_jax_detector(grid_setup) -> FisherDetector:
     )
 
 
+def _is_7_smooth(value: int) -> bool:
+    """Return whether ``value`` factors entirely into {2, 3, 5, 7}."""
+    for prime in (2, 3, 5, 7):
+        while value % prime == 0:
+            value //= prime
+    return value == 1
+
+
+def test_next_fast_fft_len_is_minimal_7_smooth_bound():
+    """The helper returns the smallest 7-smooth length that fits."""
+    from hwoslaps.modeling.fisher_grid_jax import _next_fast_fft_len
+
+    smooth = [n for n in range(1, 20001) if _is_7_smooth(n)]
+    for target in range(1, 10001):
+        result = _next_fast_fft_len(target)
+        assert result >= target
+        assert _is_7_smooth(result)
+        assert result == min(n for n in smooth if n >= target)
+
+
+def test_next_fast_fft_len_pads_production_convolution_lengths():
+    """Production geometries land on genuinely fast transform lengths."""
+    from hwoslaps.modeling.fisher_grid_jax import (
+        _fast_convolution_fft_shape,
+        _next_fast_fft_len,
+    )
+
+    # 1312 = 2**5 * 41; the 41 forces a slow generic/Bluestein transform.
+    assert _next_fast_fft_len(1312) == 1323
+    assert _next_fast_fft_len(1024) == 1024
+
+    shape = _fast_convolution_fft_shape((314, 314), (999, 999))
+    assert shape == (1323, 1323)
+    for axis in shape:
+        assert axis >= 314 + 999 - 1
+
+
+def test_fast_fft_shape_padding_preserves_cropped_convolution():
+    """Zero-padding past the linear minimum leaves the cropped region intact."""
+    from hwoslaps.modeling.fisher_grid_jax import _fast_convolution_fft_shape
+
+    rng = np.random.default_rng(20260831)
+    shape_native = (37, 41)
+    kernel = rng.normal(size=(11, 9))
+    image = rng.normal(size=shape_native)
+
+    minimal = (
+        shape_native[0] + kernel.shape[0] - 1,
+        shape_native[1] + kernel.shape[1] - 1,
+    )
+    padded = _fast_convolution_fft_shape(shape_native, kernel.shape)
+    assert padded[0] >= minimal[0] and padded[1] >= minimal[1]
+
+    crop_y = kernel.shape[0] // 2
+    crop_x = kernel.shape[1] // 2
+
+    def convolve(fft_shape):
+        product = np.fft.rfft2(image, s=fft_shape) * np.fft.rfft2(
+            kernel, s=fft_shape
+        )
+        full = np.fft.irfft2(product, s=fft_shape)
+        return full[
+            crop_y:crop_y + shape_native[0],
+            crop_x:crop_x + shape_native[1],
+        ]
+
+    reference = convolve(minimal)
+    candidate = convolve(padded)
+    assert candidate.shape == shape_native
+    np.testing.assert_allclose(candidate, reference, rtol=1.0e-12, atol=0.0)
+
+
 def test_jax_engine_template_matches_reference(grid_setup):
     """Match the JAX signal template against the NumPy reference."""
     pytest.importorskip("jax")
