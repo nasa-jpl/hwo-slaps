@@ -33,7 +33,7 @@ radial table and FFT round-off and is gated by the equivalence tests.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -63,6 +63,27 @@ def _sersic_constant(sersic_index: float) -> float:
         + 131.0 / (1148175.0 * n**3)
         - 2194697.0 / (30690717750.0 * n**4)
     )
+
+
+class GridReduction(NamedTuple):
+    """Whitened reductions for one grid node.
+
+    Every field is a reduction over the masked data axis, so the whitened
+    signal vector itself never has to leave the device.  ``cross`` and
+    ``data_cross`` have one entry per nuisance parameter; the remaining
+    fields are scalars.  ``finite`` and ``data_finite`` carry the all-finite
+    verdict for the whitened vectors the reductions were taken over, so the
+    fail-closed validation the host used to perform on the dense bank
+    survives.
+    """
+
+    raw: float
+    cross: np.ndarray
+    finite: bool
+    signal_data_inner: Optional[float] = None
+    data_cross: Optional[np.ndarray] = None
+    data_finite: Optional[bool] = None
+    signal_bias_inner: Optional[float] = None
 
 
 class JaxGridTemplateEngine:
@@ -99,6 +120,15 @@ class JaxGridTemplateEngine:
         Truth/data lens centre defining candidate-position geometry.
     batch_size : `int`, optional
         Number of grid positions evaluated per vmapped batch.
+    sigma_masked : `numpy.ndarray`, optional
+        Per-pixel standard deviations over the masked pixels, in signal-vector
+        order.  Supplying it enables :meth:`reduction_iterator`, which whitens
+        and reduces on the device so only per-node scalars cross the bus.
+    nuisance_whitened : `numpy.ndarray`, optional
+        Whitened nuisance design matrix of shape ``(n_masked, n_nuisance)``
+        the signal vectors are projected against.
+    bias_whitened : `numpy.ndarray`, optional
+        Whitened fixed bias residual of length ``n_masked``.
     """
 
     def __init__(
@@ -114,6 +144,9 @@ class JaxGridTemplateEngine:
         candidate_positions: Optional[Sequence[Tuple[float, float]]] = None,
         truth_lens_centre_yx: Optional[Tuple[float, float]] = None,
         batch_size: int = _DEFAULT_BATCH_SIZE,
+        sigma_masked: Optional[np.ndarray] = None,
+        nuisance_whitened: Optional[np.ndarray] = None,
+        bias_whitened: Optional[np.ndarray] = None,
     ):
         import jax
 
@@ -323,6 +356,64 @@ class JaxGridTemplateEngine:
         self._gain = gain
 
         self._batch_signals = jax.jit(jax.vmap(self._signal_for_position))
+
+        self._sigma_masked = None
+        self._nuisance_whitened = None
+        self._bias_whitened = None
+        self._batch_reductions = None
+        if sigma_masked is not None:
+            self._configure_projection(
+                n_masked=int(mask_flat_idx.size),
+                sigma_masked=sigma_masked,
+                nuisance_whitened=nuisance_whitened,
+                bias_whitened=bias_whitened,
+            )
+
+    def _configure_projection(
+        self,
+        *,
+        n_masked: int,
+        sigma_masked: np.ndarray,
+        nuisance_whitened: Optional[np.ndarray],
+        bias_whitened: Optional[np.ndarray],
+    ) -> None:
+        """Upload the whitening and projection operands once."""
+        jax = self._jax
+        jnp = self._jnp
+
+        sigma = np.asarray(sigma_masked, dtype=float)
+        if sigma.shape != (n_masked,):
+            raise ValueError(
+                "sigma_masked must be a 1D array with one entry per masked pixel."
+            )
+        if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0.0):
+            raise ValueError("sigma_masked must be finite and strictly positive.")
+
+        if nuisance_whitened is None:
+            nuisance = np.zeros((n_masked, 0), dtype=float)
+        else:
+            nuisance = np.asarray(nuisance_whitened, dtype=float)
+            if nuisance.ndim != 2 or nuisance.shape[0] != n_masked:
+                raise ValueError(
+                    "nuisance_whitened must have shape (n_masked, n_nuisance)."
+                )
+            if not np.all(np.isfinite(nuisance)):
+                raise ValueError("nuisance_whitened contains non-finite values.")
+
+        bias = None
+        if bias_whitened is not None:
+            bias = np.asarray(bias_whitened, dtype=float)
+            if bias.shape != (n_masked,):
+                raise ValueError(
+                    "bias_whitened must be a 1D array with one entry per masked pixel."
+                )
+            if not np.all(np.isfinite(bias)):
+                raise ValueError("bias_whitened contains non-finite values.")
+
+        self._sigma_masked = jnp.asarray(sigma)
+        self._nuisance_whitened = jnp.asarray(nuisance)
+        self._bias_whitened = None if bias is None else jnp.asarray(bias)
+        self._batch_reductions = jax.jit(jax.vmap(self._reduction_for_position))
 
     # ------------------------------------------------------------------
     # Build-time extraction
@@ -870,6 +961,36 @@ class JaxGridTemplateEngine:
         data_residual = (mu1_truth_flat - self._mu0_flat)[self._mask_flat_idx]
         return jnp.stack((model_signal, data_residual), axis=0)
 
+    def _reduction_for_position(self, position_yx):
+        """Whiten one node's signal vector and reduce it on the device.
+
+        The whitening is the same elementwise division by the per-pixel
+        standard deviations the host applied, and the reductions are the only
+        quantities the profiled-likelihood algebra needs from the data axis.
+        """
+        jnp = self._jnp
+        signal = self._signal_for_position(position_yx)
+
+        if self._truth_kernel_fft is None:
+            model_whitened = signal / self._sigma_masked
+            data_whitened = None
+        else:
+            model_whitened = signal[0] / self._sigma_masked
+            data_whitened = signal[1] / self._sigma_masked
+
+        reductions = {
+            "raw": jnp.sum(model_whitened * model_whitened),
+            "cross": model_whitened @ self._nuisance_whitened,
+            "finite": jnp.all(jnp.isfinite(model_whitened)),
+        }
+        if data_whitened is not None:
+            reductions["signal_data_inner"] = jnp.sum(model_whitened * data_whitened)
+            reductions["data_cross"] = data_whitened @ self._nuisance_whitened
+            reductions["data_finite"] = jnp.all(jnp.isfinite(data_whitened))
+        if self._bias_whitened is not None:
+            reductions["signal_bias_inner"] = model_whitened @ self._bias_whitened
+        return reductions
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -891,6 +1012,70 @@ class JaxGridTemplateEngine:
             ``(2, n_masked)`` fit-template/truth-residual pair when the truth
             kernel was supplied.
         """
+        for batch in self._position_batches(positions):
+            signals = np.asarray(self._batch_signals(batch))
+            for row in signals:
+                yield row
+
+    def reduction_iterator(
+        self, positions: Sequence[Tuple[float, float]]
+    ) -> Iterator[GridReduction]:
+        """Yield whitened reductions for each position.
+
+        Requires the engine to have been built with ``sigma_masked``.  The
+        signal vectors are whitened and reduced inside the batched device
+        kernel, so only a scalar and one entry per nuisance parameter cross
+        the bus for each node.
+
+        Parameters
+        ----------
+        positions : sequence of `tuple` of `float`
+            Subhalo (y, x) centres in arcsec, one per grid node.
+
+        Yields
+        ------
+        reduction : `GridReduction`
+            Whitened reductions for one position.
+        """
+        if self._batch_reductions is None:
+            raise RuntimeError(
+                "JAX grid engine was built without sigma_masked; whitened "
+                "reductions are unavailable."
+            )
+        mismatch = self._truth_kernel_fft is not None
+        biased = self._bias_whitened is not None
+        for batch in self._position_batches(positions):
+            reductions = self._batch_reductions(batch)
+            raw = np.asarray(reductions["raw"], dtype=float)
+            cross = np.asarray(reductions["cross"], dtype=float)
+            finite = np.asarray(reductions["finite"], dtype=bool)
+            if mismatch:
+                signal_data_inner = np.asarray(
+                    reductions["signal_data_inner"], dtype=float
+                )
+                data_cross = np.asarray(reductions["data_cross"], dtype=float)
+                data_finite = np.asarray(reductions["data_finite"], dtype=bool)
+            if biased:
+                signal_bias_inner = np.asarray(
+                    reductions["signal_bias_inner"], dtype=float
+                )
+            for index in range(raw.shape[0]):
+                yield GridReduction(
+                    raw=raw[index],
+                    cross=cross[index],
+                    finite=finite[index],
+                    signal_data_inner=(
+                        signal_data_inner[index] if mismatch else None
+                    ),
+                    data_cross=data_cross[index] if mismatch else None,
+                    data_finite=data_finite[index] if mismatch else None,
+                    signal_bias_inner=(
+                        signal_bias_inner[index] if biased else None
+                    ),
+                )
+
+    def _position_batches(self, positions: Sequence[Tuple[float, float]]):
+        """Yield device-resident position batches, bounds-checked."""
         jnp = self._jnp
         positions_arr = np.asarray(positions, dtype=float)
         for start in range(0, positions_arr.shape[0], self.batch_size):
@@ -912,10 +1097,7 @@ class JaxGridTemplateEngine:
                         f"exceeds table maximum {table_r_max:.6g}; rebuild the "
                         "engine with the complete candidate position set."
                     )
-            batch = jnp.asarray(batch_positions)
-            signals = np.asarray(self._batch_signals(batch))
-            for row in signals:
-                yield row
+            yield jnp.asarray(batch_positions)
 
 
-__all__ = ["JaxGridTemplateEngine"]
+__all__ = ["GridReduction", "JaxGridTemplateEngine"]

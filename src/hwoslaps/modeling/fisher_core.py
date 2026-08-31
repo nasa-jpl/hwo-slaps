@@ -615,23 +615,83 @@ class ProfileLikelihoodWorkspace:
             if not np.all(np.isfinite(bias)):
                 raise ValueError("bias_whitened contains non-finite values.")
 
+        amp = self._validate_amplitude_true(amplitude_true, signals.shape[0])
+
+        raw = np.einsum("ij,ij->i", signals, signals)
+        cross = None
+        if self.n_nuisance > 0:
+            cross = signals @ self.nuisance_whitened
+
+        signal_data_inner = None
+        data_cross = None
+        if data_bank is not None:
+            signal_data_inner = np.einsum("ij,ij->i", signals, data_bank)
+            if self.n_nuisance > 0:
+                data_cross = data_bank @ self.nuisance_whitened
+
+        signal_bias_inner = None
+        nuisance_bias = None
+        if bias is not None:
+            signal_bias_inner = signals @ bias
+            if self.n_nuisance > 0:
+                nuisance_bias = self.nuisance_whitened.T @ bias
+
+        return self._bank_result_from_reductions(
+            raw=raw,
+            cross=cross,
+            amp=amp,
+            whitened_size=int(signals.shape[1]),
+            signal_data_inner=signal_data_inner,
+            data_cross=data_cross,
+            signal_bias_inner=signal_bias_inner,
+            nuisance_bias=nuisance_bias,
+        )
+
+    def _validate_amplitude_true(
+        self,
+        amplitude_true: Union[float, ArrayLike],
+        n_signals: int,
+    ) -> np.ndarray:
+        """Coerce ``amplitude_true`` to one finite value per bank signal."""
         if np.isscalar(amplitude_true):
-            amp = np.full(signals.shape[0], float(amplitude_true), dtype=float)
+            amp = np.full(n_signals, float(amplitude_true), dtype=float)
         else:
             amp = np.asarray(amplitude_true, dtype=float)
-            if amp.ndim != 1 or amp.size != signals.shape[0]:
+            if amp.ndim != 1 or amp.size != n_signals:
                 raise ValueError(
                     "amplitude_true must be a scalar or a 1D array with length equal to n_signals."
                 )
         if not np.all(np.isfinite(amp)):
             raise ValueError("amplitude_true contains non-finite values.")
+        return amp
 
-        raw = np.einsum("ij,ij->i", signals, signals)
-        cross = None
+    def _bank_result_from_reductions(
+        self,
+        *,
+        raw: np.ndarray,
+        cross: Optional[np.ndarray],
+        amp: np.ndarray,
+        whitened_size: int,
+        signal_data_inner: Optional[np.ndarray] = None,
+        data_cross: Optional[np.ndarray] = None,
+        signal_bias_inner: Optional[np.ndarray] = None,
+        nuisance_bias: Optional[np.ndarray] = None,
+    ) -> SignalBankResult:
+        """Finish the profiled-likelihood algebra from bank reductions.
+
+        Every reduction over the whitened data axis has already been taken:
+        ``raw`` is ``s^T s``, ``cross`` is ``s^T J``, ``signal_data_inner`` is
+        ``s^T d``, ``data_cross`` is ``d^T J``, ``signal_bias_inner`` is
+        ``s^T b`` and ``nuisance_bias`` is ``J^T b``.  Keeping the remaining
+        scalar algebra here makes this the single place the statistical
+        conventions of a signal bank live, whether the reductions came from a
+        dense whitened bank in memory or from an accelerator that never
+        materialized one on the host.
+        """
         if self.n_nuisance == 0:
             profiled = raw.copy()
         else:
-            cross = signals @ self.nuisance_whitened
+            assert cross is not None
             profiled = raw - np.einsum("ij,jk,ik->i", cross, self.normal_pinv, cross)
             tol = 1.0e-10 * np.maximum(raw, 1.0)
             bad = profiled < -tol
@@ -652,12 +712,12 @@ class ProfileLikelihoodWorkspace:
         amplitude_hat = None
         q_mismatch = None
         z_mismatch = None
-        if data_bank is not None:
-            numerator_data = np.einsum("ij,ij->i", signals, data_bank)
+        if signal_data_inner is not None:
+            numerator_data = signal_data_inner
             if self.n_nuisance > 0:
                 assert cross is not None
-                data_cross = data_bank @ self.nuisance_whitened
-                numerator_data -= np.einsum(
+                assert data_cross is not None
+                numerator_data = numerator_data - np.einsum(
                     "ij,jk,ik->i",
                     cross,
                     self.normal_pinv,
@@ -672,13 +732,13 @@ class ProfileLikelihoodWorkspace:
         amplitude_spurious = None
         q_spurious = None
         z_spurious = None
-        if bias is not None:
-            numerator_bias = signals @ bias
+        if signal_bias_inner is not None:
+            numerator_bias = signal_bias_inner
             if self.n_nuisance > 0:
                 assert cross is not None
-                nuisance_bias = self.nuisance_whitened.T @ bias
+                assert nuisance_bias is not None
                 projected_bias = self.normal_pinv @ nuisance_bias
-                numerator_bias -= cross @ projected_bias
+                numerator_bias = numerator_bias - cross @ projected_bias
             amplitude_spurious = np.full_like(profiled, np.nan, dtype=float)
             amplitude_spurious[positive] = (
                 numerator_bias[positive] / profiled[positive]
@@ -700,13 +760,161 @@ class ProfileLikelihoodWorkspace:
             amplitude_true=amp,
             nuisance_rank=int(self.nuisance_rank),
             nuisance_condition_number=float(self.nuisance_condition_number),
-            whitened_size=int(signals.shape[1]),
+            whitened_size=int(whitened_size),
             amplitude_hat=amplitude_hat,
             q_mismatch=q_mismatch,
             z_mismatch=z_mismatch,
             amplitude_spurious=amplitude_spurious,
             q_spurious=q_spurious,
             z_spurious=z_spurious,
+        )
+
+    def evaluate_signal_bank_reduced(
+        self,
+        *,
+        raw: ArrayLike,
+        cross: Optional[MatrixLike],
+        signals_finite: ArrayLike,
+        whitened_size: int,
+        amplitude_true: Union[float, ArrayLike] = 1.0,
+        signal_data_inner: Optional[ArrayLike] = None,
+        data_cross: Optional[MatrixLike] = None,
+        data_finite: Optional[ArrayLike] = None,
+        signal_bias_inner: Optional[ArrayLike] = None,
+        bias_whitened: Optional[ArrayLike] = None,
+    ) -> SignalBankResult:
+        """Evaluate a bank from reductions computed off-host.
+
+        This is :meth:`evaluate_signal_bank` for callers that formed the
+        whitened bank somewhere the host never saw it, and can therefore only
+        return the small reductions over the data axis.  The fail-closed
+        finiteness semantics of the dense entry point are preserved by
+        ``signals_finite`` and ``data_finite``, which must carry the
+        all-finite verdict computed where the bank actually existed.
+
+        Parameters
+        ----------
+        raw : array-like
+            ``s^T s`` per signal, with shape ``(n_signals,)``.
+        cross : array-like or `None`
+            ``s^T J`` per signal, with shape ``(n_signals, n_nuisance)``.
+            Ignored when the workspace carries no nuisance parameters.
+        signals_finite : array-like
+            Per-signal verdict that every whitened bank entry was finite.
+        whitened_size : `int`
+            Number of whitened data coordinates the reductions ran over.
+        amplitude_true : `float` or array-like, optional
+            Matched-model signal amplitudes, as for the dense entry point.
+        signal_data_inner, data_cross, data_finite : array-like, optional
+            ``s^T d``, ``d^T J`` and the per-signal finiteness verdict for the
+            paired data residuals.
+        signal_bias_inner : array-like, optional
+            ``s^T b`` for a fixed bias residual.
+        bias_whitened : array-like, optional
+            The bias residual itself, whitened, used for ``J^T b``.
+        """
+        raw_arr = np.asarray(raw, dtype=float)
+        if raw_arr.ndim != 1:
+            raise ValueError("raw must be a 1D array with shape (n_signals,).")
+        n_signals = raw_arr.shape[0]
+
+        finite = np.asarray(signals_finite, dtype=bool)
+        if finite.shape != (n_signals,):
+            raise ValueError("signals_finite must have shape (n_signals,).")
+        if not np.all(finite):
+            raise ValueError("signal_bank_whitened contains non-finite values.")
+
+        whitened_size = int(whitened_size)
+        if whitened_size <= 0:
+            raise ValueError("whitened_size must be a positive integer.")
+        if self.n_data == 0:
+            self.n_data = whitened_size  # type: ignore[misc]
+        elif whitened_size != self.n_data:
+            raise ValueError(
+                f"signal bank width {whitened_size} does not match workspace data size {self.n_data}."
+            )
+
+        cross_arr = None
+        if self.n_nuisance > 0:
+            if cross is None:
+                raise ValueError(
+                    "cross is required when the workspace carries nuisance parameters."
+                )
+            cross_arr = np.asarray(cross, dtype=float)
+            if cross_arr.shape != (n_signals, self.n_nuisance):
+                raise ValueError(
+                    "cross must have shape (n_signals, n_nuisance)."
+                )
+
+        if not np.all(np.isfinite(raw_arr)) or (
+            cross_arr is not None and not np.all(np.isfinite(cross_arr))
+        ):
+            raise ValueError("signal bank reductions contain non-finite values.")
+
+        amp = self._validate_amplitude_true(amplitude_true, n_signals)
+
+        data_inner_arr = None
+        data_cross_arr = None
+        if signal_data_inner is not None:
+            data_inner_arr = np.asarray(signal_data_inner, dtype=float)
+            if data_inner_arr.shape != (n_signals,):
+                raise ValueError("signal_data_inner must have shape (n_signals,).")
+            if data_finite is None:
+                raise ValueError(
+                    "data_finite is required alongside signal_data_inner."
+                )
+            data_finite_arr = np.asarray(data_finite, dtype=bool)
+            if data_finite_arr.shape != (n_signals,):
+                raise ValueError("data_finite must have shape (n_signals,).")
+            if not np.all(data_finite_arr):
+                raise ValueError("data_bank_whitened contains non-finite values.")
+            if self.n_nuisance > 0:
+                if data_cross is None:
+                    raise ValueError(
+                        "data_cross is required when the workspace carries nuisance parameters."
+                    )
+                data_cross_arr = np.asarray(data_cross, dtype=float)
+                if data_cross_arr.shape != (n_signals, self.n_nuisance):
+                    raise ValueError(
+                        "data_cross must have shape (n_signals, n_nuisance)."
+                    )
+            if not np.all(np.isfinite(data_inner_arr)) or (
+                data_cross_arr is not None and not np.all(np.isfinite(data_cross_arr))
+            ):
+                raise ValueError("data bank reductions contain non-finite values.")
+
+        bias_inner_arr = None
+        nuisance_bias = None
+        if signal_bias_inner is not None:
+            if bias_whitened is None:
+                raise ValueError(
+                    "bias_whitened is required alongside signal_bias_inner."
+                )
+            bias = np.asarray(bias_whitened, dtype=float)
+            if bias.ndim != 1 or bias.size != whitened_size:
+                raise ValueError(
+                    "bias_whitened must be a 1D array with width equal to "
+                    "signal_bank_whitened."
+                )
+            if not np.all(np.isfinite(bias)):
+                raise ValueError("bias_whitened contains non-finite values.")
+            bias_inner_arr = np.asarray(signal_bias_inner, dtype=float)
+            if bias_inner_arr.shape != (n_signals,):
+                raise ValueError("signal_bias_inner must have shape (n_signals,).")
+            if not np.all(np.isfinite(bias_inner_arr)):
+                raise ValueError("bias reductions contain non-finite values.")
+            if self.n_nuisance > 0:
+                nuisance_bias = self.nuisance_whitened.T @ bias
+
+        return self._bank_result_from_reductions(
+            raw=raw_arr,
+            cross=cross_arr,
+            amp=amp,
+            whitened_size=whitened_size,
+            signal_data_inner=data_inner_arr,
+            data_cross=data_cross_arr,
+            signal_bias_inner=bias_inner_arr,
+            nuisance_bias=nuisance_bias,
         )
 
     def spurious_from_bias(

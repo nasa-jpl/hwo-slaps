@@ -1126,20 +1126,28 @@ class FisherDetector:
         threshold = float(self.map_config.get("detection_q_threshold", 10.0))
 
         start = perf_counter()
-        signal_iter = self._grid_signal_iterator(positions, num_workers=num_workers)
+        on_device = self._grid_device_projection_enabled()
+        if on_device:
+            signal_iter: Iterator[Any] = self._grid_reduction_iterator(positions)
+        else:
+            signal_iter = self._grid_signal_iterator(
+                positions, num_workers=num_workers
+            )
         progressed = self._progress_iter(
             signal_iter,
             desc="Fisher grid map templates",
             total=n_positions,
         )
 
-        batch: List[np.ndarray] = []
+        batch: List[Any] = []
         results = []
 
         def _flush() -> None:
             if not batch:
                 return
-            if self.mismatch_enabled:
+            if on_device:
+                results.append(self._evaluate_reduction_batch(batch))
+            elif self.mismatch_enabled:
                 signal_matrix = np.column_stack([pair[0] for pair in batch])
                 data_matrix = np.column_stack([pair[1] for pair in batch])
                 signal_whitened = self.whitener.apply(signal_matrix)
@@ -1159,7 +1167,7 @@ class FisherDetector:
             batch.clear()
 
         for signal in progressed:
-            batch.append(np.asarray(signal, dtype=float))
+            batch.append(signal if on_device else np.asarray(signal, dtype=float))
             if len(batch) >= self._GRID_EVAL_BATCH:
                 _flush()
         _flush()
@@ -1309,6 +1317,43 @@ class FisherDetector:
             profiled_nuisance_names=list(self.nuisance_names),
         )
 
+    def _evaluate_reduction_batch(self, batch: Sequence[Any]):
+        """Evaluate one flush batch of device-computed whitened reductions."""
+        count = len(batch)
+        raw = np.fromiter(
+            (item.raw for item in batch), dtype=float, count=count
+        )
+        cross = np.stack([item.cross for item in batch])
+        signals_finite = np.fromiter(
+            (item.finite for item in batch), dtype=bool, count=count
+        )
+        if not self.mismatch_enabled:
+            return self.workspace.evaluate_signal_bank_reduced(
+                raw=raw,
+                cross=cross,
+                signals_finite=signals_finite,
+                whitened_size=self.pixels_unmasked,
+            )
+
+        assert self._bias_whitened is not None
+        return self.workspace.evaluate_signal_bank_reduced(
+            raw=raw,
+            cross=cross,
+            signals_finite=signals_finite,
+            whitened_size=self.pixels_unmasked,
+            signal_data_inner=np.fromiter(
+                (item.signal_data_inner for item in batch), dtype=float, count=count
+            ),
+            data_cross=np.stack([item.data_cross for item in batch]),
+            data_finite=np.fromiter(
+                (item.data_finite for item in batch), dtype=bool, count=count
+            ),
+            signal_bias_inner=np.fromiter(
+                (item.signal_bias_inner for item in batch), dtype=float, count=count
+            ),
+            bias_whitened=self._bias_whitened,
+        )
+
     def _grid_signal_iterator(
         self,
         positions: Sequence[Tuple[float, float]],
@@ -1352,28 +1397,62 @@ class FisherDetector:
         positions: Sequence[Tuple[float, float]],
     ) -> Iterator[np.ndarray]:
         if self._jax_grid_engine is None:
-            from .fisher_grid_jax import JaxGridTemplateEngine
-
-            kernel = self._ensure_odd_kernel(self.model_psf_data.kernel)
-            truth_kernel_native = None
-            if self.mismatch_enabled:
-                truth_kernel = self._ensure_odd_kernel(self._truth_template_kernel())
-                truth_kernel_native = np.asarray(
-                    pyauto_kernel_native(truth_kernel),
-                    dtype=float,
-                )
-            self._jax_grid_engine = JaxGridTemplateEngine(
-                lensing_baseline=self.lensing_baseline,
-                lensing_baseline_fit=self.lensing_baseline_fit,
-                map_config_template=deepcopy(self.map_config_template),
-                psf_kernel_native=np.asarray(pyauto_kernel_native(kernel), dtype=float),
-                mu0_adu_2d=self.mu0_model_adu_2d,
-                mask_2d=self.mask_2d,
-                truth_psf_kernel_native=truth_kernel_native,
-                candidate_positions=positions,
-                truth_lens_centre_yx=self._grid_layout().centre_yx,
-            )
+            self._jax_grid_engine = self._build_jax_grid_engine(positions)
         yield from self._jax_grid_engine.signal_iterator(positions)
+
+    def _grid_reduction_iterator(
+        self,
+        positions: Sequence[Tuple[float, float]],
+    ) -> Iterator[Any]:
+        """Yield device-computed whitened reductions for grid nodes."""
+        if self._jax_grid_engine is None:
+            self._jax_grid_engine = self._build_jax_grid_engine(positions)
+        yield from self._jax_grid_engine.reduction_iterator(positions)
+
+    def _grid_device_projection_enabled(self) -> bool:
+        """Return whether grid nodes can be whitened and reduced on device.
+
+        The device path needs the JAX engine, because that is what holds the
+        signal vectors, and a diagonal whitener, because that is the only
+        whitening it reproduces exactly.  Every other configuration keeps the
+        dense host path.
+        """
+        engine = str(self.map_config.get("engine", "reference")).lower()
+        return engine == "jax" and self.whitener.mode == "diagonal"
+
+    def _build_jax_grid_engine(self, positions: Sequence[Tuple[float, float]]):
+        from .fisher_grid_jax import JaxGridTemplateEngine
+
+        kernel = self._ensure_odd_kernel(self.model_psf_data.kernel)
+        truth_kernel_native = None
+        if self.mismatch_enabled:
+            truth_kernel = self._ensure_odd_kernel(self._truth_template_kernel())
+            truth_kernel_native = np.asarray(
+                pyauto_kernel_native(truth_kernel),
+                dtype=float,
+            )
+        sigma_masked = None
+        nuisance_whitened = None
+        bias_whitened = None
+        if self._grid_device_projection_enabled():
+            sigma_masked = self.whitener.sigma_diag
+            if self.n_nuisance > 0:
+                nuisance_whitened = self.workspace.nuisance_whitened
+            bias_whitened = self._bias_whitened
+        return JaxGridTemplateEngine(
+            lensing_baseline=self.lensing_baseline,
+            lensing_baseline_fit=self.lensing_baseline_fit,
+            map_config_template=deepcopy(self.map_config_template),
+            psf_kernel_native=np.asarray(pyauto_kernel_native(kernel), dtype=float),
+            mu0_adu_2d=self.mu0_model_adu_2d,
+            mask_2d=self.mask_2d,
+            truth_psf_kernel_native=truth_kernel_native,
+            candidate_positions=positions,
+            truth_lens_centre_yx=self._grid_layout().centre_yx,
+            sigma_masked=sigma_masked,
+            nuisance_whitened=nuisance_whitened,
+            bias_whitened=bias_whitened,
+        )
 
     def _grid_signal_iterator_parallel(
         self,
