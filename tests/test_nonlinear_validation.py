@@ -26,6 +26,7 @@ from generate_nonlinear_validation_campaign import (  # noqa: E402
     smoke_jobs,
 )
 from harvest_nonlinear_validation import (  # noqa: E402
+    expected_provenance,
     spearman_rank_correlation,
 )
 from run_nonlinear_validation import (  # noqa: E402
@@ -313,6 +314,41 @@ class TestSpearman:
     def test_constant_input_fails_closed(self):
         with pytest.raises(ValueError, match="constant"):
             spearman_rank_correlation([1.0, 1.0, 1.0], [1.0, 2.0, 3.0])
+
+
+class TestExpectedProvenance:
+    JOB = {
+        "run_name": "ladder_selected_sys0069",
+        "restamped_config_hash": "hash-original",
+    }
+    MANIFEST = {
+        "code_revision": {"sha256": "rev-campaign"},
+        "amendments": [{
+            "reason": "fix",
+            "code_revision": {"sha256": "rev-amended"},
+            "jobs": {
+                "ladder_selected_sys0069/asimov_fixed_bridge": {
+                    "restamped_config_hash": "hash-amended",
+                },
+            },
+        }],
+    }
+
+    def test_unamended_arm_keeps_campaign_provenance(self):
+        assert expected_provenance(
+            self.JOB, "asimov_injected", self.MANIFEST
+        ) == ("rev-campaign", "hash-original")
+
+    def test_amended_arm_resolves_to_amendment(self):
+        assert expected_provenance(
+            self.JOB, "asimov_fixed_bridge", self.MANIFEST
+        ) == ("rev-amended", "hash-amended")
+
+    def test_manifest_without_amendments(self):
+        manifest = {"code_revision": {"sha256": "rev-campaign"}}
+        assert expected_provenance(
+            self.JOB, "asimov_fixed_bridge", manifest
+        ) == ("rev-campaign", "hash-original")
 
 
 class TestSampleMembers:

@@ -359,9 +359,15 @@ def main(argv=None) -> None:
         fisher_q=float(rung_payload["q_f_matched"]),
         case_id=f"{system_id_value}_{args.arm}",
     )
-    mass_context = build_mass_mapping_context(
-        injected_config,
-        log10_m200_range=tuple(fit_block["log10_m200_range"]),
+    # The M200 mapping context exists only for the freed search; the
+    # model builder requires None for the fixed-template mode.
+    mass_context = (
+        build_mass_mapping_context(
+            injected_config,
+            log10_m200_range=tuple(fit_block["log10_m200_range"]),
+        )
+        if str(declaration["fit_mode"]) == "freed"
+        else None
     )
 
     runner = AutoLensFitRunner(

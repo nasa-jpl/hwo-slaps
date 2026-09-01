@@ -123,6 +123,37 @@ def _row(job: dict, arm: str, payload: dict) -> dict:
     }
 
 
+def expected_provenance(job: dict, arm: str, manifest: dict) -> tuple:
+    """Resolve one row's expected code revision and config hash.
+
+    Parameters
+    ----------
+    job : `dict`
+        The manifest job entry.
+    arm : `str`
+        Arm name of the row.
+    manifest : `dict`
+        Campaign manifest, optionally carrying ``amendments`` records
+        for jobs rerun at a later revision from restaged configurations.
+
+    Returns
+    -------
+    revision_sha256 : `str`
+        Expected artifact code-revision digest.
+    config_hash : `str`
+        Expected artifact staged-configuration hash.
+    """
+    label = f"{job['run_name']}/{arm}"
+    revision_sha256 = manifest["code_revision"]["sha256"]
+    config_hash = job["restamped_config_hash"]
+    for amendment in manifest.get("amendments", []):
+        entry = amendment["jobs"].get(label)
+        if entry is not None:
+            revision_sha256 = amendment["code_revision"]["sha256"]
+            config_hash = entry["restamped_config_hash"]
+    return revision_sha256, config_hash
+
+
 def _verify_row(
     job: dict,
     arm: str,
@@ -166,16 +197,17 @@ def _verify_row(
         findings.append(
             f"{label}: campaign uuid {payload['campaign_uuid']!r}"
         )
-    if payload["code_revision"]["sha256"] != manifest["code_revision"]["sha256"]:
+    revision_sha256, config_hash = expected_provenance(job, arm, manifest)
+    if payload["code_revision"]["sha256"] != revision_sha256:
         findings.append(
             f"{label}: code revision "
             f"{payload['code_revision']['sha256'][:16]}"
         )
-    if payload["staged_config_hash"] != job["restamped_config_hash"]:
+    if payload["staged_config_hash"] != config_hash:
         findings.append(
             f"{label}: staged config hash "
             f"{payload['staged_config_hash'][:16]} is not the manifest's "
-            f"{job['restamped_config_hash'][:16]}"
+            f"{config_hash[:16]}"
         )
 
     fit_block = protocol["fit"]
@@ -410,6 +442,7 @@ def main(argv=None) -> None:
         "schema_version": 2,
         "campaign_uuid": manifest["campaign_uuid"],
         "code_revision": manifest["code_revision"],
+        "amendments": manifest.get("amendments", []),
         "rows": len(rows),
         "expected_rows": manifest["n_fit_pairs"],
         "missing": missing,
