@@ -44,7 +44,7 @@ def test_committed_freeze_loads_and_validates(freeze):
     assert freeze["schema_version"] == df.DESIGN_FREEZE_SCHEMA_VERSION
     assert freeze["freeze"]["name"] == "design_freeze_v1"
     assert freeze["freeze"]["status"] == "ratified"
-    assert freeze["freeze"]["version"] == 2
+    assert freeze["freeze"]["version"] == 3
 
 
 def test_required_blocks_are_all_present(freeze):

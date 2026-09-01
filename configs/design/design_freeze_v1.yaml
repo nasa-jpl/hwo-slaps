@@ -6,7 +6,7 @@
 # document, report or brief disagrees with this file, THIS FILE WINS and the
 # document is stale; the superseded documents carry a banner pointing here.
 #
-# STATUS: RATIFIED, version 2 (amended 2026-08-23 evening). Every item the
+# STATUS: RATIFIED, version 3 (amended 2026-09-01). Every item the
 # version-1 freeze left provisional was ruled by George on 2026-08-23; the
 # rulings are recorded under `ratifications` below and the provisional list is
 # empty. The version-2 amendment also carries the A2 declared spacing
@@ -14,7 +14,10 @@
 # the A6-2 golden-magnitude re-anchor (23.795 V), the A6-1 XeLiF-only ruling,
 # the SEI promotion into configs/, and the committed pre-registration and
 # golden-anchor bindings. Numbers remain provisional until the GPT Pro review
-# per `claim_labels.provisionality`.
+# per `claim_labels.provisionality`. The version-3 amendment adds the
+# `nonlinear_validation` block: the pre-declared protocol and sampler seed
+# rule for the post-campaign nonlinear validation of the production ladder
+# results. It changes nothing about the ladder campaigns themselves.
 #
 # Conventions. Angles are arcseconds. Signal is electrons in the exposure and
 # variance is electrons squared. Masses are log10 solar. Paths are repo-root
@@ -28,12 +31,23 @@ schema_version: 1
 
 freeze:
   name: design_freeze_v1
-  version: 2
+  version: 3
   status: ratified
   authored: '2026-08-23'
-  amended: '2026-08-23'
+  amended: '2026-09-01'
   ratified: '2026-08-23'
   ratification_owner: George, with Sol Pro concurrence
+  amendment_v3: >-
+    Version 3, 2026-09-01, under George's D-N1 through D-N6 rulings of the
+    same day: the `nonlinear_validation` block is added, pre-declaring the
+    sample, arms, injection rule, fit settings, sampler seed rule and
+    success criteria of the post-campaign nonlinear validation BEFORE any
+    validation manifest is generated or any fit is run. No ladder-campaign
+    declaration changes. The declared `seeds` block is untouched; the
+    sampler stream lives inside `nonlinear_validation.seeds` because the
+    campaign seed declaration is frozen and cross-checked against the
+    embedded parent design. George's commit approval of this file
+    constitutes the signature.
   amendment: >-
     Version 2, 2026-08-23 evening, under George's ruling slate recorded in
     `ratifications`: A2 spacing systematic declared; A3 B8 ratified as
@@ -1490,3 +1504,133 @@ parent_design:
     - distributions.lens_mass_profile
     - derived.lens_magnitude_descriptive
     - selection.parent_tier
+
+# -----------------------------------------------------------------------------
+# Version-3 amendment: post-campaign nonlinear validation protocol (D-N1..D-N6,
+# ruled by George 2026-09-01). Declared in full BEFORE any validation manifest
+# exists. This is post-campaign validation under a pre-declared protocol; it is
+# NOT part of the original pre-registration and must never be presented as
+# such. Nothing in this block alters any ladder-campaign declaration.
+# -----------------------------------------------------------------------------
+nonlinear_validation:
+  declared: '2026-09-01'
+  rulings: [D-N1, D-N2, D-N3, D-N4, D-N5, D-N6]
+  purpose: >-
+    Validate the production Fisher screening statistic q_F against full
+    nonlinear PyAutoLens/Nautilus inference q_fit on the measured ladder
+    systems themselves, extending the pilot's single-scene calibration
+    across the production population and its five-template morphology
+    lever.
+  sample:
+    rule: >-
+      Every ladder_parent_v1 member (48) plus every ladder_selected_v1
+      member (12). The one overlap member (sys0728) is validated once,
+      from its parent artifact, and reported in both tiers. 59 unique
+      systems.
+  arms:
+    asimov_injected:
+      arm_index: 0
+      dataset_kind: asimov
+      subhalo_enabled: true
+      purpose: clean statistic equivalence against the Fisher/Asimov q_F
+    noisy_injected:
+      arm_index: 1
+      dataset_kind: noisy
+      subhalo_enabled: true
+      purpose: >-
+        literature-facing detection test on one noise realization; the
+        realization is the system's own declared primary_noise draw
+        (the staged configuration's global_seed), identical to the one
+        the selection observables were defined on
+    noisy_control:
+      arm_index: 2
+      dataset_kind: noisy
+      subhalo_enabled: false
+      purpose: >-
+        matched-PSF false-positive control at production heterogeneity;
+        the subhalo search runs at the same trial mass and position as
+        the injected arms on data containing no subhalo
+  injection_rule:
+    mass: >-
+      The bracket-top rung m_best_bracket_logm[1] of the system's ladder
+      artifact: the first refined rung at which q_F reached the declared
+      threshold of 10. Right-censored systems (m_best NaN) inject at the
+      ladder ceiling logm 9.5 and their expected nonlinear outcome is
+      non-detection, making censoring a testable prediction.
+    position: >-
+      The argmax of the recomputed Fisher grid-map q inside the D-F7
+      aperture at the injection rung, from the same staged configuration,
+      kernel (k999), engine (jax), node spacing (0.05 arcsec) and
+      detector construction as the production ladder. The recomputed
+      aperture q_max must agree with the artifact's recorded rung q_max
+      to a relative 1.0e-6 or the extraction fails closed.
+  fit:
+    fit_mode: freed
+    clumpy_fit_parameterization: host_free
+    fit_psf:
+      mode: delta
+      prior_table: configs/psf_priors/jwst_wss_drift_v1.yaml
+      seed: 20260814
+      family: combined
+      amplitude_rms_nm: 0.0
+    kernel_shape_native: [999, 999]
+    n_live_smooth: 100
+    n_live_subhalo: 200
+    maxcall: 500000
+    jax_n_batch: 32
+    number_of_cores: 1
+    log10_m200_range: [6.0, 9.7]
+    nautilus_training_workers: 4
+    note: >-
+      Settings are the perf-sprint bench anchors (n_live 100/200, maxcall
+      500k, batch 32) proven bit-reproducible on this code revision. The
+      freed mass range extends the module default (6.0, 8.5) to cover
+      bracket-top rungs up to the 9.5 ceiling with margin; it is passed
+      per run and the module default is unchanged. q_fit is a likelihood
+      ratio and is insensitive to the prior range; Delta logZ is
+      evidence-based and is quoted only under this declared range.
+  seeds:
+    stream: sampler
+    generator: numpy.random.SeedSequence -> uint32
+    entropy: 20260823
+    spawn_key: [5, system_index, arm_index]
+    rule: >-
+      seed = int(SeedSequence(entropy=20260823, spawn_key=(5, i, a))
+      .generate_state(1, dtype=uint32)[0]) for system index i (the
+      integer in the sysNNNN identifier) and arm index a as declared
+      under `arms`. Spawn key 5 is chosen because the frozen campaign
+      seed declaration uses spawn keys 0 through 4. One seed serves the
+      smooth and subhalo fits of a pair, matching the bench protocol.
+  code_revision_policy: >-
+    Staged ladder configurations pin stage0.code_revision and the runners
+    fail closed against the executing tree, so the campaign generator
+    writes restamped copies at the validation campaign's own code
+    revision and records the original revision and both config hashes in
+    the manifest. All non-revision bytes are otherwise identical.
+  smokes: >-
+    Before the fleet: one asimov_injected pair per source template (5
+    smokes), because only cosmos_48849 has ever been through a freed fit.
+    A smoke failure stops the campaign, not the protocol.
+  success_criteria:
+    - >-
+      Crossing agreement: the fraction of non-censored systems whose
+      injected-arm nonlinear verdict (q_fit >= 10) matches the Fisher
+      verdict at the injection rung, reported per tier and overall.
+    - >-
+      Rank fidelity: Spearman correlation of q_fit against q_F across
+      the injected arms, the population analogue of the pilot's 0.918.
+    - >-
+      Controls: false positives counted at Delta logZ > 5 (Bayesian
+      convention) and at q_fit >= 10 (screening convention); the pilot
+      reference is 0/63 under matched PSF.
+    - >-
+      Morphology transfer: the per-template ordering of nonlinear
+      detectability against the Fisher ordering.
+    - >-
+      Censoring consistency: the 6 right-censored parent systems are
+      expected to yield nonlinear non-detections at logm 9.5.
+  reporting: >-
+    All outcomes are reported, including disagreement: a bend in the
+    q_fit-to-q_F relation at high mass or for specific morphologies is a
+    finding, not a failure. Quality flags and convergence statuses travel
+    with every row.
