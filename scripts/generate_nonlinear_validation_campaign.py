@@ -1,0 +1,256 @@
+#!/usr/bin/env python
+"""Generate the DesignFreeze v3 nonlinear-validation campaign.
+
+Reads the harvested ladder campaigns, applies the declared sample rule
+(every parent member plus every selected member, the overlap member kept
+once from its parent artifact), and stages one restamped configuration
+copy per unique system. Staged ladder configurations pin
+``stage0.code_revision`` and every runner fails closed against the
+executing tree, so the copies are restamped to THIS tree's revision and
+the original revision travels in the manifest, per the freeze's
+``code_revision_policy``.
+
+The campaign directory receives:
+
+- ``configs/<system_id>.yaml``: restamped staged configuration copies.
+- ``manifest.json``: identity, seed declaration, sample, and the full
+  job table with every arm's derived sampler seed.
+- ``positions_queue.txt``: one extraction job per line, largest image
+  first.
+- ``fits_queue.txt``: one fit-arm job per line, largest image first.
+
+Queue lines are ``<config> <ladder_artifact> <output_dir>`` for
+positions and ``<config> <positions_artifact> <arm> <output_dir>`` for
+fits, consumed by ``nonlinear_validation_dispatch.sh``.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import sys
+import uuid
+
+import numpy as np
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT/"src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT/"src"))
+if str(REPO_ROOT/"scripts") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT/"scripts"))
+
+from run_nonlinear_validation import (  # noqa: E402
+    ARMS,
+    derive_sampler_seed,
+    system_index,
+)
+
+LADDER_ARTIFACT_NAME = "ladder_result.npz"
+POSITIONS_ARTIFACT_NAME = "injection_position.json"
+
+
+def sample_members(parent_run: Path, selected_run: Path):
+    """Apply the declared sample rule to the two harvested ladder tiers.
+
+    Parameters
+    ----------
+    parent_run : `pathlib.Path`
+        The ladder_parent_v1 ``run`` directory.
+    selected_run : `pathlib.Path`
+        The ladder_selected_v1 ``run`` directory.
+
+    Returns
+    -------
+    members : `list` [`dict`]
+        One entry per unique system: the bare ``sysNNNN`` identifier,
+        the owning tier, the tiers the system reports in, and the
+        staged configuration and artifact paths.
+
+    Raises
+    ------
+    ValueError
+        Raised when a tier is empty, a member misses its artifact, or
+        the tier counts disagree with the declared 48 + 12 sample.
+    """
+    members = {}
+    for tier, run_dir, expected in (
+        ("parent", parent_run, 48),
+        ("selected", selected_run, 12),
+    ):
+        config_dir = run_dir/"configs"
+        config_paths = sorted(config_dir.glob(f"ladder_{tier}_sys*.yaml"))
+        if len(config_paths) != expected:
+            raise ValueError(
+                f"{config_dir} holds {len(config_paths)} member "
+                f"configurations, expected {expected}"
+            )
+        for config_path in config_paths:
+            run_name = config_path.stem
+            bare_id = "sys" + str(system_index(run_name)).zfill(4)
+            artifact = run_dir/"outputs"/run_name/LADDER_ARTIFACT_NAME
+            if not artifact.is_file():
+                raise ValueError(f"Missing ladder artifact {artifact}")
+            if bare_id in members:
+                members[bare_id]["report_tiers"].append(tier)
+                continue
+            members[bare_id] = {
+                "system_id": bare_id,
+                "run_name": run_name,
+                "tier": tier,
+                "report_tiers": [tier],
+                "config": str(config_path),
+                "ladder_artifact": str(artifact),
+            }
+    ordered = [members[key] for key in sorted(members)]
+    overlaps = [m for m in ordered if len(m["report_tiers"]) > 1]
+    if len(ordered) != 59 or len(overlaps) != 1:
+        raise ValueError(
+            f"Sample rule expects 59 unique systems with 1 overlap, got "
+            f"{len(ordered)} with {len(overlaps)}"
+        )
+    return ordered
+
+
+def image_side_px(config: dict) -> int:
+    """Return a member's lensing grid side in pixels for LPT ordering."""
+    return int(config["lensing"]["grid"]["shape"][0])
+
+
+def main(argv=None) -> None:
+    """Stage the campaign directory, manifest and queues."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("parent_run", help="ladder_parent_v1 run directory")
+    parser.add_argument(
+        "selected_run", help="ladder_selected_v1 run directory"
+    )
+    parser.add_argument("campaign_dir", help="Campaign directory to create")
+    args = parser.parse_args(argv)
+
+    from hwoslaps.provenance import (
+        config_hash,
+        revision_digest,
+        revision_provenance,
+    )
+
+    revision = revision_provenance()
+    digest = revision_digest(revision)
+    if revision["git_dirty"]:
+        raise ValueError(
+            "Refusing to generate a campaign from a dirty tree: "
+            f"{revision['git_dirty_paths']}"
+        )
+
+    campaign_dir = Path(args.campaign_dir)
+    config_out = campaign_dir/"configs"
+    if (campaign_dir/"manifest.json").exists():
+        raise ValueError(
+            f"{campaign_dir} already holds a manifest; refusing to regenerate"
+        )
+    config_out.mkdir(parents=True, exist_ok=True)
+
+    members = sample_members(Path(args.parent_run), Path(args.selected_run))
+
+    jobs = []
+    for member in members:
+        with open(member["config"], encoding="utf-8") as stream:
+            staged = yaml.safe_load(stream)
+        original_hash = config_hash(staged)
+        original_revision = dict(staged["stage0"]["code_revision"])
+        staged["stage0"]["code_revision"] = {
+            "git_hash": revision["git_hash"],
+            "git_dirty": revision["git_dirty"],
+            "sha256": digest,
+        }
+        restamped_path = config_out/f"{member['run_name']}.yaml"
+        restamped_path.write_text(
+            yaml.safe_dump(staged, sort_keys=False), encoding="utf-8"
+        )
+        index = system_index(member["run_name"])
+        jobs.append({
+            **member,
+            "restamped_config": str(restamped_path),
+            "original_code_revision": original_revision,
+            "original_config_hash": original_hash,
+            "restamped_config_hash": config_hash(staged),
+            "image_side_px": image_side_px(staged),
+            "output_dir": str(campaign_dir/"outputs"/member["run_name"]),
+            "arms": {
+                arm: {
+                    "arm_index": spec["arm_index"],
+                    "sampler_seed": derive_sampler_seed(
+                        index, spec["arm_index"]
+                    ),
+                }
+                for arm, spec in ARMS.items()
+            },
+        })
+
+    largest_first = sorted(
+        jobs, key=lambda job: job["image_side_px"], reverse=True
+    )
+    positions_lines = [
+        f"{job['restamped_config']} {job['ladder_artifact']} "
+        f"{job['output_dir']}"
+        for job in largest_first
+    ]
+    fits_lines = [
+        f"{job['restamped_config']} "
+        f"{job['output_dir']}/{POSITIONS_ARTIFACT_NAME} {arm} "
+        f"{job['output_dir']}"
+        for job in largest_first
+        for arm in sorted(ARMS)
+    ]
+    (campaign_dir/"positions_queue.txt").write_text(
+        "\n".join(positions_lines) + "\n", encoding="utf-8"
+    )
+    (campaign_dir/"fits_queue.txt").write_text(
+        "\n".join(fits_lines) + "\n", encoding="utf-8"
+    )
+
+    manifest = {
+        "schema_version": 1,
+        "name": "nonlinear_validation_v1",
+        "campaign_uuid": str(uuid.uuid4()),
+        "design_freeze": {
+            "path": "configs/design/design_freeze_v1.yaml",
+            "version": 3,
+            "protocol_block": "nonlinear_validation",
+        },
+        "code_revision": {
+            "git_hash": revision["git_hash"],
+            "git_dirty": revision["git_dirty"],
+            "sha256": digest,
+        },
+        "seed_declaration": {
+            "stream": "sampler",
+            "entropy": 20260823,
+            "spawn_key": [5, "system_index", "arm_index"],
+        },
+        "arms": {
+            arm: {
+                "arm_index": spec["arm_index"],
+                "dataset_kind": spec["dataset_kind"],
+                "subhalo_in_truth": spec["subhalo"],
+            }
+            for arm, spec in ARMS.items()
+        },
+        "n_systems": len(jobs),
+        "n_fit_pairs": len(jobs)*len(ARMS),
+        "jobs": jobs,
+    }
+    (campaign_dir/"manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    print(
+        f"Campaign staged: {campaign_dir}\n"
+        f"  {len(jobs)} systems, {len(fits_lines)} fit-pair jobs, code "
+        f"revision {digest[:16]} (git {revision['git_hash'][:7]}), "
+        f"campaign uuid {manifest['campaign_uuid']}"
+    )
+
+
+if __name__ == "__main__":
+    main()
