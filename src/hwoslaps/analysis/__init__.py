@@ -4,19 +4,6 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
-_FORECAST_NAMES = (
-    "SubhaloForecastData",
-    "forecast_ratio",
-    "half_mode_mass_from_thermal_kev",
-    "load_subhalo_forecast_npz",
-    "run_subhalo_forecast",
-    "save_subhalo_forecast_npz",
-    "sigma_sub_from_f_sub",
-    "thermal_kev_from_half_mode_mass",
-    "validate_subhalo_forecast_config",
-    "wdm_suppression",
-)
-
 _RANK_STABILITY_NAMES = (
     "MEMBER_SCALARS",
     "NOISE_STREAM",
@@ -67,7 +54,7 @@ _SELECTION_NAMES = (
     "top_k_jaccard",
 )
 
-__all__ = sorted(_FORECAST_NAMES + _RANK_STABILITY_NAMES + _SELECTION_NAMES)
+__all__ = sorted(_RANK_STABILITY_NAMES + _SELECTION_NAMES)
 
 if TYPE_CHECKING:
     from .rank_stability import (
@@ -118,26 +105,10 @@ if TYPE_CHECKING:
         standardize,
         top_k_jaccard,
     )
-    from .subhalo_forecast import (
-        SubhaloForecastData,
-        forecast_ratio,
-        half_mode_mass_from_thermal_kev,
-        load_subhalo_forecast_npz,
-        run_subhalo_forecast,
-        save_subhalo_forecast_npz,
-        sigma_sub_from_f_sub,
-        thermal_kev_from_half_mode_mass,
-        validate_subhalo_forecast_config,
-        wdm_suppression,
-    )
 
 
 def __getattr__(name: str) -> Any:
     """Resolve analysis APIs without eager analysis-module imports."""
-    if name in _FORECAST_NAMES:
-        from . import subhalo_forecast
-
-        return getattr(subhalo_forecast, name)
     if name in _RANK_STABILITY_NAMES:
         from . import rank_stability
 
