@@ -19,6 +19,9 @@ from extract_injection_positions import (  # noqa: E402
     injection_logm,
 )
 from generate_nonlinear_validation_campaign import sample_members  # noqa: E402
+from harvest_nonlinear_validation import (  # noqa: E402
+    spearman_rank_correlation,
+)
 from run_nonlinear_validation import (  # noqa: E402
     ARMS,
     build_arm_config,
@@ -160,6 +163,26 @@ class TestBuildArmConfig:
         reference = deepcopy(staged)
         build_arm_config(staged, "noisy_injected", _injection())
         assert staged == reference
+
+
+class TestSpearman:
+    def test_perfect_monotone_relations(self):
+        first = [1.0, 2.0, 5.0, 9.0]
+        assert spearman_rank_correlation(first, [2.0, 4.0, 8.0, 16.0]) == 1.0
+        assert spearman_rank_correlation(first, [8.0, 7.0, 3.0, 1.0]) == -1.0
+
+    def test_hand_computed_tied_case(self):
+        # Ranks: first (1, 2.5, 2.5, 4), second (2, 1, 3, 4). Centred,
+        # sum(ab) = 3.0 and sqrt(sum(a^2) sum(b^2)) = sqrt(4.5 * 5.0),
+        # so the rank Pearson correlation is 3/sqrt(22.5) = 2/sqrt(10).
+        value = spearman_rank_correlation(
+            [1.0, 2.0, 2.0, 3.0], [5.0, 4.0, 6.0, 7.0]
+        )
+        assert value == pytest.approx(2.0/np.sqrt(10.0))
+
+    def test_constant_input_fails_closed(self):
+        with pytest.raises(ValueError, match="constant"):
+            spearman_rank_correlation([1.0, 1.0, 1.0], [1.0, 2.0, 3.0])
 
 
 class TestSampleMembers:
