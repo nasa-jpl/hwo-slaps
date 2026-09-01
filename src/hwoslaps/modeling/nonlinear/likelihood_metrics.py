@@ -18,6 +18,9 @@ SCDD_DELTA_LOG_L_THRESHOLD = 5.0
 SCDD_Q_THRESHOLD = 2.0*SCDD_DELTA_LOG_L_THRESHOLD
 """Equivalent likelihood-ratio threshold, ``q = 2 Delta log L``."""
 
+STRONG_EVIDENCE_DELTA_LOG_Z_THRESHOLD = 5.0
+"""Strong-evidence threshold on marginalized ``Delta log Z`` (`float`)."""
+
 
 @dataclass(frozen=True)
 class LikelihoodRatioMetric:

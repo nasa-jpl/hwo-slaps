@@ -835,7 +835,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         fit_psf = modeling['fit_psf']
         _require_type(fit_psf, dict, 'modeling.fit_psf')
         unsupported_fit_psf_keys = sorted(
-            set(fit_psf) - {'mode', 'psf', 'bank', 'delta'}
+            set(fit_psf) - {'mode', 'psf', 'delta'}
         )
         if unsupported_fit_psf_keys:
             raise ValueError(
@@ -845,20 +845,20 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         fit_psf_mode = _require(fit_psf, 'mode', 'modeling.fit_psf')
         _require_type(fit_psf_mode, str, 'modeling.fit_psf.mode')
         fit_psf_mode = fit_psf_mode.lower()
-        if fit_psf_mode not in {'matched', 'explicit', 'bank', 'delta'}:
+        if fit_psf_mode not in {'matched', 'explicit', 'delta'}:
             raise ValueError(
                 "modeling.fit_psf.mode must be one of: "
-                "'matched', 'explicit', 'bank', 'delta'"
+                "'matched', 'explicit', 'delta'"
             )
         if fit_psf_mode == 'matched':
-            for key in ('psf', 'bank', 'delta'):
+            for key in ('psf', 'delta'):
                 if key in fit_psf:
                     raise ValueError(
                         f"modeling.fit_psf.{key} must not be present when "
                         "modeling.fit_psf.mode is 'matched'"
                     )
         elif fit_psf_mode == 'explicit':
-            for key in ('bank', 'delta'):
+            for key in ('delta',):
                 if key in fit_psf:
                     raise ValueError(
                         f"modeling.fit_psf.{key} must not be present when "
@@ -870,134 +870,8 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                 validate_psf_config(explicit_psf)
             except ValueError as exc:
                 raise ValueError(f"modeling.fit_psf.psf is invalid: {exc}") from exc
-        elif fit_psf_mode == 'bank':
-            for key in ('psf', 'delta'):
-                if key in fit_psf:
-                    raise ValueError(
-                        f"modeling.fit_psf.{key} must not be present when "
-                        "modeling.fit_psf.mode is 'bank'"
-                    )
-            bank = _require(fit_psf, 'bank', 'modeling.fit_psf')
-            _require_type(bank, dict, 'modeling.fit_psf.bank')
-            if 'kind' not in bank:
-                raise ValueError(
-                    "Missing required key 'modeling.fit_psf.bank.kind'"
-                )
-            kind = bank['kind']
-            _require_type(kind, str, 'modeling.fit_psf.bank.kind')
-            kind = kind.lower()
-            if kind not in {'prior_draws', 'explicit'}:
-                raise ValueError(
-                    "modeling.fit_psf.bank.kind must be one of: "
-                    "'prior_draws', 'explicit'"
-                )
-            if kind == 'prior_draws':
-                supported = {
-                    'kind',
-                    'prior_table',
-                    'amplitude_rms_nm',
-                    'n_draws',
-                    'seed',
-                    'include_perfect',
-                    'include_truth',
-                }
-                _reject_unknown_keys(bank, supported, 'modeling.fit_psf.bank')
-                prior_table = _require(
-                    bank,
-                    'prior_table',
-                    'modeling.fit_psf.bank',
-                )
-                _require_type(
-                    prior_table,
-                    str,
-                    'modeling.fit_psf.bank.prior_table',
-                )
-                amplitude = _require(
-                    bank,
-                    'amplitude_rms_nm',
-                    'modeling.fit_psf.bank',
-                )
-                if isinstance(amplitude, list):
-                    if not amplitude:
-                        raise ValueError(
-                            "modeling.fit_psf.bank.amplitude_rms_nm must be "
-                            "a non-empty list"
-                        )
-                    for index, value in enumerate(amplitude):
-                        _require_positive_finite_number(
-                            value,
-                            "modeling.fit_psf.bank.amplitude_rms_nm"
-                            f"[{index}]",
-                        )
-                else:
-                    _require_positive_finite_number(
-                        amplitude,
-                        'modeling.fit_psf.bank.amplitude_rms_nm',
-                    )
-                n_draws = _require(
-                    bank,
-                    'n_draws',
-                    'modeling.fit_psf.bank',
-                )
-                if (
-                    isinstance(n_draws, bool)
-                    or not isinstance(n_draws, int)
-                    or n_draws < 1
-                ):
-                    raise ValueError(
-                        "modeling.fit_psf.bank.n_draws must be an integer "
-                        "greater than or equal to 1"
-                    )
-                if isinstance(amplitude, list) and n_draws % len(amplitude):
-                    raise ValueError(
-                        "modeling.fit_psf.bank.n_draws must be divisible by "
-                        "the length of modeling.fit_psf.bank.amplitude_rms_nm"
-                    )
-                seed = _require(bank, 'seed', 'modeling.fit_psf.bank')
-                if (
-                    isinstance(seed, bool)
-                    or not isinstance(seed, int)
-                    or seed < 0
-                ):
-                    raise ValueError(
-                        "modeling.fit_psf.bank.seed must be a non-negative "
-                        "integer"
-                    )
-                for key in ('include_perfect', 'include_truth'):
-                    if key in bank:
-                        _require_type(
-                            bank[key],
-                            bool,
-                            f'modeling.fit_psf.bank.{key}',
-                        )
-            else:
-                _reject_unknown_keys(
-                    bank,
-                    {'kind', 'candidates'},
-                    'modeling.fit_psf.bank',
-                )
-                if 'candidates' not in bank:
-                    raise ValueError(
-                        "Missing required key "
-                        "'modeling.fit_psf.bank.candidates'"
-                    )
-                candidates = bank['candidates']
-                _require_type(
-                    candidates,
-                    list,
-                    'modeling.fit_psf.bank.candidates',
-                )
-                if not candidates:
-                    raise ValueError(
-                        "modeling.fit_psf.bank.candidates must be non-empty"
-                    )
-                for index, candidate in enumerate(candidates):
-                    _validate_psf_aberrations(
-                        candidate,
-                        f'modeling.fit_psf.bank.candidates[{index}]',
-                    )
         else:
-            for key in ('psf', 'bank'):
+            for key in ('psf',):
                 if key in fit_psf:
                     raise ValueError(
                         f"modeling.fit_psf.{key} must not be present when "

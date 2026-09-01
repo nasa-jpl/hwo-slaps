@@ -36,10 +36,6 @@ from hwoslaps.modeling.nonlinear.dataset_builder import (
 from hwoslaps.modeling.nonlinear.psf_mismatch import (
     run_psf_mismatch_case,
 )
-from hwoslaps.modeling.nonlinear.psf_bank import (
-    build_psf_bank,
-    run_psf_bank_case,
-)
 from hwoslaps.modeling.nonlinear.validator import NonlinearMetricValidator
 from hwoslaps.modeling.utils_fisher import print_fisher_summary
 from hwoslaps.observation import generate_observation
@@ -755,17 +751,12 @@ def _guard_kernel() -> np.ndarray:
         ("matched", "fit", False, True),
         ("matched", "delta:wrong", False, False),
         ("matched", "fit", True, False),
-        ("bank", "fit", False, False),
-        ("bank", "delta:wrong", True, False),
-        ("bank", "bank:right", True, True),
         ("delta", "fit", False, False),
         ("delta", "delta:right", False, False),
-        ("delta", "bank:wrong", True, False),
         ("delta", "explicit:wrong", True, False),
         ("delta", "delta:right", True, True),
         ("explicit", "fit", False, False),
         ("explicit", "explicit:right", False, False),
-        ("explicit", "bank:wrong", True, False),
         ("explicit", "delta:wrong", True, False),
         ("explicit", "explicit:right", True, True),
     ],
@@ -784,13 +775,6 @@ def test_validator_guard_rejects_mode_label_and_supplied_incoherence(
     config = copy.deepcopy(compact_config)
     if mode == "matched":
         config["modeling"]["fit_psf"] = {"mode": "matched"}
-    elif mode == "bank":
-        config["modeling"]["fit_psf"] = {
-            "mode": "bank",
-            "bank": {"kind": "explicit", "candidates": [
-                copy.deepcopy(config["psf"]["aberrations"])
-            ]},
-        }
     elif mode == "explicit":
         config["modeling"]["fit_psf"] = {
             "mode": "explicit",
@@ -819,7 +803,7 @@ def test_validator_guard_rejects_mode_label_and_supplied_incoherence(
         metadata = _metadata(resolved_label, supplied, digest)
         expected_digest = (
             metadata.psf_fit_sha256
-            if mode in {"bank", "delta", "explicit"}
+            if mode in {"delta", "explicit"}
             else None
         )
         return validator.validate_case(
@@ -879,7 +863,7 @@ def test_validator_guard_requires_executor_kernel_digest(compact_config):
         ValueError,
         match=(
             "mismatch-mode datasets must be executed through "
-            "run_psf_mismatch_case / run_psf_bank_case"
+            "run_psf_mismatch_case"
         ),
     ):
         NonlinearMetricValidator(SimpleNamespace()).validate_case(
@@ -1023,19 +1007,12 @@ def test_validator_guard_rejects_arbitrary_delta_identity(compact_config):
         )
 
 
-@pytest.mark.parametrize("mode", ["bank", "delta"])
+@pytest.mark.parametrize("mode", ["delta"])
 def test_validator_matched_control_contract(compact_config, monkeypatch, mode):
     """Permit only truth-kernel matched references under mismatch configs."""
     import hwoslaps.modeling.nonlinear.validator as validator_module
 
     config = copy.deepcopy(compact_config)
-    if mode == "bank":
-        config["modeling"]["fit_psf"] = {
-            "mode": "bank",
-            "bank": {"kind": "explicit", "candidates": [
-                copy.deepcopy(config["psf"]["aberrations"])
-            ]},
-        }
 
     class ReachedModelBuild(Exception):
         """Signal that guard validation passed."""
@@ -1463,29 +1440,6 @@ def test_fisher_delta_rejects_altered_observation_scalars(compact_config):
         )
 
 
-def test_fisher_bank_still_raises(compact_config):
-    """Keep the nonlinear-only bank rejection intact on the Fisher path."""
-    psf_data, baseline, _, observation_baseline, _ = _fisher_products(
-        compact_config
-    )
-    config = copy.deepcopy(compact_config)
-    config["modeling"]["fit_psf"] = {
-        "mode": "bank",
-        "bank": {"kind": "explicit", "candidates": [
-            copy.deepcopy(config["psf"]["aberrations"])
-        ]},
-    }
-
-    with pytest.raises(ValueError, match="nonlinear-only"):
-        FisherDetector(
-            observation_baseline=observation_baseline,
-            lensing_baseline=baseline,
-            psf_data=psf_data,
-            full_config=config,
-            fisher_config=config["modeling"]["fisher"],
-        )
-
-
 def test_fisher_detection_transports_delta_provenance(
     compact_config,
     capsys,
@@ -1736,36 +1690,6 @@ def test_prior_digest_and_parse_share_one_read(
     assert spec.draw_aberrations == reference_spec.draw_aberrations
 
 
-def test_bank_executor_passes_wrapped_kernel_digest(compact_config):
-    """Bind each bank dataset to the wrapped candidate kernel digest."""
-    config = copy.deepcopy(compact_config)
-    config["modeling"]["fit_psf"] = {
-        "mode": "bank",
-        "bank": {
-            "kind": "explicit",
-            "candidates": [
-                copy.deepcopy(config["psf"]["aberrations"]),
-            ],
-        },
-    }
-    bank = _quiet_call(build_psf_bank, config)
-    validator = _FakeValidator()
-    run_psf_bank_case(
-        validator,
-        _observation(config),
-        config,
-        _trial(),
-        bank,
-        fit_mode="fixed_template",
-        include_anchors=False,
-    )
-
-    assert len(validator.calls) == 1
-    assert validator.calls[0]["expected_psf_fit_sha256"] == (
-        validator.calls[0]["metadata"].psf_fit_sha256
-    )
-
-
 def test_executor_rejects_kernel_pixel_scale_mismatch(compact_config):
     """Reject a fit kernel whose pixel scale differs from the observation."""
     observation = _observation(compact_config)
@@ -1918,10 +1842,9 @@ def test_seed_reproducibility_and_independence(compact_config):
     assert first.draw_aberrations == fourth.draw_aberrations
 
 
-def test_lightweight_module_imports_and_bank_helper_reexports():
-    """Keep mismatch and bank module bodies free of eager HCIPy imports."""
+def test_lightweight_mismatch_module_imports():
+    """Keep the PSF mismatch module free of eager HCIPy imports."""
     for module_name, forbidden in (
-        ("hwoslaps.modeling.nonlinear.psf_bank", "'hcipy'"),
         ("hwoslaps.psf.mismatch", "'hcipy', 'matplotlib'"),
     ):
         code = (
@@ -1936,25 +1859,6 @@ def test_lightweight_module_imports_and_bank_helper_reexports():
             text=True,
         )
         assert completed.returncode == 0, completed.stderr
-
-    import hwoslaps.modeling.nonlinear.psf_bank as bank_module
-    import hwoslaps.psf.mismatch as mismatch_module
-
-    for name in (
-        "_BANK_VERSION_PACKAGES",
-        "_aberrations_from_wire",
-        "_aberrations_to_wire",
-        "_canonical_aberrations",
-        "_current_versions",
-        "_empty_aberrations",
-        "_flat_int_map_from_wire",
-        "_flat_int_map_to_wire",
-        "_kernel_sha256",
-        "_nested_int_map_from_wire",
-        "_nested_int_map_to_wire",
-        "_resolve_prior_table_path",
-    ):
-        assert getattr(bank_module, name) is getattr(mismatch_module, name)
 
 
 def test_nonlinear_package_exposes_mismatch_symbols_lazily():

@@ -75,11 +75,6 @@ __all__ = [
     "NonlinearMetricValidator",
     "NonlinearSearchSettings",
     "PointMassMCRSubhalo",
-    "PsfBank",
-    "PsfBankCandidate",
-    "PsfBankCandidateFit",
-    "PsfBankCaseResult",
-    "PsfBankSummary",
     "PsfMismatchCaseResult",
     "PsfMismatchSpec",
     "SCDD_DELTA_LOG_L_THRESHOLD",
@@ -102,13 +97,8 @@ __all__ = [
     "profile_likelihood_ratio",
     "profile_likelihood_q",
     "q_from_delta_log_l",
-    "build_psf_bank",
     "build_psf_mismatch_spec",
-    "combine_psf_bank_fits",
-    "load_psf_bank_npz",
-    "run_psf_bank_case",
     "run_psf_mismatch_case",
-    "save_psf_bank_npz",
     "smooth_model_spec_from_config",
     "subhalo_model_spec_from_trial",
     "trial_from_fisher_map_position",
@@ -118,7 +108,7 @@ __all__ = [
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve lazy custom profile and PSF-bank exports.
+    """Resolve lazy custom profile exports.
 
     Parameters
     ----------
@@ -142,21 +132,6 @@ def __getattr__(name: str) -> Any:
         from . import mass_mapping
 
         return getattr(mass_mapping, name)
-    if name in {
-        "PsfBank",
-        "PsfBankCandidate",
-        "PsfBankCandidateFit",
-        "PsfBankCaseResult",
-        "PsfBankSummary",
-        "build_psf_bank",
-        "combine_psf_bank_fits",
-        "load_psf_bank_npz",
-        "run_psf_bank_case",
-        "save_psf_bank_npz",
-    }:
-        from . import psf_bank
-
-        return getattr(psf_bank, name)
     if name in {
         "PsfMismatchCaseResult",
         "PsfMismatchSpec",

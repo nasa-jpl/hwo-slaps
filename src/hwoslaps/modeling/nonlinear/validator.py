@@ -79,7 +79,7 @@ def _validate_fit_psf_dataset(
         if expected_psf_fit_sha256 is None:
             raise ValueError(
                 "mismatch-mode datasets must be executed through "
-                "run_psf_mismatch_case / run_psf_bank_case"
+                "run_psf_mismatch_case"
             )
         if expected_psf_fit_sha256 != dataset_psf_fit_sha256:
             raise ValueError(

@@ -412,11 +412,6 @@ class FisherDetector:
         self._delta_truth_kernel_scales = None
         self._delta_truth_accept_digests = None
         self._delta_truth_regen_kernel = None
-        if self.fit_psf_mode == "bank":
-            raise ValueError(
-                "modeling.fit_psf mode 'bank' is a nonlinear-only "
-                "treatment; use 'matched' or 'explicit' for Fisher runs"
-            )
         self.psf_mismatch_enabled = self.fit_psf_mode in {
             "explicit",
             "delta",

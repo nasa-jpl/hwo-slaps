@@ -20,8 +20,10 @@ from ...psf.mismatch import (
     build_psf_mismatch_spec,
     generate_fit_psf,
 )
-from .likelihood_metrics import SCDD_Q_THRESHOLD
-from .psf_bank import STRONG_EVIDENCE_DELTA_LOG_Z_THRESHOLD
+from .likelihood_metrics import (
+    SCDD_Q_THRESHOLD,
+    STRONG_EVIDENCE_DELTA_LOG_Z_THRESHOLD,
+)
 
 
 __all__ = (
