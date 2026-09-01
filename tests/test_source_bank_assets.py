@@ -59,9 +59,7 @@ LEGACY_ANCHOR = {
 }
 """The anchor prepared before the contract solve existed.
 
-Its contract was embedded by ``scripts/retrofit_rate_contract.py``, which
-rewrites the asset and prints the sha256 that repins it here and in the
-design freeze. Every bank anchor is held to the contract, so this entry is
+Every bank anchor is held to the contract, so this entry is
 parametrized alongside the four prepared with it.
 """
 
