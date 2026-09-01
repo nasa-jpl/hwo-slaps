@@ -2,24 +2,25 @@
 """Run one nonlinear-validation arm of one production ladder member.
 
 One invocation is one smooth/subhalo Nautilus fit pair under the
-DesignFreeze v3 ``nonlinear_validation`` protocol: the member's staged
-ladder configuration is rendered at the production kernel with its trial
-subhalo injected (or withheld, for the control arm) at the mass and
-position the injection-position artifact declares, and the freed fit
-pair runs with the matched delta-zero fit PSF, the declared search
-settings and the declared sampler seed stream.
+DesignFreeze v3 ``nonlinear_validation`` protocol. Every protocol
+setting is read from the freeze itself: the arm table (dataset kind,
+truth subhalo, fit mode, rung, eligibility), the fit settings, the
+kernel declaration and the sampler seed rule. Nothing about the
+protocol is CLI-overridable, so a job cannot silently run off-protocol.
 
-The three arms are declared in the freeze:
+The member's staged ladder configuration is rendered at the declared
+fit kernel with its trial subhalo injected (or withheld, for the
+control arm) at the rung and support-matched position the
+injection-position artifact declares. Before any fit, the runner
+verifies the code revision, the source asset, the PSF state, the staged
+kernel against the declaration, the declared training-worker
+environment, and that the trial position lies inside the nonlinear
+dataset's PSF-border-valid support with a non-degenerate mask.
 
-- ``asimov_injected``: subhalo in the truth, noiseless Asimov dataset.
-- ``noisy_injected``: subhalo in the truth, the system's own declared
-  primary-noise realization.
-- ``noisy_control``: no subhalo in the truth, the same noisy dataset
-  kind; the subhalo search runs at the same trial mass and position.
-
-The sampler seed is derived here, fail-closed, from the freeze entropy
-and the declared spawn key; it is not an input. The job artifact is
-``nonlinear_validation_<arm>.json`` under ``--output-dir``.
+The job artifact is ``nonlinear_validation_<arm>.json`` under
+``--output-dir``; it embeds the complete case record (both fit
+summaries with error strings, freed-recovery values, diagnostics and
+quality flags).
 """
 
 from __future__ import annotations
@@ -41,32 +42,28 @@ if str(REPO_ROOT/"src") not in sys.path:
 if str(REPO_ROOT/"scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT/"scripts"))
 
-SEED_ENTROPY = 20260823
-"""Freeze seed entropy the sampler stream derives from (`int`)."""
+DESIGN_FREEZE_PATH = REPO_ROOT/"configs"/"design"/"design_freeze_v1.yaml"
 
 SAMPLER_SPAWN_KEY = 5
 """Leading spawn key of the declared sampler stream (`int`)."""
 
-ARMS = {
-    "asimov_injected": {"arm_index": 0, "dataset_kind": "asimov", "subhalo": True},
-    "noisy_injected": {"arm_index": 1, "dataset_kind": "noisy", "subhalo": True},
-    "noisy_control": {"arm_index": 2, "dataset_kind": "noisy", "subhalo": False},
-}
-"""Declared validation arms (`dict`)."""
 
-KERNEL_SHAPE_NATIVE = [999, 999]
-"""Production detector kernel the fits render at (`list`)."""
+def load_protocol(path=DESIGN_FREEZE_PATH) -> dict:
+    """Load the declared nonlinear-validation protocol block.
 
-DELTA_BLOCK = {
-    "prior_table": "configs/psf_priors/jwst_wss_drift_v1.yaml",
-    "seed": 20260814,
-    "family": "combined",
-    "amplitude_rms_nm": 0.0,
-}
-"""Matched delta-zero fit-PSF declaration of the protocol (`dict`)."""
+    Parameters
+    ----------
+    path : path-like, optional
+        Design freeze artifact to read.
 
-LOG10_M200_RANGE = (6.0, 9.7)
-"""Declared freed mass-mapping range of the protocol (`tuple`)."""
+    Returns
+    -------
+    protocol : `dict`
+        The validated ``nonlinear_validation`` block.
+    """
+    from hwoslaps.campaign.design_freeze import load_design_freeze
+
+    return load_design_freeze(path)["nonlinear_validation"]
 
 
 def system_index(system_id: str) -> int:
@@ -99,11 +96,13 @@ def system_index(system_id: str) -> int:
     return int(digits)
 
 
-def derive_sampler_seed(index: int, arm_index: int) -> int:
+def derive_sampler_seed(entropy: int, index: int, arm_index: int) -> int:
     """Derive one arm's declared Nautilus sampler seed.
 
     Parameters
     ----------
+    entropy : `int`
+        The freeze seed entropy.
     index : `int`
         System index ``i``.
     arm_index : `int`
@@ -115,7 +114,7 @@ def derive_sampler_seed(index: int, arm_index: int) -> int:
         The 32-bit sampler seed of the freeze's sampler stream.
     """
     sequence = np.random.SeedSequence(
-        entropy=SEED_ENTROPY,
+        entropy=int(entropy),
         spawn_key=(SAMPLER_SPAWN_KEY, int(index), int(arm_index)),
     )
     return int(sequence.generate_state(1, dtype=np.uint32)[0])
@@ -123,8 +122,9 @@ def derive_sampler_seed(index: int, arm_index: int) -> int:
 
 def build_arm_config(
     staged_config: dict,
-    arm: str,
-    injection: dict,
+    arm_declaration: dict,
+    rung_payload: dict,
+    fit_block: dict,
 ) -> dict:
     """Build the rendering configuration of one validation arm.
 
@@ -132,33 +132,45 @@ def build_arm_config(
     ----------
     staged_config : `dict`
         The member's restamped staged ladder configuration.
-    arm : `str`
-        Declared arm name.
-    injection : `dict`
-        The member's injection-position artifact payload.
+    arm_declaration : `dict`
+        The arm's declaration from the freeze protocol.
+    rung_payload : `dict`
+        The rung block of the member's injection-position artifact.
+    fit_block : `dict`
+        The freeze protocol's ``fit`` block.
 
     Returns
     -------
     config : `dict`
         Full configuration the arm's scene and fits are built from.
+
+    Raises
+    ------
+    ValueError
+        Raised when the staged kernel disagrees with the declaration.
     """
-    declaration = ARMS[arm]
     config = copy.deepcopy(staged_config)
     config.pop("provenance_note", None)
     config["plotting"] = {"enabled": False}
-    config["psf"]["kernel"]["shape_native"] = list(KERNEL_SHAPE_NATIVE)
+    staged_kernel = list(config["psf"]["kernel"]["shape_native"])
+    declared_kernel = list(fit_block["kernel_shape_native"])
+    if staged_kernel != declared_kernel:
+        raise ValueError(
+            f"Staged kernel {staged_kernel} is not the declared fit kernel "
+            f"{declared_kernel}"
+        )
     config["modeling"]["fit_psf"] = {
         "mode": "delta",
-        "delta": dict(DELTA_BLOCK),
+        "delta": dict(fit_block["fit_psf"]),
     }
     subhalo = config["lensing"]["subhalo"]
-    subhalo["enabled"] = bool(declaration["subhalo"])
-    subhalo["mass"] = float(injection["injection_mass_msun"])
+    subhalo["enabled"] = bool(arm_declaration["subhalo_in_truth"])
+    subhalo["mass"] = float(rung_payload["mass_msun"])
     subhalo["position"] = {
         "type": "direct",
         "centre": [
-            float(injection["position_yx_arcsec"][0]),
-            float(injection["position_yx_arcsec"][1]),
+            float(rung_payload["position_yx_arcsec"][0]),
+            float(rung_payload["position_yx_arcsec"][1]),
         ],
     }
     return config
@@ -171,32 +183,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "positions", help="The member's injection_position.json"
     )
-    parser.add_argument("arm", choices=sorted(ARMS), help="Validation arm")
+    parser.add_argument("arm", help="Declared validation arm name")
     parser.add_argument("output_dir", help="Directory for fit outputs")
-    parser.add_argument(
-        "--n-live-smooth",
-        type=int,
-        default=100,
-        help="Live points for the smooth fit",
-    )
-    parser.add_argument(
-        "--n-live-subhalo",
-        type=int,
-        default=200,
-        help="Live points for the freed subhalo fit",
-    )
-    parser.add_argument(
-        "--jax-n-batch",
-        type=int,
-        default=32,
-        help="Vectorized AutoFit likelihood batch size",
-    )
-    parser.add_argument(
-        "--maxcall",
-        type=int,
-        default=500_000,
-        help="Maximum likelihood calls",
-    )
     parser.add_argument(
         "--force",
         action="store_true",
@@ -215,6 +203,25 @@ def main(argv=None) -> None:
             f"Refusing to overwrite {artifact_path}; pass --force to replace it"
         )
 
+    protocol = load_protocol()
+    fit_block = protocol["fit"]
+    arms = protocol["arms"]
+    if args.arm not in arms:
+        raise ValueError(
+            f"Arm {args.arm!r} is not declared; declared arms: "
+            f"{sorted(arms)}"
+        )
+    declaration = arms[args.arm]
+
+    declared_workers = str(fit_block["nautilus_training_workers"])
+    effective_workers = os.environ.get("HWOSLAPS_NAUTILUS_TRAINING_WORKERS")
+    if effective_workers != declared_workers:
+        raise ValueError(
+            "HWOSLAPS_NAUTILUS_TRAINING_WORKERS is "
+            f"{effective_workers!r} but the protocol declares "
+            f"{declared_workers!r}"
+        )
+
     with open(args.config, encoding="utf-8") as stream:
         staged_config = yaml.safe_load(stream)
     with open(args.positions, encoding="utf-8") as stream:
@@ -226,10 +233,27 @@ def main(argv=None) -> None:
             f"Positions artifact belongs to {injection['system_id']!r}, "
             f"configuration to {system_id_value!r}"
         )
+    if list(injection["fit_kernel_shape_native"]) != list(
+        fit_block["kernel_shape_native"]
+    ):
+        raise ValueError(
+            "Positions artifact was extracted for kernel "
+            f"{injection['fit_kernel_shape_native']}, protocol declares "
+            f"{fit_block['kernel_shape_native']}"
+        )
 
-    declaration = ARMS[args.arm]
+    rung_name = str(declaration["rung"])
+    if rung_name not in injection["rungs"]:
+        raise ValueError(
+            f"Positions artifact carries no {rung_name!r} rung for "
+            f"{system_id_value} (censored: {injection['censored']})"
+        )
+    rung_payload = injection["rungs"][rung_name]
+
     seed = derive_sampler_seed(
-        system_index(system_id_value), declaration["arm_index"]
+        int(protocol["seeds"]["entropy"]),
+        system_index(system_id_value),
+        int(declaration["arm_index"]),
     )
 
     from run_stage0_observation import (
@@ -237,6 +261,7 @@ def main(argv=None) -> None:
         _verify_source_asset,
     )
     import run_ladder
+    from extract_injection_positions import support_half_widths
 
     run_ladder._verify_psf_state(staged_config)
     revision = _verify_code_revision(staged_config)
@@ -246,6 +271,9 @@ def main(argv=None) -> None:
     from hwoslaps.modeling.nonlinear.autolens_runner import (
         AutoLensFitRunner,
         NonlinearSearchSettings,
+    )
+    from hwoslaps.modeling.nonlinear.dataset_builder import (
+        _exclude_psf_edge_pixels,
     )
     from hwoslaps.modeling.nonlinear.mass_mapping import (
         build_mass_mapping_context,
@@ -262,13 +290,17 @@ def main(argv=None) -> None:
     timings = {}
     start = time.time()
 
+    injected_declaration = dict(declaration)
+    injected_declaration["subhalo_in_truth"] = True
     injected_config = build_arm_config(
-        staged_config, "asimov_injected", injection
+        staged_config, injected_declaration, rung_payload, fit_block
     )
     arm_config = (
         injected_config
-        if declaration["subhalo"]
-        else build_arm_config(staged_config, args.arm, injection)
+        if declaration["subhalo_in_truth"]
+        else build_arm_config(
+            staged_config, declaration, rung_payload, fit_block
+        )
     )
 
     lensing_injected = generate_lensing_system(
@@ -276,7 +308,7 @@ def main(argv=None) -> None:
     )
     lensing_for_data = (
         lensing_injected
-        if declaration["subhalo"]
+        if declaration["subhalo_in_truth"]
         else generate_lensing_system(
             arm_config["lensing"], full_config=arm_config
         )
@@ -293,31 +325,56 @@ def main(argv=None) -> None:
     )
     timings["scene_psf_observation_s"] = time.time() - start
 
+    kernel_shape = tuple(fit_block["kernel_shape_native"])
+    image_shape = tuple(
+        np.asarray(observation.data.native, dtype=float).shape
+    )
+    use_mask = _exclude_psf_edge_pixels(
+        np.ones(image_shape, dtype=bool), psf_shape=kernel_shape
+    )
+    n_unmasked_pixels = int(np.count_nonzero(use_mask))
+    if n_unmasked_pixels == 0:
+        raise ValueError(
+            f"The PSF border of kernel {kernel_shape} leaves no valid "
+            f"pixels on an image of shape {image_shape}"
+        )
+    half_widths = support_half_widths(
+        image_shape, float(observation.pixel_scale), kernel_shape
+    )
+    position = rung_payload["position_yx_arcsec"]
+    if (
+        abs(float(position[0])) > half_widths[0]
+        or abs(float(position[1])) > half_widths[1]
+    ):
+        raise ValueError(
+            f"Trial position {position} lies outside the PSF-border-valid "
+            f"support half-widths {half_widths}"
+        )
+
     trial = trial_from_fisher_map_position(
         injected_config,
         lensing_injected,
-        float(injection["injection_mass_msun"]),
-        (
-            float(injection["position_yx_arcsec"][0]),
-            float(injection["position_yx_arcsec"][1]),
-        ),
-        fisher_q=float(injection["q_at_position"]),
+        float(rung_payload["mass_msun"]),
+        (float(position[0]), float(position[1])),
+        fisher_q=float(rung_payload["q_f_matched"]),
         case_id=f"{system_id_value}_{args.arm}",
     )
     mass_context = build_mass_mapping_context(
-        injected_config, log10_m200_range=LOG10_M200_RANGE
+        injected_config,
+        log10_m200_range=tuple(fit_block["log10_m200_range"]),
     )
 
     runner = AutoLensFitRunner(
         NonlinearSearchSettings(
-            n_live_smooth=args.n_live_smooth,
-            n_live_subhalo_search=args.n_live_subhalo,
-            number_of_cores=1,
-            maxcall=args.maxcall,
+            n_live_smooth=int(fit_block["n_live_smooth"]),
+            n_live_subhalo_search=int(fit_block["n_live_subhalo_search"]),
+            n_live_subhalo_fixed=int(fit_block["n_live_subhalo_fixed"]),
+            number_of_cores=int(fit_block["number_of_cores"]),
+            maxcall=int(fit_block["maxcall"]),
             seed=seed,
             path_prefix=f"{system_id_value}_{args.arm}",
             use_jax=True,
-            jax_n_batch=args.jax_n_batch,
+            jax_n_batch=int(fit_block["jax_n_batch"]),
         ),
         output_dir=str(output_dir),
     )
@@ -329,65 +386,69 @@ def main(argv=None) -> None:
         observation,
         arm_config,
         trial,
-        fit_mode="freed",
-        dataset_kind=declaration["dataset_kind"],
+        fit_mode=str(declaration["fit_mode"]),
+        dataset_kind=str(declaration["dataset_kind"]),
         mass_context=mass_context,
     )
     timings["fit_pair_s"] = time.time() - start
 
     case = result.case
+    delta_log_likelihood = None
+    if (
+        case.subhalo_fit.log_likelihood_max is not None
+        and case.smooth_fit.log_likelihood_max is not None
+    ):
+        delta_log_likelihood = float(
+            case.subhalo_fit.log_likelihood_max
+            - case.smooth_fit.log_likelihood_max
+        )
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "artifact": artifact_path.name,
         "system_id": system_id_value,
         "tier": str(injection["tier"]),
         "arm": args.arm,
-        "arm_index": declaration["arm_index"],
-        "dataset_kind": declaration["dataset_kind"],
-        "subhalo_in_truth": declaration["subhalo"],
+        "arm_declaration": dict(declaration),
         "sampler_seed": seed,
-        "seed_entropy": SEED_ENTROPY,
+        "seed_entropy": int(protocol["seeds"]["entropy"]),
         "seed_spawn_key": [
             SAMPLER_SPAWN_KEY,
             system_index(system_id_value),
-            declaration["arm_index"],
+            int(declaration["arm_index"]),
         ],
-        "injection_logm": float(injection["injection_logm"]),
-        "injection_mass_msun": float(injection["injection_mass_msun"]),
+        "rung": dict(rung_payload),
         "censored": bool(injection["censored"]),
-        "position_yx_arcsec": [
-            float(injection["position_yx_arcsec"][0]),
-            float(injection["position_yx_arcsec"][1]),
-        ],
-        "fisher_q_at_position": float(injection["q_at_position"]),
         "ladder_campaign_uuid": str(injection["ladder_campaign_uuid"]),
         "ladder_config_hash": str(injection["ladder_config_hash"]),
         "staged_config_hash": config_hash(staged_config),
         "arm_config_hash": config_hash(arm_config),
         "source_asset_sha256": asset_sha256,
         "code_revision": revision,
-        "n_live_smooth": args.n_live_smooth,
-        "n_live_subhalo": args.n_live_subhalo,
-        "jax_n_batch": args.jax_n_batch,
-        "maxcall": args.maxcall,
-        "log10_m200_range": list(LOG10_M200_RANGE),
-        "nautilus_training_workers": os.environ.get(
-            "HWOSLAPS_NAUTILUS_TRAINING_WORKERS"
-        ),
+        "fit_settings": {
+            key: fit_block[key]
+            for key in (
+                "kernel_shape_native",
+                "n_live_smooth",
+                "n_live_subhalo_search",
+                "n_live_subhalo_fixed",
+                "maxcall",
+                "jax_n_batch",
+                "number_of_cores",
+                "log10_m200_range",
+                "nautilus_training_workers",
+            )
+        },
+        "n_unmasked_pixels": n_unmasked_pixels,
+        "image_shape": list(image_shape),
+        "support_half_widths_arcsec": [half_widths[0], half_widths[1]],
         "timings": timings,
         "q_fit": result.q_fit,
         "delta_log_evidence": result.delta_log_evidence,
+        "delta_log_likelihood": delta_log_likelihood,
         "smooth_status": result.smooth_status,
         "subhalo_status": result.subhalo_status,
-        "smooth_log_likelihood_max": case.smooth_fit.log_likelihood_max,
-        "subhalo_log_likelihood_max": case.subhalo_fit.log_likelihood_max,
-        "smooth_log_evidence": case.smooth_fit.log_evidence,
-        "subhalo_log_evidence": case.subhalo_fit.log_evidence,
-        "smooth_runtime_s": case.smooth_fit.runtime_s,
-        "subhalo_runtime_s": case.subhalo_fit.runtime_s,
-        "smooth_analysis_key": case.smooth_fit.analysis_key,
-        "subhalo_analysis_key": case.subhalo_fit.analysis_key,
         "quality_flags": list(case.quality_flags),
+        "case": case.to_dict(),
         "trial": trial.to_dict(),
         "measured_truth_total_rms_nm": psf_data.total_rms_nm,
         "kernel_sha256": result.kernel_sha256,
@@ -396,7 +457,6 @@ def main(argv=None) -> None:
         "campaign_uuid": os.environ.get("HWOSLAPS_CAMPAIGN_UUID", ""),
     }
     output_dir.mkdir(parents=True, exist_ok=True)
-    result.write_json(output_dir/f"case_{args.arm}.json")
     artifact_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",
         encoding="utf-8",

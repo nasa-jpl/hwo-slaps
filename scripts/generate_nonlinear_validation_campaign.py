@@ -10,24 +10,32 @@ executing tree, so the copies are restamped to THIS tree's revision and
 the original revision travels in the manifest, per the freeze's
 ``code_revision_policy``.
 
+Arm eligibility follows the freeze's arm table: ``all`` arms run on
+every system, ``non_censored`` arms skip the right-censored members,
+and ``golden`` arms run only on the golden-flagged members of the
+selected tier (read from the selected-tier artifacts, so the overlap
+member's golden flag is resolved from its selected artifact).
+
 The campaign directory receives:
 
-- ``configs/<system_id>.yaml``: restamped staged configuration copies.
-- ``manifest.json``: identity, seed declaration, sample, and the full
-  job table with every arm's derived sampler seed.
-- ``positions_queue.txt``: one extraction job per line, largest image
-  first.
-- ``fits_queue.txt``: one fit-arm job per line, largest image first.
+- ``configs/<run_name>.yaml``: restamped staged configuration copies.
+- ``manifest.json``: identity, the declared protocol echo, and the full
+  job table with every eligible arm's derived sampler seed.
+- ``positions_queue.txt``: one extraction job per line, largest first.
+- ``smokes_queue.txt``: the freeze's smoke gate, the asimov_injected
+  arm of the smallest-image member of each source template.
+- ``fits_queue.txt``: every eligible fit arm, largest first.
 
 Queue lines are ``<config> <ladder_artifact> <output_dir>`` for
 positions and ``<config> <positions_artifact> <arm> <output_dir>`` for
-fits, consumed by ``nonlinear_validation_dispatch.sh``.
+smokes and fits, consumed by ``nonlinear_validation_dispatch.sh``.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import sys
 import uuid
@@ -42,8 +50,8 @@ if str(REPO_ROOT/"scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT/"scripts"))
 
 from run_nonlinear_validation import (  # noqa: E402
-    ARMS,
     derive_sampler_seed,
+    load_protocol,
     system_index,
 )
 
@@ -65,8 +73,9 @@ def sample_members(parent_run: Path, selected_run: Path):
     -------
     members : `list` [`dict`]
         One entry per unique system: the bare ``sysNNNN`` identifier,
-        the owning tier, the tiers the system reports in, and the
-        staged configuration and artifact paths.
+        the owning tier, the tiers the system reports in, the staged
+        configuration and artifact paths, and the censored and golden
+        flags read from the tier artifacts.
 
     Raises
     ------
@@ -92,8 +101,14 @@ def sample_members(parent_run: Path, selected_run: Path):
             artifact = run_dir/"outputs"/run_name/LADDER_ARTIFACT_NAME
             if not artifact.is_file():
                 raise ValueError(f"Missing ladder artifact {artifact}")
+            record = np.load(artifact, allow_pickle=False)
+            golden = bool(record["golden"])
+            censored = bool(math.isnan(float(record["m_best"])))
             if bare_id in members:
                 members[bare_id]["report_tiers"].append(tier)
+                members[bare_id]["golden"] = (
+                    members[bare_id]["golden"] or golden
+                )
                 continue
             members[bare_id] = {
                 "system_id": bare_id,
@@ -102,6 +117,8 @@ def sample_members(parent_run: Path, selected_run: Path):
                 "report_tiers": [tier],
                 "config": str(config_path),
                 "ladder_artifact": str(artifact),
+                "censored": censored,
+                "golden": golden,
             }
     ordered = [members[key] for key in sorted(members)]
     overlaps = [m for m in ordered if len(m["report_tiers"]) > 1]
@@ -113,9 +130,72 @@ def sample_members(parent_run: Path, selected_run: Path):
     return ordered
 
 
+def eligible_arms(member: dict, arms: dict):
+    """Return the declared arms one member is eligible for.
+
+    Parameters
+    ----------
+    member : `dict`
+        A `sample_members` entry with its censored and golden flags.
+    arms : `dict`
+        The freeze protocol's arm table.
+
+    Returns
+    -------
+    names : `list` [`str`]
+        Eligible arm names in declared-index order.
+
+    Raises
+    ------
+    ValueError
+        Raised for an unknown sample rule.
+    """
+    names = []
+    for name, declaration in sorted(
+        arms.items(), key=lambda item: item[1]["arm_index"]
+    ):
+        sample = declaration["sample"]
+        if sample == "all":
+            eligible = True
+        elif sample == "non_censored":
+            eligible = not member["censored"]
+        elif sample == "golden":
+            eligible = member["golden"]
+        else:
+            raise ValueError(f"Unknown arm sample rule {sample!r}")
+        if eligible:
+            names.append(name)
+    return names
+
+
 def image_side_px(config: dict) -> int:
     """Return a member's lensing grid side in pixels for LPT ordering."""
     return int(config["lensing"]["grid"]["shape"][0])
+
+
+def smoke_jobs(jobs):
+    """Select the freeze's smoke-gate jobs.
+
+    Parameters
+    ----------
+    jobs : `list` [`dict`]
+        Job table entries carrying ``template`` and ``image_side_px``.
+
+    Returns
+    -------
+    smokes : `list` [`dict`]
+        The smallest-image member of each source template, in template
+        order.
+    """
+    by_template = {}
+    for job in jobs:
+        current = by_template.get(job["template"])
+        if current is None or (
+            (job["image_side_px"], job["run_name"])
+            < (current["image_side_px"], current["run_name"])
+        ):
+            by_template[job["template"]] = job
+    return [by_template[key] for key in sorted(by_template)]
 
 
 def main(argv=None) -> None:
@@ -133,6 +213,10 @@ def main(argv=None) -> None:
         revision_digest,
         revision_provenance,
     )
+
+    protocol = load_protocol()
+    arms = protocol["arms"]
+    entropy = int(protocol["seeds"]["entropy"])
 
     revision = revision_provenance()
     digest = revision_digest(revision)
@@ -168,22 +252,24 @@ def main(argv=None) -> None:
             yaml.safe_dump(staged, sort_keys=False), encoding="utf-8"
         )
         index = system_index(member["run_name"])
+        arm_names = eligible_arms(member, arms)
         jobs.append({
             **member,
             "restamped_config": str(restamped_path),
             "original_code_revision": original_revision,
             "original_config_hash": original_hash,
             "restamped_config_hash": config_hash(staged),
+            "template": str(staged["stage0"]["source_template"]),
             "image_side_px": image_side_px(staged),
             "output_dir": str(campaign_dir/"outputs"/member["run_name"]),
             "arms": {
-                arm: {
-                    "arm_index": spec["arm_index"],
+                name: {
+                    "arm_index": arms[name]["arm_index"],
                     "sampler_seed": derive_sampler_seed(
-                        index, spec["arm_index"]
+                        entropy, index, arms[name]["arm_index"]
                     ),
                 }
-                for arm, spec in ARMS.items()
+                for name in arm_names
             },
         })
 
@@ -195,22 +281,33 @@ def main(argv=None) -> None:
         f"{job['output_dir']}"
         for job in largest_first
     ]
+
+    def fit_line(job, arm):
+        return (
+            f"{job['restamped_config']} "
+            f"{job['output_dir']}/{POSITIONS_ARTIFACT_NAME} {arm} "
+            f"{job['output_dir']}"
+        )
+
+    smokes = smoke_jobs(jobs)
+    smoke_lines = [fit_line(job, "asimov_injected") for job in smokes]
     fits_lines = [
-        f"{job['restamped_config']} "
-        f"{job['output_dir']}/{POSITIONS_ARTIFACT_NAME} {arm} "
-        f"{job['output_dir']}"
+        fit_line(job, arm)
         for job in largest_first
-        for arm in sorted(ARMS)
+        for arm in job["arms"]
     ]
     (campaign_dir/"positions_queue.txt").write_text(
         "\n".join(positions_lines) + "\n", encoding="utf-8"
+    )
+    (campaign_dir/"smokes_queue.txt").write_text(
+        "\n".join(smoke_lines) + "\n", encoding="utf-8"
     )
     (campaign_dir/"fits_queue.txt").write_text(
         "\n".join(fits_lines) + "\n", encoding="utf-8"
     )
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": "nonlinear_validation_v1",
         "campaign_uuid": str(uuid.uuid4()),
         "design_freeze": {
@@ -225,19 +322,15 @@ def main(argv=None) -> None:
         },
         "seed_declaration": {
             "stream": "sampler",
-            "entropy": 20260823,
+            "entropy": entropy,
             "spawn_key": [5, "system_index", "arm_index"],
         },
         "arms": {
-            arm: {
-                "arm_index": spec["arm_index"],
-                "dataset_kind": spec["dataset_kind"],
-                "subhalo_in_truth": spec["subhalo"],
-            }
-            for arm, spec in ARMS.items()
+            name: dict(declaration) for name, declaration in arms.items()
         },
         "n_systems": len(jobs),
-        "n_fit_pairs": len(jobs)*len(ARMS),
+        "n_fit_pairs": len(fits_lines),
+        "smoke_run_names": [job["run_name"] for job in smokes],
         "jobs": jobs,
     }
     (campaign_dir/"manifest.json").write_text(
@@ -246,9 +339,10 @@ def main(argv=None) -> None:
     )
     print(
         f"Campaign staged: {campaign_dir}\n"
-        f"  {len(jobs)} systems, {len(fits_lines)} fit-pair jobs, code "
-        f"revision {digest[:16]} (git {revision['git_hash'][:7]}), "
-        f"campaign uuid {manifest['campaign_uuid']}"
+        f"  {len(jobs)} systems, {len(fits_lines)} fit-pair jobs "
+        f"({len(smoke_lines)} smokes), code revision {digest[:16]} "
+        f"(git {revision['git_hash'][:7]}), campaign uuid "
+        f"{manifest['campaign_uuid']}"
     )
 
 

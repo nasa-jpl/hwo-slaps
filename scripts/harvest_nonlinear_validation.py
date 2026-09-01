@@ -1,13 +1,17 @@
 #!/usr/bin/env python
 """Harvest and review the nonlinear-validation campaign.
 
-Collects every arm artifact of the campaign the manifest declares,
-verifies the identity chain fail-closed (campaign uuid, code revision,
-and the declared sampler seed re-derived from the freeze rule), and
-writes ``harvest/harvest.json`` with one row per fit pair plus
-``harvest/review.json`` with the integrity census and the freeze v3
-success criteria: crossing agreement, rank fidelity, control false
-positives, morphology transfer and censoring consistency.
+Collects every eligible arm artifact of the campaign the manifest
+declares, verifies the identity chain fail-closed (job binding,
+campaign uuid, code revision, restamped configuration hash, declared
+sampler seed re-derived from the freeze rule, arm declaration, fit
+settings against the freeze protocol, matched kernels, non-degenerate
+mask support), and writes ``harvest/harvest.json`` with one row per fit
+pair plus ``harvest/review.json`` with the integrity census and the
+freeze v3 success criteria: recovery at the first Fisher-positive rung,
+below-rung consistency, within-rung rank fidelity, control tallies,
+the golden-five bridge comparison, replicate scatter, morphology
+transfer and censoring consistency.
 
 An incomplete campaign is reported and fails the run unless
 ``--allow-incomplete`` is passed (useful mid-campaign); science
@@ -29,13 +33,27 @@ if str(REPO_ROOT/"scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT/"scripts"))
 
 from run_nonlinear_validation import (  # noqa: E402
-    ARMS,
     derive_sampler_seed,
+    load_protocol,
     system_index,
 )
 
 Q_FIT_THRESHOLD = 10.0
 DLOGZ_THRESHOLD = 5.0
+
+REPLICATE_ARMS = ("asimov_injected", "asimov_injected_r1", "asimov_injected_r2")
+
+CHECKED_FIT_SETTINGS = (
+    "kernel_shape_native",
+    "n_live_smooth",
+    "n_live_subhalo_search",
+    "n_live_subhalo_fixed",
+    "maxcall",
+    "jax_n_batch",
+    "number_of_cores",
+    "log10_m200_range",
+    "nautilus_training_workers",
+)
 
 
 def spearman_rank_correlation(first, second) -> float:
@@ -73,63 +91,278 @@ def spearman_rank_correlation(first, second) -> float:
     return float((a*b).sum()/denominator)
 
 
-def _row(job: dict, arm: str, payload: dict, template: str) -> dict:
+def _row(job: dict, arm: str, payload: dict) -> dict:
     """Reduce one arm artifact to its harvest row."""
+    recovery = (payload.get("case") or {}).get("subhalo_recovery")
     return {
         "system_id": payload["system_id"],
         "tier": job["tier"],
         "report_tiers": job["report_tiers"],
-        "template": template,
+        "template": job["template"],
+        "golden": job["golden"],
         "arm": arm,
-        "dataset_kind": payload["dataset_kind"],
-        "subhalo_in_truth": payload["subhalo_in_truth"],
-        "injection_logm": payload["injection_logm"],
+        "fit_mode": payload["arm_declaration"]["fit_mode"],
+        "dataset_kind": payload["arm_declaration"]["dataset_kind"],
+        "subhalo_in_truth": payload["arm_declaration"]["subhalo_in_truth"],
+        "rung_name": payload["arm_declaration"]["rung"],
+        "injection_logm": payload["rung"]["logm"],
         "censored": payload["censored"],
-        "position_yx_arcsec": payload["position_yx_arcsec"],
-        "fisher_q_at_position": payload["fisher_q_at_position"],
+        "position_yx_arcsec": payload["rung"]["position_yx_arcsec"],
+        "q_f_matched": payload["rung"]["q_f_matched"],
+        "q_f_production": payload["rung"]["q_f_production_at_position"],
         "q_fit": payload["q_fit"],
         "delta_log_evidence": payload["delta_log_evidence"],
+        "delta_log_likelihood": payload["delta_log_likelihood"],
         "smooth_status": payload["smooth_status"],
         "subhalo_status": payload["subhalo_status"],
         "quality_flags": payload["quality_flags"],
+        "subhalo_recovery": recovery,
+        "n_unmasked_pixels": payload["n_unmasked_pixels"],
         "sampler_seed": payload["sampler_seed"],
         "fit_pair_s": payload["timings"]["fit_pair_s"],
-        "smooth_runtime_s": payload["smooth_runtime_s"],
-        "subhalo_runtime_s": payload["subhalo_runtime_s"],
     }
 
 
-def _verify_row(job: dict, arm: str, payload: dict, manifest: dict) -> list:
+def _verify_row(
+    job: dict,
+    arm: str,
+    payload: dict,
+    manifest: dict,
+    protocol: dict,
+) -> list:
     """Return the integrity findings of one arm artifact."""
     findings = []
+    label = f"{job['run_name']}/{arm}"
+
+    if payload["system_id"] != job["run_name"]:
+        findings.append(
+            f"{label}: artifact belongs to {payload['system_id']!r}"
+        )
+    if payload["arm"] != arm:
+        findings.append(f"{label}: artifact records arm {payload['arm']!r}")
+
+    declared = protocol["arms"][arm]
+    recorded = payload["arm_declaration"]
+    for key in ("arm_index", "dataset_kind", "subhalo_in_truth",
+                "fit_mode", "rung", "sample"):
+        if recorded.get(key) != declared[key]:
+            findings.append(
+                f"{label}: arm declaration {key} is {recorded.get(key)!r}, "
+                f"protocol declares {declared[key]!r}"
+            )
+
     expected_seed = derive_sampler_seed(
-        system_index(payload["system_id"]), ARMS[arm]["arm_index"]
+        int(protocol["seeds"]["entropy"]),
+        system_index(job["run_name"]),
+        int(declared["arm_index"]),
     )
     if int(payload["sampler_seed"]) != expected_seed:
         findings.append(
-            f"{payload['system_id']}/{arm}: sampler seed "
-            f"{payload['sampler_seed']} is not the declared {expected_seed}"
+            f"{label}: sampler seed {payload['sampler_seed']} is not the "
+            f"declared {expected_seed}"
         )
+
     if payload["campaign_uuid"] != manifest["campaign_uuid"]:
         findings.append(
-            f"{payload['system_id']}/{arm}: campaign uuid "
-            f"{payload['campaign_uuid']!r}"
+            f"{label}: campaign uuid {payload['campaign_uuid']!r}"
         )
     if payload["code_revision"]["sha256"] != manifest["code_revision"]["sha256"]:
         findings.append(
-            f"{payload['system_id']}/{arm}: code revision "
+            f"{label}: code revision "
             f"{payload['code_revision']['sha256'][:16]}"
         )
-    if payload["kernel_sha256"] != payload["truth_kernel_sha256"]:
+    if payload["staged_config_hash"] != job["restamped_config_hash"]:
         findings.append(
-            f"{payload['system_id']}/{arm}: fit kernel is not the truth kernel"
+            f"{label}: staged config hash "
+            f"{payload['staged_config_hash'][:16]} is not the manifest's "
+            f"{job['restamped_config_hash'][:16]}"
         )
+
+    fit_block = protocol["fit"]
+    for key in CHECKED_FIT_SETTINGS:
+        if payload["fit_settings"].get(key) != fit_block[key]:
+            findings.append(
+                f"{label}: fit setting {key} is "
+                f"{payload['fit_settings'].get(key)!r}, protocol declares "
+                f"{fit_block[key]!r}"
+            )
+
+    if payload["kernel_sha256"] != payload["truth_kernel_sha256"]:
+        findings.append(f"{label}: fit kernel is not the truth kernel")
+    if int(payload["n_unmasked_pixels"]) <= 0:
+        findings.append(f"{label}: degenerate mask support")
     for side in ("smooth_status", "subhalo_status"):
         if payload[side] != "success":
-            findings.append(
-                f"{payload['system_id']}/{arm}: {side} {payload[side]!r}"
-            )
+            findings.append(f"{label}: {side} {payload[side]!r}")
     return findings
+
+
+def _q_verdict(row) -> bool:
+    """Screening-convention verdict of one row."""
+    return (
+        row["q_fit"] is not None and float(row["q_fit"]) >= Q_FIT_THRESHOLD
+    )
+
+
+def _science(rows) -> dict:
+    """Compute the freeze v3 success-criteria summaries."""
+    science = {}
+    for arm in ("asimov_injected", "noisy_injected"):
+        injected = [
+            row for row in rows if row["arm"] == arm and not row["censored"]
+        ]
+        recovered = [row for row in injected if _q_verdict(row)]
+        pairs = [
+            (float(row["q_fit"]), float(row["q_f_matched"]))
+            for row in injected
+            if row["q_fit"] is not None
+        ]
+        overshoot = [
+            float(row["q_f_matched"]) - Q_FIT_THRESHOLD for row in injected
+        ]
+        science[arm] = {
+            "n": len(injected),
+            "recovered_at_first_positive_rung": len(recovered),
+            "recovery_fraction": (
+                len(recovered)/len(injected) if injected else None
+            ),
+            "median_q_f_overshoot": (
+                float(np.median(overshoot)) if overshoot else None
+            ),
+            "spearman_within_rung_q_fit_vs_q_f_matched": (
+                spearman_rank_correlation(
+                    [pair[0] for pair in pairs],
+                    [pair[1] for pair in pairs],
+                )
+                if len(pairs) >= 3
+                else None
+            ),
+            "median_q_fit": (
+                float(np.median([pair[0] for pair in pairs]))
+                if pairs
+                else None
+            ),
+        }
+
+    below = [row for row in rows if row["arm"] == "asimov_below"]
+    science["asimov_below"] = {
+        "n": len(below),
+        "below_threshold": sum(1 for row in below if not _q_verdict(row)),
+        "below_rung_consistency_fraction": (
+            sum(1 for row in below if not _q_verdict(row))/len(below)
+            if below
+            else None
+        ),
+        "exceedances": [
+            f"{row['system_id']} q_fit {row['q_fit']}"
+            for row in below
+            if _q_verdict(row)
+        ],
+    }
+
+    controls = [row for row in rows if row["arm"] == "noisy_control"]
+    science["noisy_control"] = {
+        "n": len(controls),
+        "screening_convention_tally_q_fit": sum(
+            1 for row in controls if _q_verdict(row)
+        ),
+        "bayesian_convention_tally_dlogz": sum(
+            1
+            for row in controls
+            if row["delta_log_evidence"] is not None
+            and float(row["delta_log_evidence"]) > DLOGZ_THRESHOLD
+        ),
+        "note": (
+            "sample-conditional tallies under the declared protocol, not "
+            "calibrated false-positive rates"
+        ),
+    }
+
+    bridge = [row for row in rows if row["arm"] == "asimov_fixed_bridge"]
+    science["asimov_fixed_bridge"] = {
+        "n": len(bridge),
+        "systems": [
+            {
+                "system_id": row["system_id"],
+                "q_fit_fixed": row["q_fit"],
+                "q_f_matched": row["q_f_matched"],
+                "q_f_production": row["q_f_production"],
+            }
+            for row in sorted(bridge, key=lambda row: row["system_id"])
+        ],
+    }
+
+    replicate_rows = {}
+    for row in rows:
+        if row["arm"] in REPLICATE_ARMS and row["golden"]:
+            replicate_rows.setdefault(row["system_id"], {})[row["arm"]] = row
+    replicate_summary = []
+    for system_id in sorted(replicate_rows):
+        group = replicate_rows[system_id]
+        q_values = [
+            float(group[arm]["q_fit"])
+            for arm in REPLICATE_ARMS
+            if arm in group and group[arm]["q_fit"] is not None
+        ]
+        z_values = [
+            float(group[arm]["delta_log_evidence"])
+            for arm in REPLICATE_ARMS
+            if arm in group
+            and group[arm]["delta_log_evidence"] is not None
+        ]
+        replicate_summary.append({
+            "system_id": system_id,
+            "n_seeds": len(q_values),
+            "q_fit_values": q_values,
+            "q_fit_spread": (
+                max(q_values) - min(q_values) if q_values else None
+            ),
+            "dlogz_spread": (
+                max(z_values) - min(z_values) if z_values else None
+            ),
+        })
+    science["replicate_scatter_golden"] = {
+        "systems": replicate_summary,
+        "max_q_fit_spread": max(
+            (entry["q_fit_spread"] for entry in replicate_summary
+             if entry["q_fit_spread"] is not None),
+            default=None,
+        ),
+    }
+
+    per_template = {}
+    for row in rows:
+        if row["arm"] != "asimov_injected" or row["censored"]:
+            continue
+        entry = per_template.setdefault(
+            row["template"], {"n": 0, "recovered": 0, "q_fit": []}
+        )
+        entry["n"] += 1
+        entry["recovered"] += int(_q_verdict(row))
+        if row["q_fit"] is not None:
+            entry["q_fit"].append(float(row["q_fit"]))
+    for entry in per_template.values():
+        entry["median_q_fit"] = (
+            float(np.median(entry["q_fit"])) if entry["q_fit"] else None
+        )
+        del entry["q_fit"]
+    science["per_template_asimov"] = per_template
+
+    censored_rows = [
+        row
+        for row in rows
+        if row["censored"]
+        and row["arm"] in ("asimov_injected", "noisy_injected")
+    ]
+    science["censored"] = {
+        "n": len(censored_rows),
+        "unexpected_detections": [
+            f"{row['system_id']}/{row['arm']} q_fit {row['q_fit']}"
+            for row in censored_rows
+            if _q_verdict(row)
+        ],
+    }
+    return science
 
 
 def main(argv=None) -> None:
@@ -145,14 +378,15 @@ def main(argv=None) -> None:
     campaign_dir = Path(args.campaign_dir)
     with open(campaign_dir/"manifest.json", encoding="utf-8") as stream:
         manifest = json.load(stream)
+    protocol = load_protocol()
 
     rows = []
     findings = []
     missing = []
     for job in manifest["jobs"]:
-        with open(job["restamped_config"], encoding="utf-8") as stream:
-            template = yaml.safe_load(stream)["stage0"]["source_template"]
-        for arm in sorted(ARMS):
+        for arm in sorted(
+            job["arms"], key=lambda name: job["arms"][name]["arm_index"]
+        ):
             artifact = (
                 Path(job["output_dir"])/f"nonlinear_validation_{arm}.json"
             )
@@ -161,8 +395,10 @@ def main(argv=None) -> None:
                 continue
             with open(artifact, encoding="utf-8") as stream:
                 payload = json.load(stream)
-            findings.extend(_verify_row(job, arm, payload, manifest))
-            rows.append(_row(job, arm, payload, template))
+            findings.extend(
+                _verify_row(job, arm, payload, manifest, protocol)
+            )
+            rows.append(_row(job, arm, payload))
 
     if missing and not args.allow_incomplete:
         raise SystemExit(
@@ -170,90 +406,8 @@ def main(argv=None) -> None:
             f"(first: {missing[:5]}); pass --allow-incomplete to summarize"
         )
 
-    def q_verdict(row):
-        return (
-            row["q_fit"] is not None
-            and float(row["q_fit"]) >= Q_FIT_THRESHOLD
-        )
-
-    science = {}
-    for arm in ("asimov_injected", "noisy_injected"):
-        injected = [
-            row for row in rows if row["arm"] == arm and not row["censored"]
-        ]
-        agree = [row for row in injected if q_verdict(row)]
-        pairs = [
-            (float(row["q_fit"]), float(row["fisher_q_at_position"]))
-            for row in injected
-            if row["q_fit"] is not None
-        ]
-        science[arm] = {
-            "n": len(injected),
-            "nonlinear_detections_at_injection": len(agree),
-            "crossing_agreement_fraction": (
-                len(agree)/len(injected) if injected else None
-            ),
-            "spearman_q_fit_vs_q_f": (
-                spearman_rank_correlation(
-                    [pair[0] for pair in pairs],
-                    [pair[1] for pair in pairs],
-                )
-                if len(pairs) >= 3
-                else None
-            ),
-            "median_q_fit": (
-                float(np.median([pair[0] for pair in pairs]))
-                if pairs
-                else None
-            ),
-        }
-
-    controls = [row for row in rows if row["arm"] == "noisy_control"]
-    science["noisy_control"] = {
-        "n": len(controls),
-        "false_positives_q_fit": sum(1 for row in controls if q_verdict(row)),
-        "false_positives_dlogz": sum(
-            1
-            for row in controls
-            if row["delta_log_evidence"] is not None
-            and float(row["delta_log_evidence"]) > DLOGZ_THRESHOLD
-        ),
-    }
-
-    per_template = {}
-    for row in rows:
-        if row["arm"] != "asimov_injected" or row["censored"]:
-            continue
-        entry = per_template.setdefault(
-            row["template"], {"n": 0, "detected": 0, "q_fit": []}
-        )
-        entry["n"] += 1
-        entry["detected"] += int(q_verdict(row))
-        if row["q_fit"] is not None:
-            entry["q_fit"].append(float(row["q_fit"]))
-    for entry in per_template.values():
-        entry["median_q_fit"] = (
-            float(np.median(entry["q_fit"])) if entry["q_fit"] else None
-        )
-        del entry["q_fit"]
-
-    censored_rows = [
-        row
-        for row in rows
-        if row["censored"] and row["arm"] in ("asimov_injected", "noisy_injected")
-    ]
-    science["censored"] = {
-        "n": len(censored_rows),
-        "unexpected_detections": [
-            f"{row['system_id']}/{row['arm']} q_fit {row['q_fit']}"
-            for row in censored_rows
-            if q_verdict(row)
-        ],
-    }
-    science["per_template_asimov"] = per_template
-
     review = {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign_uuid": manifest["campaign_uuid"],
         "code_revision": manifest["code_revision"],
         "rows": len(rows),
@@ -269,7 +423,7 @@ def main(argv=None) -> None:
         "total_fit_wall_hours": float(
             sum(row["fit_pair_s"] for row in rows)/3600.0
         ),
-        "science": science,
+        "science": _science(rows),
     }
 
     harvest_dir = campaign_dir/"harvest"
@@ -277,7 +431,7 @@ def main(argv=None) -> None:
     (harvest_dir/"harvest.json").write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "campaign_uuid": manifest["campaign_uuid"],
                 "rows": rows,
             },

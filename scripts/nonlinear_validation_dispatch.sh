@@ -23,10 +23,22 @@ cd "$REPO_ROOT" || exit 2
 
 case "$PHASE" in
   positions) QUEUE="$CAMPAIGN_DIR/positions_queue.txt" ;;
+  smokes) QUEUE="$CAMPAIGN_DIR/smokes_queue.txt" ;;
   fits) QUEUE="$CAMPAIGN_DIR/fits_queue.txt" ;;
   *) echo "unknown phase: $PHASE" >&2; exit 2 ;;
 esac
 [ -f "$QUEUE" ] || { echo "missing queue: $QUEUE" >&2; exit 2; }
+
+# The freeze's smoke gate: the fit fleet may not dispatch until the smoke
+# phase completed AND its artifacts were reviewed and approved.
+if [ "$PHASE" = fits ]; then
+  if [ ! -f "$CAMPAIGN_DIR/sentinels/smokes_PHASE_COMPLETE" ]; then
+    echo "smoke gate: smokes phase is not complete" >&2; exit 3
+  fi
+  if [ ! -f "$CAMPAIGN_DIR/SMOKES_APPROVED" ]; then
+    echo "smoke gate: SMOKES_APPROVED sentinel is missing" >&2; exit 3
+  fi
+fi
 
 LOGDIR="$CAMPAIGN_DIR/logs"
 SENTDIR="$CAMPAIGN_DIR/sentinels"
