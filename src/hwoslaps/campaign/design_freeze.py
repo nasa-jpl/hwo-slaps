@@ -67,8 +67,34 @@ REQUIRED_BLOCKS = (
     "reporting",
     "parent_design_source",
     "parent_design",
+    "nonlinear_validation",
 )
 """Top-level blocks every freeze document must carry (`tuple` of `str`)."""
+
+REQUIRED_NONLINEAR_VALIDATION_KEYS = (
+    "declared",
+    "arms",
+    "injection_rule",
+    "fit",
+    "seeds",
+    "smoke_gate",
+    "success_criteria",
+)
+"""Keys the version-3 nonlinear-validation block must carry (`tuple`)."""
+
+REQUIRED_NONLINEAR_FIT_KEYS = (
+    "kernel_shape_native",
+    "fit_psf",
+    "n_live_smooth",
+    "n_live_subhalo_search",
+    "n_live_subhalo_fixed",
+    "maxcall",
+    "jax_n_batch",
+    "number_of_cores",
+    "log10_m200_range",
+    "nautilus_training_workers",
+)
+"""Fit settings the nonlinear-validation protocol must declare (`tuple`)."""
 
 REQUIRED_PROVISIONAL_ITEMS = ()
 """Identifiers of the items awaiting ratification (`tuple` of `str`).
@@ -631,7 +657,111 @@ def validate_design_freeze(document: dict) -> dict:
     _validate_seeds(freeze)
     _validate_extraction_settings(freeze)
     _validate_module_constants(freeze)
+    _validate_nonlinear_validation(freeze)
     return freeze
+
+
+def _validate_nonlinear_validation(freeze: dict) -> None:
+    """Validate the version-3 nonlinear-validation protocol block.
+
+    Parameters
+    ----------
+    freeze : `dict`
+        Freeze document whose ``nonlinear_validation`` block is checked.
+
+    Raises
+    ------
+    DesignFreezeError
+        Raised for missing protocol keys, missing fit settings, a
+        malformed arm declaration, duplicate arm indices, or a seed
+        declaration that does not extend the frozen campaign streams.
+    """
+    block = _require_mapping(
+        freeze["nonlinear_validation"], "nonlinear_validation"
+    )
+    missing = [
+        key for key in REQUIRED_NONLINEAR_VALIDATION_KEYS if key not in block
+    ]
+    if missing:
+        raise DesignFreezeError(
+            "nonlinear_validation is missing required keys: "
+            + ", ".join(missing)
+        )
+
+    fit = _require_mapping(block["fit"], "nonlinear_validation.fit")
+    missing = [key for key in REQUIRED_NONLINEAR_FIT_KEYS if key not in fit]
+    if missing:
+        raise DesignFreezeError(
+            "nonlinear_validation.fit is missing required settings: "
+            + ", ".join(missing)
+        )
+
+    arms = _require_mapping(block["arms"], "nonlinear_validation.arms")
+    if not arms:
+        raise DesignFreezeError("nonlinear_validation.arms is empty")
+    indices = []
+    for name, declaration in arms.items():
+        arm = _require_mapping(
+            declaration, f"nonlinear_validation.arms.{name}"
+        )
+        for key in (
+            "arm_index",
+            "dataset_kind",
+            "subhalo_in_truth",
+            "fit_mode",
+            "rung",
+            "sample",
+        ):
+            if key not in arm:
+                raise DesignFreezeError(
+                    f"nonlinear_validation.arms.{name} is missing {key!r}"
+                )
+        if arm["dataset_kind"] not in ("asimov", "noisy"):
+            raise DesignFreezeError(
+                f"nonlinear_validation.arms.{name}.dataset_kind must be "
+                "'asimov' or 'noisy'"
+            )
+        if arm["fit_mode"] not in ("freed", "fixed_template"):
+            raise DesignFreezeError(
+                f"nonlinear_validation.arms.{name}.fit_mode must be "
+                "'freed' or 'fixed_template'"
+            )
+        if arm["rung"] not in ("top", "below"):
+            raise DesignFreezeError(
+                f"nonlinear_validation.arms.{name}.rung must be "
+                "'top' or 'below'"
+            )
+        if arm["sample"] not in ("all", "non_censored", "golden"):
+            raise DesignFreezeError(
+                f"nonlinear_validation.arms.{name}.sample must be "
+                "'all', 'non_censored' or 'golden'"
+            )
+        indices.append(int(arm["arm_index"]))
+    if len(set(indices)) != len(indices):
+        raise DesignFreezeError(
+            "nonlinear_validation arm indices must be unique, got "
+            f"{sorted(indices)}"
+        )
+
+    seeds = _require_mapping(block["seeds"], "nonlinear_validation.seeds")
+    campaign_seeds = _require_mapping(freeze["seeds"], "seeds")
+    if int(seeds.get("entropy", -1)) != int(campaign_seeds["entropy"]):
+        raise DesignFreezeError(
+            "nonlinear_validation.seeds.entropy must equal the frozen "
+            "campaign seed entropy"
+        )
+    spawn_key = seeds.get("spawn_key")
+    if not isinstance(spawn_key, list) or spawn_key[:1] != [5]:
+        raise DesignFreezeError(
+            "nonlinear_validation.seeds.spawn_key must be a list starting "
+            "with 5, beyond the frozen campaign spawn keys 0-4"
+        )
+
+    criteria = block["success_criteria"]
+    if not isinstance(criteria, list) or not criteria:
+        raise DesignFreezeError(
+            "nonlinear_validation.success_criteria must be a non-empty list"
+        )
 
 
 def load_design_freeze(

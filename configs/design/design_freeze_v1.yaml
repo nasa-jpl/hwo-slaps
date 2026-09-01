@@ -39,15 +39,20 @@ freeze:
   ratification_owner: George, with Sol Pro concurrence
   amendment_v3: >-
     Version 3, 2026-09-01, under George's D-N1 through D-N6 rulings of the
-    same day: the `nonlinear_validation` block is added, pre-declaring the
-    sample, arms, injection rule, fit settings, sampler seed rule and
+    same day, extended by his same-day review-response rulings (below-arm,
+    golden-five bridge, golden-five seed replicates): the
+    `nonlinear_validation` block is added, pre-declaring the sample, arms,
+    injection rule, fit settings, sampler seed rule, smoke gate and
     success criteria of the post-campaign nonlinear validation BEFORE any
-    validation manifest is generated or any fit is run. No ladder-campaign
-    declaration changes. The declared `seeds` block is untouched; the
-    sampler stream lives inside `nonlinear_validation.seeds` because the
-    campaign seed declaration is frozen and cross-checked against the
-    embedded parent design. George's commit approval of this file
-    constitutes the signature.
+    accepted fit artifact existed. The block was revised once on its
+    declaration day after the smoke gate failed closed on the initial
+    kernel declaration and an external adversarial review returned
+    findings; the faulty first staging produced no retained fit artifact.
+    No ladder-campaign declaration changes. The declared `seeds` block is
+    untouched; the sampler stream lives inside `nonlinear_validation.seeds`
+    because the campaign seed declaration is frozen and cross-checked
+    against the embedded parent design. George's commit approval of this
+    file constitutes the signature.
   amendment: >-
     Version 2, 2026-08-23 evening, under George's ruling slate recorded in
     `ratifications`: A2 spacing systematic declared; A3 B8 ratified as
@@ -1506,89 +1511,177 @@ parent_design:
     - selection.parent_tier
 
 # -----------------------------------------------------------------------------
-# Version-3 amendment: post-campaign nonlinear validation protocol (D-N1..D-N6,
-# ruled by George 2026-09-01). Declared in full BEFORE any validation manifest
-# exists. This is post-campaign validation under a pre-declared protocol; it is
-# NOT part of the original pre-registration and must never be presented as
-# such. Nothing in this block alters any ladder-campaign declaration.
+# Version-3 amendment: post-campaign nonlinear validation protocol (D-N1..D-N6
+# ruled by George 2026-09-01, extended the same day by his three
+# review-response rulings: below-crossing arm, fixed-template bridge on the
+# golden five, and sampler-seed replicates on the golden five). Declared in
+# full BEFORE any accepted fit artifact existed. The protocol was revised once
+# on its declaration day, after the five-template smoke gate failed closed and
+# an external adversarial review (gpt-5.6-sol, xhigh) returned findings; no
+# fit artifact from the faulty first staging was retained. This is
+# post-campaign validation under a pre-declared protocol; it is NOT part of
+# the original pre-registration and must never be presented as such. Nothing
+# in this block alters any ladder-campaign declaration.
 # -----------------------------------------------------------------------------
 nonlinear_validation:
   declared: '2026-09-01'
-  rulings: [D-N1, D-N2, D-N3, D-N4, D-N5, D-N6]
+  rulings: [D-N1, D-N2, D-N3, D-N4, D-N5, D-N6, D-N7-below-arm,
+            D-N8-bridge-arm, D-N9-seed-replicates]
   purpose: >-
-    Validate the production Fisher screening statistic q_F against full
-    nonlinear PyAutoLens/Nautilus inference q_fit on the measured ladder
-    systems themselves, extending the pilot's single-scene calibration
-    across the production population and its five-template morphology
-    lever.
+    Calibrate the production Fisher screening statistic q_F against a
+    practical freed nonlinear search (PyAutoLens + Nautilus) on the
+    measured ladder systems themselves, extending the pilot's
+    single-scene calibration across the production population and its
+    five-template morphology lever. The freed q_fit and the Fisher q_F
+    do not profile the same model, so this is a calibration of the
+    screen against the field-standard practice, not a claim of
+    statistic equivalence.
   sample:
     rule: >-
       Every ladder_parent_v1 member (48) plus every ladder_selected_v1
       member (12). The one overlap member (sys0728) is validated once,
       from its parent artifact, and reported in both tiers. 59 unique
-      systems.
+      systems. The golden subsample is the five golden-flagged members
+      of the selected tier.
   arms:
     asimov_injected:
       arm_index: 0
       dataset_kind: asimov
-      subhalo_enabled: true
-      purpose: clean statistic equivalence against the Fisher/Asimov q_F
+      subhalo_in_truth: true
+      fit_mode: freed
+      rung: top
+      sample: all
+      purpose: freed-search calibration against q_F on noiseless data
     noisy_injected:
       arm_index: 1
       dataset_kind: noisy
-      subhalo_enabled: true
+      subhalo_in_truth: true
+      fit_mode: freed
+      rung: top
+      sample: all
       purpose: >-
-        literature-facing detection test on one noise realization; the
-        realization is the system's own declared primary_noise draw
-        (the staged configuration's global_seed), identical to the one
-        the selection observables were defined on
+        literature-facing recovery test on one noise realization drawn
+        with the system's declared primary-noise seed (the staged
+        configuration's global_seed). Poisson noise is signal-dependent,
+        so arms sharing that seed do NOT share an identical noise
+        realization; no paired-noise contrast is claimed.
     noisy_control:
       arm_index: 2
       dataset_kind: noisy
-      subhalo_enabled: false
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
       purpose: >-
-        matched-PSF false-positive control at production heterogeneity;
-        the subhalo search runs at the same trial mass and position as
-        the injected arms on data containing no subhalo
+        truth-centred targeted control: the freed subhalo search runs
+        with the same position prior centre on data containing no
+        subhalo. Exceedances are reported as screening-convention
+        tallies (q_fit >= 10) and Bayesian-convention tallies
+        (Delta logZ > 5); with one realization per system and no
+        empirical null for the freed search, they are
+        sample-conditional tallies, never calibrated false-positive
+        rates.
+    asimov_below:
+      arm_index: 3
+      dataset_kind: asimov
+      subhalo_in_truth: true
+      fit_mode: freed
+      rung: below
+      sample: non_censored
+      purpose: >-
+        two-sided crossing test: at the bracket-bottom rung, where the
+        production q_F is below threshold, the freed search is expected
+        to land below threshold as well
+    asimov_fixed_bridge:
+      arm_index: 4
+      dataset_kind: asimov
+      subhalo_in_truth: true
+      fit_mode: fixed_template
+      rung: top
+      sample: golden
+      purpose: >-
+        bridge arm matching the Fisher statistic's conditions (fixed
+        trial mass and position): isolates failure of the local Fisher
+        approximation from the freed search's extra freedom
+    asimov_injected_r1:
+      arm_index: 5
+      dataset_kind: asimov
+      subhalo_in_truth: true
+      fit_mode: freed
+      rung: top
+      sample: golden
+      purpose: sampler-seed replicate of asimov_injected
+    asimov_injected_r2:
+      arm_index: 6
+      dataset_kind: asimov
+      subhalo_in_truth: true
+      fit_mode: freed
+      rung: top
+      sample: golden
+      purpose: second sampler-seed replicate of asimov_injected
   injection_rule:
-    mass: >-
-      The bracket-top rung m_best_bracket_logm[1] of the system's ladder
-      artifact: the first refined rung at which q_F reached the declared
-      threshold of 10. Right-censored systems (m_best NaN) inject at the
-      ladder ceiling logm 9.5 and their expected nonlinear outcome is
-      non-detection, making censoring a testable prediction.
+    rungs: >-
+      "top" is the bracket-top rung m_best_bracket_logm[1] of the
+      system's ladder artifact: the first refined rung (refinement step
+      0.1 dex) at which the production q_F reached the declared
+      threshold of 10, so injected q_F values sit up to ~0.1 dex of
+      mass above the interpolated crossing and the recovery statistics
+      are defined AT this rung, not at the crossing itself.
+      Right-censored systems (m_best NaN) take the ladder ceiling
+      logm 9.5 with expected non-detection. "below" is the
+      bracket-bottom rung m_best_bracket_logm[0], defined only for
+      non-censored systems.
     position: >-
-      The argmax of the recomputed Fisher grid-map q inside the D-F7
-      aperture at the injection rung, from the same staged configuration,
-      kernel (k999), engine (jax), node spacing (0.05 arcsec) and
-      detector construction as the production ladder. The recomputed
-      aperture q_max must agree with the artifact's recorded rung q_max
-      to a relative 1.0e-6 or the extraction fails closed.
+      For each rung, the trial position is the argmax of a
+      support-matched Fisher grid map: the production detector
+      construction and 0.05 arcsec node grid, evaluated with the
+      nonlinear arm's own kernel (51 x 51) and restricted to nodes
+      inside both the D-F7 aperture and the nonlinear dataset's
+      PSF-border-valid region. The support-matched q_F at that node is
+      the comparison statistic; the production-kernel (999 x 999) q_F
+      at the same node is recorded for linkage. The recomputed
+      production-kernel aperture q_max must agree with the artifact's
+      recorded rung q_max to a relative 1.0e-6 at every rung used, or
+      the extraction fails closed.
   fit:
-    fit_mode: freed
-    clumpy_fit_parameterization: host_free
+    kernel_shape_native: [51, 51]
+    kernel_note: >-
+      The nonlinear arms render and fit at the staged observation-layer
+      kernel (51 x 51), the convention every validated nonlinear
+      heritage result (pilot 370-trial grid, Item 7/9 anchors, the
+      perf-sprint bench) was established at. The production Fisher
+      kernel (999 x 999) is unusable here: the nonlinear dataset
+      excludes pixels within half a kernel of the image edge, which
+      leaves zero valid pixels on 50 of 59 systems. The kernel
+      difference between the fit and the production ladder is declared
+      and the support-matched q_F above makes the comparison
+      like-for-like.
     fit_psf:
       mode: delta
       prior_table: configs/psf_priors/jwst_wss_drift_v1.yaml
       seed: 20260814
       family: combined
       amplitude_rms_nm: 0.0
-    kernel_shape_native: [999, 999]
     n_live_smooth: 100
-    n_live_subhalo: 200
+    n_live_subhalo_search: 200
+    n_live_subhalo_fixed: 100
     maxcall: 500000
     jax_n_batch: 32
     number_of_cores: 1
     log10_m200_range: [6.0, 9.7]
     nautilus_training_workers: 4
     note: >-
-      Settings are the perf-sprint bench anchors (n_live 100/200, maxcall
-      500k, batch 32) proven bit-reproducible on this code revision. The
-      freed mass range extends the module default (6.0, 8.5) to cover
+      Settings are the perf-sprint bench anchors proven
+      bit-reproducible on this code revision, except the freed mass
+      range, which extends the module default (6.0, 8.5) to cover
       bracket-top rungs up to the 9.5 ceiling with margin; it is passed
-      per run and the module default is unchanged. q_fit is a likelihood
-      ratio and is insensitive to the prior range; Delta logZ is
-      evidence-based and is quoted only under this declared range.
+      per run and the module default is unchanged. The wider prior was
+      not exercised by the bench: it changes the freed search's sampled
+      volume, can move the recovered maximum of a finite Nautilus run,
+      and enters Delta logZ directly through the Occam penalty, so
+      Delta logZ is quoted only under this declared range and q_fit is
+      treated as range-insensitive only where the recovered maximum
+      lies away from the range boundaries.
   seeds:
     stream: sampler
     generator: numpy.random.SeedSequence -> uint32
@@ -1598,39 +1691,71 @@ nonlinear_validation:
       seed = int(SeedSequence(entropy=20260823, spawn_key=(5, i, a))
       .generate_state(1, dtype=uint32)[0]) for system index i (the
       integer in the sysNNNN identifier) and arm index a as declared
-      under `arms`. Spawn key 5 is chosen because the frozen campaign
-      seed declaration uses spawn keys 0 through 4. One seed serves the
-      smooth and subhalo fits of a pair, matching the bench protocol.
+      under `arms`; the replicate arms carry their own arm indices and
+      therefore their own seeds. Spawn key 5 is chosen because the
+      frozen campaign seed declaration uses spawn keys 0 through 4. One
+      seed serves the smooth and subhalo fits of a pair, matching the
+      bench protocol; seed sharing within a pair carries no validity
+      claim about nested-sampling error, which the replicate arms bound
+      empirically on the golden five.
   code_revision_policy: >-
-    Staged ladder configurations pin stage0.code_revision and the runners
-    fail closed against the executing tree, so the campaign generator
-    writes restamped copies at the validation campaign's own code
-    revision and records the original revision and both config hashes in
-    the manifest. All non-revision bytes are otherwise identical.
-  smokes: >-
-    Before the fleet: one asimov_injected pair per source template (5
-    smokes), because only cosmos_48849 has ever been through a freed fit.
-    A smoke failure stops the campaign, not the protocol.
+    Staged ladder configurations pin stage0.code_revision and the
+    runners fail closed against the executing tree, so the campaign
+    generator writes restamped copies at the validation campaign's own
+    code revision and records the original revision and both config
+    hashes in the manifest. All non-revision bytes are otherwise
+    identical.
+  smoke_gate: >-
+    The generator stages a dedicated smoke queue: the asimov_injected
+    arm of the smallest-image member of each of the five source
+    templates. The fit fleet must not dispatch until the smoke phase
+    is complete AND a SMOKES_APPROVED sentinel has been written after
+    human-or-agent review of the five smoke artifacts; the dispatcher
+    enforces both. A smoke failure stops the campaign, not the
+    protocol.
   success_criteria:
     - >-
-      Crossing agreement: the fraction of non-censored systems whose
-      injected-arm nonlinear verdict (q_fit >= 10) matches the Fisher
-      verdict at the injection rung, reported per tier and overall.
+      Recovery fraction at the first Fisher-positive rung: the fraction
+      of non-censored systems whose freed fit reaches q_fit >= 10 at
+      the bracket-top rung, per tier and overall, reported alongside
+      the q_F - 10 overshoot at that rung. This is a one-sided recovery
+      statistic at a rung where the screen is positive by construction;
+      it is not a crossing-agreement claim on its own.
     - >-
-      Rank fidelity: Spearman correlation of q_fit against q_F across
-      the injected arms, the population analogue of the pilot's 0.918.
+      Below-rung consistency: the fraction of non-censored systems
+      whose freed fit stays below q_fit = 10 at the bracket-bottom
+      rung, completing the two-sided crossing test.
     - >-
-      Controls: false positives counted at Delta logZ > 5 (Bayesian
-      convention) and at q_fit >= 10 (screening convention); the pilot
-      reference is 0/63 under matched PSF.
+      Rank fidelity, within-rung: Spearman correlation of q_fit against
+      the support-matched q_F across the injected arms. The q_F range
+      is restricted to just above threshold by the injection rule, so
+      this measures within-rung ordering and scatter; it is NOT
+      comparable to the pilot's broad-grid 0.918.
     - >-
-      Morphology transfer: the per-template ordering of nonlinear
-      detectability against the Fisher ordering.
+      Control tallies: exceedances of q_fit >= 10 and of
+      Delta logZ > 5 on the control arm, reported as
+      sample-conditional screening-convention tallies with the pilot's
+      0/63 matched-PSF result as heritage context, never as calibrated
+      false-positive rates.
     - >-
-      Censoring consistency: the 6 right-censored parent systems are
-      expected to yield nonlinear non-detections at logm 9.5.
+      Bridge comparison: on the golden five, the fixed-template q_fit
+      against the support-matched q_F at the same mass and position,
+      isolating the Fisher approximation from the freed search freedom.
+    - >-
+      Replicate scatter: on the golden five, the spread of q_fit and
+      Delta logZ across the three declared sampler seeds of the
+      asimov_injected configuration, bounding nested-sampling scatter
+      before any near-threshold disagreement is interpreted.
+    - >-
+      Morphology transfer: the per-template ordering of freed-fit
+      recovery against the Fisher ordering.
+    - >-
+      Censoring consistency: the six right-censored parent systems are
+      expected to yield freed non-detections at logm 9.5.
   reporting: >-
     All outcomes are reported, including disagreement: a bend in the
-    q_fit-to-q_F relation at high mass or for specific morphologies is a
-    finding, not a failure. Quality flags and convergence statuses travel
-    with every row.
+    q_fit-to-q_F relation at high mass or for specific morphologies is
+    a finding, not a failure. Every row carries both complete fit
+    summaries (including error strings and effective sampler settings),
+    the dataset's unmasked-pixel count, freed-recovery values and
+    boundary diagnostics, and quality flags.
