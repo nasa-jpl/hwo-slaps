@@ -18,6 +18,9 @@ IFS=',' read -r -a GPUS <<< "$1"; shift
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY=/data/home/gvassilakis/Software/miniconda3/envs/hwo-slaps/bin/python
 
+# Staged configurations carry repo-root-relative asset paths.
+cd "$REPO_ROOT" || exit 2
+
 case "$PHASE" in
   positions) QUEUE="$CAMPAIGN_DIR/positions_queue.txt" ;;
   fits) QUEUE="$CAMPAIGN_DIR/fits_queue.txt" ;;
