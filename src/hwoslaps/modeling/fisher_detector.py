@@ -1992,8 +1992,6 @@ class FisherDetector:
         """
         analysis_config = getattr(self, "fit_full_config", self.full_config)
         light_type = analysis_config["lensing"]["source_galaxy"]["light"]["type"]
-        analysis_lens = analysis_config["lensing"]["lens_galaxy"]
-        analysis_mass = analysis_lens["mass"]
         light_root = ("lensing", "source_galaxy", "light")
         centre_root = light_root + ("centre",)
         ell_comps_root = light_root + ("ell_comps",)
@@ -2041,54 +2039,6 @@ class FisherDetector:
                 prior_sigma=self._lookup_prior_sigma("lens.ell_comp_2"),
             ),
         ]
-        if analysis_mass["type"] == "PowerLaw":
-            specs.append(
-                _ScalarNuisanceSpec(
-                    name="lens.slope",
-                    path=("lensing", "lens_galaxy", "mass", "slope"),
-                    step_mode="additive",
-                    step_key="slope",
-                    prior_sigma=self._lookup_prior_sigma("lens.slope"),
-                )
-            )
-            for order in ("m3", "m4"):
-                if order not in analysis_mass.get("multipoles", {}):
-                    continue
-                for component_index in (0, 1):
-                    name = f"lens.multipole_{order}_{component_index + 1}"
-                    specs.append(
-                        _ScalarNuisanceSpec(
-                            name=name,
-                            path=(
-                                "lensing",
-                                "lens_galaxy",
-                                "mass",
-                                "multipoles",
-                                order,
-                                component_index,
-                            ),
-                            step_mode="additive",
-                            step_key="multipole_comp",
-                            prior_sigma=self._lookup_prior_sigma(name),
-                        )
-                    )
-        if "shear" in analysis_lens:
-            for component_index in (0, 1):
-                name = f"lens.shear_{component_index + 1}"
-                specs.append(
-                    _ScalarNuisanceSpec(
-                        name=name,
-                        path=(
-                            "lensing",
-                            "lens_galaxy",
-                            "shear",
-                            component_index,
-                        ),
-                        step_mode="additive",
-                        step_key="shear_comp",
-                        prior_sigma=self._lookup_prior_sigma(name),
-                    )
-                )
         specs.extend(
             [
                 _ScalarNuisanceSpec(
@@ -2310,16 +2260,6 @@ class FisherDetector:
 
         if step <= 0.0 or not np.isfinite(step):
             raise ValueError(f"Invalid finite-difference step for nuisance {spec.name}: {step}")
-
-        if spec.name == "lens.slope":
-            lower_slope = base_value - step
-            upper_slope = base_value + step
-            if lower_slope <= 1.0 or upper_slope >= 3.0:
-                raise ValueError(
-                    "PowerLaw slope finite difference violates the supported "
-                    f"bounds (1, 3): slope={base_value}, step={step}, "
-                    f"perturbed interval=[{lower_slope}, {upper_slope}]."
-                )
 
         self._set_path_value_create(plus_config, spec.path, base_value + step)
         self._set_path_value_create(minus_config, spec.path, base_value - step)

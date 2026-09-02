@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from types import SimpleNamespace
 
 import autolens as al
@@ -15,8 +14,6 @@ from hwoslaps.lensing.mass_models import (
 )
 from hwoslaps.modeling.nonlinear.autolens_model_builder import (
     DEFAULT_PRIOR_WIDTHS,
-    autofit_model_from_spec,
-    fixed_point_model_spec_from_trial,
     smooth_model_spec_from_config,
     subhalo_model_spec_from_trial,
 )
@@ -836,39 +833,6 @@ def test_legacy_model_spec_payloads_match_baseline_literals():
         trial,
         fit_mode="local_search",
     ).to_dict() == GOLDEN_LOCAL
-
-
-def test_fixed_point_uses_exact_clipped_prior_targets():
-    """Evaluate C1 at the exact clipped slope target."""
-    config = deepcopy(_config())
-    mass = config["lensing"]["lens_galaxy"]["mass"]
-    mass["type"] = "PowerLaw"
-    mass["slope"] = 1.21
-    priors = {
-        "lens_slope_sigma": 0.2,
-    }
-    runner = _StubRunner()
-    NonlinearMetricValidator(runner).validate_case(
-        _identity_dataset(),
-        _metadata(),
-        config,
-        _trial(),
-        fit_mode="freed",
-        priors_config=priors,
-        mass_context=build_mass_mapping_context(config),
-    )
-    instance = runner.analysis.last_instance
-    assert instance.galaxies.lens.mass.slope == 1.21
-
-    spec = fixed_point_model_spec_from_trial(
-        config,
-        _trial(),
-        priors_config=priors,
-    )
-    model = autofit_model_from_spec(spec)
-    assert model.prior_count == 0
-    pinned = model.instance_from_prior_medians()
-    assert pinned.galaxies.lens.mass.slope == 1.21
 
 
 def test_smooth_reuse_rejects_mismatched_analysis_key():

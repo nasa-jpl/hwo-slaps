@@ -101,7 +101,6 @@ def compact_config(prior_table, tmp_path) -> dict:
         "ell_comps": [0.05, -0.02],
         "einstein_radius": 0.5,
     }
-    config["lensing"]["lens_galaxy"].pop("shear", None)
     config["lensing"]["source_galaxy"]["light"].update({
         "centre": [0.02, 0.03],
         "ell_comps": [0.03, -0.01],

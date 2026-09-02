@@ -210,23 +210,6 @@ def generate_lensing_system(config, full_config):
         lens_centre=tuple(lens_config['mass']['centre']),
         lens_ellipticity=tuple(lens_config['mass']['ell_comps']),
         lens_mass_type=lens_config['mass']['type'],
-        lens_slope=(
-            float(lens_config['mass']['slope'])
-            if lens_config['mass']['type'] == 'PowerLaw'
-            else None
-        ),
-        lens_multipoles=(
-            {
-                order: tuple(components)
-                for order, components in lens_config['mass'].get(
-                    'multipoles', {}
-                ).items()
-            }
-            or None
-        ),
-        lens_shear=(
-            tuple(lens_config['shear']) if 'shear' in lens_config else None
-        ),
         source_centre=source_centre,
         source_ellipticity=source_ellipticity,
         source_intensity=source_intensity,
@@ -361,45 +344,14 @@ def _create_macro_profiles(lens_config):
             einstein_radius=mass_config['einstein_radius'],
             ell_comps=tuple(mass_config['ell_comps'])
         )
-    elif mass_config['type'] == 'PowerLaw':
-        shared = {
-            'centre': tuple(mass_config['centre']),
-            'einstein_radius': mass_config['einstein_radius'],
-            'slope': mass_config['slope'],
-        }
-        profiles['mass'] = al.mp.PowerLaw(
-            ell_comps=tuple(mass_config['ell_comps']),
-            **shared,
-        )
-        for order_name in sorted(mass_config.get('multipoles', {})):
-            order = int(order_name[1:])
-            profiles[f'multipole_{order_name}'] = al.mp.PowerLawMultipole(
-                m=order,
-                multipole_comps=tuple(
-                    mass_config['multipoles'][order_name]
-                ),
-                **shared,
-            )
     else:
         raise ValueError(f"Unsupported mass profile type: {mass_config['type']}")
-    if 'shear' in lens_config:
-        profiles['shear'] = al.mp.ExternalShear(
-            gamma_1=lens_config['shear'][0],
-            gamma_2=lens_config['shear'][1],
-        )
     return profiles
 
 
 def _macro_profile_mapping(lens_galaxy, lens_config):
     """Return the ordered macro profiles attached to a built lens galaxy."""
-    names = ['mass']
-    names.extend(
-        f'multipole_{order}'
-        for order in sorted(lens_config['mass'].get('multipoles', {}))
-    )
-    if 'shear' in lens_config:
-        names.append('shear')
-    return OrderedDict((name, getattr(lens_galaxy, name)) for name in names)
+    return OrderedDict([('mass', lens_galaxy.mass)])
 
 
 def _create_source_galaxy(source_config):

@@ -187,14 +187,6 @@ SCENE_LIGHT_BASELINES = {
         'scene_config': 'configs/scenes/scene4_cosmos.yaml',
         'light_type': 'Image',
     },
-    'scene5_flex_macro': {
-        'scene_config': 'configs/scenes/scene5_flex_macro.yaml',
-        'light_type': 'Exponential',
-    },
-    'scene5_ablation_sie_fit': {
-        'scene_config': 'configs/scenes/scene5_ablation_sie_fit.yaml',
-        'light_type': 'Exponential',
-    },
 }
 
 SCENE_NORMALIZED_FIELD = {

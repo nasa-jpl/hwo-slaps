@@ -548,8 +548,7 @@ def extract_theta_e(
         configuration.
     lens_centre_arcsec : `tuple`
         Main lens centre as ``(y, x)``. This is the centre of the
-        primary macro mass profile, which the multipole profiles share
-        and which external shear does not move.
+        primary macro mass profile.
     grid : `CriticalCurveGrid`
         Declared extraction grid.
     theta_e_factor : `float`, optional
@@ -653,7 +652,7 @@ def extract_theta_e_from_lens_config(
 
     The truth macro model is rebuilt with the same profile factory the
     lensing generator uses, so the extraction always sees the exact
-    truth macro of the scene, multipoles and external shear included.
+    truth macro of the scene.
 
     Parameters
     ----------

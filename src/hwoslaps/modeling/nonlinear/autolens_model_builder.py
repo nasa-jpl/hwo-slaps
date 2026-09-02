@@ -14,7 +14,6 @@ from .model_specs import (
     PriorSpec,
     ProfileSpec,
     fixed,
-    linked,
     uniform,
 )
 from .trial import SubhaloTrial
@@ -29,9 +28,6 @@ DEFAULT_PRIOR_WIDTHS = {
     "source_intensity_frac_sigma": 0.5,
     "source_effective_radius_frac_sigma": 0.3,
     "subhalo_centre_window_arcsec": 0.03,
-    "lens_slope_sigma": 0.05,
-    "lens_multipole_comp_sigma": 0.01,
-    "lens_shear_comp_sigma": 0.01,
     "image_flux_scale_frac_sigma": 0.5,
     "image_size_scale_frac_sigma": 0.3,
     "subhalo_freed_centre_window_arcsec": 0.15,
@@ -121,7 +117,7 @@ def _guard_supported_config(full_config: Dict[str, Any]) -> None:
         )
     truth_lens = full_config["lensing"]["lens_galaxy"]
     mass_type = truth_lens["mass"].get("type")
-    if mass_type not in {"Isothermal", "PowerLaw"}:
+    if mass_type != "Isothermal":
         raise ValueError(f"Unsupported truth mass profile type: {mass_type}")
     light_type = full_config["lensing"]["source_galaxy"]["light"].get(
         "type"
@@ -148,10 +144,10 @@ def _macro_components(
     *,
     pin_to_targets: bool = False,
 ) -> Dict[str, ProfileSpec]:
-    """Build fit-side macro mass, multipole, and shear components."""
+    """Build the fit-side macro mass component."""
     mass_config = lens_config["mass"]
     mass_type = mass_config.get("type")
-    if mass_type not in {"Isothermal", "PowerLaw"}:
+    if mass_type != "Isothermal":
         raise ValueError(f"Unsupported fit mass profile type: {mass_type}")
     centre = mass_config["centre"]
     ell_comps = mass_config["ell_comps"]
@@ -197,78 +193,9 @@ def _macro_components(
             pin_to_targets,
         ),
     }
-    if mass_type == "PowerLaw":
-        parameters["slope"] = _pin_local_prior(
-            _clipped_uniform(
-                mass_config["slope"],
-                widths["lens_slope_sigma"],
-                1.2,
-                2.8,
-                open_interval=True,
-            ),
-            mass_config["slope"],
-            pin_to_targets,
-        )
-
     components = {
         "mass": ProfileSpec(class_name=mass_type, parameters=parameters)
     }
-    if mass_type == "PowerLaw":
-        for order_name in sorted(mass_config.get("multipoles", {})):
-            order = int(order_name[1:])
-            multipole_comps = mass_config["multipoles"][order_name]
-            components[f"multipole_m{order}"] = ProfileSpec(
-                class_name="PowerLawMultipole",
-                parameters={
-                    "m": fixed(order),
-                    "multipole_comps_0": _pin_local_prior(
-                        _uniform_around(
-                            multipole_comps[0],
-                            widths["lens_multipole_comp_sigma"],
-                        ),
-                        multipole_comps[0],
-                        pin_to_targets,
-                    ),
-                    "multipole_comps_1": _pin_local_prior(
-                        _uniform_around(
-                            multipole_comps[1],
-                            widths["lens_multipole_comp_sigma"],
-                        ),
-                        multipole_comps[1],
-                        pin_to_targets,
-                    ),
-                    "centre_0": linked("mass", "centre_0"),
-                    "centre_1": linked("mass", "centre_1"),
-                    "einstein_radius": linked(
-                        "mass",
-                        "einstein_radius",
-                    ),
-                    "slope": linked("mass", "slope"),
-                },
-            )
-    if "shear" in lens_config:
-        shear = lens_config["shear"]
-        components["shear"] = ProfileSpec(
-            class_name="ExternalShear",
-            parameters={
-                "gamma_1": _pin_local_prior(
-                    _uniform_around(
-                        shear[0],
-                        widths["lens_shear_comp_sigma"],
-                    ),
-                    shear[0],
-                    pin_to_targets,
-                ),
-                "gamma_2": _pin_local_prior(
-                    _uniform_around(
-                        shear[1],
-                        widths["lens_shear_comp_sigma"],
-                    ),
-                    shear[1],
-                    pin_to_targets,
-                ),
-            },
-        )
     return components
 
 
@@ -744,9 +671,6 @@ def _profile_class(class_name: str) -> Any:
 
     classes = {
         "Isothermal": al.mp.Isothermal,
-        "PowerLaw": al.mp.PowerLaw,
-        "PowerLawMultipole": al.mp.PowerLawMultipole,
-        "ExternalShear": al.mp.ExternalShear,
         "PointMass": al.mp.PointMass,
         "IsothermalSph": al.mp.IsothermalSph,
         "NFWSph": al.mp.NFWSph,
@@ -773,10 +697,6 @@ def _assign_profile_value(profile_model: Any, name: str, value: Any) -> None:
         profile_model.ell_comps.ell_comps_0 = value
     elif name == "ell_comps_1":
         profile_model.ell_comps.ell_comps_1 = value
-    elif name == "multipole_comps_0":
-        profile_model.multipole_comps.multipole_comps_0 = value
-    elif name == "multipole_comps_1":
-        profile_model.multipole_comps.multipole_comps_1 = value
     else:
         setattr(profile_model, name, value)
 
@@ -800,10 +720,6 @@ def _profile_parameter_value(profile_model: Any, name: str) -> Any:
         return profile_model.ell_comps.ell_comps_0
     if name == "ell_comps_1":
         return profile_model.ell_comps.ell_comps_1
-    if name == "multipole_comps_0":
-        return profile_model.multipole_comps.multipole_comps_0
-    if name == "multipole_comps_1":
-        return profile_model.multipole_comps.multipole_comps_1
     return getattr(profile_model, name)
 
 

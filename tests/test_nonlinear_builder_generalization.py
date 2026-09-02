@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 import yaml
 
-import hwoslaps.modeling.nonlinear as nonlinear
 from hwoslaps.lensing.generator import (
     _create_lens_galaxy,
     _create_source_galaxy,
@@ -44,8 +43,6 @@ from hwoslaps.modeling.nonlinear.trial import (
 SCENE_NAMES = (
     "scene1_smooth_ring.yaml",
     "scene4_cosmos.yaml",
-    "scene5_ablation_sie_fit.yaml",
-    "scene5_flex_macro.yaml",
 )
 
 
@@ -116,13 +113,6 @@ def test_builder_guards_throughput_and_unknown_profiles():
         smooth_model_spec_from_config(unknown_light)
 
 
-def test_flexible_guard_is_removed_and_power_law_builds():
-    """Expose no legacy flexible-lens guard and build PowerLaw truth."""
-    assert not hasattr(nonlinear, "guard_flexible_lens_nonlinear")
-    spec = smooth_model_spec_from_config(_scene("scene5_flex_macro.yaml"))
-    assert spec.galaxies["lens"].components["mass"].class_name == "PowerLaw"
-
-
 def test_fit_lens_explicit_routes_macro_but_inherits_truth_redshift():
     """Use explicit SIE parameters while retaining the truth lens plane."""
     explicit = _scene("scene5_ablation_sie_fit.yaml")
@@ -172,28 +162,6 @@ def test_legacy_subhalo_specs_preserve_custom_source_metadata(
     assert spec.metadata["image_source_asset_hash"]
 
 
-def test_scene5_macro_count_and_link_identity():
-    """Build 12 macro freedoms with shared PowerLaw multipole priors."""
-    spec = smooth_model_spec_from_config(_scene("scene5_flex_macro.yaml"))
-    model = autofit_model_from_spec(spec)
-    assert model.galaxies.lens.prior_count == 12
-    mass = model.galaxies.lens.mass
-    for name in ("multipole_m3", "multipole_m4"):
-        multipole = getattr(model.galaxies.lens, name)
-        assert multipole.centre.centre_0 is mass.centre.centre_0
-        assert multipole.centre.centre_1 is mass.centre.centre_1
-        assert multipole.einstein_radius is mass.einstein_radius
-        assert multipole.slope is mass.slope
-
-
-def test_single_multipole_plus_shear_has_ten_macro_parameters():
-    """Count six PowerLaw, two multipole, and two shear freedoms."""
-    config = _scene("scene5_flex_macro.yaml")
-    config["lensing"]["lens_galaxy"]["mass"]["multipoles"].pop("m4")
-    model = autofit_model_from_spec(smooth_model_spec_from_config(config))
-    assert model.galaxies.lens.prior_count == 10
-
-
 @pytest.mark.parametrize("scene_name", SCENE_NAMES)
 def test_all_scene_truth_point_tracer_images_match(scene_name):
     """Match every scene's intended fit-side truth tracer image."""
@@ -225,57 +193,6 @@ def test_all_scene_truth_point_tracer_images_match(scene_name):
         rtol=1.0e-10,
         atol=1.0e-12,
     )
-
-
-def test_multipole_truth_convention_matches_generator_deflections():
-    """Pin fit-side multipole component orientation to generator truth."""
-    config = _scene("scene5_flex_macro.yaml")
-    truth = _create_lens_galaxy(config["lensing"]["lens_galaxy"])
-    fitted = autofit_model_from_spec(
-        smooth_model_spec_from_config(config)
-    ).instance_from_prior_medians().galaxies.lens
-    grid = al.Grid2D.uniform(shape_native=(9, 9), pixel_scales=0.08)
-    for name in ("multipole_m3", "multipole_m4"):
-        np.testing.assert_allclose(
-            np.asarray(getattr(fitted, name).deflections_yx_2d_from(grid)),
-            np.asarray(getattr(truth, name).deflections_yx_2d_from(grid)),
-            rtol=1.0e-12,
-            atol=1.0e-14,
-        )
-
-
-def test_slope_sersic_and_ellipticity_prior_clipping():
-    """Clip physical boxes and reject truth outside their safe domains."""
-    power_law = _scene("scene5_flex_macro.yaml")
-    power_law["lensing"]["lens_galaxy"]["mass"]["slope"] = 1.21
-    spec = smooth_model_spec_from_config(
-        power_law,
-        priors_config={"lens_slope_sigma": 0.2},
-    )
-    slope = spec.galaxies["lens"].components["mass"].parameters["slope"]
-    assert 1.2 < slope.lower < 1.21 < slope.upper
-
-    bad_slope = deepcopy(power_law)
-    bad_slope["lensing"]["lens_galaxy"]["mass"]["slope"] = 1.2
-    with pytest.raises(ValueError, match="outside"):
-        smooth_model_spec_from_config(bad_slope)
-
-    bad_ell = _simple_config()
-    bad_ell["lensing"]["lens_galaxy"]["mass"]["ell_comps"][0] = 0.9
-    with pytest.raises(ValueError, match="outside"):
-        smooth_model_spec_from_config(bad_ell)
-
-    clipped_ell = _simple_config()
-    clipped_ell["lensing"]["lens_galaxy"]["mass"]["ell_comps"][0] = 0.89
-    spec = smooth_model_spec_from_config(
-        clipped_ell,
-        priors_config={"lens_ell_comps_sigma": 0.05},
-    )
-    ell_prior = spec.galaxies["lens"].components["mass"].parameters[
-        "ell_comps_0"
-    ]
-    assert ell_prior.upper < 0.9
-    assert ell_prior.lower < 0.89 < ell_prior.upper
 
 
 def test_image_source_spec_is_compact_and_has_four_free_parameters():

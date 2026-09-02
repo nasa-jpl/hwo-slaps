@@ -24,16 +24,6 @@ lensing:
       einstein_radius: 1  # arcsec
       centre: [0.0, 0.0]
       ell_comps: [0.1, 0.0]  # Ellipticity
-      # PowerLaw alternative (replace this mass block):
-      # type: PowerLaw
-      # centre: [0.0, 0.0]
-      # ell_comps: [0.1, 0.0]
-      # einstein_radius: 1.0
-      # slope: 2.0
-      # multipoles:  # optional; phi_m = atan2(comp0, comp1) / m
-      #   m3: [0.0, 0.01]
-      #   m4: [0.02, 0.0]
-    # shear: [0.02, -0.01]  # optional [gamma_1, gamma_2]
       
   # Background source galaxy
   source_galaxy:
@@ -281,13 +271,6 @@ modeling:
     #   lens.centre_y: 5.0e-3
     #   lens.centre_x: 5.0e-3
     #   lens.einstein_radius: 1.0e-2
-    #   lens.slope: 5.0e-2
-    #   lens.multipole_m3_1: 1.0e-2
-    #   lens.multipole_m3_2: 1.0e-2
-    #   lens.multipole_m4_1: 1.0e-2
-    #   lens.multipole_m4_2: 1.0e-2
-    #   lens.shear_1: 1.0e-2
-    #   lens.shear_2: 1.0e-2
     #   source.centre_y: 5.0e-3
     #   source.centre_x: 5.0e-3
     # Example larger PSF scan basis:

@@ -23,10 +23,13 @@ SPEC.loader.exec_module(DERIVATION)
 QUALIFICATION_TOTAL_FLUX = 0.289151264
 EXPONENTIAL_SCENES = (
     'scene1_smooth_ring',
+)
+RETIRED_REFERENCE_SCENES = frozenset({
+    'scene2_clumpy',
+    'scene3_bow_dot',
     'scene5_flex_macro',
     'scene5_ablation_sie_fit',
-)
-RETIRED_REFERENCE_SCENES = frozenset({'scene2_clumpy', 'scene3_bow_dot'})
+})
 """Scenes the committed reference carries that the tree no longer derives.
 
 Their synthetic source families were removed after the artifact was

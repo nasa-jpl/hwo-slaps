@@ -2,20 +2,14 @@
 
 from __future__ import annotations
 
-import copy
 import math
-from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
 
 autolens = pytest.importorskip("autolens")
 
 from hwoslaps.lensing import critical_curve as cc  # noqa: E402
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SCENE5_CONFIG = REPO_ROOT / "configs" / "scenes" / "scene5_flex_macro.yaml"
 
 UNIT_SQUARE = np.array(
     [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]], dtype=float
@@ -41,13 +35,6 @@ def _circle(radius, centre=(0.0, 0.0), vertices=720):
     )
 
 
-def _scene5_lens_config():
-    """Return the scene-5 flexible-macro truth lens configuration."""
-    with open(SCENE5_CONFIG) as stream:
-        config = yaml.safe_load(stream)
-    return config["lensing"]["lens_galaxy"]
-
-
 def _sie_galaxy(einstein_radius=1.0, ell_comps=(0.0, 0.0), centre=(0.0, 0.0)):
     """Return a truth SIE macro galaxy."""
     return autolens.Galaxy(
@@ -58,12 +45,6 @@ def _sie_galaxy(einstein_radius=1.0, ell_comps=(0.0, 0.0), centre=(0.0, 0.0)):
             ell_comps=tuple(ell_comps),
         ),
     )
-
-
-@pytest.fixture(scope="module")
-def scene5_extraction():
-    """Extract theta_E once from the scene-5 flexible truth macro."""
-    return cc.extract_theta_e_from_lens_config(_scene5_lens_config())
 
 
 def test_polygon_area_is_hand_calculable():
@@ -401,72 +382,3 @@ def test_massless_model_raises_missing_curve_error():
             ),
         )
 
-
-def test_scene5_flexible_macro_extraction_is_deterministic(scene5_extraction):
-    """Scene 5 extracts and rehashes identically across reruns."""
-    rerun = cc.extract_theta_e_from_lens_config(copy.deepcopy(_scene5_lens_config()))
-
-    assert scene5_extraction.curve_counts == {
-        "extracted": 1, "closed": 1, "enclosing": 1
-    }
-    assert rerun.theta_e_eff_arcsec == scene5_extraction.theta_e_eff_arcsec
-    assert np.array_equal(rerun.contour_arcsec, scene5_extraction.contour_arcsec)
-    assert rerun.contour_sha256 == scene5_extraction.contour_sha256
-    assert rerun.aperture.sha256 == scene5_extraction.aperture.sha256
-    assert rerun.to_provenance_dict() == scene5_extraction.to_provenance_dict()
-    assert 0.5 < scene5_extraction.theta_e_eff_arcsec < 2.0
-
-
-def test_scene5_contour_hash_is_traversal_invariant(scene5_extraction):
-    """Reversing or rotating the stored contour keeps its hash."""
-    contour = scene5_extraction.contour_arcsec
-    rotated = np.vstack([contour[7:-1], contour[:7], contour[7:8]])
-    assert cc.polyline_digest(cc.canonical_polygon(rotated)) == (
-        scene5_extraction.contour_sha256
-    )
-    assert cc.polyline_digest(cc.canonical_polygon(contour[::-1])) == (
-        scene5_extraction.contour_sha256
-    )
-
-
-def test_scene5_provenance_record_pins_the_algorithm(scene5_extraction):
-    """The provenance record carries every DesignFreeze field."""
-    record = scene5_extraction.to_provenance_dict()
-    assert record["algorithm_id"] == cc.ALGORITHM_ID
-    assert record["choice_rule_id"] == cc.CHOICE_RULE_ID
-    assert record["grid"] == {
-        "requested_half_width_arcsec": 4.0,
-        "half_width_arcsec": 4.0,
-        "pixel_scale_arcsec": 0.01,
-        "pixels_per_side": 800,
-    }
-    assert record["lens_centre_arcsec"] == [0.0, 0.0]
-    assert record["theta_e_eff_arcsec"] == pytest.approx(
-        math.sqrt(record["area_arcsec2"]/math.pi)
-    )
-    assert record["aperture"]["radius_arcsec"] == pytest.approx(
-        2.0*record["theta_e_eff_arcsec"]
-    )
-    assert record["aperture"]["required_map_half_width_arcsec"] == pytest.approx(
-        2.2*record["theta_e_eff_arcsec"]
-    )
-    assert len(record["contour_sha256"]) == 64
-    assert len(record["aperture_sha256"]) == 64
-
-
-def test_scene5_theta_e_differs_from_the_macro_parameter(scene5_extraction):
-    """The flexible macro is not summarised by its R_E parameter."""
-    parameter = float(_scene5_lens_config()["mass"]["einstein_radius"])
-    assert scene5_extraction.theta_e_eff_arcsec != pytest.approx(parameter, abs=1e-6)
-    assert scene5_extraction.theta_e_eff_arcsec == pytest.approx(parameter, abs=0.2)
-
-
-def test_scene5_theta_e_is_stable_against_the_grid_extent(scene5_extraction):
-    """A wider declared grid returns the same effective radius."""
-    wider = cc.extract_theta_e_from_lens_config(
-        _scene5_lens_config(), grid_half_width_arcsec=5.0
-    )
-    assert wider.theta_e_eff_arcsec == pytest.approx(
-        scene5_extraction.theta_e_eff_arcsec, abs=1e-9
-    )
-    assert wider.grid.pixels_per_side == 1000
