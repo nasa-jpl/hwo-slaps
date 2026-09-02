@@ -180,6 +180,7 @@ _load_yaml_mapping = load_yaml_mapping
 _load_observing_reference = load_observing_reference
 _stage_job_config = stage_job_config
 _resolve_path = resolve_path
+_file_sha256 = file_sha256
 
 
 def _require_string(value: Any, path: str) -> str:
