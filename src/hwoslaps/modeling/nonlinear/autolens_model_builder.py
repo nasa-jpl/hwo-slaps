@@ -126,18 +126,6 @@ def _guard_supported_config(full_config: Dict[str, Any]) -> None:
         raise ValueError(f"Unsupported truth source light type: {light_type}")
 
 
-def _fit_lens_config(full_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Return the matched or explicit fit-side macro configuration."""
-    truth_lens = full_config["lensing"]["lens_galaxy"]
-    fit_lens = full_config.get("modeling", {}).get("fit_lens")
-    if (
-        isinstance(fit_lens, dict)
-        and str(fit_lens.get("mode", "")).lower() == "explicit"
-    ):
-        return fit_lens["lens_galaxy"]
-    return truth_lens
-
-
 def _macro_components(
     lens_config: Dict[str, Any],
     widths: Dict[str, float],
@@ -354,9 +342,8 @@ def smooth_model_spec_from_config(
     widths = _widths(priors_config)
     truth_lens = full_config["lensing"]["lens_galaxy"]
     source_config = full_config["lensing"]["source_galaxy"]
-    fit_lens = _fit_lens_config(full_config)
     lens_components = _macro_components(
-        fit_lens,
+        truth_lens,
         widths,
         pin_to_targets=pin_to_targets,
     )

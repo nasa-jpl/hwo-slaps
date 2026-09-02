@@ -113,29 +113,6 @@ def test_builder_guards_throughput_and_unknown_profiles():
         smooth_model_spec_from_config(unknown_light)
 
 
-def test_fit_lens_explicit_routes_macro_but_inherits_truth_redshift():
-    """Use explicit SIE parameters while retaining the truth lens plane."""
-    explicit = _scene("scene5_ablation_sie_fit.yaml")
-    explicit_spec = smooth_model_spec_from_config(explicit)
-    lens = explicit_spec.galaxies["lens"]
-    assert lens.redshift.value == pytest.approx(
-        explicit["lensing"]["lens_galaxy"]["redshift"]
-    )
-    assert lens.components["mass"].class_name == "Isothermal"
-    assert set(lens.components) == {"mass"}
-    assert lens.components["mass"].parameters["einstein_radius"].lower == pytest.approx(
-        0.99
-    )
-
-    matched = _scene("scene5_flex_macro.yaml")
-    matched_spec = smooth_model_spec_from_config(matched)
-    assert matched_spec.galaxies["lens"].components["mass"].class_name == "PowerLaw"
-    absent = _simple_config()
-    assert smooth_model_spec_from_config(absent).galaxies["lens"].components[
-        "mass"
-    ].class_name == "Isothermal"
-
-
 def test_make_analysis_rejects_jax_for_custom_profiles(tmp_path):
     """Reject JAX before constructing analysis for a CPU-only model."""
     runner = AutoLensFitRunner(
@@ -169,12 +146,6 @@ def test_all_scene_truth_point_tracer_images_match(scene_name):
     spec = smooth_model_spec_from_config(config)
     instance = autofit_model_from_spec(spec).instance_from_prior_medians()
     truth_lens_config = config["lensing"]["lens_galaxy"]
-    fit_lens = config.get("modeling", {}).get("fit_lens")
-    if isinstance(fit_lens, dict) and fit_lens.get("mode") == "explicit":
-        truth_lens_config = {
-            "redshift": config["lensing"]["lens_galaxy"]["redshift"],
-            **fit_lens["lens_galaxy"],
-        }
     truth_lens = _create_lens_galaxy(truth_lens_config)
     truth_source = _create_source_galaxy(
         config["lensing"]["source_galaxy"]

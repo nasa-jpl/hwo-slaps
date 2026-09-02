@@ -823,47 +823,6 @@ def test_mismatch_grid_map_parallel_matches_serial(grid_setup, mismatch_setup):
         np.testing.assert_array_equal(getattr(parallel, name), getattr(serial, name))
 
 
-@pytest.mark.xtx_gpu
-def test_explicit_fit_lens_grid_map_parallel_matches_serial(grid_setup):
-    """Exercise exact mismatch parity for an explicit fit lens full map."""
-    config = copy.deepcopy(grid_setup["config"])
-    fit_lens = {
-        "mass": copy.deepcopy(config["lensing"]["lens_galaxy"]["mass"])
-    }
-    fit_lens["mass"]["centre"] = [0.01, -0.02]
-    config["modeling"]["fit_lens"] = {
-        "mode": "explicit",
-        "lens_galaxy": fit_lens,
-    }
-
-    parallel_config = copy.deepcopy(config["modeling"]["fisher"]["map"])
-    parallel_config["num_workers"] = 2
-    serial_config = copy.deepcopy(parallel_config)
-    serial_config["num_workers"] = 1
-
-    parallel = FisherDetector(
-        observation_baseline=grid_setup["observation_baseline"],
-        lensing_baseline=grid_setup["lensing_baseline"],
-        psf_data=grid_setup["psf_data"],
-        full_config=config,
-        fisher_config={**config["modeling"]["fisher"], "map": parallel_config},
-    )
-    serial = FisherDetector(
-        observation_baseline=grid_setup["observation_baseline"],
-        lensing_baseline=grid_setup["lensing_baseline"],
-        psf_data=grid_setup["psf_data"],
-        full_config=config,
-        fisher_config={**config["modeling"]["fisher"], "map": serial_config},
-    )
-    parallel_map = parallel.compute_grid_map()
-    serial_map = serial.compute_grid_map()
-
-    for name in MISMATCH_GRID_ARRAYS:
-        np.testing.assert_array_equal(
-            getattr(parallel_map, name), getattr(serial_map, name)
-        )
-
-
 def test_generator_dispatches_grid_map(grid_setup):
     """Route a grid map config through perform_fisher_detection."""
     config = copy.deepcopy(grid_setup["config"])

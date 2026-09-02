@@ -213,12 +213,6 @@ modeling:
   #   #   amplitude_rms_nm: 20.0  # non-negative scalar knowledge error
   #   #   seed: 20260814          # non-negative integer
   #   #   family: combined        # combined | global | segment
-  # Optional analysis-lens override; explicit replaces mass and shear.
-  # fit_lens:
-  #   mode: matched               # matched | explicit
-  #   # lens_galaxy:              # required only for explicit; no redshift
-  #   #   mass: {type: Isothermal, centre: [0.0, 0.0], ell_comps: [0.1, 0.0], einstein_radius: 1.0}
-  #   #   shear: [0.01, 0.0]      # omitted means no fit-side shear
   fisher:
     mode: both                    # local | map | both
     snr_threshold: 3.0

@@ -446,7 +446,6 @@ class FisherDetectionData:
     psf_scan_mode_names: Optional[List[str]] = None
     grid_map: Optional[FisherGridMapData] = None
     psf_mismatch_enabled: bool = False
-    lens_mismatch_enabled: bool = False
     fit_psf_mode: str = "explicit"
     fit_psf_delta: Optional[Dict[str, Any]] = None
     runtime_provenance: Optional[Dict[str, Any]] = None
@@ -583,12 +582,6 @@ def print_fisher_summary(fisher_data: FisherDetectionData) -> None:
                 )
             else:
                 print("  fit_psf mode: explicit")
-        if fisher_data.lens_mismatch_enabled:
-            print("  fit_lens mode: explicit")
-            print(
-                "  Reference/pool lens mismatch uses ~2x per-node "
-                "ray-tracing work."
-            )
         if local_mismatch:
             local = fisher_data.local
             assert local is not None

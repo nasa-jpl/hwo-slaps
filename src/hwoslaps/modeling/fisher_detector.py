@@ -285,7 +285,6 @@ def _grid_worker_init(
     mask_2d: np.ndarray,
     truth_kernel_native: Optional[np.ndarray] = None,
     truth_kernel_pixel_scales=None,
-    truth_config_template: Optional[Dict[str, Any]] = None,
 ) -> None:
     os.environ.update(_GRID_WORKER_ENV)
     # The spawned worker imports numpy before this initializer runs, so
@@ -304,7 +303,6 @@ def _grid_worker_init(
     )
     _GRID_WORKER_STATE["mu0"] = mu0_adu_2d
     _GRID_WORKER_STATE["mask"] = mask_2d
-    _GRID_WORKER_STATE["truth_config_template"] = truth_config_template
     if truth_kernel_native is None:
         _GRID_WORKER_STATE["truth_kernel"] = None
     else:
@@ -334,32 +332,11 @@ def _grid_worker_signal(position_yx: Tuple[float, float]) -> np.ndarray:
             model_image - _GRID_WORKER_STATE["mu0"],
             mask=_GRID_WORKER_STATE["mask"],
         )
-    truth_config_template = _GRID_WORKER_STATE["truth_config_template"]
-    if truth_config_template is None:
-        model_image, truth_image = _mean_adu_images_from_lensing_arrays(
-            lensing_data=lensing_data,
-            observation_config=config["observation"],
-            psf_kernels=(model_kernel, truth_kernel),
-        )
-    else:
-        model_image = _mean_adu_images_from_lensing_arrays(
-            lensing_data=lensing_data,
-            observation_config=config["observation"],
-            psf_kernels=(model_kernel,),
-        )[0]
-        truth_config = deepcopy(truth_config_template)
-        truth_config["lensing"]["subhalo"]["position"] = {
-            "type": "direct",
-            "centre": [float(position_yx[0]), float(position_yx[1])],
-        }
-        truth_lensing_data = generate_lensing_system(
-            truth_config["lensing"], full_config=truth_config
-        )
-        truth_image = _mean_adu_images_from_lensing_arrays(
-            lensing_data=truth_lensing_data,
-            observation_config=truth_config["observation"],
-            psf_kernels=(truth_kernel,),
-        )[0]
+    model_image, truth_image = _mean_adu_images_from_lensing_arrays(
+        lensing_data=lensing_data,
+        observation_config=config["observation"],
+        psf_kernels=(model_kernel, truth_kernel),
+    )
     model_signal = flatten_masked_image(
         model_image - _GRID_WORKER_STATE["mu0"],
         mask=_GRID_WORKER_STATE["mask"],
@@ -403,7 +380,6 @@ class FisherDetector:
         self.fisher_config = deepcopy(fisher_config)
 
         fit_psf_config = self.full_config["modeling"].get("fit_psf")
-        fit_lens_config = self.full_config["modeling"].get("fit_lens")
         self.fit_psf_mode = str(
             (fit_psf_config or {}).get("mode", "matched")
         ).lower()
@@ -416,13 +392,7 @@ class FisherDetector:
             "explicit",
             "delta",
         }
-        self.lens_mismatch_enabled = bool(
-            fit_lens_config is not None
-            and str(fit_lens_config.get("mode", "")).lower() == "explicit"
-        )
-        self.mismatch_enabled = (
-            self.psf_mismatch_enabled or self.lens_mismatch_enabled
-        )
+        self.mismatch_enabled = self.psf_mismatch_enabled
         self.fit_full_config = deepcopy(self.full_config)
         if self.psf_mismatch_enabled:
             assert fit_psf_config is not None
@@ -539,16 +509,6 @@ class FisherDetector:
         else:
             self.fit_psf_data = None
             self.model_psf_data = self.psf_data
-        if self.lens_mismatch_enabled:
-            assert fit_lens_config is not None
-            fit_lens_galaxy = fit_lens_config["lens_galaxy"]
-            target = self.fit_full_config["lensing"]["lens_galaxy"]
-            target["mass"] = deepcopy(fit_lens_galaxy["mass"])
-            if "shear" in fit_lens_galaxy:
-                target["shear"] = deepcopy(fit_lens_galaxy["shear"])
-            else:
-                target.pop("shear", None)
-
         self.include_background_offset = bool(self.fisher_config["include_background_offset"])
         self.snr_threshold = float(self.fisher_config["snr_threshold"])
         self.finite_diff = deepcopy(self.fisher_config["finite_diff"])
@@ -637,17 +597,7 @@ class FisherDetector:
         )
 
         self.mu0_adu_2d = self._mean_adu_from_observation(self.observation_baseline)
-        self.lensing_baseline_fit = None
-        if self.lens_mismatch_enabled:
-            self.lensing_baseline_fit = generate_lensing_system(
-                self.baseline_config_template["lensing"],
-                full_config=self.baseline_config_template,
-            )
-            self.mu0_model_adu_2d = self._mean_adu_from_lensing(
-                lensing_data=self.lensing_baseline_fit,
-                observation_config=self.baseline_config_template["observation"],
-            )
-        elif self.psf_mismatch_enabled:
+        if self.psf_mismatch_enabled:
             self.mu0_model_adu_2d = self._mean_adu_from_config(
                 self.baseline_config_template
             )
@@ -912,10 +862,9 @@ class FisherDetector:
         """Compute local profiled Asimov detectability.
 
         The calculation uses the injected position. Existing Fisher fields
-        describe the fit-side template alone. With an explicit fit PSF or fit
-        lens, optional mismatch fields project truth-side data and the smooth
-        truth-minus-fit residual onto that profiled template. Lens mismatch
-        requires separate truth- and fit-side ray traces.
+        describe the fit-side template alone. With an explicit fit PSF,
+        optional mismatch fields project truth-side data and the smooth
+        truth-minus-fit residual onto that profiled template.
         """
         if self.fit_psf_mode == "delta":
             self._bind_observation_to_delta_truth(
@@ -925,19 +874,10 @@ class FisherDetector:
             )
         mu1_adu_2d = self._mean_adu_from_observation(observation_test)
         if self.mismatch_enabled:
-            if self.lens_mismatch_enabled:
-                if lensing_test.subhalo_position is None:
-                    raise ValueError(
-                        "Lens-mismatch local evaluation requires a subhalo position."
-                    )
-                mu1_model_adu_2d = self._mean_adu_for_position(
-                    lensing_test.subhalo_position
-                )
-            else:
-                mu1_model_adu_2d = self._mean_adu_from_lensing(
-                    lensing_data=lensing_test,
-                    observation_config=self.full_config["observation"],
-                )
+            mu1_model_adu_2d = self._mean_adu_from_lensing(
+                lensing_data=lensing_test,
+                observation_config=self.full_config["observation"],
+            )
             smooth_mean_image = self.mu0_model_adu_2d
             subhalo_mean_image = mu1_model_adu_2d
         else:
@@ -1034,7 +974,7 @@ class FisherDetector:
         """Compute a signal-bank detectability map over candidate positions."""
         if self.mismatch_enabled:
             raise ValueError(
-                "fit_psf and fit_lens mismatch are unsupported for legacy "
+                "fit_psf mismatch is unsupported for legacy "
                 "bank maps; use map.type: grid for mismatch runs."
             )
         positions_yx = self._candidate_positions()
@@ -1106,9 +1046,8 @@ class FisherDetector:
         parent against the workspace built at construction time.
 
         Existing Fisher arrays describe fit-side templates. With an explicit
-        fit PSF or fit lens, paired truth-side data residuals are evaluated in
-        the same streaming batches and populate the optional mismatch arrays.
-        Lens mismatch costs about twice the per-node ray-tracing work.
+        fit PSF, paired truth-side data residuals are evaluated in the same
+        streaming batches and populate the optional mismatch arrays.
         """
         if self.map_type != "grid":
             raise ValueError("compute_grid_map requires modeling.fisher.map.type: 'grid'.")
@@ -1474,7 +1413,6 @@ class FisherDetector:
             bias_whitened = self._bias_whitened
         return JaxGridTemplateEngine(
             lensing_baseline=self.lensing_baseline,
-            lensing_baseline_fit=self.lensing_baseline_fit,
             map_config_template=deepcopy(self.map_config_template),
             psf_kernel_native=np.asarray(pyauto_kernel_native(kernel), dtype=float),
             mu0_adu_2d=self.mu0_model_adu_2d,
@@ -1510,11 +1448,6 @@ class FisherDetector:
             np.asarray(self.mask_2d, dtype=bool),
             truth_kernel_native,
             truth_kernel_pixel_scales,
-            (
-                deepcopy(self.map_config_template_truth)
-                if self.lens_mismatch_enabled
-                else None
-            ),
         )
         yield from _supervised_ordered_map(
             _grid_worker_signal,
@@ -1850,8 +1783,7 @@ class FisherDetector:
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Generate fit- and truth-side node images.
 
-        PSF-only mismatch shares one ray trace. Lens mismatch regenerates both
-        macro models and therefore costs about twice the per-node work.
+        PSF-only mismatch shares one ray trace.
         """
         config = deepcopy(self.map_config_template)
         config["lensing"]["subhalo"]["position"] = {
@@ -1864,32 +1796,11 @@ class FisherDetector:
         )
         model_kernel = self._ensure_odd_kernel(self.model_psf_data.kernel)
         truth_kernel = self._ensure_odd_kernel(self._truth_template_kernel())
-        if self.lens_mismatch_enabled:
-            model_image = _mean_adu_images_from_lensing_arrays(
-                lensing_data=lensing_data,
-                observation_config=config["observation"],
-                psf_kernels=(model_kernel,),
-            )[0]
-            truth_config = deepcopy(self.map_config_template_truth)
-            truth_config["lensing"]["subhalo"]["position"] = {
-                "type": "direct",
-                "centre": [float(position_yx[0]), float(position_yx[1])],
-            }
-            truth_lensing_data = generate_lensing_system(
-                truth_config["lensing"],
-                full_config=truth_config,
-            )
-            truth_image = _mean_adu_images_from_lensing_arrays(
-                lensing_data=truth_lensing_data,
-                observation_config=truth_config["observation"],
-                psf_kernels=(truth_kernel,),
-            )[0]
-        else:
-            model_image, truth_image = _mean_adu_images_from_lensing_arrays(
-                lensing_data=lensing_data,
-                observation_config=config["observation"],
-                psf_kernels=(model_kernel, truth_kernel),
-            )
+        model_image, truth_image = _mean_adu_images_from_lensing_arrays(
+            lensing_data=lensing_data,
+            observation_config=config["observation"],
+            psf_kernels=(model_kernel, truth_kernel),
+        )
         return model_image, truth_image
 
     def _mean_adu_from_config(self, config: Dict[str, Any]) -> np.ndarray:
@@ -2502,13 +2413,9 @@ class FisherDetector:
             pixel_scales=pyauto_kernel_pixel_scales(kernel_plus),
             normalize=False,
         )
-        lensing_baseline = self.lensing_baseline
-        if role == "fit" and self.lens_mismatch_enabled:
-            assert self.lensing_baseline_fit is not None
-            lensing_baseline = self.lensing_baseline_fit
         return self._source_adu_from_kernel(
             derivative_kernel_obj,
-            lensing_baseline=lensing_baseline,
+            lensing_baseline=self.lensing_baseline,
         )
 
     @staticmethod
@@ -2660,8 +2567,7 @@ class FisherDetector:
 
         The aperture is declared in arcseconds and, unlike ``source_snr``,
         depends on neither the realized source brightness nor the injected
-        subhalo.  ``centre: lens`` places it on the analysis lens mass centre
-        (the fit-side centre when ``modeling.fit_lens`` overrides it) and
+        subhalo.  ``centre: lens`` places it on the analysis lens mass centre;
         ``centre: grid`` places it on the geometric centre of the image grid.
         Radii are compared on the closed interval ``[inner, outer]``.
 

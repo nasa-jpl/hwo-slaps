@@ -1,8 +1,7 @@
-"""Tests for flexible macro-lens validation and generation."""
+"""Tests for Isothermal macro-lens validation and generation."""
 
 from __future__ import annotations
 
-import copy
 from pathlib import Path
 
 import autolens as al
@@ -12,7 +11,6 @@ import yaml
 
 from hwoslaps.config.validation import validate_or_raise
 from hwoslaps.lensing.generator import (
-    _create_lens_galaxy,
     generate_lensing_system,
 )
 from hwoslaps.plotting.lensing_plots import (
@@ -42,18 +40,6 @@ def _config() -> dict:
     return config
 
 
-def _power_law_mass() -> dict:
-    """Return a representative flexible PowerLaw mass block."""
-    return {
-        "type": "PowerLaw",
-        "centre": [0.0, 0.0],
-        "ell_comps": [0.1, 0.0],
-        "einstein_radius": 1.0,
-        "slope": 2.0,
-        "multipoles": {"m3": [0.0, 0.01], "m4": [0.02, 0.0]},
-    }
-
-
 def _generated(config: dict):
     """Generate one scene from a complete configuration."""
     return generate_lensing_system(config["lensing"], full_config=config)
@@ -81,57 +67,6 @@ def test_truth_lens_galaxy_rejects_unknown_keys(unknown_key):
 
     assert "lensing.lens_galaxy" in str(error.value)
     assert unknown_key in str(error.value)
-
-
-
-def test_fit_lens_matched_and_explicit_structure():
-    """Enforce matched and explicit fit-lens block structure."""
-    config = _config()
-    validate_or_raise(config)
-
-    config["modeling"]["fit_lens"] = {
-        "mode": "matched",
-        "lens_galaxy": {"mass": copy.deepcopy(_power_law_mass())},
-    }
-    with pytest.raises(ValueError, match="lens_galaxy"):
-        validate_or_raise(config)
-
-    config["modeling"]["fit_lens"] = {"mode": "explicit"}
-    with pytest.raises(ValueError, match="lens_galaxy"):
-        validate_or_raise(config)
-
-
-@pytest.mark.parametrize(
-    "mutation, match",
-    [
-        (("redshift", 0.3), "unsupported keys"),
-        (("extra", 1), "unsupported keys"),
-    ],
-)
-def test_explicit_fit_lens_rejects_unknown_lens_keys(mutation, match):
-    """Reject fit-lens redshift and all other unsupported galaxy keys."""
-    config = _config()
-    key, value = mutation
-    config["modeling"]["fit_lens"] = {
-        "mode": "explicit",
-        "lens_galaxy": {"mass": copy.deepcopy(_power_law_mass()), key: value},
-    }
-    with pytest.raises(ValueError, match=match):
-        validate_or_raise(config)
-
-
-def test_explicit_fit_lens_reuses_mass_validation():
-    """Apply the same PowerLaw slope domain to the explicit fit model."""
-    config = _config()
-    mass = _power_law_mass()
-    mass["slope"] = 3.0
-    config["modeling"]["fit_lens"] = {
-        "mode": "explicit",
-        "lens_galaxy": {"mass": mass},
-    }
-    with pytest.raises(ValueError, match="modeling.fit_lens.*slope"):
-        validate_or_raise(config)
-
 
 @pytest.mark.parametrize("key", ["slope", "multipole_comp", "shear_comp"])
 def test_item5_finite_difference_steps_are_required_and_positive(key):
