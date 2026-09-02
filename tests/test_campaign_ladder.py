@@ -27,6 +27,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from hwoslaps.campaign import design_freeze as df
 from hwoslaps.campaign import ladder
+from hwoslaps.campaign import _common
 from hwoslaps.campaign import s1_lite
 from hwoslaps.lensing.critical_curve import ApertureDefinition
 
@@ -517,7 +518,7 @@ def test_staged_configs_keep_the_stage0_block_except_the_revision(
     revision so the runner's moved-code gate holds for ladder jobs."""
     frozen = s1_lite._load_frozen_manifest(Path(stage0_root))
     stage0_jobs = {job["job_id"]: job for job in frozen["jobs"]}
-    revision = ladder._code_revision_record()
+    revision = _common._code_revision_record()
     for job in parent_campaign["manifest"]["campaign"]["jobs"]:
         system_id = job["job_id"].removeprefix("ladder_parent_")
         expected = dict(

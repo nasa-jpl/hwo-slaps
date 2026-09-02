@@ -93,10 +93,10 @@ from typing import Any, Optional
 import numpy as np
 import yaml
 
-from hwoslaps.provenance import config_hash, revision_digest, revision_provenance
+from hwoslaps.provenance import config_hash
 
+from . import _common
 from .design_freeze import (
-    DEFAULT_DESIGN_FREEZE_PATH,
     file_sha256,
     load_design_freeze,
     repo_root,
@@ -286,13 +286,6 @@ def ladder_job_id(tier: str, system_id: str) -> str:
     return job_id
 
 
-def _freeze_artifact_path(freeze_path) -> Path:
-    """Return the resolved freeze artifact one build consumes."""
-    return Path(
-        freeze_path if freeze_path is not None else DEFAULT_DESIGN_FREEZE_PATH
-    ).expanduser().resolve()
-
-
 def _verified_freeze_artifact(freeze: dict, freeze_path) -> Path:
     """Prove the consumed freeze mapping is the artifact on disk.
 
@@ -322,7 +315,7 @@ def _verified_freeze_artifact(freeze: dict, freeze_path) -> Path:
         Raised when the mapping does not equal the file, which includes
         every case where it never went through the verifying loader.
     """
-    resolved = _freeze_artifact_path(freeze_path)
+    resolved = _common._freeze_artifact_path(freeze_path)
     if freeze != load_design_freeze(resolved):
         raise LadderError(
             "The design freeze mapping handed to the ladder campaign builder "
@@ -428,7 +421,7 @@ def _stage0_campaign(stage0_root: Path) -> dict:
             f"Stage 0 campaign root {stage0_root} is not a directory"
         )
     try:
-        return s1_lite._load_frozen_manifest(stage0_root)
+        return _common.load_frozen_manifest(stage0_root)
     except s1_lite.CampaignError as exc:
         raise LadderError(
             f"Stage 0 campaign root {stage0_root} is not a frozen campaign: "
@@ -990,16 +983,6 @@ def _declared_spacing_systematic(freeze: dict) -> dict:
     return {"value_dex": float(block["value_dex"])}
 
 
-def _code_revision_record() -> dict:
-    """Return the source revision this campaign is being generated at."""
-    revision = revision_provenance()
-    return {
-        "git_hash": revision["git_hash"],
-        "git_dirty": revision["git_dirty"],
-        "sha256": revision_digest(revision),
-    }
-
-
 def _staged_config_hashes(
     scene_paths: dict,
     observing_reference: Optional[str],
@@ -1030,10 +1013,8 @@ def _staged_config_hashes(
     hashes : `dict`
         Job id to staged configuration hash.
     """
-    from . import s1_lite
-
     scene_configs = {
-        label: s1_lite._load_yaml_mapping(
+        label: _common.load_yaml_mapping(
             path, f"Campaign base scene config '{label}'"
         )
         for label, path in scene_paths.items()
@@ -1041,12 +1022,12 @@ def _staged_config_hashes(
     observation = None
     source_patches: dict = {}
     if observing_reference is not None:
-        observation, source_patches = s1_lite._load_observing_reference(
+        observation, source_patches = _common.load_observing_reference(
             Path(observing_reference), sorted(scene_paths)
         )
     hashes = {}
     for job in jobs:
-        merged, _ = s1_lite._stage_job_config(
+        merged, _ = _common.stage_job_config(
             scene_configs[job["scene"]],
             observation,
             source_patches.get(job["scene"]),
@@ -1129,7 +1110,7 @@ def build_ladder_campaign(
     status = _verified_ratified_freeze(freeze)
     command = _verified_runner_command(runner_command)
     systematic = _declared_spacing_systematic(freeze)
-    code_revision = _code_revision_record()
+    code_revision = _common._code_revision_record()
 
     target = Path(directory).expanduser().resolve()
     root = Path(stage0_root).expanduser().resolve()
@@ -1227,9 +1208,7 @@ def build_ladder_campaign(
             reference_path, str(reference["sha256"]), "the observing reference"
         )
 
-    from . import s1_lite
-
-    resolved_output_root = s1_lite._resolve_path(str(output_root), target)
+    resolved_output_root = _common.resolve_path(str(output_root), target)
     job_config_hashes = _staged_config_hashes(
         scene_paths,
         None if reference_path is None else str(reference_path),
@@ -1310,11 +1289,6 @@ def build_ladder_campaign(
     return {"manifest": manifest, "summary": summary, "members": members}
 
 
-def _manifest_bytes(manifest: dict) -> bytes:
-    """Render the manifest to its canonical bytes."""
-    return yaml.safe_dump(manifest, sort_keys=True).encode("utf-8")
-
-
 def write_ladder_campaign(
     directory,
     freeze: dict,
@@ -1372,7 +1346,7 @@ def write_ladder_campaign(
         campaign_uuid=campaign_uuid,
     )
     target.mkdir(parents=True, exist_ok=True)
-    payload = _manifest_bytes(built["manifest"])
+    payload = _common._manifest_bytes(built["manifest"])
     manifest_path = target/_MANIFEST_NAME
     manifest_path.write_bytes(payload)
     return {
@@ -1686,7 +1660,7 @@ def validate_ladder_manifest(manifest_path) -> dict:
             )
 
     scene_paths = {
-        label: s1_lite._resolve_path(value, path.parent)
+        label: _common.resolve_path(value, path.parent)
         for label, value in campaign["base_scene_configs"].items()
     }
     reference = campaign["observing_reference"]
@@ -1697,9 +1671,9 @@ def validate_ladder_manifest(manifest_path) -> dict:
     hashes = _staged_config_hashes(
         scene_paths,
         None if reference is None
-        else str(s1_lite._resolve_path(reference, path.parent)),
+        else str(_common.resolve_path(reference, path.parent)),
         campaign["jobs"],
-        s1_lite._resolve_path(campaign["output_root"], path.parent),
+        _common.resolve_path(campaign["output_root"], path.parent),
     )
     if recorded != hashes:
         differing = sorted(

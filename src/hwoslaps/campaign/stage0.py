@@ -53,10 +53,8 @@ from typing import Any, Optional
 import numpy as np
 import yaml
 
-from hwoslaps.provenance import revision_digest, revision_provenance
-
+from . import _common
 from .design_freeze import (
-    DEFAULT_DESIGN_FREEZE_PATH,
     file_sha256,
     load_design_freeze,
     repo_root,
@@ -674,13 +672,6 @@ def selection_observable_plan(freeze: dict) -> dict:
     }
 
 
-def _freeze_artifact_path(freeze_path) -> Path:
-    """Return the resolved freeze artifact one build consumes."""
-    return Path(
-        freeze_path if freeze_path is not None else DEFAULT_DESIGN_FREEZE_PATH
-    ).expanduser().resolve()
-
-
 def _verified_freeze_artifact(freeze: dict, freeze_path) -> Path:
     """Prove the consumed freeze mapping is the artifact on disk.
 
@@ -710,7 +701,7 @@ def _verified_freeze_artifact(freeze: dict, freeze_path) -> Path:
         Raised when the mapping does not equal the file, which includes
         every case where it never went through the verifying loader.
     """
-    resolved = _freeze_artifact_path(freeze_path)
+    resolved = _common._freeze_artifact_path(freeze_path)
     if freeze != load_design_freeze(resolved):
         raise Stage0Error(
             "The design freeze mapping handed to the campaign builder is not "
@@ -777,23 +768,6 @@ def _extraction_settings(freeze: dict) -> dict:
             "border_margin_pixels": float(guards["border_margin_pixels"]),
             "min_contour_vertices": int(guards["min_contour_vertices"]),
         },
-    }
-
-
-def _code_revision_record() -> dict:
-    """Return the source revision this campaign is being generated at.
-
-    Stage 0 is resumable, so a job can start long after its campaign was
-    generated. The record travels inside every staged configuration and
-    the runner refuses to render under a different revision, which is
-    what makes a resume from moved code fail closed instead of quietly
-    mixing two code states into one pool.
-    """
-    revision = revision_provenance()
-    return {
-        "git_hash": revision["git_hash"],
-        "git_dirty": revision["git_dirty"],
-        "sha256": revision_digest(revision),
     }
 
 
@@ -1066,7 +1040,7 @@ def build_stage0_campaign(
     """
     freeze_artifact = _verified_freeze_artifact(freeze, freeze_path)
     command = _verified_runner_command(freeze, runner_command)
-    code_revision = _code_revision_record()
+    code_revision = _common._code_revision_record()
     base = Path(root if root is not None else repo_root()).resolve()
     frozen_size = int(freeze["stage0"]["n_systems"])
     size = int(n_systems if n_systems is not None else frozen_size)
@@ -1217,11 +1191,6 @@ def _catalogue_bytes(catalogue: dict) -> bytes:
     return (json.dumps(catalogue, sort_keys=True, indent=2) + "\n").encode("utf-8")
 
 
-def _manifest_bytes(manifest: dict) -> bytes:
-    """Render the manifest to its canonical bytes."""
-    return yaml.safe_dump(manifest, sort_keys=True).encode("utf-8")
-
-
 def write_stage0_campaign(
     directory,
     freeze: dict,
@@ -1295,7 +1264,7 @@ def write_stage0_campaign(
     manifest["campaign"]["seed_policy"]["catalogue_sha256"] = hashlib.sha256(
         catalogue_payload
     ).hexdigest()
-    manifest_payload = _manifest_bytes(manifest)
+    manifest_payload = _common._manifest_bytes(manifest)
     manifest_path = target/_MANIFEST_NAME
     manifest_path.write_bytes(manifest_payload)
 
