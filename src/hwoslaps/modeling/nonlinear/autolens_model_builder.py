@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
 from ...lensing.image_source import load_source_image_asset
-from .clumpy_profiles import ClumpyTemplateContext
 from .mass_mapping import MassMappingContext
 from .model_specs import (
     GalaxySpec,
@@ -34,14 +32,8 @@ DEFAULT_PRIOR_WIDTHS = {
     "lens_slope_sigma": 0.05,
     "lens_multipole_comp_sigma": 0.01,
     "lens_shear_comp_sigma": 0.01,
-    "source_sersic_index_sigma": 0.5,
     "image_flux_scale_frac_sigma": 0.5,
     "image_size_scale_frac_sigma": 0.3,
-    "clumpy_flux_scale_frac_sigma": 0.5,
-    "clumpy_size_scale_frac_sigma": 0.3,
-    "clump_centre_sigma_arcsec": 0.01,
-    "clump_intensity_frac_sigma": 0.5,
-    "clump_effective_radius_frac_sigma": 0.3,
     "subhalo_freed_centre_window_arcsec": 0.15,
 }
 """Default local prior widths for validation fits."""
@@ -134,7 +126,7 @@ def _guard_supported_config(full_config: Dict[str, Any]) -> None:
     light_type = full_config["lensing"]["source_galaxy"]["light"].get(
         "type"
     )
-    if light_type not in {"Exponential", "Sersic", "Clumpy", "Image"}:
+    if light_type not in {"Exponential", "Image"}:
         raise ValueError(f"Unsupported truth source light type: {light_type}")
 
 
@@ -286,7 +278,7 @@ def _analytic_source_profile(
     *,
     pin_to_targets: bool = False,
 ) -> ProfileSpec:
-    """Build an Exponential or Sersic source profile specification."""
+    """Build an Exponential source profile specification."""
     centre = light_config["centre"]
     ell_comps = light_config["ell_comps"]
     parameters = {
@@ -339,330 +331,21 @@ def _analytic_source_profile(
             pin_to_targets,
         ),
     }
-    if light_config["type"] == "Sersic":
-        parameters["sersic_index"] = _pin_local_prior(
-            _clipped_uniform(
-                light_config["sersic_index"],
-                widths["source_sersic_index_sigma"],
-                0.3,
-                10.0,
-            ),
-            light_config["sersic_index"],
-            pin_to_targets,
-        )
     return ProfileSpec(
         class_name=light_config["type"],
         parameters=parameters,
     )
 
 
-def _clumpy_template_context(
-    light_config: Dict[str, Any],
-) -> ClumpyTemplateContext:
-    """Build the immutable clumpy-source template context."""
-    host_config = light_config["host"]
-    host_centre = tuple(float(value) for value in host_config["centre"])
-    host = (
-        float(host_config["ell_comps"][0]),
-        float(host_config["ell_comps"][1]),
-        float(host_config["intensity"]),
-        float(host_config["effective_radius"]),
-        float(host_config["sersic_index"]),
-    )
-    clumps = []
-    for clump in light_config["clumps"]:
-        clumps.append(
-            (
-                float(clump["centre"][0]) - host_centre[0],
-                float(clump["centre"][1]) - host_centre[1],
-                float(clump["ell_comps"][0]),
-                float(clump["ell_comps"][1]),
-                float(clump["intensity"]),
-                float(clump["effective_radius"]),
-                float(clump["sersic_index"]),
-            )
-        )
-    canonical = (host, host_centre, tuple(clumps))
-    context_hash = hashlib.sha256(
-        repr(canonical).encode("utf-8")
-    ).hexdigest()[:16]
-    return ClumpyTemplateContext(
-        host=host,
-        host_centre=host_centre,
-        clumps=tuple(clumps),
-        context_hash=context_hash,
-    )
-
-
-def _clumpy_composite_profile(
-    light_config: Dict[str, Any],
-    widths: Dict[str, float],
-    parameterization: str,
-    *,
-    pin_to_targets: bool = False,
-) -> ProfileSpec:
-    """Build a rigid or host-free transformed clumpy profile."""
-    context = _clumpy_template_context(light_config)
-    host_config = light_config["host"]
-    host_ell = host_config["ell_comps"]
-    parameters = {
-        "centre_0": _pin_local_prior(
-            _uniform_around(
-                host_config["centre"][0],
-                widths["source_centre_sigma_arcsec"],
-            ),
-            host_config["centre"][0],
-            pin_to_targets,
-        ),
-        "centre_1": _pin_local_prior(
-            _uniform_around(
-                host_config["centre"][1],
-                widths["source_centre_sigma_arcsec"],
-            ),
-            host_config["centre"][1],
-            pin_to_targets,
-        ),
-        "flux_scale": _pin_local_prior(
-            _uniform_fraction(
-                light_config["flux_scale"],
-                widths["clumpy_flux_scale_frac_sigma"],
-            ),
-            light_config["flux_scale"],
-            pin_to_targets,
-        ),
-        "size_scale": _pin_local_prior(
-            _uniform_fraction(
-                light_config["size_scale"],
-                widths["clumpy_size_scale_frac_sigma"],
-            ),
-            light_config["size_scale"],
-            pin_to_targets,
-        ),
-    }
-    if parameterization == "host_free":
-        parameters.update(
-            {
-                "host_ell_comps_0": _pin_local_prior(
-                    _ell_prior(
-                        host_ell[0],
-                        widths["source_ell_comps_sigma"],
-                    ),
-                    host_ell[0],
-                    pin_to_targets,
-                ),
-                "host_ell_comps_1": _pin_local_prior(
-                    _ell_prior(
-                        host_ell[1],
-                        widths["source_ell_comps_sigma"],
-                    ),
-                    host_ell[1],
-                    pin_to_targets,
-                ),
-                "host_intensity": _pin_local_prior(
-                    _uniform_fraction(
-                        host_config["intensity"],
-                        widths["source_intensity_frac_sigma"],
-                    ),
-                    host_config["intensity"],
-                    pin_to_targets,
-                ),
-                "host_effective_radius": _pin_local_prior(
-                    _uniform_fraction(
-                        host_config["effective_radius"],
-                        widths["source_effective_radius_frac_sigma"],
-                    ),
-                    host_config["effective_radius"],
-                    pin_to_targets,
-                ),
-                "host_sersic_index": _pin_local_prior(
-                    _clipped_uniform(
-                        host_config["sersic_index"],
-                        widths["source_sersic_index_sigma"],
-                        0.3,
-                        10.0,
-                    ),
-                    host_config["sersic_index"],
-                    pin_to_targets,
-                ),
-            }
-        )
-    else:
-        parameters.update(
-            {
-                "host_ell_comps": fixed(tuple(float(v) for v in host_ell)),
-                "host_intensity": fixed(float(host_config["intensity"])),
-                "host_effective_radius": fixed(
-                    float(host_config["effective_radius"])
-                ),
-                "host_sersic_index": fixed(
-                    float(host_config["sersic_index"])
-                ),
-            }
-        )
-    parameters["template_context"] = fixed(context)
-    return ProfileSpec(
-        class_name="ClumpyTransformedSource",
-        parameters=parameters,
-    )
-
-
-def _sersic_component(
-    component: Dict[str, Any],
-    widths: Dict[str, float],
-    *,
-    clump: bool,
-    centre: tuple,
-    intensity: float,
-    effective_radius: float,
-    pin_to_targets: bool = False,
-) -> ProfileSpec:
-    """Build one fully-free-mode host or clump Sersic component."""
-    centre_width = (
-        widths["clump_centre_sigma_arcsec"]
-        if clump
-        else widths["source_centre_sigma_arcsec"]
-    )
-    parameters = {
-        "centre_0": _pin_local_prior(
-            _uniform_around(centre[0], centre_width),
-            centre[0],
-            pin_to_targets,
-        ),
-        "centre_1": _pin_local_prior(
-            _uniform_around(centre[1], centre_width),
-            centre[1],
-            pin_to_targets,
-        ),
-    }
-    if clump:
-        parameters.update(
-            {
-                "ell_comps_0": fixed(float(component["ell_comps"][0])),
-                "ell_comps_1": fixed(float(component["ell_comps"][1])),
-                "intensity": _pin_local_prior(
-                    _uniform_fraction(
-                        intensity,
-                        widths["clump_intensity_frac_sigma"],
-                    ),
-                    intensity,
-                    pin_to_targets,
-                ),
-                "effective_radius": _pin_local_prior(
-                    _uniform_fraction(
-                        effective_radius,
-                        widths["clump_effective_radius_frac_sigma"],
-                    ),
-                    effective_radius,
-                    pin_to_targets,
-                ),
-                "sersic_index": fixed(float(component["sersic_index"])),
-            }
-        )
-    else:
-        parameters.update(
-            {
-                "ell_comps_0": _pin_local_prior(
-                    _ell_prior(
-                        component["ell_comps"][0],
-                        widths["source_ell_comps_sigma"],
-                    ),
-                    component["ell_comps"][0],
-                    pin_to_targets,
-                ),
-                "ell_comps_1": _pin_local_prior(
-                    _ell_prior(
-                        component["ell_comps"][1],
-                        widths["source_ell_comps_sigma"],
-                    ),
-                    component["ell_comps"][1],
-                    pin_to_targets,
-                ),
-                "intensity": _pin_local_prior(
-                    _uniform_fraction(
-                        intensity,
-                        widths["source_intensity_frac_sigma"],
-                    ),
-                    intensity,
-                    pin_to_targets,
-                ),
-                "effective_radius": _pin_local_prior(
-                    _uniform_fraction(
-                        effective_radius,
-                        widths["source_effective_radius_frac_sigma"],
-                    ),
-                    effective_radius,
-                    pin_to_targets,
-                ),
-                "sersic_index": _pin_local_prior(
-                    _clipped_uniform(
-                        component["sersic_index"],
-                        widths["source_sersic_index_sigma"],
-                        0.3,
-                        10.0,
-                    ),
-                    component["sersic_index"],
-                    pin_to_targets,
-                ),
-            }
-        )
-    return ProfileSpec(class_name="Sersic", parameters=parameters)
-
-
-def _fully_free_clumpy_components(
-    light_config: Dict[str, Any],
-    widths: Dict[str, float],
-    *,
-    pin_to_targets: bool = False,
-) -> Dict[str, ProfileSpec]:
-    """Build independently parameterized as-built clumpy components."""
-    flux_scale = float(light_config["flux_scale"])
-    size_scale = float(light_config["size_scale"])
-    host_config = light_config["host"]
-    host_centre = tuple(float(value) for value in host_config["centre"])
-    components = {
-        "host": _sersic_component(
-            host_config,
-            widths,
-            clump=False,
-            centre=host_centre,
-            intensity=float(host_config["intensity"]) * flux_scale,
-            effective_radius=(
-                float(host_config["effective_radius"]) * size_scale
-            ),
-            pin_to_targets=pin_to_targets,
-        )
-    }
-    for index, clump in enumerate(light_config["clumps"]):
-        offset = (
-            float(clump["centre"][0]) - host_centre[0],
-            float(clump["centre"][1]) - host_centre[1],
-        )
-        centre = (
-            host_centre[0] + size_scale * offset[0],
-            host_centre[1] + size_scale * offset[1],
-        )
-        components[f"clump_{index}"] = _sersic_component(
-            clump,
-            widths,
-            clump=True,
-            centre=centre,
-            intensity=float(clump["intensity"]) * flux_scale,
-            effective_radius=float(clump["effective_radius"]) * size_scale,
-            pin_to_targets=pin_to_targets,
-        )
-    return components
-
-
 def _source_components(
     light_config: Dict[str, Any],
     widths: Dict[str, float],
-    clumpy_fit_parameterization: str,
     *,
     pin_to_targets: bool = False,
 ) -> tuple[Dict[str, ProfileSpec], Dict[str, Any]]:
     """Build source components and model metadata."""
     light_type = light_config["type"]
-    if light_type in {"Exponential", "Sersic"}:
+    if light_type == "Exponential":
         return {
             "light": _analytic_source_profile(
                 light_config,
@@ -715,34 +398,12 @@ def _source_components(
         return {"light": profile}, {
             "image_source_asset_hash": asset.sha256_16,
         }
-    if clumpy_fit_parameterization not in {"rigid", "host_free", "fully_free"}:
-        raise ValueError(
-            "clumpy_fit_parameterization must be 'rigid', 'host_free', or "
-            "'fully_free'"
-        )
-    metadata = {
-        "clumpy_fit_parameterization": clumpy_fit_parameterization,
-    }
-    if clumpy_fit_parameterization == "fully_free":
-        return _fully_free_clumpy_components(
-            light_config,
-            widths,
-            pin_to_targets=pin_to_targets,
-        ), metadata
-    return {
-        "light": _clumpy_composite_profile(
-            light_config,
-            widths,
-            clumpy_fit_parameterization,
-            pin_to_targets=pin_to_targets,
-        )
-    }, metadata
+    raise ValueError(f"Unsupported source light type: {light_type}")
 
 
 def smooth_model_spec_from_config(
     full_config: Dict[str, Any],
     priors_config: Optional[Dict[str, Any]] = None,
-    clumpy_fit_parameterization: str = "host_free",
     *,
     pin_to_targets: bool = False,
 ) -> ModelSpec:
@@ -754,9 +415,6 @@ def smooth_model_spec_from_config(
         Full HWO-SLAPS configuration.
     priors_config : `dict`, optional
         Prior-width overrides.
-    clumpy_fit_parameterization : `str`, optional
-        Clumpy-source fit mode: ``"rigid"``, ``"host_free"``, or
-        ``"fully_free"``.
     pin_to_targets : `bool`, optional
         Internal switch replacing validated local priors with fixed targets.
 
@@ -778,7 +436,6 @@ def smooth_model_spec_from_config(
     source_components, source_metadata = _source_components(
         source_config["light"],
         widths,
-        clumpy_fit_parameterization,
         pin_to_targets=pin_to_targets,
     )
 
@@ -867,7 +524,6 @@ def subhalo_model_spec_from_trial(
     fit_mode: str = "fixed_template",
     *,
     mass_context: Optional[MassMappingContext] = None,
-    clumpy_fit_parameterization: str = "host_free",
 ) -> ModelSpec:
     """Build a source-neutral subhalo-model specification.
 
@@ -883,9 +539,6 @@ def subhalo_model_spec_from_trial(
         ``"fixed_template"``, ``"local_search"``, or ``"freed"``.
     mass_context : `MassMappingContext`, optional
         Required only for freed fits.
-    clumpy_fit_parameterization : `str`, optional
-        Clumpy-source fit parameterization.
-
     Returns
     -------
     spec : `ModelSpec`
@@ -901,7 +554,6 @@ def subhalo_model_spec_from_trial(
     spec = smooth_model_spec_from_config(
         full_config,
         priors_config=priors_config,
-        clumpy_fit_parameterization=clumpy_fit_parameterization,
     )
     galaxies = dict(spec.galaxies)
     y0, x0 = trial.position_yx_arcsec
@@ -1010,7 +662,6 @@ def fixed_point_model_spec_from_trial(
     full_config: Dict[str, Any],
     trial: SubhaloTrial,
     priors_config: Optional[Dict[str, Any]] = None,
-    clumpy_fit_parameterization: str = "host_free",
 ) -> ModelSpec:
     """Build a fixed-template-shaped model pinned to all target values.
 
@@ -1022,9 +673,6 @@ def fixed_point_model_spec_from_trial(
         Trial subhalo fixed at its configured mass-profile scales and centre.
     priors_config : `dict`, optional
         Prior-width overrides used to validate every target's physical box.
-    clumpy_fit_parameterization : `str`, optional
-        Clumpy-source fit parameterization.
-
     Returns
     -------
     spec : `ModelSpec`
@@ -1033,7 +681,6 @@ def fixed_point_model_spec_from_trial(
     pinned_smooth = smooth_model_spec_from_config(
         full_config,
         priors_config=priors_config,
-        clumpy_fit_parameterization=clumpy_fit_parameterization,
         pin_to_targets=True,
     )
     fixed_template = subhalo_model_spec_from_trial(
@@ -1041,7 +688,6 @@ def fixed_point_model_spec_from_trial(
         trial,
         priors_config=priors_config,
         fit_mode="fixed_template",
-        clumpy_fit_parameterization=clumpy_fit_parameterization,
     )
     galaxies = dict(pinned_smooth.galaxies)
     lens_galaxy = galaxies["lens"]
@@ -1090,7 +736,6 @@ def _profile_class(class_name: str) -> Any:
     import autolens as al
 
     from ...lensing.image_source import ImageSource
-    from .clumpy_profiles import ClumpyTransformedSource
     from .mass_mapping import (
         NFWMCRSubhaloSph,
         PointMassMCRSubhalo,
@@ -1106,9 +751,7 @@ def _profile_class(class_name: str) -> Any:
         "IsothermalSph": al.mp.IsothermalSph,
         "NFWSph": al.mp.NFWSph,
         "Exponential": al.lp.Exponential,
-        "Sersic": al.lp.Sersic,
         "ImageSource": ImageSource,
-        "ClumpyTransformedSource": ClumpyTransformedSource,
         "NFWMCRSubhaloSph": NFWMCRSubhaloSph,
         "SISMCRSubhalo": SISMCRSubhalo,
         "PointMassMCRSubhalo": PointMassMCRSubhalo,
@@ -1134,10 +777,6 @@ def _assign_profile_value(profile_model: Any, name: str, value: Any) -> None:
         profile_model.multipole_comps.multipole_comps_0 = value
     elif name == "multipole_comps_1":
         profile_model.multipole_comps.multipole_comps_1 = value
-    elif name == "host_ell_comps_0":
-        profile_model.host_ell_comps.host_ell_comps_0 = value
-    elif name == "host_ell_comps_1":
-        profile_model.host_ell_comps.host_ell_comps_1 = value
     else:
         setattr(profile_model, name, value)
 
@@ -1165,10 +804,6 @@ def _profile_parameter_value(profile_model: Any, name: str) -> Any:
         return profile_model.multipole_comps.multipole_comps_0
     if name == "multipole_comps_1":
         return profile_model.multipole_comps.multipole_comps_1
-    if name == "host_ell_comps_0":
-        return profile_model.host_ell_comps.host_ell_comps_0
-    if name == "host_ell_comps_1":
-        return profile_model.host_ell_comps.host_ell_comps_1
     return getattr(profile_model, name)
 
 

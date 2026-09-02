@@ -314,9 +314,6 @@ def analysis_key_from(
         ),
         "psf_pixel_scales": _pixel_scales(psf),
         "fit_mode": model_metadata.get("fit_mode"),
-        "clumpy_fit_parameterization": model_metadata.get(
-            "clumpy_fit_parameterization"
-        ),
         "mass_context_hash": model_metadata.get("mass_context_hash"),
         "image_source_asset_hash": model_metadata.get(
             "image_source_asset_hash"

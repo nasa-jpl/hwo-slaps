@@ -138,7 +138,6 @@ def _smooth_analysis_key(dataset, config, priors_config=None):
     metadata.update(
         {
             "fit_mode": "smooth",
-            "clumpy_fit_parameterization": None,
             "resolved_prior_widths": resolved_widths,
         }
     )
@@ -840,17 +839,13 @@ def test_legacy_model_spec_payloads_match_baseline_literals():
 
 
 def test_fixed_point_uses_exact_clipped_prior_targets():
-    """Evaluate C1 at exact clipped slope and Sersic-index targets."""
+    """Evaluate C1 at the exact clipped slope target."""
     config = deepcopy(_config())
     mass = config["lensing"]["lens_galaxy"]["mass"]
     mass["type"] = "PowerLaw"
     mass["slope"] = 1.21
-    light = config["lensing"]["source_galaxy"]["light"]
-    light["type"] = "Sersic"
-    light["sersic_index"] = 0.31
     priors = {
         "lens_slope_sigma": 0.2,
-        "source_sersic_index_sigma": 0.5,
     }
     runner = _StubRunner()
     NonlinearMetricValidator(runner).validate_case(
@@ -864,7 +859,6 @@ def test_fixed_point_uses_exact_clipped_prior_targets():
     )
     instance = runner.analysis.last_instance
     assert instance.galaxies.lens.mass.slope == 1.21
-    assert instance.galaxies.source.light.sersic_index == 0.31
 
     spec = fixed_point_model_spec_from_trial(
         config,
@@ -875,7 +869,6 @@ def test_fixed_point_uses_exact_clipped_prior_targets():
     assert model.prior_count == 0
     pinned = model.instance_from_prior_medians()
     assert pinned.galaxies.lens.mass.slope == 1.21
-    assert pinned.galaxies.source.light.sersic_index == 0.31
 
 
 def test_smooth_reuse_rejects_mismatched_analysis_key():

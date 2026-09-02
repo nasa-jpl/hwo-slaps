@@ -23,19 +23,22 @@ SPEC.loader.exec_module(DERIVATION)
 QUALIFICATION_TOTAL_FLUX = 0.289151264
 EXPONENTIAL_SCENES = (
     'scene1_smooth_ring',
-    'scene3_bow_dot',
     'scene5_flex_macro',
     'scene5_ablation_sie_fit',
 )
-NUMBER_OF_CLUMPS = 3
-CLUMP_FLUX_FRACTION = 0.1
+RETIRED_REFERENCE_SCENES = frozenset({'scene2_clumpy', 'scene3_bow_dot'})
+"""Scenes the committed reference carries that the tree no longer derives.
+
+Their synthetic source families were removed after the artifact was
+pinned. The entries stay in the artifact; production stages only
+``scene4_cosmos``.
+"""
 STUB_AREA_M2 = 33.6
 PIXEL_SCALE_ARCSEC = 0.00716
 PIXEL_AREA_ARCSEC2 = PIXEL_SCALE_ARCSEC ** 2
 
 PHYSICAL_TARGET_RATE_E_PER_S = 14.78754553
 CORRECTED_EXPONENTIAL_INTENSITY = 0.00524356964
-CORRECTED_CLUMPY_FLUX_SCALE = 0.00262178482
 CORRECTED_IMAGE_TOTAL_FLUX = 0.00075809239
 ANCHOR_RELATIVE_TOLERANCE = 1.0e-2
 """Window around the audit's provisional corrected normalizations.
@@ -534,30 +537,20 @@ def test_scene_one_closed_form_reproduces_the_qualification_flux():
 
 
 def test_every_source_family_shares_one_continuous_normalization():
-    """Pin the closed-form angular integral of all three families.
+    """Pin the closed-form angular integral of the remaining families.
 
-    The three families configure the same continuous angular integral,
+    The remaining families configure the same continuous angular integral,
     which is the quantity the profile normalizations control and which
     the qualification scenes froze at 0.289151264.
     """
     smooth = _scene_light('scene1_smooth_ring')
-    clumpy = _scene_light('scene2_clumpy')
     cosmos = _scene_light('scene4_cosmos')
 
     smooth_integral = DERIVATION.source_profile_angular_integral(smooth)
-    clumpy_integral = DERIVATION.source_profile_angular_integral(clumpy)
     cosmos_integral = DERIVATION.source_profile_angular_integral(cosmos)
 
     assert smooth_integral == pytest.approx(QUALIFICATION_TOTAL_FLUX, abs=1.0e-9)
-    assert clumpy_integral == pytest.approx(QUALIFICATION_TOTAL_FLUX, rel=1.0e-7)
     assert cosmos_integral == QUALIFICATION_TOTAL_FLUX
-
-    host_only = {**clumpy, 'clumps': []}
-    host_integral = DERIVATION.source_profile_angular_integral(host_only)
-    assert len(clumpy['clumps']) == NUMBER_OF_CLUMPS
-    assert 1.0 - host_integral / clumpy_integral == pytest.approx(
-        CLUMP_FLUX_FRACTION, rel=1.0e-7
-    )
 
     with pytest.raises(ValueError, match='Unsupported source light type'):
         DERIVATION.source_profile_angular_integral({'type': 'Guessed'})
@@ -576,9 +569,7 @@ def test_scene_patches_scale_one_leaf_per_family_and_record_both_rates():
     """Solve every scene to one detected rate and record both conventions.
 
     Each patch is a deep-merge config fragment touching only the single
-    light-level leaf its family is linear in, so the clumpy 90/10 split
-    is preserved structurally: ``flux_scale`` multiplies the host and
-    every clump uniformly and the clump list is never replaced.
+    light-level leaf its family is linear in.
     """
     pytest.importorskip('autolens')
 
@@ -621,12 +612,6 @@ def test_scene_patches_scale_one_leaf_per_family_and_record_both_rates():
             CORRECTED_EXPONENTIAL_INTENSITY, rel=ANCHOR_RELATIVE_TOLERANCE
         )
 
-    clumpy = _light_patch(patches, 'scene2_clumpy')
-    assert set(clumpy) == {'flux_scale'}
-    assert clumpy['flux_scale'] == pytest.approx(
-        CORRECTED_CLUMPY_FLUX_SCALE, rel=ANCHOR_RELATIVE_TOLERANCE
-    )
-
     cosmos = _light_patch(patches, 'scene4_cosmos')
     assert set(cosmos) == {'total_flux'}
     assert cosmos['total_flux'] == pytest.approx(
@@ -646,7 +631,7 @@ def test_unlensed_render_sums_to_the_target_rate_for_every_family():
     target = PHYSICAL_TARGET_RATE_E_PER_S
     patches, details = DERIVATION.scene_flux_patches(target, PIXEL_SCALE_ARCSEC)
 
-    for label in ('scene1_smooth_ring', 'scene2_clumpy', 'scene4_cosmos'):
+    for label in ('scene1_smooth_ring', 'scene4_cosmos'):
         leaf = _light_patch(patches, label)
         realized = _patched_render_sum(label, leaf)
 
@@ -1024,12 +1009,7 @@ def test_artifact_feeds_an_s1_lite_freeze_against_the_real_scenes(tmp_path):
         detail = details['scene_details'][label]
         field = detail['normalized_field']
         assert light[field] == detail[field]
-        if detail['light_type'] == 'Clumpy':
-            assert light['host']['intensity'] == 1.8
-            assert [clump['intensity'] for clump in light['clumps']] == (
-                [2.0166667] * NUMBER_OF_CLUMPS
-            )
-        elif detail['light_type'] == 'Image':
+        if detail['light_type'] == 'Image':
             assert light['flux_scale'] == 1.0
 
 
@@ -1043,7 +1023,9 @@ def test_default_normalization_mode_rebuilds_the_committed_reference(
     back unchanged from the current code. It is deliberately NOT a
     byte-for-byte guard, because ``generation_date`` stamps the current
     date and so a rebuild on any later day differs from the committed
-    artifact in that one field alone.
+    artifact in that one field alone. The retired scenes in
+    ``RETIRED_REFERENCE_SCENES`` are pinned in the artifact but no longer
+    derivable, so they are checked by name and excluded from the rebuild.
     """
     _require_vendored_sei()
     committed = _committed_reference()
@@ -1063,9 +1045,21 @@ def test_default_normalization_mode_rebuilds_the_committed_reference(
     )
 
     assert rebuilt['observation'] == committed['observation']
-    assert rebuilt['source_normalization'] == committed['source_normalization']
+    rebuilt_normalization = rebuilt['source_normalization']
+    committed_normalization = committed['source_normalization']
+    assert (
+        set(committed_normalization) - set(rebuilt_normalization)
+        == RETIRED_REFERENCE_SCENES
+    )
+    for label, patch in rebuilt_normalization.items():
+        assert patch == committed_normalization[label]
     rebuilt['metadata'].pop('generation_date')
     committed['metadata'].pop('generation_date')
+    committed_details = committed['metadata'][
+        'source_normalization_details'
+    ]['scene_details']
+    for label in RETIRED_REFERENCE_SCENES:
+        committed_details.pop(label)
     assert rebuilt['metadata'] == committed['metadata']
     assert DERIVATION.SCRIPT_VERSION == '3'
 

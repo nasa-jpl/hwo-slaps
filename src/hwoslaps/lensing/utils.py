@@ -85,20 +85,19 @@ class LensingData:
     source_ellipticity : `tuple` of `float`
         Ellipticity components of the source as (e1, e2).
     source_intensity : `float`
-        Intensity parameter of the source light profile. For Clumpy this is
-        the as-built host intensity; for Image it is the flux normalization
-        ``total_flux * flux_scale`` (intensity units times arcsec^2).
+        Intensity parameter of the source light profile. For Image it is
+        the flux normalization ``total_flux * flux_scale`` (intensity units
+        times arcsec^2).
         `source_components` / `source_image_asset` are the authoritative
         truth records.
     source_effective_radius : `float`
-        Effective radius of the source in arcseconds. For Clumpy this is
-        the as-built host effective radius; for Image it is the
+        Effective radius of the source in arcseconds. For Image it is the
         dimensionless `size_scale`.
     source_light_type : `str`, optional
         Configured source light type.
     source_components : `list` of `dict`, optional
-        As-built analytic source components after joint transforms. None for
-        an Image source.
+        As-built analytic source component provenance. None for an Image
+        source.
     source_image_asset : `dict`, optional
         Validated asset and profile provenance for an Image source. None for
         analytic source types.

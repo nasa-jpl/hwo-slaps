@@ -1800,53 +1800,6 @@ def test_grid_map_carries_image_asset_identity(grid_setup, tmp_path):
     assert len(grid_map.source_image_asset_sha256_16) == 16
 
 
-def test_jax_engine_clumpy_q_f_matches_reference(grid_setup):
-    """Match reference q_F for a Sersic host with two compact clumps."""
-    pytest.importorskip("jax")
-    component = {
-        "centre": [0.0, 0.0],
-        "ell_comps": [0.03, -0.01],
-        "intensity": 5.0,
-        "effective_radius": 0.2,
-        "sersic_index": 1.3,
-    }
-    light = {
-        "type": "Clumpy",
-        "host": component,
-        "clumps": [
-            {
-                **component,
-                "centre": [0.06, -0.04],
-                "intensity": 0.8,
-                "effective_radius": 0.035,
-                "sersic_index": 0.8,
-            },
-            {
-                **component,
-                "centre": [-0.07, 0.05],
-                "intensity": 0.5,
-                "effective_radius": 0.028,
-                "sersic_index": 1.1,
-            },
-        ],
-        "flux_scale": 1.1,
-        "size_scale": 1.15,
-    }
-    reference, jax_detector = _source_type_detectors(grid_setup, light)
-
-    reference_map = reference.compute_grid_map()
-    jax_map = jax_detector.compute_grid_map()
-
-    assert np.all(np.isfinite(reference_map.q_asimov_2d))
-    assert np.any(reference_map.q_asimov_2d > 0.0)
-    np.testing.assert_allclose(
-        jax_map.q_asimov_2d,
-        reference_map.q_asimov_2d,
-        rtol=1.0e-6,
-        atol=0.0,
-    )
-
-
 def test_jax_engine_image_q_f_matches_reference(grid_setup, tmp_path):
     """Match reference q_F for a synthetic bilinear image source."""
     pytest.importorskip("jax")

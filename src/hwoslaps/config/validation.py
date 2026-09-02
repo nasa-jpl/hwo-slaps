@@ -200,41 +200,6 @@ def _validate_lens_mass(mass: Dict[str, Any], key_path: str) -> None:
         )
 
 
-def _validate_sersic_component(component: Dict[str, Any], key_path: str) -> None:
-    """Validate one explicit Sersic source-light component."""
-    _require_type(component, dict, key_path)
-    supported = {
-        'centre',
-        'ell_comps',
-        'intensity',
-        'effective_radius',
-        'sersic_index',
-    }
-    _reject_unknown_keys(component, supported, key_path)
-    _require_finite_pair(
-        _require(component, 'centre', key_path),
-        f'{key_path}.centre',
-    )
-    _require_ell_comps(
-        _require(component, 'ell_comps', key_path),
-        f'{key_path}.ell_comps',
-    )
-    _require_positive_finite_number(
-        _require(component, 'intensity', key_path),
-        f'{key_path}.intensity',
-    )
-    _require_positive_finite_number(
-        _require(component, 'effective_radius', key_path),
-        f'{key_path}.effective_radius',
-    )
-    _require_bounded_positive_number(
-        _require(component, 'sersic_index', key_path),
-        f'{key_path}.sersic_index',
-        0.3,
-        10.0,
-    )
-
-
 def validate_top_level(config: Dict[str, Any]) -> None:
     """Validate the required top-level configuration sections.
 
@@ -326,7 +291,7 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(light, dict, 'lensing.source_galaxy.light')
     light_type = _require(light, 'type', 'lensing.source_galaxy.light')
     _require_type(light_type, str, 'lensing.source_galaxy.light.type')
-    supported_light_types = ('Exponential', 'Sersic', 'Clumpy', 'Image')
+    supported_light_types = ('Exponential', 'Image')
     if light_type not in supported_light_types:
         raise ValueError(
             "source_galaxy.light.type must be one of: "
@@ -356,38 +321,6 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
             _require(light, 'effective_radius', light_path),
             f'{light_path}.effective_radius',
         )
-    elif light_type == 'Sersic':
-        component = {key: value for key, value in light.items() if key != 'type'}
-        _validate_sersic_component(component, light_path)
-    elif light_type == 'Clumpy':
-        _reject_unknown_keys(
-            light,
-            {'type', 'host', 'clumps', 'flux_scale', 'size_scale'},
-            light_path,
-        )
-        host = _require(light, 'host', light_path)
-        _validate_sersic_component(host, f'{light_path}.host')
-        clumps = _require(light, 'clumps', light_path)
-        _require_type(clumps, list, f'{light_path}.clumps')
-        if len(clumps) == 0:
-            raise ValueError(
-                "lensing.source_galaxy.light.clumps must contain at least "
-                "one clump; a zero-clump Clumpy is a Sersic"
-            )
-        if len(clumps) > 4:
-            raise ValueError(
-                "lensing.source_galaxy.light.clumps must contain at most 4 clumps"
-            )
-        for index, clump in enumerate(clumps):
-            _validate_sersic_component(
-                clump,
-                f'{light_path}.clumps[{index}]',
-            )
-        for key in ('flux_scale', 'size_scale'):
-            _require_positive_finite_number(
-                _require(light, key, light_path),
-                f'{light_path}.{key}',
-            )
     else:
         _reject_unknown_keys(
             light,

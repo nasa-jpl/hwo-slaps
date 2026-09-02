@@ -1984,10 +1984,10 @@ class FisherDetector:
         profile has no ellipticity.  With the optional background direction,
         Image scenes therefore have 10 scalar nuisances instead of 12.
 
-        Prior-sigma caveat: for Clumpy and Image the `source.intensity` and
+        Prior-sigma caveat: for Image the `source.intensity` and
         `source.effective_radius` directions perturb the dimensionless
         `flux_scale` / `size_scale`, so any configured prior sigmas for
-        these names are fractional there, while for Exponential and Sersic
+        these names are fractional there, while for Exponential
         they are in the parameter's own units.
         """
         analysis_config = getattr(self, "fit_full_config", self.full_config)
@@ -1995,13 +1995,9 @@ class FisherDetector:
         analysis_lens = analysis_config["lensing"]["lens_galaxy"]
         analysis_mass = analysis_lens["mass"]
         light_root = ("lensing", "source_galaxy", "light")
-        if light_type == "Clumpy":
-            centre_root = light_root + ("host", "centre")
-            ell_comps_root = light_root + ("host", "ell_comps")
-        else:
-            centre_root = light_root + ("centre",)
-            ell_comps_root = light_root + ("ell_comps",)
-        if light_type in {"Clumpy", "Image"}:
+        centre_root = light_root + ("centre",)
+        ell_comps_root = light_root + ("ell_comps",)
+        if light_type == "Image":
             intensity_path = light_root + ("flux_scale",)
             effective_radius_path = light_root + ("size_scale",)
         else:
@@ -2327,18 +2323,6 @@ class FisherDetector:
 
         self._set_path_value_create(plus_config, spec.path, base_value + step)
         self._set_path_value_create(minus_config, spec.path, base_value - step)
-        light = plus_config["lensing"]["source_galaxy"]["light"]
-        if light["type"] == "Clumpy" and spec.name in {
-            "source.centre_y",
-            "source.centre_x",
-        }:
-            coordinate_index = int(spec.path[-1])
-            for clump in light["clumps"]:
-                clump["centre"][coordinate_index] += step
-            for clump in minus_config["lensing"]["source_galaxy"]["light"][
-                "clumps"
-            ]:
-                clump["centre"][coordinate_index] -= step
         return float(step)
 
     # ------------------------------------------------------------------

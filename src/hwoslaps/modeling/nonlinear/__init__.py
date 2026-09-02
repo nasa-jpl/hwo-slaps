@@ -21,7 +21,6 @@ from .calibration import (
     fit_q_calibration,
     pair_fisher_and_nonlinear,
 )
-from .clumpy_profiles import ClumpyTemplateContext
 from .likelihood_metrics import (
     SCDD_DELTA_LOG_L_THRESHOLD,
     SCDD_Q_THRESHOLD,
@@ -61,8 +60,6 @@ from .validator import NonlinearMetricValidator
 __all__ = [
     "AutoLensFitRunner",
     "CalibrationPair",
-    "ClumpyTemplateContext",
-    "ClumpyTransformedSource",
     "FisherNonlinearCalibration",
     "LikelihoodRatioMetric",
     "LocalFitAttempt",
@@ -120,10 +117,6 @@ def __getattr__(name: str) -> Any:
     value : `object`
         Requested custom profile or context class.
     """
-    if name == "ClumpyTransformedSource":
-        from .clumpy_profiles import ClumpyTransformedSource
-
-        return ClumpyTransformedSource
     if name in {
         "NFWMCRSubhaloSph",
         "PointMassMCRSubhalo",

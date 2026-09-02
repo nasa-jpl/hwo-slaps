@@ -30,10 +30,6 @@ from hwoslaps.modeling.nonlinear.autolens_runner import (
     AutoLensFitRunner,
     NonlinearSearchSettings,
 )
-from hwoslaps.modeling.nonlinear.clumpy_profiles import (
-    ClumpyTemplateContext,
-    ClumpyTransformedSource,
-)
 from hwoslaps.modeling.nonlinear.dataset_builder import (
     NonlinearDatasetMetadata,
 )
@@ -840,39 +836,9 @@ def test_t6_requires_cpu_guard_remains_general_and_precedes_backend_import(
 
 
 def _t10_source_config(source_family):
-    """Return one complete config for a stock, clumpy, or image source."""
+    """Return one complete config for a stock or image source."""
     config, _ = _freed_config_and_trial()
     if source_family == "stock":
-        return config
-    if source_family == "clumpy":
-        config["lensing"]["source_galaxy"]["light"] = {
-            "type": "Clumpy",
-            "host": {
-                "centre": [-0.03, 0.08],
-                "ell_comps": [0.12, -0.06],
-                "intensity": 1.8,
-                "effective_radius": 0.11,
-                "sersic_index": 1.2,
-            },
-            "clumps": [
-                {
-                    "centre": [0.03, 0.12],
-                    "ell_comps": [0.0, 0.0],
-                    "intensity": 0.8,
-                    "effective_radius": 0.025,
-                    "sersic_index": 1.0,
-                },
-                {
-                    "centre": [-0.08, 0.01],
-                    "ell_comps": [0.02, -0.01],
-                    "intensity": 0.6,
-                    "effective_radius": 0.03,
-                    "sersic_index": 0.9,
-                },
-            ],
-            "flux_scale": 1.0,
-            "size_scale": 1.0,
-        }
         return config
     if source_family == "image":
         asset_path = (
@@ -933,12 +899,6 @@ def _t10_spec(family):
             fit_mode="freed",
             mass_context=context,
         )
-    if family in {"clumpy_rigid", "clumpy_host_free"}:
-        mode = family.removeprefix("clumpy_")
-        return model_builder.smooth_model_spec_from_config(
-            _t10_source_config("clumpy"),
-            clumpy_fit_parameterization=mode,
-        )
     if family == "image_source":
         return model_builder.smooth_model_spec_from_config(
             _t10_source_config("image")
@@ -951,8 +911,6 @@ T10_FAMILIES = (
     "freed_nfw",
     "freed_sis",
     "freed_point_mass",
-    "clumpy_rigid",
-    "clumpy_host_free",
     "image_source",
 )
 
@@ -1539,109 +1497,6 @@ def test_t7_mass_adapters_construct_and_evaluate_under_persistent_jit(
     _assert_finite_difference(np.asarray(gradient), finite_difference)
 
 
-def _clumpy_context():
-    """Return a nondegenerate fixed host-and-clump template."""
-    return ClumpyTemplateContext(
-        host=(0.11, -0.07, 1.8, 0.16, 1.4),
-        host_centre=(0.03, -0.04),
-        clumps=(
-            (0.09, -0.06, 0.03, -0.02, 0.7, 0.035, 1.1),
-            (-0.08, 0.05, -0.04, 0.01, 0.5, 0.028, 0.9),
-        ),
-        context_hash="item7b-t8",
-    )
-
-
-def _clumpy_profile(parameters, mode):
-    """Construct a rigid or host-free profile from flat parameters."""
-    arguments = {
-        "centre": (parameters[0], parameters[1]),
-        "flux_scale": parameters[2],
-        "size_scale": parameters[3],
-        "host_ell_comps": (0.11, -0.07),
-        "host_intensity": 1.8,
-        "host_effective_radius": 0.16,
-        "host_sersic_index": 1.4,
-        "template_context": _clumpy_context(),
-    }
-    if mode == "host_free":
-        arguments.update(
-            host_ell_comps=(parameters[4], parameters[5]),
-            host_intensity=parameters[6],
-            host_effective_radius=parameters[7],
-            host_sersic_index=parameters[8],
-        )
-    return ClumpyTransformedSource(**arguments)
-
-
-@pytest.mark.parametrize(
-    "mode,parameters",
-    [
-        ("rigid", [0.03, -0.04, 1.15, 0.92]),
-        (
-            "host_free",
-            [0.03, -0.04, 1.15, 0.92, 0.11, -0.07, 1.8, 0.16, 1.4],
-        ),
-    ],
-)
-def test_t8_clumpy_profiles_trace_every_sampled_scalar(mode, parameters):
-    """Catch scalar casts, lost xp threading, or detached clumpy parameters."""
-    jax = pytest.importorskip("jax")
-    jnp = pytest.importorskip("jax.numpy")
-    jax.config.update("jax_enable_x64", True)
-    parameters = np.asarray(parameters, dtype=float)
-    grid = al.Grid2D.uniform(
-        shape_native=(3, 3),
-        pixel_scales=0.11,
-        origin=(0.04, -0.02),
-    )
-
-    def traced_image(values):
-        image = _clumpy_profile(values, mode).image_2d_from(
-            grid=grid,
-            xp=jnp,
-        )
-        return image.array
-
-    def eager_image(values):
-        return np.asarray(
-            _clumpy_profile(values, mode).image_2d_from(
-                grid=grid,
-                xp=np,
-            )
-        )
-
-    def eager_objective(values):
-        return float(eager_image(values).sum())
-
-    persistent = jax.jit(traced_image)
-    first = persistent(jnp.asarray(parameters))
-    changed_parameters = parameters.copy()
-    changed_parameters[:4] += np.asarray([0.006, -0.004, 0.05, 0.03])
-    if mode == "host_free":
-        changed_parameters[4:] += np.asarray(
-            [0.006, -0.005, 0.08, 0.008, 0.04]
-        )
-    changed = persistent(jnp.asarray(changed_parameters))
-    np.testing.assert_allclose(
-        np.asarray(first),
-        eager_image(parameters),
-        rtol=1.0e-12,
-        atol=1.0e-12,
-    )
-    assert not np.array_equal(np.asarray(first), np.asarray(changed))
-
-    gradient = jax.grad(lambda values: jnp.sum(traced_image(values)))(
-        jnp.asarray(parameters)
-    )
-    finite_difference = _central_difference(
-        eager_objective,
-        parameters,
-        step=3.0e-6,
-    )
-    _assert_finite_difference(np.asarray(gradient), finite_difference)
-
-
 def _image_samples():
     """Return a deterministic normalized asymmetric image asset."""
     rows, cols = np.indices((8, 10), dtype=float)
@@ -1994,7 +1849,6 @@ def test_t11_all_custom_profiles_pickle_spawn_and_evaluate_on_cpu():
             log10_m200=7.0,
             mapping_context=_context(model="PointMass"),
         ),
-        _clumpy_profile(np.asarray([0.03, -0.04, 1.15, 0.92]), "rigid"),
         _image_profile(np.asarray([0.13, -0.21, 1.15, 0.92])),
     ]
     serialized = [pickle.dumps(profile) for profile in profiles]

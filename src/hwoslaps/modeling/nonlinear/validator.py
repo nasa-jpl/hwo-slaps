@@ -200,7 +200,6 @@ class NonlinearMetricValidator:
         psf_case: str = "nominal",
         priors_config: Optional[dict] = None,
         mass_context: Optional[MassMappingContext] = None,
-        clumpy_fit_parameterization: str = "host_free",
         smooth_result: Optional[NonlinearFitSummary] = None,
         analysis_key: Optional[str] = None,
         *,
@@ -227,8 +226,6 @@ class NonlinearMetricValidator:
             Prior-width overrides.
         mass_context : `MassMappingContext`, optional
             Required for freed fits.
-        clumpy_fit_parameterization : `str`, optional
-            Clumpy-source fit parameterization.
         smooth_result : `NonlinearFitSummary`, optional
             Reusable smooth denominator. If supplied, no smooth search runs.
         analysis_key : `str`, optional
@@ -260,7 +257,6 @@ class NonlinearMetricValidator:
         smooth_spec = smooth_model_spec_from_config(
             full_config,
             priors_config=priors_config,
-            clumpy_fit_parameterization=clumpy_fit_parameterization,
         )
         subhalo_spec = subhalo_model_spec_from_trial(
             full_config,
@@ -268,22 +264,14 @@ class NonlinearMetricValidator:
             priors_config=priors_config,
             fit_mode=fit_mode,
             mass_context=mass_context,
-            clumpy_fit_parameterization=clumpy_fit_parameterization,
         )
         resolved_widths = dict(DEFAULT_PRIOR_WIDTHS)
         if priors_config:
             resolved_widths.update(priors_config)
-        clumpy_parameterization = (
-            clumpy_fit_parameterization
-            if full_config["lensing"]["source_galaxy"]["light"]["type"]
-            == "Clumpy"
-            else None
-        )
         smooth_metadata = dict(smooth_spec.metadata)
         smooth_metadata.update(
             {
                 "fit_mode": "smooth",
-                "clumpy_fit_parameterization": clumpy_parameterization,
                 "resolved_prior_widths": resolved_widths,
             }
         )
@@ -297,7 +285,6 @@ class NonlinearMetricValidator:
         model_metadata.update(
             {
                 "fit_mode": fit_mode,
-                "clumpy_fit_parameterization": clumpy_parameterization,
                 "resolved_prior_widths": resolved_widths,
             }
         )
@@ -379,9 +366,6 @@ class NonlinearMetricValidator:
                     full_config,
                     trial=trial,
                     priors_config=priors_config,
-                    clumpy_fit_parameterization=(
-                        clumpy_fit_parameterization
-                    ),
                 )
                 fixed_model = autofit_model_from_spec(fixed_spec)
                 fixed_instance = fixed_model.instance_from_prior_medians()

@@ -183,14 +183,6 @@ SCENE_LIGHT_BASELINES = {
         'scene_config': 'configs/scenes/scene1_smooth_ring.yaml',
         'light_type': 'Exponential',
     },
-    'scene2_clumpy': {
-        'scene_config': 'configs/scenes/scene2_clumpy.yaml',
-        'light_type': 'Clumpy',
-    },
-    'scene3_bow_dot': {
-        'scene_config': 'configs/scenes/scene3_bow_dot.yaml',
-        'light_type': 'Exponential',
-    },
     'scene4_cosmos': {
         'scene_config': 'configs/scenes/scene4_cosmos.yaml',
         'light_type': 'Image',
@@ -207,7 +199,6 @@ SCENE_LIGHT_BASELINES = {
 
 SCENE_NORMALIZED_FIELD = {
     'Exponential': 'intensity',
-    'Clumpy': 'flux_scale',
     'Image': 'total_flux',
 }
 """Config leaf each source family scales exactly linearly with."""
@@ -605,26 +596,6 @@ def source_profile_angular_integral(light_config):
         return sersic_n1_total_flux(
             light_config['intensity'], light_config['effective_radius']
         )
-    if light_type == 'Clumpy':
-        flux_scale = _require_positive(
-            light_config['flux_scale'], 'clumpy flux_scale'
-        )
-        size_scale = _require_positive(
-            light_config['size_scale'], 'clumpy size_scale'
-        )
-        components = [light_config['host'], *light_config['clumps']]
-        total = 0.0
-        for component in components:
-            sersic_index = float(component['sersic_index'])
-            if sersic_index != 1.0:
-                raise ValueError(
-                    'Clumpy components must carry sersic_index 1 for the n=1 '
-                    f'closed form, got {sersic_index}.'
-                )
-            total += sersic_n1_total_flux(
-                component['intensity'], component['effective_radius']
-            )
-        return flux_scale * size_scale ** 2 * total
     if light_type == 'Image':
         total_flux = _require_positive(
             light_config['total_flux'], 'image total_flux'
@@ -1052,10 +1023,7 @@ def scene_flux_patches(total_flux_e_per_s, pixel_scale_arcsec,
     Each patch is a deep-merge configuration fragment in the exact shape
     the S1-lite observing-reference loader applies to a staged job
     config. The scaled leaf is the single field its source family is
-    linear in, so the clumpy scene scales through ``flux_scale``, which
-    the engine applies uniformly to the host and every clump: the frozen
-    90/10 flux split is preserved structurally and the clump list is
-    never replaced.
+    linear in, so source structure is preserved.
 
     The scale factor comes from rendering the unlensed source on the
     scene's own production grid rather than from a closed form, because

@@ -44,21 +44,7 @@ lensing:
       ell_comps: [0.14516129, 0.25142673]
       intensity: 2.0
       effective_radius: 0.11
-      # Supported truth-side alternatives (replace this entire light block):
-      # Sersic:
-      #   type: Sersic
-      #   centre: [-0.03, 0.08]
-      #   ell_comps: [0.14516129, 0.25142673]
-      #   intensity: 2.0
-      #   effective_radius: 0.11
-      #   sersic_index: 1.5  # required; 0.3 <= n <= 10
-      # Clumpy:
-      #   type: Clumpy
-      #   host: {centre: [-0.03, 0.08], ell_comps: [0.14516129, 0.25142673], intensity: 2.0, effective_radius: 0.11, sersic_index: 1.0}
-      #   clumps:  # required list of 1-4 explicit Sersic components
-      #     - {centre: [0.00, 0.11], ell_comps: [0.0, 0.0], intensity: 0.3, effective_radius: 0.02, sersic_index: 1.0}
-      #   flux_scale: 1.0  # required joint component-intensity scale
-      #   size_scale: 1.0  # required joint size and clump-offset scale
+      # Supported truth-side alternative (replace this entire light block):
       # Image:
       #   type: Image
       #   asset_path: /absolute/path/to/prepared_source.npz

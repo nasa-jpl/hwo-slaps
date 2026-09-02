@@ -219,7 +219,6 @@ def run_psf_mismatch_case(
     psf_truth_label: str = "observation",
     priors_config: Optional[dict] = None,
     mass_context: Any = None,
-    clumpy_fit_parameterization: str = "host_free",
 ) -> PsfMismatchCaseResult:
     """Run one nonlinear case with a deterministic mismatched fit PSF.
 
@@ -247,9 +246,6 @@ def run_psf_mismatch_case(
         Nonlinear prior-width overrides.
     mass_context : `MassMappingContext`, optional
         Required explicit mass context for freed fits.
-    clumpy_fit_parameterization : `str`, optional
-        Clumpy-source fit parameterization.
-
     Returns
     -------
     result : `PsfMismatchCaseResult`
@@ -353,7 +349,6 @@ def run_psf_mismatch_case(
         psf_case=psf_case,
         priors_config=priors_config,
         mass_context=mass_context,
-        clumpy_fit_parameterization=clumpy_fit_parameterization,
         smooth_result=None,
         expected_psf_fit_sha256=wrapped_kernel_sha256,
     )
@@ -398,7 +393,6 @@ def run_psf_mismatch_case(
         "fit_mode": fit_mode,
         "dataset_kind": dataset_kind,
         "background_treatment": background_treatment,
-        "clumpy_fit_parameterization": clumpy_fit_parameterization,
     }
     return PsfMismatchCaseResult(
         case_id=str(case.case_id),

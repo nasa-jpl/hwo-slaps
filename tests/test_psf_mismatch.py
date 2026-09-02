@@ -641,7 +641,6 @@ class _FakeValidator:
         psf_case="nominal",
         priors_config=None,
         mass_context=None,
-        clumpy_fit_parameterization="host_free",
         smooth_result=None,
         expected_psf_fit_sha256=None,
     ):
@@ -650,7 +649,6 @@ class _FakeValidator:
             full_config,
             priors_config,
             mass_context,
-            clumpy_fit_parameterization,
         )
         smooth = SimpleNamespace(
             status=self.smooth_status,

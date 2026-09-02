@@ -168,13 +168,7 @@ def generate_lensing_system(config, full_config):
     config_to_store = deepcopy(full_config)
 
     source_light = source_config['light']
-    if source_light_type == 'Clumpy':
-        source_summary_profile = source_galaxy.host
-        source_centre = tuple(source_summary_profile.centre)
-        source_ellipticity = tuple(source_summary_profile.ell_comps)
-        source_intensity = float(source_summary_profile.intensity)
-        source_effective_radius = float(source_summary_profile.effective_radius)
-    elif source_light_type == 'Image':
+    if source_light_type == 'Image':
         source_centre = tuple(source_light['centre'])
         source_ellipticity = (0.0, 0.0)
         source_intensity = source_light['total_flux'] * source_light['flux_scale']
@@ -436,35 +430,6 @@ def _create_source_galaxy(source_config):
             redshift=source_config['redshift'],
             light=source_light
         )
-    elif light_config['type'] == 'Sersic':
-        source_light = _sersic_from_component(light_config)
-        return al.Galaxy(
-            redshift=source_config['redshift'],
-            light=source_light
-        )
-    elif light_config['type'] == 'Clumpy':
-        flux_scale = float(light_config['flux_scale'])
-        size_scale = float(light_config['size_scale'])
-        host_config = light_config['host']
-        host_centre = np.asarray(host_config['centre'], dtype=float)
-        profiles = {
-            'host': _sersic_from_component(
-                host_config,
-                centre=host_centre,
-                flux_scale=flux_scale,
-                size_scale=size_scale,
-            )
-        }
-        for index, clump_config in enumerate(light_config['clumps']):
-            offset = np.asarray(clump_config['centre'], dtype=float) - host_centre
-            clump_centre = host_centre + size_scale * offset
-            profiles[f'clump_{index}'] = _sersic_from_component(
-                clump_config,
-                centre=clump_centre,
-                flux_scale=flux_scale,
-                size_scale=size_scale,
-            )
-        return al.Galaxy(redshift=source_config['redshift'], **profiles)
     elif light_config['type'] == 'Image':
         asset = load_source_image_asset(light_config['asset_path'])
         source_light = ImageSource.from_asset(
@@ -483,25 +448,6 @@ def _create_source_galaxy(source_config):
         raise ValueError(f"Unsupported light profile type: {light_config['type']}")
 
 
-def _sersic_from_component(
-    component,
-    *,
-    centre=None,
-    flux_scale=1.0,
-    size_scale=1.0,
-):
-    """Build one Sersic component after optional joint transforms."""
-    if centre is None:
-        centre = component['centre']
-    return al.lp.Sersic(
-        centre=tuple(float(value) for value in centre),
-        ell_comps=tuple(component['ell_comps']),
-        intensity=component['intensity'] * flux_scale,
-        effective_radius=component['effective_radius'] * size_scale,
-        sersic_index=component['sersic_index'],
-    )
-
-
 def _component_truth(role, profile):
     """Return one as-built analytic source component provenance record."""
     return {
@@ -518,15 +464,8 @@ def _source_truth_metadata(source_config, source_galaxy):
     """Return source type, as-built components, and image-asset provenance."""
     light_config = source_config['light']
     light_type = light_config['type']
-    if light_type in {'Exponential', 'Sersic'}:
+    if light_type == 'Exponential':
         return light_type, [_component_truth('single', source_galaxy.light)], None
-    if light_type == 'Clumpy':
-        components = [_component_truth('host', source_galaxy.host)]
-        components.extend(
-            _component_truth(f'clump_{index}', getattr(source_galaxy, f'clump_{index}'))
-            for index in range(len(light_config['clumps']))
-        )
-        return light_type, components, None
     if light_type == 'Image':
         asset = load_source_image_asset(light_config['asset_path'])
         asset_metadata = {

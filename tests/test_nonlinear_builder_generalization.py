@@ -43,8 +43,6 @@ from hwoslaps.modeling.nonlinear.trial import (
 
 SCENE_NAMES = (
     "scene1_smooth_ring.yaml",
-    "scene2_clumpy.yaml",
-    "scene3_bow_dot.yaml",
     "scene4_cosmos.yaml",
     "scene5_ablation_sie_fit.yaml",
     "scene5_flex_macro.yaml",
@@ -158,7 +156,7 @@ def test_make_analysis_rejects_jax_for_custom_profiles(tmp_path):
         runner.make_analysis(None, model_metadata={"requires_cpu": True})
 
 
-@pytest.mark.parametrize("scene_name", ["scene2_clumpy.yaml", "scene4_cosmos.yaml"])
+@pytest.mark.parametrize("scene_name", ["scene4_cosmos.yaml"])
 @pytest.mark.parametrize("fit_mode", ["fixed_template", "local_search"])
 def test_legacy_subhalo_specs_preserve_custom_source_metadata(
     scene_name,
@@ -171,21 +169,7 @@ def test_legacy_subhalo_specs_preserve_custom_source_metadata(
         fit_mode=fit_mode,
     )
     assert "requires_cpu" not in spec.metadata
-    if scene_name == "scene4_cosmos.yaml":
-        assert spec.metadata["image_source_asset_hash"]
-    else:
-        assert spec.metadata["clumpy_fit_parameterization"] == "host_free"
-
-
-def test_builder_metadata_does_not_request_legacy_jax_guard():
-    """Keep the retired custom-source CPU stamp out of builder metadata."""
-    spec = subhalo_model_spec_from_trial(
-        _scene("scene2_clumpy.yaml"),
-        _legacy_trial(),
-        fit_mode="fixed_template",
-    )
-    assert spec.metadata["clumpy_fit_parameterization"] == "host_free"
-    assert "requires_cpu" not in spec.metadata
+    assert spec.metadata["image_source_asset_hash"]
 
 
 def test_scene5_macro_count_and_link_identity():
@@ -276,19 +260,6 @@ def test_slope_sersic_and_ellipticity_prior_clipping():
     with pytest.raises(ValueError, match="outside"):
         smooth_model_spec_from_config(bad_slope)
 
-    sersic = _simple_config()
-    light = sersic["lensing"]["source_galaxy"]["light"]
-    light["type"] = "Sersic"
-    light["sersic_index"] = 0.4
-    spec = smooth_model_spec_from_config(
-        sersic,
-        priors_config={"source_sersic_index_sigma": 1.0},
-    )
-    index = spec.galaxies["source"].components["light"].parameters[
-        "sersic_index"
-    ]
-    assert index.lower == pytest.approx(0.3)
-
     bad_ell = _simple_config()
     bad_ell["lensing"]["lens_galaxy"]["mass"]["ell_comps"][0] = 0.9
     with pytest.raises(ValueError, match="outside"):
@@ -348,7 +319,6 @@ def _identity_inputs():
     }
     model_metadata = {
         "fit_mode": "freed",
-        "clumpy_fit_parameterization": "host_free",
         "mass_context_hash": "mass-a",
         "image_source_asset_hash": "asset-a",
         "resolved_prior_widths": {"width": 0.1},
@@ -372,7 +342,6 @@ def test_analysis_key_covers_dataset_and_model_identity():
         variants.append((changed_dataset, metadata, model_metadata))
     for key, value in (
         ("fit_mode", "fixed_template"),
-        ("clumpy_fit_parameterization", "rigid"),
         ("mass_context_hash", "mass-b"),
         ("resolved_prior_widths", {"width": 0.2}),
     ):
