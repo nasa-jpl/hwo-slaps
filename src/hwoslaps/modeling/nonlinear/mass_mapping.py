@@ -321,19 +321,6 @@ def build_mass_mapping_context(
             "build_mass_mapping_context_explicit for control data"
         )
     concentration = subhalo.get("concentration") or {}
-    # The mass-mapping context re-evaluates the concentration relation from
-    # (model, x_sub, h) alone, so a declared offset would be silently
-    # dropped and the nonlinear model would use a different concentration
-    # from the one the truth was injected with. Reject rather than mislead;
-    # propagating the offset through the context and its provenance hash is
-    # the follow-up if a nonlinear leg ever needs offset concentrations.
-    if concentration.get("offset_dex") is not None:
-        raise ValueError(
-            "lensing.subhalo.concentration.offset_dex is not supported by the "
-            "nonlinear mass-mapping context, which would silently re-evaluate "
-            "the un-offset relation. Remove the offset or extend "
-            "MassMappingContext to carry it."
-        )
     return build_mass_mapping_context_explicit(
         subhalo_model=subhalo.get("model"),
         concentration_model=concentration.get("model"),

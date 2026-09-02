@@ -72,27 +72,11 @@ lensing:
   subhalo:
     enabled: true  # Set to false to create system with no subhalo
     mass: 1.0e7  # Solar masses
-    model: NFW  # PointMass, SIS, NFW, or NFWTruncated
-    # NFWTruncated is the Baltz, Marshall and Oguri (2009) truncated NFW.
-    # It takes kappa_s and the scale radius from the same mass and
-    # concentration path as NFW, so the two differ only by truncation.
-    # The block below is required for and only for NFWTruncated.
-    # truncation:
-    #   mode: scale_ratio      # scale_ratio | explicit_arcsec
-    #   tau: 10.0              # scale_ratio only; r_t / r_s, > 0
-    #   radius_arcsec: 0.05    # explicit_arcsec only; > 0
-    # Concentration configuration applies only for NFW subhalo models.
-    # For SIS and PointMass, remove this block (or set `concentration: null`).
-    # x_sub and h are accepted only by moline2017_eq7; c200 only by explicit.
+    model: NFW  # PointMass, SIS, or NFW
     concentration:
-      model: moline2017_eq7  # moline2017_eq7, power_law, or explicit
+      model: moline2017_eq7  # moline2017_eq7 or power_law
       x_sub: 1.0             # required for moline2017_eq7
       h: null                # null => infer from configured cosmology
-      # c200: 20.0           # required for explicit; bypasses every relation
-      # offset_dex: 0.0      # optional for every model; c200 *= 10 ** offset,
-      #                      # applied after the relation is evaluated inside
-      #                      # its own validity bounds. Absent leaves the
-      #                      # concentration untouched.
     position:
       type: 'angle'         # 'random', 'angle', or 'direct'
       # Deterministic first branch-validation run: place the subhalo on the Einstein ring.

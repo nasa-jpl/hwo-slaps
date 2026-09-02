@@ -3,7 +3,7 @@ Mass model calculations for dark matter subhalos.
 
 This module provides Einstein radius calculations for different mass models
 used in subhalo lensing studies: Point Mass, Singular Isothermal Sphere (SIS),
-Navarro-Frenk-White (NFW), and truncated NFW profiles.
+Navarro-Frenk-White (NFW) profiles.
 """
 
 from dataclasses import dataclass
@@ -58,19 +58,6 @@ def _require_bounded(value, name, minimum, maximum):
     value_float = _require_positive_finite(value, name)
     if value_float < minimum or value_float > maximum:
         raise ValueError(f"{name} must be between {minimum:g} and {maximum:g}")
-    return value_float
-
-
-def _require_finite(value, name):
-    """Validate numeric domain for signed finite physical parameters."""
-    if isinstance(value, bool):
-        raise ValueError(f"{name} must be a finite number")
-    try:
-        value_float = float(value)
-    except (TypeError, ValueError):
-        raise ValueError(f"{name} must be a finite number")
-    if not np.isfinite(value_float):
-        raise ValueError(f"{name} must be a finite number")
     return value_float
 
 
@@ -461,9 +448,8 @@ def concentration_mass_relation(
     z=0.5,
     x_sub=None,
     h=None,
-    c200=None,
 ):
-    """Calculate NFW concentration with explicit model provenance.
+    """Calculate NFW concentration with model provenance.
 
     Parameters
     ----------
@@ -473,25 +459,18 @@ def concentration_mass_relation(
         Concentration model. Supported values:
         - 'moline2017_eq7'
         - 'power_law'
-        - 'explicit'
     z : `float`, optional
         Lens redshift used by the power-law model only.
     x_sub : `float`, optional
         Dimensionless radial position for Moline Eq. 7 model.
     h : `float`, optional
         Reduced Hubble parameter for Moline Eq. 7 model.
-    c200 : `float`, optional
-        Declared concentration used by the explicit model only.
 
     Returns
     -------
     c200 : `float`
         Concentration parameter (r200/rs).
 
-    Notes
-    -----
-    The explicit model bypasses every mass-concentration relation and so
-    carries no mass or radial-position validity bounds of its own.
     """
     if model == "moline2017_eq7":
         if x_sub is None:
@@ -502,60 +481,10 @@ def concentration_mass_relation(
         return concentration_moline2017_eq7(M200_msun, x_sub=x_sub, h=h)
     if model == "power_law":
         return concentration_power_law(M200_msun, z=z)
-    if model == "explicit":
-        if c200 is None:
-            raise ValueError("c200 is required when model='explicit'")
-        return _require_positive_finite(c200, "c200")
     raise ValueError(
         "Unsupported concentration model. Supported: 'moline2017_eq7', "
-        "'power_law', 'explicit'"
+        "'power_law'"
     )
-
-
-def apply_concentration_offset_dex(c200, offset_dex):
-    """Apply a log10 offset to a concentration value.
-
-    Parameters
-    ----------
-    c200 : `float`
-        Concentration returned by the configured concentration model,
-        before any offset is applied.
-    offset_dex : `float` or `None`
-        Offset in dex. ``None`` returns the concentration unchanged, which
-        keeps offset-free runs bit-identical to the un-offset behaviour.
-
-    Returns
-    -------
-    c200_offset : `float`
-        Concentration ``c200 * 10 ** offset_dex``.
-
-    Raises
-    ------
-    ValueError
-        Raised when ``c200`` is not finite and positive, when ``offset_dex``
-        is not a finite number, or when the offset concentration is not
-        finite and positive.
-
-    Notes
-    -----
-    The offset is applied last, after the model has already been evaluated
-    under its own validity bounds, so a shifted concentration never widens
-    the mass or radial-position domain of the underlying relation.
-    """
-    base_c200 = _require_positive_finite(c200, "c200")
-    if offset_dex is None:
-        return base_c200
-    offset = _require_finite(offset_dex, "offset_dex")
-    try:
-        offset_c200 = base_c200 * 10.0**offset
-    except OverflowError:
-        # Python floats raise rather than saturating; treat both the same.
-        offset_c200 = np.inf
-    if not np.isfinite(offset_c200) or offset_c200 <= 0:
-        raise ValueError(
-            "Offset concentration must be a finite positive number"
-        )
-    return float(offset_c200)
 
 
 def nfw_scale_parameters(M200_msun, c200, z_lens, cosmology):
@@ -654,68 +583,6 @@ def nfw_lensing_parameters(M200_msun, c200, z_lens, z_source, cosmology):
     scale_radius_arcsec = (rs_m / D_l_m) * ARCSEC_PER_RAD
 
     return float(kappa_s), float(scale_radius_arcsec)
-
-
-def nfw_truncation_radius_arcsec(
-    mode,
-    scale_radius_arcsec,
-    tau=None,
-    radius_arcsec=None,
-):
-    """Resolve the truncation radius of a truncated NFW subhalo.
-
-    Parameters
-    ----------
-    mode : `str`
-        Truncation mode. Supported values:
-        - 'scale_ratio'
-        - 'explicit_arcsec'
-    scale_radius_arcsec : `float`
-        NFW scale radius in arcseconds. Used by the 'scale_ratio' mode.
-    tau : `float`, optional
-        Truncation ratio ``r_t / r_s``. Required by the 'scale_ratio' mode
-        and rejected by the 'explicit_arcsec' mode.
-    radius_arcsec : `float`, optional
-        Truncation radius in arcseconds. Required by the 'explicit_arcsec'
-        mode and rejected by the 'scale_ratio' mode.
-
-    Returns
-    -------
-    truncation_radius_arcsec : `float`
-        Truncation radius in arcseconds for the Baltz, Marshall and Oguri
-        (2009) profile.
-
-    Raises
-    ------
-    ValueError
-        Raised for an unsupported mode, a missing mode-specific parameter,
-        a parameter supplied for a mode that does not accept it, or a value
-        that is not finite and positive.
-    """
-    if mode == "scale_ratio":
-        if radius_arcsec is not None:
-            raise ValueError(
-                "radius_arcsec is not accepted when mode='scale_ratio'"
-            )
-        if tau is None:
-            raise ValueError("tau is required when mode='scale_ratio'")
-        scale_radius = _require_positive_finite(
-            scale_radius_arcsec,
-            "scale_radius_arcsec",
-        )
-        return _require_positive_finite(tau, "tau") * scale_radius
-    if mode == "explicit_arcsec":
-        if tau is not None:
-            raise ValueError("tau is not accepted when mode='explicit_arcsec'")
-        if radius_arcsec is None:
-            raise ValueError(
-                "radius_arcsec is required when mode='explicit_arcsec'"
-            )
-        return _require_positive_finite(radius_arcsec, "radius_arcsec")
-    raise ValueError(
-        "Unsupported truncation mode. Supported: 'scale_ratio', "
-        "'explicit_arcsec'"
-    )
 
 
 def sigma_v_from_m200_sis(M200_msun, z_lens, cosmology):

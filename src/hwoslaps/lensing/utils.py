@@ -44,8 +44,8 @@ class LensingData:
     subhalo_mass : `float`, optional
         Mass of the subhalo in solar masses. None if no subhalo present.
     subhalo_model : `str`, optional
-        Model type for the subhalo ('PointMass', 'SIS', 'NFW', or
-        'NFWTruncated'). None if no subhalo present.
+        Model type for the subhalo ('PointMass', 'SIS', or 'NFW'). None if
+        no subhalo present.
     subhalo_position : `tuple` of `float`, optional
         Position of the subhalo as (y, x) in arcseconds relative to lens
         center.
@@ -58,8 +58,8 @@ class LensingData:
         Concentration parameter for NFW subhalos. None if not NFW or no
         subhalo.
     subhalo_concentration_model : `str`, optional
-        Concentration model used for NFW subhalos ('moline2017_eq7',
-        'power_law', or 'explicit'). None if not NFW or no subhalo.
+        Concentration model used for NFW subhalos ('moline2017_eq7' or
+        'power_law'). None if not NFW or no subhalo.
     subhalo_concentration_x_sub : `float`, optional
         Dimensionless radial parameter x_sub used by the concentration model.
         None when not applicable.
@@ -111,21 +111,6 @@ class LensingData:
         ``phi_m = atan2(comp0, comp1) / m``.
     lens_shear : `tuple` of `float`, optional
         External shear components ``(gamma_1, gamma_2)``.
-    subhalo_concentration_offset_dex : `float`, optional
-        Configured log10 concentration offset. None when no offset was
-        configured, which is the un-offset default.
-    subhalo_concentration_pre_offset : `float`, optional
-        Concentration returned by the concentration model before the offset
-        was applied. None when not applicable.
-    subhalo_truncation_mode : `str`, optional
-        Truncation mode for an ``NFWTruncated`` subhalo ('scale_ratio' or
-        'explicit_arcsec'). None for every other model.
-    subhalo_truncation_tau : `float`, optional
-        Configured truncation ratio ``r_t / r_s``. None when the truncation
-        radius was declared directly in arcseconds.
-    subhalo_truncation_radius_arcsec : `float`, optional
-        Truncation radius in arcseconds used by the injected
-        ``NFWTruncatedSph`` profile. None when not applicable.
     config : `dict`
         Complete configuration dictionary used to generate this lensing system.
     generation_timestamp : `str`
@@ -197,13 +182,6 @@ class LensingData:
     lens_slope: Optional[float] = None
     lens_multipoles: Optional[Dict[str, Tuple[float, float]]] = None
     lens_shear: Optional[Tuple[float, float]] = None
-
-    # === SUBHALO CONCENTRATION AND TRUNCATION CONTROL ===
-    subhalo_concentration_offset_dex: Optional[float] = None
-    subhalo_concentration_pre_offset: Optional[float] = None
-    subhalo_truncation_mode: Optional[str] = None
-    subhalo_truncation_tau: Optional[float] = None
-    subhalo_truncation_radius_arcsec: Optional[float] = None
 
     def __post_init__(self):
         """Set generation timestamp if not provided."""
@@ -421,7 +399,7 @@ def print_lensing_data_summary(lensing_data):
         print(f"Distance/Einstein radius: {einstein_ratio:.3f}")
 
         # NFW-specific parameters
-        nfw_models = ('NFW', 'NFWTruncated')
+        nfw_models = ('NFW',)
         if lensing_data.subhalo_model in nfw_models and lensing_data.subhalo_concentration is not None:
             print(f"Concentration: {lensing_data.subhalo_concentration:.1f}")
             if lensing_data.subhalo_concentration_model is not None:
@@ -432,25 +410,6 @@ def print_lensing_data_summary(lensing_data):
                 print(f"Concentration h: {lensing_data.subhalo_concentration_h:.6f}")
             if lensing_data.subhalo_concentration_source is not None:
                 print(f"Concentration source: {lensing_data.subhalo_concentration_source}")
-            if lensing_data.subhalo_concentration_offset_dex is not None:
-                print(
-                    "Concentration offset: "
-                    f"{lensing_data.subhalo_concentration_offset_dex:+.4f} dex"
-                )
-                print(
-                    "Concentration before offset: "
-                    f"{lensing_data.subhalo_concentration_pre_offset:.4f}"
-                )
-
-        # Truncation parameters for a truncated NFW subhalo
-        if lensing_data.subhalo_truncation_mode is not None:
-            print(f"Truncation mode: {lensing_data.subhalo_truncation_mode}")
-            if lensing_data.subhalo_truncation_tau is not None:
-                print(f"Truncation tau: {lensing_data.subhalo_truncation_tau:g}")
-            print(
-                "Truncation radius: "
-                f"{lensing_data.subhalo_truncation_radius_arcsec:.6f} arcsec"
-            )
     else:
         print("\n=== Subhalo Properties ===")
         print("No subhalo in this system")

@@ -235,44 +235,6 @@ def _validate_sersic_component(component: Dict[str, Any], key_path: str) -> None
     )
 
 
-def _validate_subhalo_truncation(truncation: Dict[str, Any], key_path: str) -> None:
-    """Validate the truncation block of a truncated NFW subhalo.
-
-    Parameters
-    ----------
-    truncation : `dict`
-        The ``lensing.subhalo.truncation`` block.
-    key_path : `str`
-        Configuration path used in error messages.
-
-    Raises
-    ------
-    ValueError
-        Raised when the mode is unsupported, when a mode-specific parameter
-        is missing or supplied for a mode that does not accept it, or when a
-        value is not finite and positive.
-    """
-    _require_type(truncation, dict, key_path)
-    mode = _require(truncation, 'mode', key_path)
-    _require_type(mode, str, f'{key_path}.mode')
-    if mode == 'scale_ratio':
-        _reject_unknown_keys(truncation, {'mode', 'tau'}, key_path)
-        _require_positive_finite_number(
-            _require(truncation, 'tau', key_path),
-            f'{key_path}.tau',
-        )
-    elif mode == 'explicit_arcsec':
-        _reject_unknown_keys(truncation, {'mode', 'radius_arcsec'}, key_path)
-        _require_positive_finite_number(
-            _require(truncation, 'radius_arcsec', key_path),
-            f'{key_path}.radius_arcsec',
-        )
-    else:
-        raise ValueError(
-            f"{key_path}.mode must be one of: 'scale_ratio', 'explicit_arcsec'"
-        )
-
-
 def validate_top_level(config: Dict[str, Any]) -> None:
     """Validate the required top-level configuration sections.
 
@@ -487,10 +449,10 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_type(enabled, bool, 'lensing.subhalo.enabled')
     if enabled:
         model = _require(subhalo, 'model', 'lensing.subhalo')
-        if model not in {'PointMass', 'SIS', 'NFW', 'NFWTruncated'}:
+        if model not in {'PointMass', 'SIS', 'NFW'}:
             raise ValueError(
                 "lensing.subhalo.model must be one of: 'PointMass', 'SIS', "
-                "'NFW', 'NFWTruncated'"
+                "'NFW'"
             )
         mass_val = _require(subhalo, 'mass', 'lensing.subhalo')
         try:
@@ -499,20 +461,20 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
             raise ValueError("lensing.subhalo.mass must be a number")
         if not math.isfinite(mass_float) or mass_float <= 0:
             raise ValueError("lensing.subhalo.mass must be positive")
-        if model in {'NFW', 'NFWTruncated'}:
+        if model == 'NFW':
             # NFW runs must declare concentration provenance explicitly.
             concentration = _require(subhalo, 'concentration', 'lensing.subhalo')
             _require_type(concentration, dict, 'lensing.subhalo.concentration')
             _reject_unknown_keys(
                 concentration,
-                {'model', 'x_sub', 'h', 'c200', 'offset_dex'},
+                {'model', 'x_sub', 'h'},
                 'lensing.subhalo.concentration',
             )
             concentration_model = _require(concentration, 'model', 'lensing.subhalo.concentration')
-            if concentration_model not in {'moline2017_eq7', 'power_law', 'explicit'}:
+            if concentration_model not in {'moline2017_eq7', 'power_law'}:
                 raise ValueError(
                     "lensing.subhalo.concentration.model must be one of: "
-                    "'moline2017_eq7', 'power_law', 'explicit'"
+                    "'moline2017_eq7', 'power_law'"
                 )
             if concentration_model == 'moline2017_eq7':
                 _require_bounded_positive_number(
@@ -535,49 +497,16 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
                         h_val,
                         "lensing.subhalo.concentration.h",
                     )
-            if concentration_model == 'explicit':
-                # The explicit model declares c200 and uses no relation, so
-                # it accepts none of the relation inputs.
-                _reject_unknown_keys(
-                    concentration,
-                    {'model', 'c200', 'offset_dex'},
-                    'lensing.subhalo.concentration',
-                )
-                _require_positive_finite_number(
-                    _require(concentration, 'c200', 'lensing.subhalo.concentration'),
-                    "lensing.subhalo.concentration.c200",
-                )
-            elif 'c200' in concentration:
-                raise ValueError(
-                    "lensing.subhalo.concentration.c200 is supported only when "
-                    "lensing.subhalo.concentration.model is 'explicit'"
-                )
             if concentration_model == 'power_law':
                 # The power-law relation reads only mass and lens redshift,
                 # so accepting the Moline inputs here would let a mistargeted
                 # override run successfully while changing nothing.
                 _reject_unknown_keys(
                     concentration,
-                    {'model', 'offset_dex'},
+                    {'model'},
                     'lensing.subhalo.concentration',
                 )
-            # Every concentration model accepts the optional log10 offset.
-            if concentration.get('offset_dex') is not None:
-                _require_finite_number(
-                    concentration['offset_dex'],
-                    "lensing.subhalo.concentration.offset_dex",
-                )
-        if model == 'NFWTruncated':
-            _validate_subhalo_truncation(
-                _require(subhalo, 'truncation', 'lensing.subhalo'),
-                'lensing.subhalo.truncation',
-            )
-        elif 'truncation' in subhalo:
-            raise ValueError(
-                "lensing.subhalo.truncation is supported only when "
-                "lensing.subhalo.model is 'NFWTruncated'"
-            )
-        if model not in {'NFW', 'NFWTruncated'} and (
+        if model != 'NFW' and (
             subhalo.get('concentration') is not None
         ):
             # PointMass and SIS ignore concentration entirely, so silently
@@ -585,7 +514,7 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
             # effect while changing nothing about the injected profile.
             raise ValueError(
                 "lensing.subhalo.concentration is supported only when "
-                "lensing.subhalo.model is 'NFW' or 'NFWTruncated'; remove the "
+                "lensing.subhalo.model is 'NFW'; remove the "
                 "block or set it to null"
             )
         position = _require(subhalo, 'position', 'lensing.subhalo')

@@ -13,12 +13,10 @@ import numpy as np
 
 from .image_source import ImageSource, load_source_image_asset
 from .mass_models import (
-    apply_concentration_offset_dex,
     concentration_mass_relation,
     einstein_radius_point_mass,
     einstein_radius_sis_m200,
     nfw_lensing_parameters,
-    nfw_truncation_radius_arcsec,
 )
 from .utils import LensingData, get_einstein_ring_position
 
@@ -123,11 +121,6 @@ def generate_lensing_system(config, full_config):
     subhalo_kappa_s = None
     subhalo_scale_radius_arcsec = None
     subhalo_profile_parameters = None
-    subhalo_concentration_offset_dex = None
-    subhalo_concentration_pre_offset = None
-    subhalo_truncation_mode = None
-    subhalo_truncation_tau = None
-    subhalo_truncation_radius_arcsec = None
 
     # Create subhalo if enabled explicitly
     if 'subhalo' in config and config['subhalo'] is not None and config['subhalo']['enabled']:
@@ -158,20 +151,9 @@ def generate_lensing_system(config, full_config):
             subhalo_concentration_x_sub = subhalo_info.get('concentration_x_sub')
             subhalo_concentration_h = subhalo_info.get('concentration_h')
             subhalo_concentration_source = subhalo_info.get('concentration_source')
-            subhalo_concentration_offset_dex = subhalo_info.get(
-                'concentration_offset_dex'
-            )
-            subhalo_concentration_pre_offset = subhalo_info.get(
-                'concentration_pre_offset'
-            )
         subhalo_kappa_s = subhalo_info.get('kappa_s')
         subhalo_scale_radius_arcsec = subhalo_info.get('scale_radius_arcsec')
         subhalo_profile_parameters = subhalo_info.get('profile_parameters')
-        subhalo_truncation_mode = subhalo_info.get('truncation_mode')
-        subhalo_truncation_tau = subhalo_info.get('truncation_tau')
-        subhalo_truncation_radius_arcsec = subhalo_info.get(
-            'truncation_radius_arcsec'
-        )
 
     # Create tracer
     tracer = al.Tracer(
@@ -229,11 +211,6 @@ def generate_lensing_system(config, full_config):
         subhalo_kappa_s=subhalo_kappa_s,
         subhalo_scale_radius_arcsec=subhalo_scale_radius_arcsec,
         subhalo_profile_parameters=subhalo_profile_parameters,
-        subhalo_concentration_offset_dex=subhalo_concentration_offset_dex,
-        subhalo_concentration_pre_offset=subhalo_concentration_pre_offset,
-        subhalo_truncation_mode=subhalo_truncation_mode,
-        subhalo_truncation_tau=subhalo_truncation_tau,
-        subhalo_truncation_radius_arcsec=subhalo_truncation_radius_arcsec,
 
         # Galaxy parameters
         lens_centre=tuple(lens_config['mass']['centre']),
@@ -681,12 +658,7 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
             centre=subhalo_position,
             einstein_radius=einstein_radius
         )
-    elif model in ('NFW', 'NFWTruncated'):
-        if model == 'NFW' and 'truncation' in subhalo_config:
-            raise ValueError(
-                "lensing.subhalo.truncation is supported only when "
-                "lensing.subhalo.model is 'NFWTruncated'"
-            )
+    elif model == 'NFW':
         concentration, concentration_meta = _resolve_nfw_concentration(
             subhalo_config=subhalo_config,
             mass_msun=mass,
@@ -716,23 +688,6 @@ def _create_subhalo(subhalo_config, lens_z, source_z, lens_galaxy, pixel_scale, 
                 kappa_s=kappa_s,
                 scale_radius=scale_radius_arcsec
             )
-        else:
-            truncation_meta = _resolve_nfw_truncation(
-                subhalo_config=subhalo_config,
-                scale_radius_arcsec=scale_radius_arcsec,
-            )
-            truncation_radius = truncation_meta['truncation_radius_arcsec']
-            # Baltz, Marshall and Oguri (2009) truncated NFW. kappa_s and the
-            # scale radius come from the untruncated path unchanged, so NFW
-            # and NFWTruncated differ only by the truncation radius.
-            subhalo = al.mp.NFWTruncatedSph(
-                centre=subhalo_position,
-                kappa_s=kappa_s,
-                scale_radius=scale_radius_arcsec,
-                truncation_radius=truncation_radius,
-            )
-            profile_parameters['truncation_radius'] = truncation_radius
-            subhalo_info.update(truncation_meta)
 
         # Add NFW-specific info to the dictionary
         subhalo_info['kappa_s'] = kappa_s
@@ -771,7 +726,7 @@ def _resolve_nfw_concentration(subhalo_config, mass_msun, lens_z, cosmology):
     if not isinstance(concentration_config, dict):
         raise ValueError(
             "lensing.subhalo.concentration must be a dict when lensing.subhalo.model is "
-            "'NFW' or 'NFWTruncated'"
+            "'NFW'"
         )
 
     model = concentration_config.get('model')
@@ -783,7 +738,7 @@ def _resolve_nfw_concentration(subhalo_config, mass_msun, lens_z, cosmology):
             h_value = _infer_reduced_h(cosmology)
         else:
             h_value = float(h_value)
-        pre_offset = concentration_mass_relation(
+        concentration = concentration_mass_relation(
             mass_msun,
             model='moline2017_eq7',
             x_sub=x_sub,
@@ -797,7 +752,7 @@ def _resolve_nfw_concentration(subhalo_config, mass_msun, lens_z, cosmology):
         }
     elif model == 'power_law':
         # Power-law mode preserves the baseline c(M, z) relation.
-        pre_offset = concentration_mass_relation(
+        concentration = concentration_mass_relation(
             mass_msun,
             model='power_law',
             z=lens_z,
@@ -808,73 +763,13 @@ def _resolve_nfw_concentration(subhalo_config, mass_msun, lens_z, cosmology):
             'concentration_h': None,
             'concentration_source': 'power_law',
         }
-    elif model == 'explicit':
-        # Explicit mode declares c200 directly and uses no relation.
-        pre_offset = concentration_mass_relation(
-            mass_msun,
-            model='explicit',
-            c200=concentration_config['c200'],
-        )
-        metadata = {
-            'concentration_model': 'explicit',
-            'concentration_x_sub': None,
-            'concentration_h': None,
-            'concentration_source': 'explicit c200',
-        }
     else:
         raise ValueError(
             "lensing.subhalo.concentration.model must be 'moline2017_eq7', "
-            "'power_law', or 'explicit'"
+            "'power_law'"
         )
 
-    # The offset is applied last, after the model has been evaluated inside
-    # its own validity bounds. An absent offset leaves the value untouched.
-    offset_dex = concentration_config.get('offset_dex')
-    concentration = apply_concentration_offset_dex(pre_offset, offset_dex)
-    metadata['concentration_offset_dex'] = (
-        None if offset_dex is None else float(offset_dex)
-    )
-    metadata['concentration_pre_offset'] = pre_offset
     return concentration, metadata
-
-
-def _resolve_nfw_truncation(subhalo_config, scale_radius_arcsec):
-    """Resolve truncated-NFW truncation radius and provenance metadata.
-
-    Parameters
-    ----------
-    subhalo_config : `dict`
-        Subhalo configuration containing a truncation block.
-    scale_radius_arcsec : `float`
-        NFW scale radius in arcseconds resolved from mass and concentration.
-
-    Returns
-    -------
-    metadata : `dict`
-        Provenance payload with truncation mode, ratio, and radius. The
-        ratio is None when the radius is declared directly in arcseconds.
-    """
-    truncation_config = subhalo_config.get('truncation')
-    if not isinstance(truncation_config, dict):
-        raise ValueError(
-            "lensing.subhalo.truncation must be a dict when lensing.subhalo.model is "
-            "'NFWTruncated'"
-        )
-
-    mode = truncation_config.get('mode')
-    tau = truncation_config.get('tau')
-    radius_arcsec = truncation_config.get('radius_arcsec')
-    truncation_radius = nfw_truncation_radius_arcsec(
-        mode,
-        scale_radius_arcsec,
-        tau=tau,
-        radius_arcsec=radius_arcsec,
-    )
-    return {
-        'truncation_mode': mode,
-        'truncation_tau': None if tau is None else float(tau),
-        'truncation_radius_arcsec': truncation_radius,
-    }
 
 
 def _infer_reduced_h(cosmology):
