@@ -175,7 +175,7 @@ def _enable_jax_compilation_cache() -> None:
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 0.0)
 
 
-def _verify_ladder_block(config: dict) -> dict:
+def _verify_ladder_block(config: dict, allowed_tiers=TIERS) -> dict:
     """Verify the staged ladder declarations against this checkout.
 
     The ladder block travels inside the staged configuration and is
@@ -189,6 +189,9 @@ def _verify_ladder_block(config: dict) -> dict:
     ----------
     config : `dict`
         Staged ladder campaign configuration.
+    allowed_tiers : `tuple` [`str`], optional
+        Tier labels accepted by the caller. Defaults to the production
+        ``TIERS`` gate.
 
     Returns
     -------
@@ -217,10 +220,10 @@ def _verify_ladder_block(config: dict) -> dict:
             "spatial_sampling_qmax systematic"
         )
     tier = str(ladder["tier"])
-    if tier not in TIERS:
+    if tier not in allowed_tiers:
         raise ValueError(
             f"The campaign declares ladder tier {tier!r}, which is not one of "
-            f"{list(TIERS)}"
+            f"{list(allowed_tiers)}"
         )
     for name in ("golden", "parent_overlap"):
         if not isinstance(ladder.get(name), bool):

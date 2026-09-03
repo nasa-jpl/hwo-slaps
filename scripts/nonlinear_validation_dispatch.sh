@@ -70,7 +70,8 @@ next_line() {
 }
 
 worker() {
-  local gpu="$1"
+  local gpu="$1"; local ordinal="$2"
+  local label="[gpu${gpu}.w${ordinal}]"
   while true; do
     local line
     line=$(next_line 9>"$LOCK") || break
@@ -81,16 +82,16 @@ worker() {
       out="${FIELDS[2]}"
       tag="$(basename "$out")_positions"
       if [ -f "$out/injection_position.json" ]; then
-        echo "[gpu$gpu] skip $tag (artifact exists)"; continue
+        echo "$label skip $tag (artifact exists)"; continue
       fi
     else
       out="${FIELDS[3]}"
       tag="$(basename "$out")_${FIELDS[2]}"
       if [ -f "$out/nonlinear_validation_${FIELDS[2]}.json" ]; then
-        echo "[gpu$gpu] skip $tag (artifact exists)"; continue
+        echo "$label skip $tag (artifact exists)"; continue
       fi
     fi
-    echo "[gpu$gpu] start $tag"
+    echo "$label start $tag"
     local rc
     if [ "$PHASE" = positions ]; then
       CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
@@ -108,17 +109,23 @@ worker() {
     if [ "$rc" -eq 0 ]; then
       rm -f "$SENTDIR/$tag.FAILED"
       touch "$SENTDIR/$tag.DONE"
-      echo "[gpu$gpu] DONE $tag"
+      echo "$label DONE $tag"
     else
       touch "$SENTDIR/$tag.FAILED"
-      echo "[gpu$gpu] FAILED $tag rc=$rc (log: $LOGDIR/$tag.log)"
+      echo "$label FAILED $tag rc=$rc (log: $LOGDIR/$tag.log)"
     fi
   done
 }
 
 PIDS=()
+declare -A WORKER_ORDINALS=()
 for gpu in "${GPUS[@]}"; do
-  worker "$gpu" &
+  if [[ ${WORKER_ORDINALS[$gpu]+set} ]]; then
+    WORKER_ORDINALS[$gpu]=$((WORKER_ORDINALS[$gpu] + 1))
+  else
+    WORKER_ORDINALS[$gpu]=1
+  fi
+  worker "$gpu" "${WORKER_ORDINALS[$gpu]}" &
   PIDS+=($!)
 done
 for pid in "${PIDS[@]}"; do wait "$pid"; done

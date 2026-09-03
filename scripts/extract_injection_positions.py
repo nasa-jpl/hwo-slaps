@@ -304,9 +304,36 @@ def main(argv=None) -> None:
     if not censored:
         rungs["below"] = below_logm(ladder_artifact["m_best_bracket_logm"])
 
+    from hwoslaps.campaign.design_freeze import load_design_freeze
+
+    freeze = load_design_freeze()
+    member_sets = freeze["nonlinear_validation"]["member_sets"]
+    allowed_tier_set = set()
+    for member_set in member_sets.values():
+        declared_tiers = member_set["tier"]
+        if isinstance(declared_tiers, str):
+            allowed_tier_set.add(declared_tiers)
+        elif isinstance(declared_tiers, list) and all(
+            isinstance(tier, str) for tier in declared_tiers
+        ):
+            allowed_tier_set.update(declared_tiers)
+        else:
+            raise ValueError(
+                "The design freeze declares a nonlinear validation member "
+                "set tier that is not a string or list of strings"
+            )
+    if not allowed_tier_set:
+        raise ValueError(
+            "The design freeze declares no tiers for nonlinear validation "
+            "member sets"
+        )
+    allowed_tiers = tuple(sorted(allowed_tier_set))
+
     import run_ladder
 
-    ladder = run_ladder._verify_ladder_block(config)
+    ladder = run_ladder._verify_ladder_block(
+        config, allowed_tiers=allowed_tiers
+    )
     run_ladder._verify_psf_state(config)
     run_ladder._enable_float64()
     run_ladder._enable_jax_compilation_cache()
@@ -419,6 +446,7 @@ def main(argv=None) -> None:
         "artifact": ARTIFACT_NAME,
         "system_id": system_id,
         "tier": str(ladder_artifact["tier"]),
+        "allowed_tiers": list(allowed_tiers),
         "censored": censored,
         "rungs": rung_payloads,
         "m_best": float(ladder_artifact["m_best"]),

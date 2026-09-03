@@ -2,7 +2,7 @@
 """Run one nonlinear-validation arm of one production ladder member.
 
 One invocation is one smooth/subhalo Nautilus fit pair under the
-DesignFreeze v3 ``nonlinear_validation`` protocol. Every protocol
+DesignFreeze v4 ``nonlinear_validation`` protocol. Every protocol
 setting is read from the freeze itself: the arm table (dataset kind,
 truth subhalo, fit mode, rung, eligibility), the fit settings, the
 kernel declaration and the sampler seed rule. Nothing about the
@@ -46,6 +46,9 @@ DESIGN_FREEZE_PATH = REPO_ROOT/"configs"/"design"/"design_freeze_v1.yaml"
 
 SAMPLER_SPAWN_KEY = 5
 """Leading spawn key of the declared sampler stream (`int`)."""
+
+NULL_NOISE_SPAWN_KEY = 6
+"""Leading spawn key of the declared null-noise stream (`int`)."""
 
 
 def load_protocol(path=DESIGN_FREEZE_PATH) -> dict:
@@ -118,6 +121,101 @@ def derive_sampler_seed(entropy: int, index: int, arm_index: int) -> int:
         spawn_key=(SAMPLER_SPAWN_KEY, int(index), int(arm_index)),
     )
     return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def derive_noise_seed(entropy: int, replicate: int, index: int) -> int:
+    """Derive one declared operational null-noise seed.
+
+    Parameters
+    ----------
+    entropy : `int`
+        The freeze seed entropy.
+    replicate : `int`
+        Positive null replicate index ``k``.
+    index : `int`
+        System index ``i``.
+
+    Returns
+    -------
+    seed : `int`
+        The 32-bit observation noise seed of the freeze's null-noise stream.
+    """
+    sequence = np.random.SeedSequence(
+        entropy=int(entropy),
+        spawn_key=(NULL_NOISE_SPAWN_KEY, int(replicate), int(index)),
+    )
+    return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def apply_noise_replicate(
+    arm_config: dict,
+    declaration: dict,
+    entropy: int,
+    index: int,
+) -> tuple[dict, int, int, list | None]:
+    """Apply a declared null-noise replicate to an arm configuration.
+
+    Parameters
+    ----------
+    arm_config : `dict`
+        Configuration already built for the arm.
+    declaration : `dict`
+        Arm declaration from the nonlinear-validation protocol.
+    entropy : `int`
+        The freeze seed entropy.
+    index : `int`
+        System index ``i``.
+
+    Returns
+    -------
+    config : `dict`
+        Private arm configuration carrying the selected noise seed.
+    noise_seed : `int`
+        The seed used to generate the observation.
+    noise_replicate : `int`
+        Zero for the primary realization or the declared replicate index.
+    noise_spawn_key : `list` or `None`
+        The declared spawn key for a replicate, or `None` for replicate zero.
+
+    Raises
+    ------
+    ValueError
+        Raised when the arm configuration has no valid integer global seed,
+        or when an invalid replicate is attached to an arm.
+    """
+    config = copy.deepcopy(arm_config)
+    staged_seed = config.get("global_seed")
+    if (
+        isinstance(staged_seed, bool)
+        or not isinstance(staged_seed, int)
+    ):
+        raise ValueError("arm_config.global_seed must be an int")
+    if "noise_replicate" not in declaration:
+        return config, int(staged_seed), 0, None
+
+    replicate = declaration["noise_replicate"]
+    if (
+        isinstance(replicate, bool)
+        or not isinstance(replicate, int)
+        or replicate < 1
+    ):
+        raise ValueError(
+            f"noise_replicate must be a positive integer, got {replicate!r}"
+        )
+    if declaration.get("dataset_kind") == "asimov":
+        raise ValueError("noise_replicate is invalid for an asimov arm")
+    if declaration.get("subhalo_in_truth") is True:
+        raise ValueError(
+            "noise_replicate is invalid when subhalo_in_truth is true"
+        )
+    noise_seed = derive_noise_seed(entropy, replicate, index)
+    config["global_seed"] = noise_seed
+    return (
+        config,
+        noise_seed,
+        replicate,
+        [NULL_NOISE_SPAWN_KEY, replicate, int(index)],
+    )
 
 
 def build_arm_config(
@@ -302,6 +400,14 @@ def main(argv=None) -> None:
             staged_config, declaration, rung_payload, fit_block
         )
     )
+    arm_config, noise_seed, noise_replicate, noise_spawn_key = (
+        apply_noise_replicate(
+            arm_config,
+            declaration,
+            int(protocol["seeds"]["entropy"]),
+            system_index(system_id_value),
+        )
+    )
 
     lensing_injected = generate_lensing_system(
         injected_config["lensing"], full_config=injected_config
@@ -409,7 +515,7 @@ def main(argv=None) -> None:
             - case.smooth_fit.log_likelihood_max
         )
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "artifact": artifact_path.name,
         "system_id": system_id_value,
         "tier": str(injection["tier"]),
@@ -422,6 +528,9 @@ def main(argv=None) -> None:
             system_index(system_id_value),
             int(declaration["arm_index"]),
         ],
+        "noise_seed": noise_seed,
+        "noise_replicate": noise_replicate,
+        "noise_spawn_key": noise_spawn_key,
         "rung": dict(rung_payload),
         "censored": bool(injection["censored"]),
         "ladder_campaign_uuid": str(injection["ladder_campaign_uuid"]),

@@ -44,7 +44,7 @@ def test_committed_freeze_loads_and_validates(freeze):
     assert freeze["schema_version"] == df.DESIGN_FREEZE_SCHEMA_VERSION
     assert freeze["freeze"]["name"] == "design_freeze_v1"
     assert freeze["freeze"]["status"] == "ratified"
-    assert freeze["freeze"]["version"] == 3
+    assert freeze["freeze"]["version"] == 4
 
 
 def test_required_blocks_are_all_present(freeze):
@@ -145,12 +145,50 @@ def test_seed_streams_are_declared_in_full(freeze):
     assert streams["parent_design"]["spawn_key"] == [0]
     assert streams["primary_noise"]["spawn_key"] == [1]
     assert streams["rank_stability_noise"]["spawn_key"] == [2]
+    assert streams["null_noise"]["spawn_key"] == [6]
     assert streams["template_permutation"]["spawn_key"] == [3]
     assert streams["bootstrap"]["spawn_key"] == [4]
     assert streams["rank_stability_noise"]["replicates"] == 20
     assert streams["rank_stability_noise"]["replicate_indices"] == list(range(20))
+    assert streams["null_noise"]["replicates"] == 9
+    assert streams["null_noise"]["replicate_indices"] == list(range(1, 10))
     assert "generate_state" in streams["primary_noise"]["engine_seed_rule"]
     assert len(freeze["seeds"]["draw_order"]) == 10
+
+
+def test_nonlinear_extension_sets_and_campaigns_are_declared(freeze):
+    """The v4 member sets and campaign arm lists are frozen."""
+    nonlinear = freeze["nonlinear_validation"]
+    assert set(nonlinear["member_sets"]) == {"production59", "validation100"}
+    assert set(nonlinear["campaigns"]) == {
+        "nonlinear_null_v1",
+        "nonlinear_validation100_v1",
+    }
+    assert nonlinear["campaigns"]["nonlinear_null_v1"]["arms"] == [
+        f"noisy_control_r{index}" for index in range(1, 10)
+    ]
+    assert nonlinear["campaigns"]["nonlinear_validation100_v1"]["arms"] == [
+        "asimov_injected",
+        "noisy_injected",
+        "noisy_control",
+        "asimov_below",
+    ]
+    source = nonlinear["campaigns"]["nonlinear_null_v1"][
+        "replicate_zero_source"
+    ]
+    assert source["harvest_sha256"] == (
+        "a8f8fa33d53ee1ab32b88b08ae3d95ceaf51a0896283f017525472bb2359c993"
+    )
+    assert source["review_sha256"] == (
+        "88042d9403aa49bfc4ea464ece3347a0ea2bf1c6938a73b7988b59212e49895c"
+    )
+    pooled = nonlinear["campaigns"]["nonlinear_validation100_v1"][
+        "pooled_source"
+    ]
+    assert pooled["campaign"] == "nonlinear_validation_v1"
+    assert pooled["campaign_uuid"] == source["campaign_uuid"]
+    assert pooled["harvest_sha256"] == source["harvest_sha256"]
+    assert pooled["review_sha256"] == source["review_sha256"]
 
 
 def test_claim_labels_and_ceiling_flag(freeze):
@@ -470,4 +508,123 @@ def test_loader_rejects_an_unusable_min_contour_vertices(freeze):
         "min_contour_vertices"
     ] = 3
     with pytest.raises(df.DesignFreezeError, match="min_contour_vertices"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_missing_null_noise_stream(freeze):
+    """The v4 operational null stream is required."""
+    broken = copy.deepcopy(freeze)
+    del broken["seeds"]["streams"]["null_noise"]
+    with pytest.raises(df.DesignFreezeError, match="null_noise"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_replicate_asimov_arm(freeze):
+    """Noise replicates cannot be attached to Asimov data."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["arms"]["noisy_control_r1"][
+        "dataset_kind"
+    ] = "asimov"
+    with pytest.raises(df.DesignFreezeError, match="dataset_kind"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_replicate_truth_subhalo(freeze):
+    """Noise replicates cannot contain a truth subhalo."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["arms"]["noisy_control_r1"][
+        "subhalo_in_truth"
+    ] = True
+    with pytest.raises(df.DesignFreezeError, match="subhalo_in_truth"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_an_undeclared_noise_replicate(freeze):
+    """Every replicate index must belong to the frozen stream."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["arms"]["noisy_control_r1"][
+        "noise_replicate"
+    ] = 10
+    with pytest.raises(df.DesignFreezeError, match="replicate_indices"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_campaign_undeclared_arm(freeze):
+    """A campaign cannot name an arm absent from the protocol."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["campaigns"]["nonlinear_null_v1"][
+        "arms"
+    ].append("not_declared")
+    with pytest.raises(df.DesignFreezeError, match="undeclared arm"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_campaign_undeclared_member_set(freeze):
+    """A campaign must use a declared member set."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["campaigns"]["nonlinear_null_v1"][
+        "member_set"
+    ] = "not_declared"
+    with pytest.raises(df.DesignFreezeError, match="member set"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_an_unknown_smoke_member_rule(freeze):
+    """Smoke selection uses a closed enum."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["campaigns"][
+        "nonlinear_null_v1"
+    ]["smoke_rule"]["member"] = "unknown_member_rule"
+    with pytest.raises(df.DesignFreezeError, match="unknown rule"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_nonconsecutive_null_replicates(freeze):
+    """Null replicate indices must be exactly 1 through 9."""
+    broken = copy.deepcopy(freeze)
+    broken["seeds"]["streams"]["null_noise"]["replicate_indices"] = list(
+        range(9)
+    )
+    with pytest.raises(df.DesignFreezeError, match="null_noise"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_missing_declared_replicate_arm(freeze):
+    """Every declared null replicate arm is required by the stream rule."""
+    broken = copy.deepcopy(freeze)
+    del broken["nonlinear_validation"]["arms"]["noisy_control_r9"]
+    broken["nonlinear_validation"]["campaigns"]["nonlinear_null_v1"][
+        "arms"
+    ].remove("noisy_control_r9")
+    with pytest.raises(df.DesignFreezeError, match="noise_replicate"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_campaign_missing_one_replicate_arm(freeze):
+    """A replicate campaign must carry the complete declared replicate set."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["campaigns"]["nonlinear_null_v1"][
+        "arms"
+    ].remove("noisy_control_r9")
+    with pytest.raises(df.DesignFreezeError, match="noise_replicate"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_an_unbound_source_digest(freeze):
+    """External nonlinear sources require both content digests."""
+    broken = copy.deepcopy(freeze)
+    del broken["nonlinear_validation"]["campaigns"]["nonlinear_null_v1"][
+        "replicate_zero_source"
+    ]["review_sha256"]
+    with pytest.raises(df.DesignFreezeError, match="review_sha256"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_an_unbound_pooled_source(freeze):
+    """The validation-100 pooled source carries the same binding contract."""
+    broken = copy.deepcopy(freeze)
+    del broken["nonlinear_validation"]["campaigns"][
+        "nonlinear_validation100_v1"
+    ]["pooled_source"]["harvest_sha256"]
+    with pytest.raises(df.DesignFreezeError, match="harvest_sha256"):
         df.validate_design_freeze(broken)

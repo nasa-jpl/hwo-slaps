@@ -79,8 +79,10 @@ REQUIRED_NONLINEAR_VALIDATION_KEYS = (
     "seeds",
     "smoke_gate",
     "success_criteria",
+    "member_sets",
+    "campaigns",
 )
-"""Keys the version-3 nonlinear-validation block must carry (`tuple`)."""
+"""Keys the nonlinear-validation block must carry (`tuple`)."""
 
 REQUIRED_NONLINEAR_FIT_KEYS = (
     "kernel_shape_native",
@@ -391,6 +393,7 @@ def _validate_seeds(freeze: dict) -> None:
         "rank_stability_noise",
         "template_permutation",
         "bootstrap",
+        "null_noise",
     ):
         block = _require_mapping(
             _required(streams, name, "seeds.streams"), f"seeds.streams.{name}"
@@ -417,6 +420,39 @@ def _validate_seeds(freeze: dict) -> None:
         raise DesignFreezeError(
             "seeds.streams.rank_stability_noise.replicate_indices must list "
             f"0 .. {replicates - 1} explicitly"
+        )
+    null_noise = _require_mapping(
+        streams["null_noise"], "seeds.streams.null_noise"
+    )
+    null_spawn_key = _required(
+        null_noise, "spawn_key", "seeds.streams.null_noise"
+    )
+    if null_spawn_key != [6]:
+        raise DesignFreezeError(
+            "seeds.streams.null_noise.spawn_key must be exactly [6]"
+        )
+    null_replicates = _require_positive_int(
+        _required(null_noise, "replicates", "seeds.streams.null_noise"),
+        "seeds.streams.null_noise.replicates",
+    )
+    null_indices = _required(
+        null_noise, "replicate_indices", "seeds.streams.null_noise"
+    )
+    if not isinstance(null_indices, list):
+        raise DesignFreezeError(
+            "seeds.streams.null_noise.replicate_indices must be a list"
+        )
+    if any(
+        isinstance(index, bool) or not isinstance(index, int)
+        for index in null_indices
+    ):
+        raise DesignFreezeError(
+            "seeds.streams.null_noise.replicate_indices must contain integers"
+        )
+    if null_indices != list(range(1, null_replicates + 1)):
+        raise DesignFreezeError(
+            "seeds.streams.null_noise.replicate_indices must list "
+            f"1 .. {null_replicates} explicitly"
         )
     order = _required(seeds, "draw_order", "seeds")
     design_order = list(freeze["parent_design"]["seeds"]["draw_order"])
@@ -662,7 +698,7 @@ def validate_design_freeze(document: dict) -> dict:
 
 
 def _validate_nonlinear_validation(freeze: dict) -> None:
-    """Validate the version-3 nonlinear-validation protocol block.
+    """Validate the version-4 nonlinear-validation protocol block.
 
     Parameters
     ----------
@@ -673,8 +709,9 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
     ------
     DesignFreezeError
         Raised for missing protocol keys, missing fit settings, a
-        malformed arm declaration, duplicate arm indices, or a seed
-        declaration that does not extend the frozen campaign streams.
+        malformed arm declaration, duplicate arm indices, invalid
+        replicate declarations, or a campaign that names an undeclared
+        member set or arm.
     """
     block = _require_mapping(
         freeze["nonlinear_validation"], "nonlinear_validation"
@@ -696,10 +733,21 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
             + ", ".join(missing)
         )
 
+    null_noise = _require_mapping(
+        freeze["seeds"]["streams"].get("null_noise"),
+        "seeds.streams.null_noise",
+    )
+    null_replicate_indices = _required(
+        null_noise,
+        "replicate_indices",
+        "seeds.streams.null_noise",
+    )
+
     arms = _require_mapping(block["arms"], "nonlinear_validation.arms")
     if not arms:
         raise DesignFreezeError("nonlinear_validation.arms is empty")
     indices = []
+    replicate_by_arm = {}
     for name, declaration in arms.items():
         arm = _require_mapping(
             declaration, f"nonlinear_validation.arms.{name}"
@@ -736,6 +784,28 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
                 f"nonlinear_validation.arms.{name}.sample must be "
                 "'all', 'non_censored' or 'golden'"
             )
+        if "noise_replicate" in arm:
+            replicate = _require_positive_int(
+                arm["noise_replicate"],
+                f"nonlinear_validation.arms.{name}.noise_replicate",
+            )
+            if arm["dataset_kind"] != "noisy":
+                raise DesignFreezeError(
+                    f"nonlinear_validation.arms.{name}.noise_replicate "
+                    "requires dataset_kind 'noisy'"
+                )
+            if arm["subhalo_in_truth"] is not False:
+                raise DesignFreezeError(
+                    f"nonlinear_validation.arms.{name}.noise_replicate "
+                    "requires subhalo_in_truth false"
+                )
+            if replicate not in null_replicate_indices:
+                raise DesignFreezeError(
+                    f"nonlinear_validation.arms.{name}.noise_replicate "
+                    f"{replicate} is not in seeds.streams.null_noise."
+                    "replicate_indices"
+                )
+            replicate_by_arm[name] = replicate
         indices.append(int(arm["arm_index"]))
     if len(set(indices)) != len(indices):
         raise DesignFreezeError(
@@ -757,11 +827,167 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
             "with 5, beyond the frozen campaign spawn keys 0-4"
         )
 
+    if set(replicate_by_arm.values()) != set(null_replicate_indices):
+        raise DesignFreezeError(
+            "nonlinear_validation noise_replicate values over declared arms "
+            f"must equal seeds.streams.null_noise.replicate_indices: "
+            f"declared {sorted(replicate_by_arm.values())}, expected "
+            f"{sorted(null_replicate_indices)}"
+        )
+
+    member_sets = _require_mapping(
+        block["member_sets"], "nonlinear_validation.member_sets"
+    )
+    if not member_sets:
+        raise DesignFreezeError("nonlinear_validation.member_sets is empty")
+    for name, member_set in member_sets.items():
+        path = f"nonlinear_validation.member_sets.{name}"
+        member_set = _require_mapping(member_set, path)
+        for key in ("rule", "source", "tier", "n_systems"):
+            _required(member_set, key, path)
+        _require_positive_int(
+            member_set["n_systems"], f"{path}.n_systems"
+        )
+
+    campaigns = _require_mapping(
+        block["campaigns"], "nonlinear_validation.campaigns"
+    )
+    if not campaigns:
+        raise DesignFreezeError("nonlinear_validation.campaigns is empty")
+    replicate_indices = []
+    for name, campaign in campaigns.items():
+        path = f"nonlinear_validation.campaigns.{name}"
+        campaign = _require_mapping(campaign, path)
+        member_set_name = _required(campaign, "member_set", path)
+        if (
+            not isinstance(member_set_name, str)
+            or member_set_name not in member_sets
+        ):
+            raise DesignFreezeError(
+                f"{path}.member_set {member_set_name!r} is not a declared "
+                "member set"
+            )
+        campaign_arms = _required(campaign, "arms", path)
+        if not isinstance(campaign_arms, list) or not campaign_arms:
+            raise DesignFreezeError(f"{path}.arms must be a non-empty list")
+        if any(not isinstance(arm_name, str) for arm_name in campaign_arms):
+            raise DesignFreezeError(f"{path}.arms must contain arm names")
+        if len(set(campaign_arms)) != len(campaign_arms):
+            raise DesignFreezeError(f"{path}.arms must contain unique arms")
+        for arm_name in campaign_arms:
+            if arm_name not in arms:
+                raise DesignFreezeError(
+                    f"{path}.arms names undeclared arm {arm_name!r}"
+                )
+        campaign_replicates = {
+            replicate_by_arm[arm_name]
+            for arm_name in campaign_arms
+            if arm_name in replicate_by_arm
+        }
+        if campaign_replicates and campaign_replicates != set(
+            null_replicate_indices
+        ):
+            raise DesignFreezeError(
+                f"{path}.arms noise_replicate values must equal "
+                "seeds.streams.null_noise.replicate_indices: declared "
+                f"{sorted(campaign_replicates)}, expected "
+                f"{sorted(null_replicate_indices)}"
+            )
+        positions_source = _required(campaign, "positions_source", path)
+        if positions_source != "self":
+            if not isinstance(positions_source, str) or not positions_source:
+                raise DesignFreezeError(
+                    f"{path}.positions_source must be 'self' or a non-empty "
+                    "campaign name"
+                )
+            source_uuid = _required(
+                campaign, "positions_source_campaign_uuid", path
+            )
+            if not isinstance(source_uuid, str) or not source_uuid:
+                raise DesignFreezeError(
+                    f"{path}.positions_source_campaign_uuid must be a "
+                    "non-empty string"
+                )
+        for source_key in ("replicate_zero_source", "pooled_source"):
+            if source_key in campaign:
+                _validate_nonlinear_source(
+                    campaign[source_key], f"{path}.{source_key}"
+                )
+        smoke_rule = _require_mapping(
+            _required(campaign, "smoke_rule", path), f"{path}.smoke_rule"
+        )
+        smoke_arms = _required(smoke_rule, "arms", f"{path}.smoke_rule")
+        if not isinstance(smoke_arms, list) or not smoke_arms:
+            raise DesignFreezeError(
+                f"{path}.smoke_rule.arms must be a non-empty list"
+            )
+        for arm_name in smoke_arms:
+            if not isinstance(arm_name, str):
+                raise DesignFreezeError(
+                    f"{path}.smoke_rule.arms must contain arm names"
+                )
+            if arm_name not in arms:
+                raise DesignFreezeError(
+                    f"{path}.smoke_rule.arms names undeclared arm "
+                    f"{arm_name!r}"
+                )
+            if arm_name not in campaign_arms:
+                raise DesignFreezeError(
+                    f"{path}.smoke_rule.arms names arm {arm_name!r} "
+                    "outside the campaign arm list"
+                )
+        member_rule = _required(smoke_rule, "member", f"{path}.smoke_rule")
+        if member_rule not in (
+            "smallest_image_per_template",
+            "smallest_image_non_censored_per_template",
+        ):
+            raise DesignFreezeError(
+                f"{path}.smoke_rule.member has unknown rule "
+                f"{member_rule!r}"
+            )
+    for name, declaration in arms.items():
+        if "noise_replicate" in declaration:
+            replicate_indices.append(
+                int(declaration["noise_replicate"])
+            )
+    if len(set(replicate_indices)) != len(replicate_indices):
+        raise DesignFreezeError(
+            "nonlinear_validation noise_replicate values must be unique"
+        )
+
     criteria = block["success_criteria"]
     if not isinstance(criteria, list) or not criteria:
         raise DesignFreezeError(
             "nonlinear_validation.success_criteria must be a non-empty list"
         )
+
+
+def _validate_nonlinear_source(source: Any, path: str) -> None:
+    """Validate one declared external nonlinear-campaign source binding.
+
+    Parameters
+    ----------
+    source : `object`
+        Source declaration to validate.
+    path : `str`
+        Configuration path used in validation messages.
+
+    Raises
+    ------
+    DesignFreezeError
+        Raised when a required source field is absent or malformed.
+    """
+    source = _require_mapping(source, path)
+    for key in ("campaign", "campaign_uuid", "harvest"):
+        value = _required(source, key, path)
+        if not isinstance(value, str) or not value:
+            raise DesignFreezeError(f"{path}.{key} must be a non-empty string")
+    _require_sha256(
+        _required(source, "harvest_sha256", path), f"{path}.harvest_sha256"
+    )
+    _require_sha256(
+        _required(source, "review_sha256", path), f"{path}.review_sha256"
+    )
 
 
 def load_design_freeze(

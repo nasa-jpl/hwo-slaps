@@ -6,7 +6,7 @@
 # document, report or brief disagrees with this file, THIS FILE WINS and the
 # document is stale; the superseded documents carry a banner pointing here.
 #
-# STATUS: RATIFIED, version 3 (amended 2026-09-01). Every item the
+# STATUS: RATIFIED, version 4 (amended 2026-09-03). Every item the
 # version-1 freeze left provisional was ruled by George on 2026-08-23; the
 # rulings are recorded under `ratifications` below and the provisional list is
 # empty. The version-2 amendment also carries the A2 declared spacing
@@ -18,6 +18,9 @@
 # `nonlinear_validation` block: the pre-declared protocol and sampler seed
 # rule for the post-campaign nonlinear validation of the production ladder
 # results. It changes nothing about the ladder campaigns themselves.
+# The Version-4 amendment adds the declared nonlinear null replicates and the
+# independent validation-100 transfer campaigns under the same post-campaign
+# validation boundary.
 #
 # Conventions. Angles are arcseconds. Signal is electrons in the exposure and
 # variance is electrons squared. Masses are log10 solar. Paths are repo-root
@@ -31,10 +34,10 @@ schema_version: 1
 
 freeze:
   name: design_freeze_v1
-  version: 3
+  version: 4
   status: ratified
   authored: '2026-08-23'
-  amended: '2026-09-01'
+  amended: '2026-09-03'
   ratified: '2026-08-23'
   ratification_owner: George, with Sol Pro concurrence
   amendment_v3: >-
@@ -53,6 +56,16 @@ freeze:
     because the campaign seed declaration is frozen and cross-checked
     against the embedded parent design. George's commit approval of this
     file constitutes the signature.
+  amendment_v4: >-
+    Version 4, 2026-09-03, under George's D-X1 through D-X9 rulings of the
+    same day: the `nonlinear_validation` block is extended with nine frozen
+    operational null-noise replicates on the production59 member set and a
+    validation100 transfer campaign. The amendment declares both campaign
+    member sets, campaign arm lists, position bindings, smoke rules, null
+    summaries and the additional success criteria BEFORE any accepted
+    extension artifact exists. It changes nothing about the ladder campaigns
+    or the version-3 arm declarations. George's commit approval of this file
+    constitutes the signature.
   amendment: >-
     Version 2, 2026-08-23 evening, under George's ruling slate recorded in
     `ratifications`: A2 spacing systematic declared; A3 B8 ratified as
@@ -842,6 +855,19 @@ seeds:
         The T4 noise-seed rank-stability harness. Declared in full now, before
         any ranking exists, so the replicate count cannot be chosen after
         seeing the stability numbers.
+    null_noise:
+      spawn_key: [6]
+      per_replicate: 'spawn_key (6, k, i) for null replicate k and system i'
+      replicates: 9
+      replicate_indices: [1, 2, 3, 4, 5, 6, 7, 8, 9]
+      engine_seed_rule: >-
+        global_seed = int(SeedSequence(entropy=20260823, spawn_key=(6, k, i))
+        .generate_state(1, dtype=uint32)[0]); replicate 0 is the primary
+        noise seed already carried by the staged configuration, so it is
+        not redrawn.
+      purpose: >-
+        Noise realizations of the truth-centred null on the 59 production
+        systems; declared in full before any null artifact exists.
     template_permutation:
       spawn_key: [3]
       purpose: 'the single balanced template assignment permutation of the 1000 labels'
@@ -1524,9 +1550,14 @@ parent_design:
 # in this block alters any ladder-campaign declaration.
 # -----------------------------------------------------------------------------
 nonlinear_validation:
+# Version-4 amendment: calibrated null replicates and validation-100 transfer,
+# ruled by George 2026-09-03 under D-X1 through D-X9. These keys were declared
+# before any accepted extension artifact existed.
   declared: '2026-09-01'
   rulings: [D-N1, D-N2, D-N3, D-N4, D-N5, D-N6, D-N7-below-arm,
             D-N8-bridge-arm, D-N9-seed-replicates]
+  declared_v4: '2026-09-03'
+  rulings_v4: [D-X1, D-X2, D-X3, D-X4, D-X5, D-X6, D-X7, D-X8, D-X9]
   purpose: >-
     Calibrate the production Fisher screening statistic q_F against a
     practical freed nonlinear search (PyAutoLens + Nautilus) on the
@@ -1543,6 +1574,60 @@ nonlinear_validation:
       from its parent artifact, and reported in both tiers. 59 unique
       systems. The golden subsample is the five golden-flagged members
       of the selected tier.
+  member_sets:
+    production59:
+      rule: >-
+        Every ladder_parent_v1 member (48) plus every ladder_selected_v1
+        member (12). The one overlap member (sys0728) is validated once,
+        from its parent artifact, and reported in both tiers. 59 unique
+        systems. The golden subsample is the five golden-flagged members
+        of the selected tier.
+      source:
+        parent: ladder_parent_v1/run
+        selected: ladder_selected_v1/run
+      tier: [parent, selected]
+      n_systems: 59
+    validation100:
+      rule: >-
+        Every ladder_validation_v1 member with
+        validation_sample_member true: the sha256-sorted first 100 of the
+        906 unmeasured post-cut survivors, as declared in
+        scratch/ValidationCampaignSpec.md.
+      source: ladder_validation_v1/run
+      tier: validation
+      n_systems: 100
+      golden: false
+      censored: m_best NaN per artifact
+  campaigns:
+    nonlinear_null_v1:
+      member_set: production59
+      arms: [noisy_control_r1, noisy_control_r2, noisy_control_r3,
+             noisy_control_r4, noisy_control_r5, noisy_control_r6,
+             noisy_control_r7, noisy_control_r8, noisy_control_r9]
+      positions_source: nonlinear_validation_v1
+      positions_source_campaign_uuid: 5d8b314d-2d56-4f49-8ea6-42e70176c5ed
+      replicate_zero_source:
+        campaign: nonlinear_validation_v1
+        campaign_uuid: 5d8b314d-2d56-4f49-8ea6-42e70176c5ed
+        harvest: nonlinear_validation_v1/harvest/harvest.json
+        harvest_sha256: a8f8fa33d53ee1ab32b88b08ae3d95ceaf51a0896283f017525472bb2359c993
+        review_sha256: 88042d9403aa49bfc4ea464ece3347a0ea2bf1c6938a73b7988b59212e49895c
+      smoke_rule:
+        arms: [noisy_control_r1]
+        member: smallest_image_per_template
+    nonlinear_validation100_v1:
+      member_set: validation100
+      arms: [asimov_injected, noisy_injected, noisy_control, asimov_below]
+      positions_source: self
+      pooled_source:
+        campaign: nonlinear_validation_v1
+        campaign_uuid: 5d8b314d-2d56-4f49-8ea6-42e70176c5ed
+        harvest: nonlinear_validation_v1/harvest/harvest.json
+        harvest_sha256: a8f8fa33d53ee1ab32b88b08ae3d95ceaf51a0896283f017525472bb2359c993
+        review_sha256: 88042d9403aa49bfc4ea464ece3347a0ea2bf1c6938a73b7988b59212e49895c
+      smoke_rule:
+        arms: [asimov_injected, asimov_below]
+        member: smallest_image_non_censored_per_template
   arms:
     asimov_injected:
       arm_index: 0
@@ -1619,6 +1704,105 @@ nonlinear_validation:
       rung: top
       sample: golden
       purpose: second sampler-seed replicate of asimov_injected
+    noisy_control_r1:
+      arm_index: 7
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 1
+      purpose: >-
+        null replicate 1 of noisy_control: same protocol, noise realization
+        1 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r2:
+      arm_index: 8
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 2
+      purpose: >-
+        null replicate 2 of noisy_control: same protocol, noise realization
+        2 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r3:
+      arm_index: 9
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 3
+      purpose: >-
+        null replicate 3 of noisy_control: same protocol, noise realization
+        3 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r4:
+      arm_index: 10
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 4
+      purpose: >-
+        null replicate 4 of noisy_control: same protocol, noise realization
+        4 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r5:
+      arm_index: 11
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 5
+      purpose: >-
+        null replicate 5 of noisy_control: same protocol, noise realization
+        5 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r6:
+      arm_index: 12
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 6
+      purpose: >-
+        null replicate 6 of noisy_control: same protocol, noise realization
+        6 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r7:
+      arm_index: 13
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 7
+      purpose: >-
+        null replicate 7 of noisy_control: same protocol, noise realization
+        7 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r8:
+      arm_index: 14
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 8
+      purpose: >-
+        null replicate 8 of noisy_control: same protocol, noise realization
+        8 of the null_noise stream, sampler seed from this arm's own index
+    noisy_control_r9:
+      arm_index: 15
+      dataset_kind: noisy
+      subhalo_in_truth: false
+      fit_mode: freed
+      rung: top
+      sample: all
+      noise_replicate: 9
+      purpose: >-
+        null replicate 9 of noisy_control: same protocol, noise realization
+        9 of the null_noise stream, sampler seed from this arm's own index
   injection_rule:
     rungs: >-
       "top" is the bracket-top rung m_best_bracket_logm[1] of the
@@ -1687,6 +1871,7 @@ nonlinear_validation:
     generator: numpy.random.SeedSequence -> uint32
     entropy: 20260823
     spawn_key: [5, system_index, arm_index]
+    null_noise_spawn_key: [6, replicate_index, system_index]
     rule: >-
       seed = int(SeedSequence(entropy=20260823, spawn_key=(5, i, a))
       .generate_state(1, dtype=uint32)[0]) for system index i (the
@@ -1752,6 +1937,29 @@ nonlinear_validation:
     - >-
       Censoring consistency: the six right-censored parent systems are
       expected to yield freed non-detections at logm 9.5.
+    - >-
+      Null exceedance rate: pooled count and Clopper-Pearson 95 percent
+      interval of q_fit >= 10 and of dlogZ > 5 over K x 59 null draws;
+      per-system any-exceedance fraction; per-template pooled counts.
+      Reported as the calibrated rate of the declared truth-centred
+      convention, with the within-system dependence stated.
+    - >-
+      Null quantiles: pooled q_fit at the 50, 90, 95 and 99 percent points
+      and the maximum, per template and overall; the q_fit threshold implied
+      by a 1 percent and a 5 percent per-trial exceedance.
+    - >-
+      Null shape context: KS distance of the pooled q_fit null against
+      chi-square with 3 degrees of freedom, reported as context only. The
+      freed search has 3 extra parameters with boundaries; no asymptotic
+      claim is made.
+    - >-
+      Threshold transfer (post hoc, labelled): v3 injected-arm recovery
+      fractions re-evaluated at the null-implied 1 percent threshold.
+    - >-
+      Validation-100 transfer: v3 criteria 1, 2, 3, 4, 7 and 8 recomputed
+      on the validation100 member set, per template with n about 20, and a
+      pooled 159-system per-template table combining the two samples,
+      labelled pooled.
   reporting: >-
     All outcomes are reported, including disagreement: a bend in the
     q_fit-to-q_F relation at high mass or for specific morphologies is
@@ -1759,3 +1967,6 @@ nonlinear_validation:
     summaries (including error strings and effective sampler settings),
     the dataset's unmasked-pixel count, freed-recovery values and
     boundary diagnostics, and quality flags.
+    The null is a null of THIS convention: matched PSF, truth-centred position
+    prior and declared mass range. It is not a blind-search false-positive
+    rate and must not be quoted as one.
