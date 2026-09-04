@@ -49,6 +49,7 @@ if str(REPO_ROOT/"scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT/"scripts"))
 
 from run_nonlinear_validation import (  # noqa: E402
+    derive_direction_seed,
     derive_noise_seed,
     derive_sampler_seed,
     system_index,
@@ -98,10 +99,33 @@ def sample_members(
         Raised when a source manifest, member artifact or tier declaration
         disagrees with the selected member-set rule.
     """
-    if mode not in ("production59", "validation100"):
+    if mode not in ("production59", "validation100", "selected12"):
         raise ValueError(f"Unknown member-set mode {mode!r}")
     if expected_n_systems is None:
-        expected_n_systems = 59 if mode == "production59" else 100
+        expected_n_systems = {
+            "production59": 59,
+            "validation100": 100,
+            "selected12": 12,
+        }[mode]
+    if mode == "selected12":
+        production_members = sample_members(
+            parent_run=parent_run,
+            selected_run=selected_run,
+            mode="production59",
+            expected_tier_counts=expected_tier_counts,
+            expected_n_systems=59,
+        )
+        selected_members = [
+            member
+            for member in production_members
+            if "selected" in member["report_tiers"]
+        ]
+        if len(selected_members) != expected_n_systems:
+            raise ValueError(
+                f"selected12 retains {len(selected_members)} systems, "
+                f"expected {expected_n_systems}"
+            )
+        return selected_members
     if mode == "validation100":
         if validation_run is None:
             raise ValueError("validation100 requires validation_run")
@@ -342,8 +366,18 @@ def smoke_jobs(jobs, member_rule):
     if member_rule not in (
         "smallest_image_per_template",
         "smallest_image_non_censored_per_template",
+        "smallest_image_golden",
     ):
         raise ValueError(f"Unknown smoke member rule {member_rule!r}")
+    if member_rule == "smallest_image_golden":
+        candidates = [job for job in jobs if job.get("golden", False)]
+        if not candidates:
+            raise ValueError(
+                "Smoke member rule 'smallest_image_golden' has no golden member"
+            )
+        return [
+            min(candidates, key=lambda job: (job["image_side_px"], job["run_name"]))
+        ]
     templates = {job["template"] for job in jobs}
     candidates = jobs
     if member_rule == "smallest_image_non_censored_per_template":
@@ -629,6 +663,10 @@ def main(argv=None) -> None:
         "--pooled-source-dir",
         help="Prior nonlinear campaign directory supplying pooled rows",
     )
+    parser.add_argument(
+        "--null-source-dir",
+        help="Prior nonlinear null campaign directory supplying null rows",
+    )
     args = parser.parse_args(argv)
 
     from hwoslaps.campaign.design_freeze import load_design_freeze
@@ -649,10 +687,10 @@ def main(argv=None) -> None:
     campaign = campaigns[args.campaign]
     member_set_name = campaign["member_set"]
     member_set = protocol["member_sets"][member_set_name]
-    if member_set_name == "production59":
+    if member_set_name in ("production59", "selected12"):
         if args.parent_run is None or args.selected_run is None:
             raise ValueError(
-                "production59 requires --parent-run and --selected-run"
+                f"{member_set_name} requires --parent-run and --selected-run"
             )
         if args.validation_run is not None:
             raise ValueError(
@@ -701,7 +739,7 @@ def main(argv=None) -> None:
         )
 
     expected_tier_counts = None
-    if member_set_name == "production59":
+    if member_set_name in ("production59", "selected12"):
         expected_tier_counts = {
             "parent": freeze["strata"]["parent"]["size"],
             "selected": freeze["strata"]["selected"]["size"],
@@ -752,6 +790,51 @@ def main(argv=None) -> None:
     elif campaign.get("replicate_zero_source") is not None:
         raise ValueError(
             "replicate_zero_source requires a reused positions source"
+        )
+
+    reference_source_echo = None
+    reference_source = campaign.get("reference_source")
+    if reference_source is None:
+        if args.positions_source_dir is not None and positions_source == "self":
+            raise ValueError(
+                "Campaign without reference_source forbids an extra "
+                "positions source for reference rows"
+            )
+    else:
+        if args.positions_source_dir is None:
+            raise ValueError(
+                "Campaign with reference_source requires "
+                "--positions-source-dir"
+            )
+        if (
+            positions_source != "self"
+            and str(reference_source["campaign_uuid"])
+            != str(campaign["positions_source_campaign_uuid"])
+        ):
+            raise ValueError(
+                "reference_source campaign_uuid must equal the declared "
+                "positions source campaign uuid"
+            )
+        reference_source_echo = _validate_source_files(
+            Path(args.positions_source_dir),
+            reference_source,
+            "reference_source",
+        )
+
+    null_source_echo = None
+    null_source = campaign.get("null_source")
+    if null_source is None:
+        if args.null_source_dir is not None:
+            raise ValueError(
+                "Campaign without null_source forbids --null-source-dir"
+            )
+    else:
+        if args.null_source_dir is None:
+            raise ValueError(
+                "Campaign with null_source requires --null-source-dir"
+            )
+        null_source_echo = _validate_source_files(
+            Path(args.null_source_dir), null_source, "null_source"
         )
 
     pooled_source = campaign.get("pooled_source")
@@ -822,6 +905,15 @@ def main(argv=None) -> None:
                 job_arms[name]["noise_seed"] = derive_noise_seed(
                     entropy, declaration["noise_replicate"], index
                 )
+            if "fit_psf_delta" in declaration:
+                job_arms[name]["directions"] = {
+                    str(direction): {
+                        "seed": derive_direction_seed(
+                            entropy, direction, index
+                        ),
+                    }
+                    for direction in declaration["fit_psf_delta"]["directions"]
+                }
         jobs.append({
             **member,
             "restamped_config": str(restamped_path),
@@ -844,15 +936,46 @@ def main(argv=None) -> None:
         for job in largest_first
     ]
 
-    def fit_line(job, arm):
-        """Build one fit-queue line for a job and arm."""
+    def fit_line(job, arm, direction=None):
+        """Build one fit-queue line for a job, arm and direction.
+
+        Parameters
+        ----------
+        job : `dict`
+            Manifest job entry.
+        arm : `str`
+            Declared arm name.
+        direction : `int`, optional
+            Direction for a PSF knowledge-error arm.
+
+        Returns
+        -------
+        line : `str`
+            Queue line consumed by the nonlinear dispatcher.
+
+        Raises
+        ------
+        ValueError
+            Raised when a direction is missing or supplied for the wrong
+            kind of arm.
+        """
         position = reused_positions.get(job["run_name"])
         if position is None:
             position = f"{job['output_dir']}/{POSITIONS_ARTIFACT_NAME}"
-        return (
+        line = (
             f"{job['restamped_config']} {position} {arm} "
             f"{job['output_dir']}"
         )
+        carries_delta = "fit_psf_delta" in arms[arm]
+        if carries_delta and direction is None:
+            raise ValueError(f"Delta arm {arm!r} requires a direction")
+        if not carries_delta and direction is not None:
+            raise ValueError(
+                f"Non-delta arm {arm!r} cannot carry a direction"
+            )
+        if direction is not None:
+            line += f" {direction}"
+        return line
 
     smoke_rule = campaign["smoke_rule"]
     smokes = smoke_jobs(jobs, smoke_rule["member"])
@@ -863,12 +986,26 @@ def main(argv=None) -> None:
                 raise ValueError(
                     f"Smoke arm {arm!r} is not eligible for {job['run_name']}"
                 )
-            smoke_lines.append(fit_line(job, arm))
-    fits_lines = [
-        fit_line(job, arm)
-        for job in largest_first
-        for arm in job["arms"]
-    ]
+            declaration = arms[arm]
+            if "fit_psf_delta" in declaration:
+                directions = smoke_rule["directions"]
+                smoke_lines.extend(
+                    fit_line(job, arm, direction)
+                    for direction in directions
+                )
+            else:
+                smoke_lines.append(fit_line(job, arm))
+    fits_lines = []
+    for job in largest_first:
+        for arm in job["arms"]:
+            declaration = arms[arm]
+            if "fit_psf_delta" in declaration:
+                fits_lines.extend(
+                    fit_line(job, arm, direction)
+                    for direction in declaration["fit_psf_delta"]["directions"]
+                )
+            else:
+                fits_lines.append(fit_line(job, arm))
     if positions_source == "self":
         (campaign_dir/"positions_queue.txt").write_text(
             "\n".join(positions_lines) + "\n", encoding="utf-8"
@@ -885,6 +1022,10 @@ def main(argv=None) -> None:
         campaign_echo["replicate_zero_source"].update(replicate_zero_echo)
     if pooled_source_echo is not None:
         campaign_echo["pooled_source"].update(pooled_source_echo)
+    if reference_source_echo is not None:
+        campaign_echo["reference_source"].update(reference_source_echo)
+    if null_source_echo is not None:
+        campaign_echo["null_source"].update(null_source_echo)
     manifest = {
         "schema_version": 3,
         "name": args.campaign,
@@ -919,6 +1060,12 @@ def main(argv=None) -> None:
         "smoke_run_names": [job["run_name"] for job in smokes],
         "jobs": jobs,
     }
+    if any("fit_psf_delta" in arms[name] for name in campaign["arms"]):
+        manifest["direction_seed_declaration"] = {
+            "stream": "psf_knowledge_direction",
+            "entropy": entropy,
+            "spawn_key": [7, "direction_index", "system_index"],
+        }
     (campaign_dir/"manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

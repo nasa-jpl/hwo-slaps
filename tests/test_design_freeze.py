@@ -44,7 +44,7 @@ def test_committed_freeze_loads_and_validates(freeze):
     assert freeze["schema_version"] == df.DESIGN_FREEZE_SCHEMA_VERSION
     assert freeze["freeze"]["name"] == "design_freeze_v1"
     assert freeze["freeze"]["status"] == "ratified"
-    assert freeze["freeze"]["version"] == 4
+    assert freeze["freeze"]["version"] == 5
 
 
 def test_required_blocks_are_all_present(freeze):
@@ -156,13 +156,72 @@ def test_seed_streams_are_declared_in_full(freeze):
     assert len(freeze["seeds"]["draw_order"]) == 10
 
 
+def test_psf_knowledge_v5_block_is_fully_declared(freeze):
+    """The v5 PSF knowledge block pins its rungs, gates and campaign."""
+    knowledge = freeze["psf_knowledge_error"]
+    residual = knowledge["residual_model"]
+    assert knowledge["declared_v5"] == "2026-09-04"
+    assert residual["amplitude_rms_nm_rungs"] == [
+        0.0, 1.0, 2.0, 5.0, 10.0, 20.0, 35.0
+    ]
+    assert residual["endpoint_anchor_nm"] == 35.0
+    assert residual["directions"] == 8
+    assert residual["direction_indices"] == list(range(1, 9))
+    assert residual["prior_table_sha256"] == (
+        "bfbececdcbe5fb37a4abcb018b63544d47c4c37ecc1900a539d62755b740c488"
+    )
+    assert knowledge["gates"]["retention_q10_min"] == 0.9
+    assert knowledge["gates"]["spurious_q90_max"] == 0.1
+    assert knowledge["ratio_floor"]["cells"] == 33
+    assert knowledge["ratio_floor"]["arcsec2"] == pytest.approx(33*0.0025)
+    assert knowledge["member_set"] == {
+        "name": "selected12",
+        "source": "ladder_selected_v1/run",
+        "source_campaign_uuid": "e1144d71-d6dd-4789-84c1-c37a9e045ea0",
+        "n_systems": 12,
+        "tier": "selected",
+    }
+    assert knowledge["campaigns"]["psf_knowledge_fisher_v1"]["phases"] == [
+        "maps"
+    ]
+
+
+def test_psf_knowledge_direction_stream_and_arms_are_declared(freeze):
+    """The direction stream and all eight delta arms are frozen."""
+    stream = freeze["seeds"]["streams"]["psf_knowledge_direction"]
+    assert stream["spawn_key"] == [7]
+    assert stream["directions"] == 8
+    assert stream["direction_indices"] == list(range(1, 9))
+    arms = freeze["nonlinear_validation"]["arms"]
+    delta_arms = [
+        name for name, declaration in arms.items()
+        if "fit_psf_delta" in declaration
+    ]
+    assert [arms[name]["arm_index"] for name in delta_arms] == list(range(16, 24))
+    assert all(
+        arms[name]["fit_psf_delta"]["directions"] == [1, 2, 3]
+        for name in delta_arms
+    )
+    nonlinear = freeze["nonlinear_validation"]
+    assert nonlinear["member_sets"]["selected12"]["n_systems"] == 12
+    assert "reference_source" in nonlinear["campaigns"][
+        "psf_knowledge_nonlinear_v1"
+    ]
+    assert "null_source" in nonlinear["campaigns"][
+        "psf_knowledge_nonlinear_v1"
+    ]
+
+
 def test_nonlinear_extension_sets_and_campaigns_are_declared(freeze):
     """The v4 member sets and campaign arm lists are frozen."""
     nonlinear = freeze["nonlinear_validation"]
-    assert set(nonlinear["member_sets"]) == {"production59", "validation100"}
+    assert set(nonlinear["member_sets"]) == {
+        "production59", "validation100", "selected12"
+    }
     assert set(nonlinear["campaigns"]) == {
         "nonlinear_null_v1",
         "nonlinear_validation100_v1",
+        "psf_knowledge_nonlinear_v1",
     }
     assert nonlinear["campaigns"]["nonlinear_null_v1"]["arms"] == [
         f"noisy_control_r{index}" for index in range(1, 10)
@@ -627,4 +686,171 @@ def test_loader_rejects_an_unbound_pooled_source(freeze):
         "nonlinear_validation100_v1"
     ]["pooled_source"]["harvest_sha256"]
     with pytest.raises(df.DesignFreezeError, match="harvest_sha256"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_missing_psf_knowledge_direction_stream(freeze):
+    """The v5 direction stream cannot be removed from the freeze."""
+    broken = copy.deepcopy(freeze)
+    del broken["seeds"]["streams"]["psf_knowledge_direction"]
+    with pytest.raises(df.DesignFreezeError, match="psf_knowledge_direction"):
+        df.validate_design_freeze(broken)
+
+
+@pytest.mark.parametrize(
+    "mutation,match",
+    [
+        (
+            lambda document: document["nonlinear_validation"]["arms"][
+                "noisy_control_d2"
+            ]["fit_psf_delta"].update({"amplitude_rms_nm": 3.0}),
+            "amplitude_rms_nm",
+        ),
+        (
+            lambda document: document["nonlinear_validation"]["arms"][
+                "noisy_control_d2"
+            ]["fit_psf_delta"].update({"directions": [9]}),
+            "directions",
+        ),
+        (
+            lambda document: document["nonlinear_validation"]["arms"][
+                "asimov_injected"
+            ].update({
+                "fit_psf_delta": {
+                    "amplitude_rms_nm": 2.0,
+                    "directions": [1, 2, 3],
+                }
+            }),
+            "dataset_kind",
+        ),
+        (
+            lambda document: document["nonlinear_validation"]["arms"][
+                "noisy_control_d2"
+            ].update({
+                "fit_mode": "fixed_template",
+            }),
+            "fit_mode",
+        ),
+        (
+            lambda document: document["nonlinear_validation"]["arms"][
+                "noisy_control_d2"
+            ].update({
+                "rung": "below",
+            }),
+            "rung",
+        ),
+        (
+            lambda document: document["nonlinear_validation"]["arms"][
+                "asimov_fixed_bridge"
+            ].update({
+                "fit_psf_delta": {
+                    "amplitude_rms_nm": 2.0,
+                    "directions": [1, 2, 3],
+                }
+            }),
+            "dataset_kind",
+        ),
+    ],
+)
+def test_loader_rejects_invalid_psf_knowledge_delta_arms(
+    freeze, mutation, match
+):
+    """Delta arms obey the frozen amplitude, direction and arm rules."""
+    broken = copy.deepcopy(freeze)
+    mutation(broken)
+    with pytest.raises(df.DesignFreezeError, match=match):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_delta_arm_noise_replicate(freeze):
+    """Knowledge-error arms cannot consume the null-noise replicate stream."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["arms"]["noisy_control_d2"][
+        "noise_replicate"
+    ] = 1
+    with pytest.raises(df.DesignFreezeError, match="noise_replicate"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_duplicate_psf_knowledge_pair(freeze):
+    """The amplitude and truth-subhalo pair is unique across delta arms."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["arms"]["noisy_control_d5"][
+        "fit_psf_delta"
+    ]["amplitude_rms_nm"] = 2.0
+    with pytest.raises(df.DesignFreezeError, match="duplicate"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_mixed_delta_campaign(freeze):
+    """A nonlinear delta campaign cannot mix matched and delta arms."""
+    broken = copy.deepcopy(freeze)
+    broken["nonlinear_validation"]["campaigns"][
+        "psf_knowledge_nonlinear_v1"
+    ]["arms"].append("noisy_control")
+    with pytest.raises(df.DesignFreezeError, match="mix"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_a_delta_campaign_without_null_source(freeze):
+    """The nonlinear knowledge campaign must bind the matched null."""
+    broken = copy.deepcopy(freeze)
+    del broken["nonlinear_validation"]["campaigns"][
+        "psf_knowledge_nonlinear_v1"
+    ]["null_source"]
+    with pytest.raises(df.DesignFreezeError, match="null_source"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_nonincreasing_psf_rungs(freeze):
+    """Residual amplitude rungs are a strictly increasing sequence."""
+    broken = copy.deepcopy(freeze)
+    broken["psf_knowledge_error"]["residual_model"][
+        "amplitude_rms_nm_rungs"
+    ] = [0.0, 2.0, 1.0]
+    with pytest.raises(df.DesignFreezeError, match="strictly increasing"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_endpoint_not_at_last_rung(freeze):
+    """The endpoint anchor is the last declared residual rung."""
+    broken = copy.deepcopy(freeze)
+    broken["psf_knowledge_error"]["residual_model"]["endpoint_anchor_nm"] = 20.0
+    with pytest.raises(df.DesignFreezeError, match="last"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_psf_knowledge_gate_outside_unit_interval(freeze):
+    """Knowledge-error gates are strict unit-interval probabilities."""
+    broken = copy.deepcopy(freeze)
+    broken["psf_knowledge_error"]["gates"]["retention_q10_min"] = 1.1
+    with pytest.raises(df.DesignFreezeError, match="between 0 and 1"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_wrong_psf_knowledge_ratio_floor_area(freeze):
+    """The ratio-floor area is pinned to its integer cell count."""
+    broken = copy.deepcopy(freeze)
+    broken["psf_knowledge_error"]["ratio_floor"]["arcsec2"] = 0.08
+    with pytest.raises(df.DesignFreezeError, match="ratio_floor.arcsec2"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_wrong_psf_knowledge_prior_digest(freeze):
+    """The declared drift-prior bytes are hash-bound."""
+    broken = copy.deepcopy(freeze)
+    broken["psf_knowledge_error"]["residual_model"][
+        "prior_table_sha256"
+    ] = "0"*64
+    with pytest.raises(df.DesignFreezeError, match="prior table sha256"):
+        df.validate_design_freeze(broken)
+
+
+def test_loader_rejects_unknown_psf_knowledge_smoke_member(freeze):
+    """The Fisher smoke member selection is a closed enum."""
+    broken = copy.deepcopy(freeze)
+    broken["psf_knowledge_error"]["campaigns"][
+        "psf_knowledge_fisher_v1"
+    ]["smoke_rule"]["members"] = ["unknown"]
+    with pytest.raises(df.DesignFreezeError, match="smoke_rule.members"):
         df.validate_design_freeze(broken)

@@ -34,6 +34,8 @@ if str(REPO_ROOT/"scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT/"scripts"))
 
 from run_nonlinear_validation import (  # noqa: E402
+    PSF_KNOWLEDGE_DIRECTION_SPAWN_KEY,
+    derive_direction_seed,
     derive_noise_seed,
     derive_sampler_seed,
     system_index,
@@ -123,6 +125,17 @@ def _row(job: dict, arm: str, payload: dict) -> dict:
         "sampler_seed": payload["sampler_seed"],
         "noise_seed": payload.get("noise_seed"),
         "noise_replicate": payload.get("noise_replicate"),
+        "direction": (
+            int((payload.get("fit_psf_delta") or {}).get("direction", 0))
+            if payload.get("fit_psf_delta") is not None
+            else 0.0
+        ),
+        "fit_psf_amplitude_rms_nm": (
+            (payload.get("fit_psf_delta") or {}).get("amplitude_rms_nm")
+            if payload.get("fit_psf_delta") is not None
+            else None
+        ),
+        "fit_psf_delta": payload.get("fit_psf_delta"),
         "ladder_campaign_uuid": payload.get("ladder_campaign_uuid"),
         "ladder_config_hash": payload.get("ladder_config_hash"),
         "fit_pair_s": payload["timings"]["fit_pair_s"],
@@ -166,8 +179,30 @@ def _verify_row(
     payload: dict,
     manifest: dict,
     protocol: dict,
+    knowledge: dict | None = None,
 ) -> list:
-    """Return the integrity findings of one arm artifact."""
+    """Return the integrity findings of one arm artifact.
+
+    Parameters
+    ----------
+    job : `dict`
+        Manifest job entry owning the artifact.
+    arm : `str`
+        Declared arm name.
+    payload : `dict`
+        Loaded nonlinear artifact payload.
+    manifest : `dict`
+        Current campaign manifest.
+    protocol : `dict`
+        Validated nonlinear-validation freeze block.
+    knowledge : `dict`, optional
+        Validated PSF knowledge-error freeze block.
+
+    Returns
+    -------
+    findings : `list` [`str`]
+        Integrity findings for this row.
+    """
     findings = []
     label = f"{job['run_name']}/{arm}"
 
@@ -180,6 +215,7 @@ def _verify_row(
 
     declared = protocol["arms"][arm]
     recorded = payload["arm_declaration"]
+    is_delta = "fit_psf_delta" in declared
     for key in ("arm_index", "dataset_kind", "subhalo_in_truth",
                 "fit_mode", "rung", "sample"):
         if recorded.get(key) != declared[key]:
@@ -187,6 +223,12 @@ def _verify_row(
                 f"{label}: arm declaration {key} is {recorded.get(key)!r}, "
                 f"protocol declares {declared[key]!r}"
             )
+    if is_delta and recorded.get("fit_psf_delta") != declared["fit_psf_delta"]:
+        findings.append(
+            f"{label}: arm declaration fit_psf_delta is "
+            f"{recorded.get('fit_psf_delta')!r}, protocol declares "
+            f"{declared['fit_psf_delta']!r}"
+        )
 
     expected_seed = derive_sampler_seed(
         int(protocol["seeds"]["entropy"]),
@@ -326,7 +368,160 @@ def _verify_row(
                 f"{fit_block[key]!r}"
             )
 
-    if payload["kernel_sha256"] != payload["truth_kernel_sha256"]:
+    delta_payload = payload.get("fit_psf_delta")
+    if is_delta:
+        knowledge_block = knowledge
+        if knowledge_block is None:
+            knowledge_block = protocol.get("psf_knowledge_error")
+        required_delta_fields = (
+            "amplitude_rms_nm",
+            "direction",
+            "seed",
+            "seed_spawn_key",
+            "delta_id",
+            "requested_draw_rms_nm",
+            "measured_draw_rms_nm",
+            "fit_kernel_sha256",
+            "truth_kernel_sha256",
+            "fit_psf_config_hash",
+            "truth_psf_config_hash",
+            "lensing_pixel_scale",
+            "prior_table_sha256",
+        )
+        if not isinstance(delta_payload, dict):
+            findings.append(f"{label}: fit_psf_delta payload is missing")
+        else:
+            missing_delta_fields = [
+                key for key in required_delta_fields if key not in delta_payload
+            ]
+            if missing_delta_fields:
+                findings.append(
+                    f"{label}: fit_psf_delta is missing "
+                    f"{missing_delta_fields}"
+                )
+            else:
+                amplitude = float(declared["fit_psf_delta"]["amplitude_rms_nm"])
+                if float(delta_payload["amplitude_rms_nm"]) != amplitude:
+                    findings.append(
+                        f"{label}: fit_psf_delta amplitude is "
+                        f"{delta_payload['amplitude_rms_nm']!r}, expected {amplitude}"
+                    )
+                direction = delta_payload["direction"]
+                if (
+                    isinstance(direction, bool)
+                    or not isinstance(direction, int)
+                    or direction not in declared["fit_psf_delta"]["directions"]
+                ):
+                    findings.append(
+                        f"{label}: fit_psf_delta direction {direction!r} is not "
+                        "declared"
+                    )
+                else:
+                    expected_direction_seed = derive_direction_seed(
+                        int(protocol["seeds"]["entropy"]),
+                        direction,
+                        system_index(job["run_name"]),
+                    )
+                    if int(delta_payload["seed"]) != expected_direction_seed:
+                        findings.append(
+                            f"{label}: direction seed "
+                            f"{delta_payload['seed']!r} is not the declared "
+                            f"{expected_direction_seed}"
+                        )
+                    expected_spawn_key = [
+                        PSF_KNOWLEDGE_DIRECTION_SPAWN_KEY,
+                        direction,
+                        system_index(job["run_name"]),
+                    ]
+                    if delta_payload["seed_spawn_key"] != expected_spawn_key:
+                        findings.append(
+                            f"{label}: direction seed spawn key "
+                            f"{delta_payload['seed_spawn_key']!r} is not the "
+                            f"declared {expected_spawn_key!r}"
+                        )
+                measured = delta_payload["measured_draw_rms_nm"]
+                if measured is None or abs(float(measured) - amplitude) > (
+                    1.0e-9*max(1.0, amplitude)
+                ):
+                    findings.append(
+                        f"{label}: measured draw RMS {measured!r} does not "
+                        f"match amplitude {amplitude}"
+                    )
+                if abs(
+                    float(delta_payload["requested_draw_rms_nm"]) - amplitude
+                ) > 1.0e-9*max(1.0, amplitude):
+                    findings.append(
+                        f"{label}: requested draw RMS "
+                        f"{delta_payload['requested_draw_rms_nm']!r} does not "
+                        f"match amplitude {amplitude}"
+                    )
+                if delta_payload["fit_kernel_sha256"] != payload["kernel_sha256"]:
+                    findings.append(
+                        f"{label}: fit_psf_delta fit kernel digest does not "
+                        "match kernel_sha256"
+                    )
+                if delta_payload["truth_kernel_sha256"] != payload[
+                    "truth_kernel_sha256"
+                ]:
+                    findings.append(
+                        f"{label}: fit_psf_delta truth kernel digest does not "
+                        "match truth_kernel_sha256"
+                    )
+                if payload["kernel_sha256"] == payload["truth_kernel_sha256"]:
+                    findings.append(
+                        f"{label}: delta fit kernel unexpectedly equals the "
+                        "truth kernel"
+                    )
+                prior_digest = None
+                if isinstance(knowledge_block, dict):
+                    residual = knowledge_block.get("residual_model")
+                    if isinstance(residual, dict):
+                        prior_digest = residual.get("prior_table_sha256")
+                if prior_digest is None:
+                    findings.append(
+                        f"{label}: PSF knowledge prior digest is unavailable"
+                    )
+                elif delta_payload["prior_table_sha256"] != prior_digest:
+                    findings.append(
+                        f"{label}: prior table digest "
+                        f"{delta_payload['prior_table_sha256']!r} is not the "
+                        f"frozen {prior_digest!r}"
+                    )
+                if (
+                    "family" in delta_payload
+                    and delta_payload["family"] != "combined"
+                ):
+                    findings.append(
+                        f"{label}: fit_psf_delta family "
+                        f"{delta_payload['family']!r} is not 'combined'"
+                    )
+                from hwoslaps.psf.mismatch import _identity_from_payload
+
+                expected_delta_id = _identity_from_payload({
+                    "schema": "psf_mismatch_delta_v1",
+                    "prior_table_sha256": delta_payload[
+                        "prior_table_sha256"
+                    ],
+                    "amplitude_rms_nm": delta_payload["amplitude_rms_nm"],
+                    "seed": delta_payload["seed"],
+                    "family": "combined",
+                    "truth_psf_config_hash": delta_payload[
+                        "truth_psf_config_hash"
+                    ],
+                    "lensing_pixel_scale": delta_payload[
+                        "lensing_pixel_scale"
+                    ],
+                })
+                if delta_payload["delta_id"] != expected_delta_id:
+                    findings.append(
+                        f"{label}: delta_id {delta_payload['delta_id']!r} "
+                        f"is not the re-derived {expected_delta_id!r}"
+                    )
+    elif delta_payload is not None:
+        findings.append(
+            f"{label}: non-delta arm carries a fit_psf_delta payload"
+        )
+    if not is_delta and payload["kernel_sha256"] != payload["truth_kernel_sha256"]:
         findings.append(f"{label}: fit kernel is not the truth kernel")
     if int(payload["n_unmasked_pixels"]) <= 0:
         findings.append(f"{label}: degenerate mask support")
@@ -1178,7 +1373,7 @@ def _campaign_findings(
     protocol: dict,
     manifest_name: str = "<manifest>",
 ) -> list:
-    """Return integrity findings for a v4 manifest's campaign contract.
+    """Return integrity findings for a versioned campaign contract.
 
     Parameters
     ----------
@@ -1197,7 +1392,7 @@ def _campaign_findings(
     Raises
     ------
     ValueError
-        Raised when a schema-3 or version-4 manifest omits its campaign
+        Raised when a schema-3 or version-4-or-later manifest omits its campaign
         mapping.
     """
     schema_version = manifest.get("schema_version")
@@ -1331,7 +1526,431 @@ def _campaign_findings(
                 f"{label}: job arms {sorted(actual_arms)!r} do not equal "
                 f"eligible arms {sorted(expected_arms)!r}"
             )
+            continue
+        for arm_name in expected_arms:
+            declaration = protocol_arms[arm_name]
+            if "fit_psf_delta" not in declaration:
+                continue
+            actual_directions = actual_arms[arm_name].get("directions")
+            expected_directions = {
+                str(direction): {
+                    "seed": derive_direction_seed(
+                        int(protocol["seeds"]["entropy"]),
+                        direction,
+                        system_index(job["run_name"]),
+                    )
+                }
+                for direction in declaration["fit_psf_delta"]["directions"]
+            }
+            if actual_directions != expected_directions:
+                findings.append(
+                    f"{label}/{arm_name}: manifest directions "
+                    f"{actual_directions!r} do not equal "
+                    f"{expected_directions!r}"
+                )
     return findings
+
+
+def _psf_knowledge_recovery_summary(rows: list, label: str) -> dict:
+    """Summarize threshold recovery and missing values for delta rows.
+
+    Parameters
+    ----------
+    rows : `list` [`dict`]
+        Harvest rows belonging to one arm and delta.
+    label : `str`
+        Label identifying the summary in its output.
+
+    Returns
+    -------
+    summary : `dict`
+        Threshold counts, exact intervals and central statistics.
+    """
+    q_values = [row.get("q_fit") for row in rows]
+    evidence_values = [row.get("delta_log_evidence") for row in rows]
+    q_tested = [value for value in q_values if value is not None]
+    evidence_tested = [value for value in evidence_values if value is not None]
+    q_summary = _exceedance_summary(
+        rows,
+        "q_fit",
+        lambda value: value >= Q_FIT_THRESHOLD,
+    )
+    evidence_summary = _exceedance_summary(
+        rows,
+        "delta_log_evidence",
+        lambda value: value > DLOGZ_THRESHOLD,
+    )
+    return {
+        "label": label,
+        "n": len(rows),
+        "n_draws": len(rows),
+        "q_fit_ge_10": q_summary,
+        "dlogZ_gt_5": evidence_summary,
+        "median_q_fit": (
+            float(np.median([float(value) for value in q_tested]))
+            if q_tested
+            else None
+        ),
+        "median_dlogZ": (
+            float(np.median([float(value) for value in evidence_tested]))
+            if evidence_tested
+            else None
+        ),
+    }
+
+
+def _psf_knowledge_system_summary(rows: list) -> dict:
+    """Summarize q-fit exceedances by system for one delta.
+
+    Parameters
+    ----------
+    rows : `list` [`dict`]
+        Harvest rows belonging to one arm and delta.
+
+    Returns
+    -------
+    systems : `dict`
+        System identifier to maximum, count, missing-value and
+        any-exceedance summaries.
+    """
+    systems = {}
+    for system_id in sorted({row["system_id"] for row in rows}):
+        system_rows = [row for row in rows if row["system_id"] == system_id]
+        values = [row["q_fit"] for row in system_rows if row["q_fit"] is not None]
+        count = sum(
+            1 for value in values if float(value) >= Q_FIT_THRESHOLD
+        )
+        systems[system_id] = {
+            "n": len(system_rows),
+            "q_fit_none": len(system_rows) - len(values),
+            "max_q_fit": max((float(value) for value in values), default=None),
+            "q_fit_exceedance_count": count,
+            "any_q_fit_exceedance": bool(count),
+        }
+    return systems
+
+
+def _psf_knowledge_diagnostics(rows: list) -> dict:
+    """Tally boundary and quality diagnostics for one delta and arm.
+
+    Parameters
+    ----------
+    rows : `list` [`dict`]
+        Harvest rows belonging to one arm and delta.
+
+    Returns
+    -------
+    diagnostics : `dict`
+        Boundary flags, quality flags and missing q-fit counts.
+    """
+    boundary = {}
+    quality = {}
+    for row in rows:
+        recovery = row.get("subhalo_recovery") or {}
+        for key in ("mass_at_lower_bound", "mass_at_upper_bound"):
+            boundary[key] = boundary.get(key, 0) + int(
+                recovery.get(key) is True
+            )
+        for flag in row.get("quality_flags", []):
+            quality[flag] = quality.get(flag, 0) + 1
+    return {
+        "q_fit_none": sum(row.get("q_fit") is None for row in rows),
+        "boundary_tally": boundary,
+        "quality_flag_tally": quality,
+    }
+
+
+def _psf_knowledge_bias_summary(rows: list) -> dict:
+    """Summarize posterior mass and position bias for injected rows.
+
+    Parameters
+    ----------
+    rows : `list` [`dict`]
+        Harvest rows belonging to one injected arm and delta.
+
+    Returns
+    -------
+    bias : `dict`
+        Median mass bias in dex and position offset in arcseconds.
+    """
+    mass_bias = []
+    position_offsets = []
+    for row in rows:
+        recovery = row.get("subhalo_recovery") or {}
+        posterior_mass = recovery.get("log10_m200_p50")
+        injection_logm = row.get("injection_logm")
+        if posterior_mass is not None and injection_logm is not None:
+            mass_bias.append(float(posterior_mass) - float(injection_logm))
+        centre_y = recovery.get("centre_y_p50")
+        centre_x = recovery.get("centre_x_p50")
+        if centre_y is None or centre_x is None:
+            centre_y = recovery.get("centre_ml_y")
+            centre_x = recovery.get("centre_ml_x")
+        position = row.get("position_yx_arcsec")
+        if (
+            centre_y is not None
+            and centre_x is not None
+            and isinstance(position, (list, tuple))
+            and len(position) == 2
+        ):
+            position_offsets.append(
+                float(
+                    np.hypot(
+                        float(centre_y) - float(position[0]),
+                        float(centre_x) - float(position[1]),
+                    )
+                )
+            )
+    return {
+        "n_mass_bias": len(mass_bias),
+        "mass_bias_median_dex": (
+            float(np.median(mass_bias)) if mass_bias else None
+        ),
+        "n_position_offset": len(position_offsets),
+        "position_offset_median_arcsec": (
+            float(np.median(position_offsets)) if position_offsets else None
+        ),
+    }
+
+
+def first_separating_delta(delta_summaries, pooled_null) -> float | None:
+    """Return the first delta whose control interval separates the null.
+
+    Parameters
+    ----------
+    delta_summaries : `dict` or sequence
+        Delta-keyed control summaries containing a ``q_fit_ge_10`` interval,
+        or entries with explicit ``delta`` and ``q_fit_ge_10`` members.
+    pooled_null : `dict`
+        Pooled-null summary containing the ``q_fit_ge_10`` interval.
+
+    Returns
+    -------
+    delta : `float` or `None`
+        Smallest delta whose control lower interval bound is above the
+        pooled-null upper bound, or `None` when no delta separates.
+    """
+    if isinstance(delta_summaries, dict):
+        entries = [
+            (float(delta), summary)
+            for delta, summary in delta_summaries.items()
+        ]
+    else:
+        entries = [
+            (float(entry["delta"]), entry)
+            for entry in delta_summaries
+        ]
+    entries.sort(key=lambda item: item[0])
+    null_summary = pooled_null.get("q_fit_ge_10", pooled_null)
+    null_interval = null_summary.get("interval")
+    if not isinstance(null_interval, (list, tuple)) or len(null_interval) != 2:
+        return None
+    null_upper = float(null_interval[1])
+    for delta, summary in entries:
+        q_summary = summary.get("q_fit_ge_10", summary)
+        interval = q_summary.get("interval")
+        if (
+            isinstance(interval, (list, tuple))
+            and len(interval) == 2
+            and float(interval[0]) > null_upper
+        ):
+            return delta
+    return None
+
+
+def _science_psf_knowledge(
+    rows: list,
+    manifest: dict,
+    campaign_dir: Path,
+    freeze: dict,
+) -> dict:
+    """Compute the nonlinear PSF knowledge-error science summaries.
+
+    Parameters
+    ----------
+    rows : `list` [`dict`]
+        Rows present in the current delta campaign.
+    manifest : `dict`
+        Current campaign manifest.
+    campaign_dir : `pathlib.Path`
+        Current campaign directory used to resolve source bindings.
+    freeze : `dict`
+        Validated design freeze document.
+
+    Returns
+    -------
+    science : `dict`
+        Delta control, recovery, null-comparator and diagnostic summaries.
+        Missing source rows are recorded in ``findings``.
+    """
+    campaign = manifest["campaign"]
+    reference_source = campaign.get("reference_source")
+    null_source = campaign.get("null_source")
+    if not isinstance(reference_source, dict):
+        raise ValueError(
+            "psf_knowledge_nonlinear_v1 manifest is missing reference_source"
+        )
+    if not isinstance(null_source, dict):
+        raise ValueError(
+            "psf_knowledge_nonlinear_v1 manifest is missing null_source"
+        )
+    reference_rows, reference_harvest, _ = _load_declared_source_rows(
+        reference_source, campaign_dir, "reference_source"
+    )
+    null_rows, null_harvest, _ = _load_declared_source_rows(
+        null_source, campaign_dir, "null_source"
+    )
+    member_names = [job["run_name"] for job in manifest["jobs"]]
+    member_set = set(member_names)
+    findings = []
+    expected_reference = {}
+    for arm in ("noisy_control", "noisy_injected"):
+        expected_reference[arm] = {}
+        for system_id in member_names:
+            matches = [
+                row
+                for row in reference_rows
+                if row.get("system_id") == system_id
+                and row.get("arm") == arm
+            ]
+            if len(matches) != 1:
+                findings.append(
+                    f"reference_source: expected one {arm} row for "
+                    f"{system_id}, found {len(matches)}"
+                )
+            if matches:
+                expected_reference[arm][system_id] = matches[0]
+    if len(null_rows) != 531:
+        findings.append(
+            f"null_source: expected 531 rows, found {len(null_rows)}"
+        )
+    reference_controls = list(expected_reference["noisy_control"].values())
+    pooled_null = list(null_rows) + reference_controls
+    restricted_null = [
+        row for row in pooled_null if row.get("system_id") in member_set
+    ]
+    if len(pooled_null) != 590:
+        findings.append(
+            f"matched null pool: expected 590 rows, found {len(pooled_null)}"
+        )
+    if len(restricted_null) != 120:
+        findings.append(
+            f"selected12 matched null pool: expected 120 rows, found "
+            f"{len(restricted_null)}"
+        )
+
+    delta_values = sorted({
+        float(protocol_arm["fit_psf_delta"]["amplitude_rms_nm"])
+        for protocol_arm in freeze["nonlinear_validation"]["arms"].values()
+        if "fit_psf_delta" in protocol_arm
+    })
+    controls_by_delta = {}
+    injected_by_delta = {}
+    for delta in delta_values:
+        controls_by_delta[delta] = [
+            row
+            for row in rows
+            if row.get("fit_psf_amplitude_rms_nm") is not None
+            and float(row["fit_psf_amplitude_rms_nm"]) == delta
+            and row.get("subhalo_in_truth") is False
+        ]
+        injected_by_delta[delta] = [
+            row
+            for row in rows
+            if row.get("fit_psf_amplitude_rms_nm") is not None
+            and float(row["fit_psf_amplitude_rms_nm"]) == delta
+            and row.get("subhalo_in_truth") is True
+        ]
+        if len(controls_by_delta[delta]) != 36:
+            findings.append(
+                f"noisy_control delta {delta:g}: expected 36 rows, found "
+                f"{len(controls_by_delta[delta])}"
+            )
+        if len(injected_by_delta[delta]) != 36:
+            findings.append(
+                f"noisy_injected delta {delta:g}: expected 36 rows, found "
+                f"{len(injected_by_delta[delta])}"
+            )
+
+    control_summary = {}
+    for delta in delta_values:
+        control_rows = controls_by_delta[delta]
+        summary = _psf_knowledge_recovery_summary(
+            control_rows, f"noisy_control_d{delta:g}"
+        )
+        summary["n_draws_expected"] = 36
+        summary["per_system"] = _psf_knowledge_system_summary(control_rows)
+        summary["q_fit_quantiles"] = _quantile_summary(
+            [row.get("q_fit") for row in control_rows]
+        )
+        summary["diagnostics"] = _psf_knowledge_diagnostics(control_rows)
+        control_summary[
+            str(delta).rstrip("0").rstrip(".")
+            if delta % 1
+            else str(int(delta))
+        ] = summary
+
+    matched_null_summary = {
+        "pooled_590": _psf_knowledge_recovery_summary(
+            pooled_null, "pooled null plus v1 controls"
+        ),
+        "selected12_120": _psf_knowledge_recovery_summary(
+            restricted_null, "selected12 null plus v1 controls"
+        ),
+        "source_harvest": str(null_harvest),
+    }
+    separation = first_separating_delta(
+        control_summary,
+        matched_null_summary["pooled_590"],
+    )
+
+    baseline_injected = list(expected_reference["noisy_injected"].values())
+    recovery = {
+        "delta_0_reference": _psf_knowledge_recovery_summary(
+            baseline_injected, "v1 noisy_injected delta 0"
+        ),
+        "per_delta": {},
+    }
+    baseline_q = recovery["delta_0_reference"]["median_q_fit"]
+    for delta in delta_values:
+        injected_rows = injected_by_delta[delta]
+        entry = _psf_knowledge_recovery_summary(
+            injected_rows, f"noisy_injected_d{delta:g}"
+        )
+        entry["diagnostics"] = _psf_knowledge_diagnostics(injected_rows)
+        entry["bias"] = _psf_knowledge_bias_summary(injected_rows)
+        entry["median_q_fit_shift"] = (
+            entry["median_q_fit"] - baseline_q
+            if entry["median_q_fit"] is not None and baseline_q is not None
+            else None
+        )
+        recovery["per_delta"][
+            str(delta).rstrip("0").rstrip(".")
+            if delta % 1
+            else str(int(delta))
+        ] = entry
+
+    return {
+        "findings": findings,
+        "expected_delta_draws": 36,
+        "reference_source": {
+            "harvest": str(reference_harvest),
+            "campaign_uuid": reference_source["campaign_uuid"],
+            "n_control_rows": len(reference_controls),
+            "n_injected_rows": len(baseline_injected),
+        },
+        "null_source": {
+            "harvest": str(null_harvest),
+            "campaign_uuid": null_source["campaign_uuid"],
+            "n_rows": len(null_rows),
+        },
+        "control": {
+            "per_delta": control_summary,
+            "first_separating_delta": separation,
+        },
+        "matched_null": matched_null_summary,
+        "recovery": recovery,
+    }
 
 
 def _science(
@@ -1341,7 +1960,7 @@ def _science(
     campaign_dir: Path | None = None,
     freeze: dict | None = None,
 ) -> dict:
-    """Dispatch legacy and v4 campaign science summaries."""
+    """Dispatch legacy, v4 and v5 campaign science summaries."""
     if manifest is None or manifest.get("campaign") is None:
         return _science_v3(rows)
     campaign_name = manifest.get("name")
@@ -1419,6 +2038,16 @@ def _science(
 
             freeze = load_design_freeze()
         return _science_null(rows, manifest, campaign_dir, freeze)
+    if campaign_name == "psf_knowledge_nonlinear_v1":
+        if campaign_dir is None:
+            raise ValueError(
+                "psf_knowledge_nonlinear_v1 science requires campaign_dir"
+            )
+        if freeze is None:
+            from hwoslaps.campaign.design_freeze import load_design_freeze
+
+            freeze = load_design_freeze()
+        return _science_psf_knowledge(rows, manifest, campaign_dir, freeze)
     raise ValueError(f"Unsupported nonlinear campaign {campaign_name!r}")
 
 
@@ -1448,18 +2077,37 @@ def main(argv=None) -> None:
         for arm in sorted(
             job["arms"], key=lambda name: job["arms"][name]["arm_index"]
         ):
-            artifact = (
-                Path(job["output_dir"])/f"nonlinear_validation_{arm}.json"
+            declaration = protocol["arms"][arm]
+            directions = (
+                declaration["fit_psf_delta"]["directions"]
+                if "fit_psf_delta" in declaration
+                else [None]
             )
-            if not artifact.is_file():
-                missing.append(f"{job['run_name']}/{arm}")
-                continue
-            with open(artifact, encoding="utf-8") as stream:
-                payload = json.load(stream)
-            findings.extend(
-                _verify_row(job, arm, payload, manifest, protocol)
-            )
-            rows.append(_row(job, arm, payload))
+            for direction in directions:
+                suffix = "" if direction is None else f"_dir{direction}"
+                artifact = (
+                    Path(job["output_dir"])
+                    / f"nonlinear_validation_{arm}{suffix}.json"
+                )
+                label = f"{job['run_name']}/{arm}"
+                if direction is not None:
+                    label += f"/dir{direction}"
+                if not artifact.is_file():
+                    missing.append(label)
+                    continue
+                with open(artifact, encoding="utf-8") as stream:
+                    payload = json.load(stream)
+                findings.extend(
+                    _verify_row(
+                        job,
+                        arm,
+                        payload,
+                        manifest,
+                        protocol,
+                        freeze.get("psf_knowledge_error"),
+                    )
+                )
+                rows.append(_row(job, arm, payload))
 
     if missing and not args.allow_incomplete:
         raise SystemExit(
@@ -1467,6 +2115,8 @@ def main(argv=None) -> None:
             f"(first: {missing[:5]}); pass --allow-incomplete to summarize"
         )
 
+    science = _science(rows, manifest, protocol, campaign_dir, freeze)
+    findings.extend(science.get("findings", []))
     review = {
         "schema_version": 2,
         "campaign_uuid": manifest["campaign_uuid"],
@@ -1485,7 +2135,7 @@ def main(argv=None) -> None:
         "total_fit_wall_hours": float(
             sum(row["fit_pair_s"] for row in rows)/3600.0
         ),
-        "science": _science(rows, manifest, protocol, campaign_dir, freeze),
+        "science": science,
     }
 
     harvest_dir = campaign_dir/"harvest"

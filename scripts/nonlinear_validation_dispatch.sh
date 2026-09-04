@@ -2,7 +2,7 @@
 # Flock-queue dispatcher for the nonlinear-validation campaign.
 #
 # usage: nonlinear_validation_dispatch.sh <campaign_dir> <phase> <gpu>[,<gpu>...]
-#   phase: positions | fits
+#   phase: positions | smokes | fits | maps | maps_smokes
 #
 # One worker per listed GPU pulls lines off the phase queue under an
 # exclusive flock. A job whose artifact already exists is skipped, so
@@ -25,6 +25,8 @@ case "$PHASE" in
   positions) QUEUE="$CAMPAIGN_DIR/positions_queue.txt" ;;
   smokes) QUEUE="$CAMPAIGN_DIR/smokes_queue.txt" ;;
   fits) QUEUE="$CAMPAIGN_DIR/fits_queue.txt" ;;
+  maps) QUEUE="$CAMPAIGN_DIR/maps_queue.txt" ;;
+  maps_smokes) QUEUE="$CAMPAIGN_DIR/smokes_queue.txt" ;;
   *) echo "unknown phase: $PHASE" >&2; exit 2 ;;
 esac
 [ -f "$QUEUE" ] || { echo "missing queue: $QUEUE" >&2; exit 2; }
@@ -84,10 +86,26 @@ worker() {
       if [ -f "$out/injection_position.json" ]; then
         echo "$label skip $tag (artifact exists)"; continue
       fi
+    elif [ "$PHASE" = maps ] || [ "$PHASE" = maps_smokes ]; then
+      if [ "${#FIELDS[@]}" -ne 5 ] || ! [[ "${FIELDS[2]}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "$label invalid maps queue line: $line" >&2
+        continue
+      fi
+      out="${FIELDS[4]}"
+      tag="$(basename "$out")_delta${FIELDS[2]}_dir${FIELDS[3]}"
+      if [ -f "$out/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json" ]; then
+        echo "$label skip $tag (artifact exists)"; continue
+      fi
     else
       out="${FIELDS[3]}"
-      tag="$(basename "$out")_${FIELDS[2]}"
-      if [ -f "$out/nonlinear_validation_${FIELDS[2]}.json" ]; then
+      if [ "${#FIELDS[@]}" -ge 5 ]; then
+        tag="$(basename "$out")_${FIELDS[2]}_dir${FIELDS[4]}"
+        artifact="$out/nonlinear_validation_${FIELDS[2]}_dir${FIELDS[4]}.json"
+      else
+        tag="$(basename "$out")_${FIELDS[2]}"
+        artifact="$out/nonlinear_validation_${FIELDS[2]}.json"
+      fi
+      if [ -f "$artifact" ]; then
         echo "$label skip $tag (artifact exists)"; continue
       fi
     fi
@@ -99,11 +117,25 @@ worker() {
         "${FIELDS[0]}" "${FIELDS[1]}" "$out" \
         > "$LOGDIR/$tag.log" 2>&1
       rc=$?
-    else
+    elif [ "$PHASE" = maps ] || [ "$PHASE" = maps_smokes ]; then
       CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
-        "$REPO_ROOT/scripts/run_nonlinear_validation.py" \
-        "${FIELDS[0]}" "${FIELDS[1]}" "${FIELDS[2]}" "$out" \
+        "$REPO_ROOT/scripts/run_psf_knowledge_map.py" \
+        "${FIELDS[0]}" "${FIELDS[1]}" "${FIELDS[2]}" "${FIELDS[3]}" "$out" \
         > "$LOGDIR/$tag.log" 2>&1
+      rc=$?
+    else
+      if [ "${#FIELDS[@]}" -ge 5 ]; then
+        CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
+          "$REPO_ROOT/scripts/run_nonlinear_validation.py" \
+          "${FIELDS[0]}" "${FIELDS[1]}" "${FIELDS[2]}" "$out" \
+          --direction "${FIELDS[4]}" \
+          > "$LOGDIR/$tag.log" 2>&1
+      else
+        CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
+          "$REPO_ROOT/scripts/run_nonlinear_validation.py" \
+          "${FIELDS[0]}" "${FIELDS[1]}" "${FIELDS[2]}" "$out" \
+          > "$LOGDIR/$tag.log" 2>&1
+      fi
       rc=$?
     fi
     if [ "$rc" -eq 0 ]; then
@@ -138,9 +170,17 @@ while IFS= read -r line; do
   read -r -a FIELDS <<< "$line"
   if [ "$PHASE" = positions ]; then
     [ -f "${FIELDS[2]}/injection_position.json" ] || MISSING=$((MISSING + 1))
-  else
-    [ -f "${FIELDS[3]}/nonlinear_validation_${FIELDS[2]}.json" ] \
+  elif [ "$PHASE" = maps ] || [ "$PHASE" = maps_smokes ]; then
+    [ -f "${FIELDS[4]}/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json" ] \
       || MISSING=$((MISSING + 1))
+  else
+    if [ "${#FIELDS[@]}" -ge 5 ]; then
+      [ -f "${FIELDS[3]}/nonlinear_validation_${FIELDS[2]}_dir${FIELDS[4]}.json" ] \
+        || MISSING=$((MISSING + 1))
+    else
+      [ -f "${FIELDS[3]}/nonlinear_validation_${FIELDS[2]}.json" ] \
+        || MISSING=$((MISSING + 1))
+    fi
   fi
 done < "$QUEUE"
 

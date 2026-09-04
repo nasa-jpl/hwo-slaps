@@ -50,6 +50,9 @@ SAMPLER_SPAWN_KEY = 5
 NULL_NOISE_SPAWN_KEY = 6
 """Leading spawn key of the declared null-noise stream (`int`)."""
 
+PSF_KNOWLEDGE_DIRECTION_SPAWN_KEY = 7
+"""Leading spawn key of the PSF knowledge direction stream (`int`)."""
+
 
 def load_protocol(path=DESIGN_FREEZE_PATH) -> dict:
     """Load the declared nonlinear-validation protocol block.
@@ -145,6 +148,119 @@ def derive_noise_seed(entropy: int, replicate: int, index: int) -> int:
         spawn_key=(NULL_NOISE_SPAWN_KEY, int(replicate), int(index)),
     )
     return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def derive_direction_seed(entropy: int, direction: int, index: int) -> int:
+    """Derive one declared PSF knowledge-error direction seed.
+
+    Parameters
+    ----------
+    entropy : `int`
+        The freeze seed entropy.
+    direction : `int`
+        Direction index ``d`` in the PSF knowledge direction stream.
+    index : `int`
+        System index ``i``.
+
+    Returns
+    -------
+    seed : `int`
+        The 32-bit direction seed of the freeze's PSF knowledge stream.
+    """
+    sequence = np.random.SeedSequence(
+        entropy=int(entropy),
+        spawn_key=(PSF_KNOWLEDGE_DIRECTION_SPAWN_KEY, int(direction), int(index)),
+    )
+    return int(sequence.generate_state(1, dtype=np.uint32)[0])
+
+
+def validate_direction_argument(
+    declaration: dict,
+    direction: int | None,
+) -> None:
+    """Validate the optional direction against one arm declaration.
+
+    Parameters
+    ----------
+    declaration : `dict`
+        Arm declaration from the nonlinear-validation protocol.
+    direction : `int` or `None`
+        Direction supplied by the queue, or no direction.
+
+    Raises
+    ------
+    ValueError
+        Raised when the direction presence or value disagrees with the arm.
+    """
+    carries_delta = "fit_psf_delta" in declaration
+    if carries_delta and direction is None:
+        raise ValueError(
+            "A fit_psf_delta arm requires --direction"
+        )
+    if not carries_delta and direction is not None:
+        raise ValueError(
+            "--direction is only valid for an arm carrying fit_psf_delta"
+        )
+    if direction is None:
+        return
+    if isinstance(direction, bool) or not isinstance(direction, int):
+        raise ValueError(f"direction must be an integer, got {direction!r}")
+    declared_directions = declaration["fit_psf_delta"].get("directions")
+    if direction not in declared_directions:
+        raise ValueError(
+            f"direction {direction} is not declared for this arm; declared "
+            f"directions are {declared_directions!r}"
+        )
+
+
+def apply_direction_override(
+    arm_config: dict,
+    declaration: dict,
+    entropy: int,
+    index: int,
+    direction: int,
+) -> tuple[dict, int]:
+    """Apply one PSF knowledge direction to a private arm configuration.
+
+    Parameters
+    ----------
+    arm_config : `dict`
+        Configuration already built for the validation arm.
+    declaration : `dict`
+        Arm declaration carrying ``fit_psf_delta``.
+    entropy : `int`
+        The freeze seed entropy.
+    index : `int`
+        System index ``i``.
+    direction : `int`
+        Declared direction index ``d``.
+
+    Returns
+    -------
+    config : `dict`
+        Deep-copied arm configuration carrying the declared amplitude and
+        direction seed.
+    seed : `int`
+        Direction seed written into the private configuration.
+
+    Raises
+    ------
+    ValueError
+        Raised when the arm has no compatible fit-PSF delta declaration.
+    """
+    validate_direction_argument(declaration, direction)
+    if "fit_psf_delta" not in declaration:
+        raise ValueError(
+            "Cannot apply a PSF knowledge direction to a non-delta arm"
+        )
+    config = copy.deepcopy(arm_config)
+    seed = derive_direction_seed(entropy, direction, index)
+    delta = config["modeling"]["fit_psf"]["delta"]
+    delta["amplitude_rms_nm"] = float(
+        declaration["fit_psf_delta"]["amplitude_rms_nm"]
+    )
+    delta["seed"] = seed
+    return config, seed
 
 
 def apply_noise_replicate(
@@ -288,6 +404,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Replace an existing arm artifact",
     )
+    parser.add_argument(
+        "--direction",
+        type=int,
+        help="Declared PSF knowledge-error direction index",
+    )
     return parser
 
 
@@ -295,12 +416,6 @@ def main(argv=None) -> None:
     """Run one validation arm's fit pair and write its artifact."""
     args = _build_parser().parse_args(argv)
     output_dir = Path(args.output_dir)
-    artifact_path = output_dir/f"nonlinear_validation_{args.arm}.json"
-    if artifact_path.exists() and not args.force:
-        raise ValueError(
-            f"Refusing to overwrite {artifact_path}; pass --force to replace it"
-        )
-
     protocol = load_protocol()
     fit_block = protocol["fit"]
     arms = protocol["arms"]
@@ -310,6 +425,15 @@ def main(argv=None) -> None:
             f"{sorted(arms)}"
         )
     declaration = arms[args.arm]
+    validate_direction_argument(declaration, args.direction)
+    artifact_suffix = (
+        "" if args.direction is None else f"_dir{args.direction}"
+    )
+    artifact_path = output_dir/f"nonlinear_validation_{args.arm}{artifact_suffix}.json"
+    if artifact_path.exists() and not args.force:
+        raise ValueError(
+            f"Refusing to overwrite {artifact_path}; pass --force to replace it"
+        )
 
     declared_workers = str(fit_block["nautilus_training_workers"])
     effective_workers = os.environ.get("HWOSLAPS_NAUTILUS_TRAINING_WORKERS")
@@ -408,6 +532,15 @@ def main(argv=None) -> None:
             system_index(system_id_value),
         )
     )
+    direction_seed = None
+    if args.direction is not None:
+        arm_config, direction_seed = apply_direction_override(
+            arm_config,
+            declaration,
+            int(protocol["seeds"]["entropy"]),
+            system_index(system_id_value),
+            args.direction,
+        )
 
     lensing_injected = generate_lensing_system(
         injected_config["lensing"], full_config=injected_config
@@ -463,7 +596,7 @@ def main(argv=None) -> None:
         float(rung_payload["mass_msun"]),
         (float(position[0]), float(position[1])),
         fisher_q=float(rung_payload["q_f_matched"]),
-        case_id=f"{system_id_value}_{args.arm}",
+        case_id=f"{system_id_value}_{args.arm}{artifact_suffix}",
     )
     # The M200 mapping context exists only for the freed search; the
     # model builder requires None for the fixed-template mode.
@@ -484,7 +617,7 @@ def main(argv=None) -> None:
             number_of_cores=int(fit_block["number_of_cores"]),
             maxcall=int(fit_block["maxcall"]),
             seed=seed,
-            path_prefix=f"{system_id_value}_{args.arm}",
+            path_prefix=f"{system_id_value}_{args.arm}{artifact_suffix}",
             use_jax=True,
             jax_n_batch=int(fit_block["jax_n_batch"]),
         ),
@@ -571,6 +704,32 @@ def main(argv=None) -> None:
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "campaign_uuid": os.environ.get("HWOSLAPS_CAMPAIGN_UUID", ""),
     }
+    if args.direction is None:
+        payload["fit_psf_delta"] = None
+    else:
+        delta = declaration["fit_psf_delta"]
+        payload["fit_psf_delta"] = {
+            "amplitude_rms_nm": float(delta["amplitude_rms_nm"]),
+            "direction": int(args.direction),
+            "seed": int(direction_seed),
+            "seed_spawn_key": [
+                PSF_KNOWLEDGE_DIRECTION_SPAWN_KEY,
+                int(args.direction),
+                system_index(system_id_value),
+            ],
+            "delta_id": result.delta_id,
+            "requested_draw_rms_nm": result.requested_amplitude_rms_nm,
+            "measured_draw_rms_nm": result.measured_draw_rms_nm,
+            "fit_kernel_sha256": result.kernel_sha256,
+            "truth_kernel_sha256": result.truth_kernel_sha256,
+            "fit_psf_config_hash": result.fit_psf_config_hash,
+            "truth_psf_config_hash": result.truth_psf_config_hash,
+            "lensing_pixel_scale": float(
+                arm_config["lensing"]["grid"]["pixel_scale"]
+            ),
+            "prior_table_sha256": result.prior_table_sha256,
+            "family": result.family,
+        }
     output_dir.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n",

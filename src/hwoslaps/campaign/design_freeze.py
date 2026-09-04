@@ -24,6 +24,7 @@ the provenance chain even though it is not frozen in a test.
 from __future__ import annotations
 
 import hashlib
+import math
 from pathlib import Path
 from typing import Any, Optional
 
@@ -67,6 +68,7 @@ REQUIRED_BLOCKS = (
     "reporting",
     "parent_design_source",
     "parent_design",
+    "psf_knowledge_error",
     "nonlinear_validation",
 )
 """Top-level blocks every freeze document must carry (`tuple` of `str`)."""
@@ -454,6 +456,47 @@ def _validate_seeds(freeze: dict) -> None:
             "seeds.streams.null_noise.replicate_indices must list "
             f"1 .. {null_replicates} explicitly"
         )
+    direction_stream = _require_mapping(
+        _required(
+            streams,
+            "psf_knowledge_direction",
+            "seeds.streams",
+        ),
+        "seeds.streams.psf_knowledge_direction",
+    )
+    if _required(
+        direction_stream,
+        "spawn_key",
+        "seeds.streams.psf_knowledge_direction",
+    ) != [7]:
+        raise DesignFreezeError(
+            "seeds.streams.psf_knowledge_direction.spawn_key must be exactly [7]"
+        )
+    directions = _require_positive_int(
+        _required(
+            direction_stream,
+            "directions",
+            "seeds.streams.psf_knowledge_direction",
+        ),
+        "seeds.streams.psf_knowledge_direction.directions",
+    )
+    direction_indices = _required(
+        direction_stream,
+        "direction_indices",
+        "seeds.streams.psf_knowledge_direction",
+    )
+    if (
+        not isinstance(direction_indices, list)
+        or any(
+            isinstance(direction, bool) or not isinstance(direction, int)
+            for direction in direction_indices
+        )
+        or direction_indices != list(range(1, directions + 1))
+    ):
+        raise DesignFreezeError(
+            "seeds.streams.psf_knowledge_direction.direction_indices must "
+            f"list 1 .. {directions} explicitly"
+        )
     order = _required(seeds, "draw_order", "seeds")
     design_order = list(freeze["parent_design"]["seeds"]["draw_order"])
     if list(order) != design_order:
@@ -466,6 +509,333 @@ def _validate_seeds(freeze: dict) -> None:
         raise DesignFreezeError(
             f"seeds.entropy {entropy} does not match the embedded parent "
             f"design entropy {design_entropy}"
+        )
+
+
+def _validate_psf_knowledge_error(freeze: dict) -> None:
+    """Validate the frozen PSF knowledge-error protocol block.
+
+    Parameters
+    ----------
+    freeze : `dict`
+        Freeze document whose PSF knowledge-error block is checked.
+
+    Raises
+    ------
+    DesignFreezeError
+        Raised when the residual rungs, direction stream, prior binding,
+        gates, ratio floor, member set or Fisher campaign is malformed.
+    """
+    block = _require_mapping(
+        freeze["psf_knowledge_error"], "psf_knowledge_error"
+    )
+    for key in (
+        "declared_v5",
+        "rulings_v5",
+        "purpose",
+        "truth_state",
+        "residual_model",
+        "member_set",
+        "mass_rungs_rule",
+        "estimands",
+        "reporting",
+        "success_criteria",
+        "campaigns",
+        "kernel_shape_native",
+    ):
+        _required(block, key, "psf_knowledge_error")
+    if block["truth_state"] != "science35":
+        raise DesignFreezeError(
+            "psf_knowledge_error.truth_state must be 'science35'"
+        )
+
+    residual = _require_mapping(
+        block["residual_model"], "psf_knowledge_error.residual_model"
+    )
+    rungs = _required(
+        residual,
+        "amplitude_rms_nm_rungs",
+        "psf_knowledge_error.residual_model",
+    )
+    if not isinstance(rungs, list) or not rungs:
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model.amplitude_rms_nm_rungs "
+            "must be a non-empty list"
+        )
+    rung_values = []
+    for index, value in enumerate(rungs):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise DesignFreezeError(
+                "psf_knowledge_error.residual_model."
+                f"amplitude_rms_nm_rungs[{index}] must be a finite number"
+            )
+        number = float(value)
+        if not math.isfinite(number):
+            raise DesignFreezeError(
+                "psf_knowledge_error.residual_model."
+                f"amplitude_rms_nm_rungs[{index}] must be finite"
+            )
+        if index and number <= rung_values[-1]:
+            raise DesignFreezeError(
+                "psf_knowledge_error.residual_model."
+                "amplitude_rms_nm_rungs must be strictly increasing"
+            )
+        rung_values.append(number)
+    if rung_values[0] != 0.0:
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model."
+            "amplitude_rms_nm_rungs must start at 0.0"
+        )
+    endpoint = _require_nonnegative_float(
+        _required(
+            residual,
+            "endpoint_anchor_nm",
+            "psf_knowledge_error.residual_model",
+        ),
+        "psf_knowledge_error.residual_model.endpoint_anchor_nm",
+    )
+    if endpoint != rung_values[-1]:
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model.endpoint_anchor_nm must "
+            "equal the last amplitude RMS rung"
+        )
+    if residual.get("mode") != "delta":
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model.mode must be 'delta'"
+        )
+    if residual.get("family") != "combined":
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model.family must be 'combined'"
+        )
+    directions = _require_positive_int(
+        _required(
+            residual,
+            "directions",
+            "psf_knowledge_error.residual_model",
+        ),
+        "psf_knowledge_error.residual_model.directions",
+    )
+    direction_indices = _required(
+        residual,
+        "direction_indices",
+        "psf_knowledge_error.residual_model",
+    )
+    if (
+        not isinstance(direction_indices, list)
+        or any(
+            isinstance(direction, bool) or not isinstance(direction, int)
+            for direction in direction_indices
+        )
+        or direction_indices != list(range(1, directions + 1))
+    ):
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model.direction_indices must "
+            f"list 1 .. {directions} explicitly"
+        )
+
+    prior_path = _required(
+        residual,
+        "prior_table",
+        "psf_knowledge_error.residual_model",
+    )
+    if not isinstance(prior_path, str) or not prior_path:
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model.prior_table must be a "
+            "non-empty repo-relative path"
+        )
+    root = repo_root().resolve()
+    resolved_prior = (root/prior_path).resolve()
+    try:
+        resolved_prior.relative_to(root)
+    except ValueError as exc:
+        raise DesignFreezeError(
+            "psf_knowledge_error.residual_model.prior_table must be under "
+            f"the repository root, got {prior_path!r}"
+        ) from exc
+    if not resolved_prior.is_file():
+        raise DesignFreezeError(
+            "psf_knowledge_error residual prior table does not exist: "
+            f"{resolved_prior}"
+        )
+    prior_digest = _require_sha256(
+        _required(
+            residual,
+            "prior_table_sha256",
+            "psf_knowledge_error.residual_model",
+        ),
+        "psf_knowledge_error.residual_model.prior_table_sha256",
+    )
+    observed_digest = file_sha256(resolved_prior)
+    if observed_digest != prior_digest:
+        raise DesignFreezeError(
+            "psf_knowledge_error residual prior table sha256 "
+            f"{observed_digest} does not match bound {prior_digest}"
+        )
+
+    gates = _require_mapping(
+        _required(block, "gates", "psf_knowledge_error"),
+        "psf_knowledge_error.gates",
+    )
+    retention = _require_positive_float(
+        _required(gates, "retention_q10_min", "psf_knowledge_error.gates"),
+        "psf_knowledge_error.gates.retention_q10_min",
+    )
+    spurious = _require_positive_float(
+        _required(gates, "spurious_q90_max", "psf_knowledge_error.gates"),
+        "psf_knowledge_error.gates.spurious_q90_max",
+    )
+    if retention >= 1.0 or spurious >= 1.0:
+        raise DesignFreezeError(
+            "psf_knowledge_error.gates values must lie strictly between 0 "
+            "and 1"
+        )
+    if retention <= 0.5:
+        raise DesignFreezeError(
+            "psf_knowledge_error.gates.retention_q10_min must be greater "
+            "than 0.5"
+        )
+    if spurious >= 0.5:
+        raise DesignFreezeError(
+            "psf_knowledge_error.gates.spurious_q90_max must be less than "
+            "0.5"
+        )
+    sensitivity = _required(gates, "sensitivity", "psf_knowledge_error.gates")
+    if not isinstance(sensitivity, list) or not sensitivity:
+        raise DesignFreezeError(
+            "psf_knowledge_error.gates.sensitivity must be a non-empty list"
+        )
+    for index, pair in enumerate(sensitivity):
+        if not isinstance(pair, list) or len(pair) != 2:
+            raise DesignFreezeError(
+                "psf_knowledge_error.gates.sensitivity["
+                f"{index}] must be a two-element list"
+            )
+        pair_retention = _require_positive_float(
+            pair[0], f"psf_knowledge_error.gates.sensitivity[{index}][0]"
+        )
+        pair_spurious = _require_positive_float(
+            pair[1], f"psf_knowledge_error.gates.sensitivity[{index}][1]"
+        )
+        if pair_retention >= 1.0 or pair_spurious >= 1.0:
+            raise DesignFreezeError(
+                "psf_knowledge_error.gates.sensitivity values must lie "
+                "strictly between 0 and 1"
+            )
+        if pair_retention <= 0.5 or pair_spurious >= 0.5:
+            raise DesignFreezeError(
+                "psf_knowledge_error.gates.sensitivity must use retention "
+                "above 0.5 and spurious below 0.5"
+            )
+
+    floor = _require_mapping(
+        _required(block, "ratio_floor", "psf_knowledge_error"),
+        "psf_knowledge_error.ratio_floor",
+    )
+    floor_cells = _require_positive_int(
+        _required(floor, "cells", "psf_knowledge_error.ratio_floor"),
+        "psf_knowledge_error.ratio_floor.cells",
+    )
+    floor_area = _require_positive_float(
+        _required(floor, "arcsec2", "psf_knowledge_error.ratio_floor"),
+        "psf_knowledge_error.ratio_floor.arcsec2",
+    )
+    if abs(floor_area - floor_cells*0.0025) > 1.0e-12:
+        raise DesignFreezeError(
+            "psf_knowledge_error.ratio_floor.arcsec2 must equal cells "
+            "times 0.0025 to 1e-12"
+        )
+    _required(floor, "rule", "psf_knowledge_error.ratio_floor")
+
+    member_set = _require_mapping(
+        _required(block, "member_set", "psf_knowledge_error"),
+        "psf_knowledge_error.member_set",
+    )
+    for key in ("name", "source", "source_campaign_uuid", "n_systems", "tier"):
+        _required(member_set, key, "psf_knowledge_error.member_set")
+    if member_set["tier"] != "selected":
+        raise DesignFreezeError(
+            "psf_knowledge_error.member_set.tier must be 'selected'"
+        )
+    member_count = _require_positive_int(
+        member_set["n_systems"], "psf_knowledge_error.member_set.n_systems"
+    )
+    selected_count = _require_positive_int(
+        freeze["strata"]["selected"]["size"], "strata.selected.size"
+    )
+    if member_count != selected_count:
+        raise DesignFreezeError(
+            "psf_knowledge_error.member_set.n_systems must equal "
+            f"strata.selected.size {selected_count}"
+        )
+
+    campaigns = _require_mapping(
+        _required(block, "campaigns", "psf_knowledge_error"),
+        "psf_knowledge_error.campaigns",
+    )
+    campaign = _require_mapping(
+        _required(
+            campaigns,
+            "psf_knowledge_fisher_v1",
+            "psf_knowledge_error.campaigns",
+        ),
+        "psf_knowledge_error.campaigns.psf_knowledge_fisher_v1",
+    )
+    campaign_path = "psf_knowledge_error.campaigns.psf_knowledge_fisher_v1"
+    if campaign.get("block") != "psf_knowledge_error":
+        raise DesignFreezeError(
+            f"{campaign_path}.block must be 'psf_knowledge_error'"
+        )
+    if campaign.get("member_set") != member_set["name"]:
+        raise DesignFreezeError(
+            f"{campaign_path}.member_set must equal "
+            "psf_knowledge_error.member_set.name"
+        )
+    if campaign.get("phases") != ["maps"]:
+        raise DesignFreezeError(f"{campaign_path}.phases must be exactly ['maps']")
+    smoke = _require_mapping(
+        _required(campaign, "smoke_rule", campaign_path),
+        f"{campaign_path}.smoke_rule",
+    )
+    smoke_deltas = _required(smoke, "deltas", f"{campaign_path}.smoke_rule")
+    if not isinstance(smoke_deltas, list):
+        raise DesignFreezeError(f"{campaign_path}.smoke_rule.deltas must be a list")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        for value in smoke_deltas
+    ):
+        raise DesignFreezeError(
+            f"{campaign_path}.smoke_rule.deltas must contain numbers"
+        )
+    smoke_values = [float(value) for value in smoke_deltas]
+    if any(value not in rung_values for value in smoke_values):
+        raise DesignFreezeError(
+            f"{campaign_path}.smoke_rule.deltas must be a subset of the "
+            "declared amplitude RMS rungs"
+        )
+    if 0.0 not in smoke_values or not any(value > 0.0 for value in smoke_values):
+        raise DesignFreezeError(
+            f"{campaign_path}.smoke_rule.deltas must contain 0 and a positive rung"
+        )
+    smoke_direction = _required(smoke, "direction", f"{campaign_path}.smoke_rule")
+    if (
+        isinstance(smoke_direction, bool)
+        or not isinstance(smoke_direction, int)
+        or smoke_direction not in direction_indices
+    ):
+        raise DesignFreezeError(
+            f"{campaign_path}.smoke_rule.direction must be one of the "
+            "declared direction indices"
+        )
+    smoke_members = _required(smoke, "members", f"{campaign_path}.smoke_rule")
+    if smoke_members != ["smallest_image", "largest_image"]:
+        raise DesignFreezeError(
+            f"{campaign_path}.smoke_rule.members must be exactly "
+            "['smallest_image', 'largest_image']"
+        )
+    kernel_shape = _required(block, "kernel_shape_native", "psf_knowledge_error")
+    if kernel_shape != [999, 999]:
+        raise DesignFreezeError(
+            "psf_knowledge_error.kernel_shape_native must be exactly [999, 999]"
         )
 
 
@@ -691,6 +1061,7 @@ def validate_design_freeze(document: dict) -> dict:
 
     _validate_templates(freeze)
     _validate_seeds(freeze)
+    _validate_psf_knowledge_error(freeze)
     _validate_extraction_settings(freeze)
     _validate_module_constants(freeze)
     _validate_nonlinear_validation(freeze)
@@ -698,7 +1069,7 @@ def validate_design_freeze(document: dict) -> dict:
 
 
 def _validate_nonlinear_validation(freeze: dict) -> None:
-    """Validate the version-4 nonlinear-validation protocol block.
+    """Validate the version-4 and version-5 nonlinear protocol block.
 
     Parameters
     ----------
@@ -716,6 +1087,9 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
     block = _require_mapping(
         freeze["nonlinear_validation"], "nonlinear_validation"
     )
+    if int(freeze["freeze"]["version"]) >= 5:
+        for key in ("declared_v5", "rulings_v5"):
+            _required(block, key, "nonlinear_validation")
     missing = [
         key for key in REQUIRED_NONLINEAR_VALIDATION_KEYS if key not in block
     ]
@@ -742,12 +1116,28 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
         "replicate_indices",
         "seeds.streams.null_noise",
     )
+    knowledge = _require_mapping(
+        freeze["psf_knowledge_error"], "psf_knowledge_error"
+    )
+    knowledge_residual = _require_mapping(
+        knowledge["residual_model"], "psf_knowledge_error.residual_model"
+    )
+    knowledge_rungs = [
+        float(value)
+        for value in knowledge_residual["amplitude_rms_nm_rungs"]
+    ]
+    direction_stream = _require_mapping(
+        freeze["seeds"]["streams"]["psf_knowledge_direction"],
+        "seeds.streams.psf_knowledge_direction",
+    )
+    direction_indices = list(direction_stream["direction_indices"])
 
     arms = _require_mapping(block["arms"], "nonlinear_validation.arms")
     if not arms:
         raise DesignFreezeError("nonlinear_validation.arms is empty")
     indices = []
     replicate_by_arm = {}
+    delta_pairs = {}
     for name, declaration in arms.items():
         arm = _require_mapping(
             declaration, f"nonlinear_validation.arms.{name}"
@@ -784,6 +1174,61 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
                 f"nonlinear_validation.arms.{name}.sample must be "
                 "'all', 'non_censored' or 'golden'"
             )
+        if "fit_psf_delta" in arm:
+            delta_path = f"nonlinear_validation.arms.{name}.fit_psf_delta"
+            delta = _require_mapping(arm["fit_psf_delta"], delta_path)
+            amplitude = _require_positive_float(
+                _required(delta, "amplitude_rms_nm", delta_path),
+                f"{delta_path}.amplitude_rms_nm",
+            )
+            if amplitude not in knowledge_rungs:
+                raise DesignFreezeError(
+                    f"{delta_path}.amplitude_rms_nm must be a positive "
+                    "declared PSF knowledge-error rung"
+                )
+            directions = _required(delta, "directions", delta_path)
+            if not isinstance(directions, list) or not directions:
+                raise DesignFreezeError(
+                    f"{delta_path}.directions must be a non-empty list"
+                )
+            if any(
+                isinstance(direction, bool)
+                or not isinstance(direction, int)
+                or direction not in direction_indices
+                for direction in directions
+            ):
+                raise DesignFreezeError(
+                    f"{delta_path}.directions must use the declared "
+                    "direction indices"
+                )
+            if len(set(directions)) != len(directions):
+                raise DesignFreezeError(
+                    f"{delta_path}.directions must be unique"
+                )
+            if arm["dataset_kind"] != "noisy":
+                raise DesignFreezeError(
+                    f"{delta_path} requires dataset_kind 'noisy'"
+                )
+            if arm["fit_mode"] != "freed":
+                raise DesignFreezeError(
+                    f"{delta_path} requires fit_mode 'freed'"
+                )
+            if arm["rung"] != "top":
+                raise DesignFreezeError(
+                    f"{delta_path} requires rung 'top'"
+                )
+            if "noise_replicate" in arm:
+                raise DesignFreezeError(
+                    f"{delta_path} cannot carry noise_replicate"
+                )
+            pair = (amplitude, arm["subhalo_in_truth"])
+            if pair in delta_pairs:
+                raise DesignFreezeError(
+                    "nonlinear_validation fit_psf_delta arms duplicate the "
+                    f"(amplitude, subhalo_in_truth) pair {pair!r}: "
+                    f"{delta_pairs[pair]!r} and {name!r}"
+                )
+            delta_pairs[pair] = name
         if "noise_replicate" in arm:
             replicate = _require_positive_int(
                 arm["noise_replicate"],
@@ -826,6 +1271,18 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
             "nonlinear_validation.seeds.spawn_key must be a list starting "
             "with 5, beyond the frozen campaign spawn keys 0-4"
         )
+    if int(freeze["freeze"]["version"]) >= 5:
+        direction_spawn_key = _required(
+            seeds,
+            "psf_knowledge_direction_spawn_key",
+            "nonlinear_validation.seeds",
+        )
+        if direction_spawn_key != [7, "direction_index", "system_index"]:
+            raise DesignFreezeError(
+                "nonlinear_validation.seeds."
+                "psf_knowledge_direction_spawn_key must be "
+                "[7, 'direction_index', 'system_index']"
+            )
 
     if set(replicate_by_arm.values()) != set(null_replicate_indices):
         raise DesignFreezeError(
@@ -879,6 +1336,44 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
                 raise DesignFreezeError(
                     f"{path}.arms names undeclared arm {arm_name!r}"
                 )
+        campaign_delta_flags = [
+            "fit_psf_delta" in arms[arm_name] for arm_name in campaign_arms
+        ]
+        has_delta_arms = any(campaign_delta_flags)
+        if has_delta_arms and not all(campaign_delta_flags):
+            raise DesignFreezeError(
+                f"{path}.arms must not mix fit_psf_delta and non-delta arms"
+            )
+        if has_delta_arms:
+            for source_key in ("reference_source", "null_source"):
+                if source_key not in campaign:
+                    raise DesignFreezeError(
+                        f"{path} with fit_psf_delta arms requires {source_key}"
+                    )
+                _validate_nonlinear_source(
+                    campaign[source_key], f"{path}.{source_key}"
+                )
+            reference_source = _require_mapping(
+                campaign["reference_source"], f"{path}.reference_source"
+            )
+            reference_arms = _required(
+                reference_source,
+                "arms",
+                f"{path}.reference_source",
+            )
+            if not isinstance(reference_arms, list) or not reference_arms:
+                raise DesignFreezeError(
+                    f"{path}.reference_source.arms must be a non-empty list"
+                )
+            for reference_arm in reference_arms:
+                if (
+                    not isinstance(reference_arm, str)
+                    or reference_arm not in arms
+                ):
+                    raise DesignFreezeError(
+                        f"{path}.reference_source.arms names undeclared arm "
+                        f"{reference_arm!r}"
+                    )
         campaign_replicates = {
             replicate_by_arm[arm_name]
             for arm_name in campaign_arms
@@ -940,11 +1435,37 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
         if member_rule not in (
             "smallest_image_per_template",
             "smallest_image_non_censored_per_template",
+            "smallest_image_golden",
         ):
             raise DesignFreezeError(
                 f"{path}.smoke_rule.member has unknown rule "
                 f"{member_rule!r}"
             )
+        if has_delta_arms:
+            smoke_directions = _required(
+                smoke_rule,
+                "directions",
+                f"{path}.smoke_rule",
+            )
+            if not isinstance(smoke_directions, list) or not smoke_directions:
+                raise DesignFreezeError(
+                    f"{path}.smoke_rule.directions must be a non-empty list"
+                )
+            declared_directions = {
+                direction
+                for arm_name in campaign_arms
+                for direction in arms[arm_name]["fit_psf_delta"]["directions"]
+            }
+            if any(
+                isinstance(direction, bool)
+                or not isinstance(direction, int)
+                or direction not in declared_directions
+                for direction in smoke_directions
+            ):
+                raise DesignFreezeError(
+                    f"{path}.smoke_rule.directions must be a subset of the "
+                    "campaign fit_psf_delta directions"
+                )
     for name, declaration in arms.items():
         if "noise_replicate" in declaration:
             replicate_indices.append(

@@ -40,11 +40,15 @@ from harvest_nonlinear_validation import (  # noqa: E402
     spearman_rank_correlation,
 )
 from run_nonlinear_validation import (  # noqa: E402
+    PSF_KNOWLEDGE_DIRECTION_SPAWN_KEY,
+    apply_direction_override,
     apply_noise_replicate,
     build_arm_config,
+    derive_direction_seed,
     derive_noise_seed,
     derive_sampler_seed,
     system_index,
+    validate_direction_argument,
 )
 
 ENTROPY = 20260823
@@ -65,6 +69,19 @@ ARMS_FIXTURE = {
     "asimov_fixed_bridge": {
         "arm_index": 4, "dataset_kind": "asimov", "subhalo_in_truth": True,
         "fit_mode": "fixed_template", "rung": "top", "sample": "golden",
+    },
+}
+
+DELTA_ARM_FIXTURE = {
+    "arm_index": 16,
+    "dataset_kind": "noisy",
+    "subhalo_in_truth": False,
+    "fit_mode": "freed",
+    "rung": "top",
+    "sample": "all",
+    "fit_psf_delta": {
+        "amplitude_rms_nm": 5.0,
+        "directions": [1, 2, 3],
     },
 }
 
@@ -221,6 +238,40 @@ class TestNoiseSeeds:
         assert len(noise | sampler) == len(noise) + len(sampler)
 
 
+class TestDirectionSeeds:
+    def test_declared_direction_reference_values(self):
+        """Lock the spawn-key-7 direction stream to NumPy values."""
+        assert PSF_KNOWLEDGE_DIRECTION_SPAWN_KEY == 7
+        assert derive_direction_seed(ENTROPY, 1, 43) == 2917453207
+        assert derive_direction_seed(ENTROPY, 8, 43) == 656673105
+        assert derive_direction_seed(ENTROPY, 1, 728) == 2045173381
+        assert derive_direction_seed(ENTROPY, 3, 813) == 1383433009
+
+    def test_direction_seeds_are_unique_and_disjoint(self):
+        """The direction stream is disjoint from sampler and null streams."""
+        direction = {
+            derive_direction_seed(ENTROPY, d, index)
+            for d in range(1, 9)
+            for index in range(1000)
+        }
+        sampler = {
+            derive_sampler_seed(ENTROPY, index, arm_index)
+            for index in range(1000)
+            for arm_index in range(24)
+        }
+        null = {
+            derive_noise_seed(ENTROPY, replicate, index)
+            for replicate in range(1, 10)
+            for index in range(1000)
+        }
+        assert len(direction) == 8000
+        assert len(sampler) == 24000
+        assert len(null) == 9000
+        assert len(direction | sampler | null) == (
+            len(direction) + len(sampler) + len(null)
+        )
+
+
 def _staged_config() -> dict:
     return {
         "run_name": "ladder_parent_sys0625",
@@ -359,6 +410,46 @@ class TestBuildArmConfig:
             FIT_BLOCK_FIXTURE,
         )
         assert staged == reference
+
+
+class TestDirectionOverride:
+    def test_override_sets_amplitude_and_seed_without_mutating_staged(self):
+        """A direction is applied only to a private arm configuration."""
+        staged = _staged_config()
+        reference = deepcopy(staged)
+        arm_config = build_arm_config(
+            staged,
+            DELTA_ARM_FIXTURE,
+            _rung_payload(),
+            FIT_BLOCK_FIXTURE,
+        )
+        original_arm = deepcopy(arm_config)
+        configured, seed = apply_direction_override(
+            arm_config,
+            DELTA_ARM_FIXTURE,
+            ENTROPY,
+            625,
+            2,
+        )
+        assert configured["modeling"]["fit_psf"]["delta"][
+            "amplitude_rms_nm"
+        ] == 5.0
+        assert configured["modeling"]["fit_psf"]["delta"]["seed"] == seed
+        assert seed == derive_direction_seed(ENTROPY, 2, 625)
+        assert arm_config == original_arm
+        assert staged == reference
+
+    def test_missing_direction_for_delta_arm_fails_closed(self):
+        with pytest.raises(ValueError, match="requires --direction"):
+            validate_direction_argument(DELTA_ARM_FIXTURE, None)
+
+    def test_direction_on_non_delta_arm_fails_closed(self):
+        with pytest.raises(ValueError, match="only valid"):
+            validate_direction_argument(ARMS_FIXTURE["noisy_control"], 1)
+
+    def test_undeclared_direction_fails_closed(self):
+        with pytest.raises(ValueError, match="not declared"):
+            validate_direction_argument(DELTA_ARM_FIXTURE, 8)
 
 
 class TestHarvestIntegrity:
@@ -520,6 +611,24 @@ class TestEligibleArms:
             ["noisy_control", "asimov_fixed_bridge"],
         ) == ["noisy_control", "asimov_fixed_bridge"]
 
+    def test_all_psf_knowledge_arms_are_eligible_for_selected_members(self):
+        """The eight delta arms apply to every selected, non-censored member."""
+        arms = {
+            f"delta_{index}": {
+                **DELTA_ARM_FIXTURE,
+                "arm_index": index,
+                "fit_psf_delta": {
+                    "amplitude_rms_nm": float(index),
+                    "directions": [1, 2, 3],
+                },
+            }
+            for index in range(16, 24)
+        }
+        assert eligible_arms(
+            {"censored": False, "golden": False},
+            arms,
+        ) == [f"delta_{index}" for index in range(16, 24)]
+
 
 class TestSmokeJobs:
     def test_smallest_member_per_template(self):
@@ -559,6 +668,24 @@ class TestSmokeJobs:
             jobs, "smallest_image_non_censored_per_template"
         )
         assert [job["run_name"] for job in smokes] == ["r1", "r2"]
+
+    def test_smallest_image_golden_member(self):
+        jobs = [
+            {
+                "template": "a", "image_side_px": 508, "run_name": "gold2",
+                "golden": True,
+            },
+            {
+                "template": "b", "image_side_px": 600, "run_name": "gold1",
+                "golden": True,
+            },
+            {
+                "template": "c", "image_side_px": 400, "run_name": "plain",
+                "golden": False,
+            },
+        ]
+        smokes = smoke_jobs(jobs, "smallest_image_golden")
+        assert [job["run_name"] for job in smokes] == ["gold2"]
 
 
 class TestSpearman:
@@ -664,6 +791,26 @@ class TestSampleMembers:
         assert by_id["sys0001"]["ladder_config_hash"] == "parent-config-1"
         assert by_id["sys0100"]["ladder_campaign_uuid"] == "selected-campaign"
         assert by_id["sys0100"]["ladder_config_hash"] == "selected-config-100"
+
+    def test_selected12_keeps_selected_report_tier_and_parent_overlap(self, tmp_path):
+        parent_indices = list(range(48))
+        selected_indices = [728] + list(range(100, 111))
+        parent_indices[0] = 728
+        self._stage_tier(tmp_path/"parent", "parent", parent_indices)
+        self._stage_tier(
+            tmp_path/"selected", "selected", selected_indices, golden={728}
+        )
+        members = sample_members(
+            tmp_path/"parent",
+            tmp_path/"selected",
+            mode="selected12",
+        )
+        assert len(members) == 12
+        overlap = [
+            member for member in members if member["system_id"] == "sys0728"
+        ]
+        assert len(overlap) == 1
+        assert overlap[0]["run_name"] == "ladder_parent_sys0728"
 
     def test_wrong_tier_count_fails_closed(self, tmp_path):
         self._stage_tier(tmp_path/"parent", "parent", range(47))
