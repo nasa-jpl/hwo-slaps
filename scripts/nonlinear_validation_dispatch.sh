@@ -62,6 +62,24 @@ print(json.load(open('$CAMPAIGN_DIR/manifest.json'))['campaign_uuid'])")"
 TOTAL=$(grep -c . "$QUEUE")
 echo "[dispatch] phase=$PHASE jobs=$TOTAL gpus=${GPUS[*]} uuid=$HWOSLAPS_CAMPAIGN_UUID"
 
+# A map job is complete only when its summary exists AND every map artifact
+# the summary lists is still present; a summary alone is not completion.
+map_job_complete() {
+  [ -f "$1" ] || return 1
+  "$PY" - "$1" <<'PY'
+import json
+import os
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+artifacts = summary.get("artifacts")
+ok = isinstance(artifacts, list) and bool(artifacts) and all(
+    os.path.isfile(path) for path in artifacts
+)
+sys.exit(0 if ok else 1)
+PY
+}
+
 next_line() {
   flock 9 || return 1
   local n
@@ -93,7 +111,7 @@ worker() {
       fi
       out="${FIELDS[4]}"
       tag="$(basename "$out")_delta${FIELDS[2]}_dir${FIELDS[3]}"
-      if [ -f "$out/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json" ]; then
+      if map_job_complete "$out/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json"; then
         echo "$label skip $tag (artifact exists)"; continue
       fi
     else
@@ -171,7 +189,7 @@ while IFS= read -r line; do
   if [ "$PHASE" = positions ]; then
     [ -f "${FIELDS[2]}/injection_position.json" ] || MISSING=$((MISSING + 1))
   elif [ "$PHASE" = maps ] || [ "$PHASE" = maps_smokes ]; then
-    [ -f "${FIELDS[4]}/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json" ] \
+    map_job_complete "${FIELDS[4]}/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json" \
       || MISSING=$((MISSING + 1))
   else
     if [ "${#FIELDS[@]}" -ge 5 ]; then

@@ -23,6 +23,7 @@ the provenance chain even though it is not frozen in a test.
 
 from __future__ import annotations
 
+import datetime
 import hashlib
 import math
 from pathlib import Path
@@ -191,6 +192,19 @@ def _require_nonnegative_float(value: Any, path: str) -> float:
             f"{path} must be non-negative and finite, got {value!r}"
         )
     return number
+
+
+def _require_iso_date(value: Any, path: str) -> str:
+    """Require an ISO calendar date string and return it."""
+    if not isinstance(value, str) or not value.strip():
+        raise DesignFreezeError(f"{path} must be a non-empty ISO date string")
+    try:
+        datetime.date.fromisoformat(value.strip())
+    except ValueError as exc:
+        raise DesignFreezeError(
+            f"{path} must be an ISO calendar date, got {value!r}"
+        ) from exc
+    return value
 
 
 def _require_sha256(value: Any, path: str) -> str:
@@ -547,6 +561,29 @@ def _validate_psf_knowledge_error(freeze: dict) -> None:
     if block["truth_state"] != "science35":
         raise DesignFreezeError(
             "psf_knowledge_error.truth_state must be 'science35'"
+        )
+    if block["rulings_v5"] != [f"D-K{index}" for index in range(1, 11)]:
+        raise DesignFreezeError(
+            "psf_knowledge_error.rulings_v5 must list D-K1 through D-K10"
+        )
+    _require_iso_date(block["declared_v5"], "psf_knowledge_error.declared_v5")
+    criteria = block["success_criteria"]
+    if (
+        not isinstance(criteria, list)
+        or not criteria
+        or any(
+            not isinstance(item, str) or not item.strip() for item in criteria
+        )
+    ):
+        raise DesignFreezeError(
+            "psf_knowledge_error.success_criteria must be a non-empty list "
+            "of non-empty strings"
+        )
+    amendment = freeze["freeze"].get("amendment_v5")
+    if not isinstance(amendment, str) or not amendment.strip():
+        raise DesignFreezeError(
+            "freeze.amendment_v5 must be a non-empty paragraph for a "
+            "version-5 freeze"
         )
 
     residual = _require_mapping(
@@ -1090,6 +1127,26 @@ def _validate_nonlinear_validation(freeze: dict) -> None:
     if int(freeze["freeze"]["version"]) >= 5:
         for key in ("declared_v5", "rulings_v5"):
             _required(block, key, "nonlinear_validation")
+        _require_iso_date(
+            block["declared_v5"], "nonlinear_validation.declared_v5"
+        )
+        if block["rulings_v5"] != [f"D-K{index}" for index in range(1, 11)]:
+            raise DesignFreezeError(
+                "nonlinear_validation.rulings_v5 must list D-K1 through D-K10"
+            )
+        criteria = block.get("success_criteria")
+        if (
+            not isinstance(criteria, list)
+            or not criteria
+            or any(
+                not isinstance(item, str) or not item.strip()
+                for item in criteria
+            )
+        ):
+            raise DesignFreezeError(
+                "nonlinear_validation.success_criteria must be a non-empty "
+                "list of non-empty strings"
+            )
     missing = [
         key for key in REQUIRED_NONLINEAR_VALIDATION_KEYS if key not in block
     ]

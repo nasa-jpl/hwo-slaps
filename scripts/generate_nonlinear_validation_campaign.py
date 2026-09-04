@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -926,6 +927,11 @@ def main(argv=None) -> None:
             "output_dir": str(campaign_dir/"outputs"/member["run_name"]),
             "arms": job_arms,
         })
+        reused_path = reused_positions.get(member["run_name"])
+        if reused_path is not None:
+            jobs[-1]["positions_artifact_sha256"] = hashlib.sha256(
+                Path(reused_path).read_bytes()
+            ).hexdigest()
 
     largest_first = sorted(
         jobs, key=lambda job: job["image_side_px"], reverse=True

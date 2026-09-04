@@ -100,11 +100,16 @@ if [ "${#GPUS[@]}" -gt 4 ]; then
   exit 2
 fi
 for gpu in "${GPUS[@]}"; do
-  if ! [[ "$gpu" =~ ^[0-9]+$ ]]; then
-    log "gpu list contains a non-negative integer violation: $gpu"
+  if ! [[ "$gpu" =~ ^(0|[1-9][0-9]*)$ ]]; then
+    log "gpu list entries must be canonical non-negative integers: $gpu"
     exit 2
   fi
 done
+UNIQUE_GPU_COUNT="$(printf '%s\n' "${GPUS[@]}" | sort -u | wc -l | tr -d ' ')"
+if [ "$UNIQUE_GPU_COUNT" -ne "${#GPUS[@]}" ]; then
+  log "gpu list repeats a GPU; packing is expressed only through --workers-per-gpu"
+  exit 2
+fi
 
 FISHER="$CAMPAIGNS_ROOT/psf_knowledge_fisher_v1"
 NONLINEAR="$CAMPAIGNS_ROOT/psf_knowledge_nonlinear_v1"
@@ -382,6 +387,12 @@ run_dispatch() {
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$campaign_name" "$phase" \
     "$EXPANDED_GPUS" >> "$dispatch_log"
   printf '0\n' > "$campaign/.${phase}_cursor"
+  rm -f "$campaign/sentinels/${phase}_PHASE_COMPLETE"
+  if [ "$phase" = "smokes" ] || [ "$phase" = "maps_smokes" ]; then
+    # An approval covers the smoke artifacts it was written against; a new
+    # smoke dispatch invalidates it so the fleet gate needs a fresh review.
+    rm -f "$campaign/SMOKES_APPROVED"
+  fi
   state_step_start "dispatch" "$campaign_name" "$phase"
   log "start step=dispatch campaign=$campaign_name phase=$phase"
   set +e

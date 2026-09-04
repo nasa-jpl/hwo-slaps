@@ -28,6 +28,7 @@ from harvest_psf_knowledge import (  # noqa: E402
     _direction_estimand_rows,
     first_spurious_delta,
     matched_receipt_findings,
+    reconcile_mask_cells,
 )
 from run_nonlinear_validation import (  # noqa: E402
     derive_direction_seed,
@@ -641,6 +642,97 @@ def test_delta_nonlinear_row_verification_and_findings():
                 knowledge,
             )
         )
+
+
+def test_delta_nonlinear_row_must_match_its_artifact_direction():
+    """A payload copied under another direction's artifact path is flagged."""
+    job, payload, manifest, protocol = _delta_row_fixture()
+    knowledge = protocol["psf_knowledge_error"]
+    assert _verify_row(
+        job, "noisy_control_d5", payload, manifest, protocol, knowledge, 1
+    ) == []
+    findings = _verify_row(
+        job, "noisy_control_d5", payload, manifest, protocol, knowledge, 2
+    )
+    assert any("is not the artifact's direction 2" in item for item in findings)
+
+
+def _packed(mask: np.ndarray, prefix: str) -> dict:
+    """Pack one boolean mask the way the map runner stores it."""
+    import hashlib
+
+    values = np.ascontiguousarray(np.asarray(mask, dtype=np.bool_))
+    return {
+        f"{prefix}_packed": np.packbits(values),
+        f"{prefix}_shape": np.asarray(values.shape, dtype=np.int64),
+        f"{prefix}_sha256": np.asarray(
+            hashlib.sha256(values.tobytes()).hexdigest()
+        ),
+    }
+
+
+def test_harvest_reconciles_scalar_cells_with_stored_masks():
+    """Scalar cell counts must be reproduced by the aperture-clipped masks."""
+    inside = np.zeros((6, 6), dtype=bool)
+    inside[1:5, 1:5] = True
+    detectable = np.zeros((6, 6), dtype=bool)
+    detectable[2:4, 2:4] = True
+    detectable[0, 0] = True
+    mismatch = np.zeros((6, 6), dtype=bool)
+    mismatch[2, 2] = True
+    spurious = np.zeros((6, 6), dtype=bool)
+    artifact = {
+        "delta_nm": np.asarray(5.0),
+        "spacing_arcsec": np.asarray(0.05),
+        "nodes_inside_aperture": np.asarray(16),
+        "matched_cells": np.asarray(4),
+        "matched_area_arcsec2": np.asarray(4*0.0025),
+        "mismatch_cells": np.asarray(1),
+        "mismatch_area_arcsec2": np.asarray(0.0025),
+        "spurious_cells": np.asarray(0),
+        "spurious_area_arcsec2": np.asarray(0.0),
+        **_packed(inside, "aperture_mask"),
+        **_packed(detectable, "detectable_mask"),
+        **_packed(mismatch, "mismatch_detectable_mask"),
+        **_packed(spurious, "false_positive_mask"),
+    }
+    assert reconcile_mask_cells(artifact, "map") == []
+    forged = dict(artifact, mismatch_cells=np.asarray(100))
+    assert any(
+        "mismatch_cells 100" in item for item in reconcile_mask_cells(forged, "map")
+    )
+    forged = dict(artifact, matched_cells=np.asarray(5))
+    assert any(
+        "matched_cells 5" in item for item in reconcile_mask_cells(forged, "map")
+    )
+    forged = dict(artifact, mismatch_area_arcsec2=np.asarray(0.5))
+    assert any(
+        "mismatch_area_arcsec2" in item
+        for item in reconcile_mask_cells(forged, "map")
+    )
+    forged = dict(artifact, mismatch_area_arcsec2=np.asarray(np.nan))
+    assert any(
+        "mismatch_area_arcsec2" in item
+        for item in reconcile_mask_cells(forged, "map")
+    )
+    forged = dict(
+        artifact,
+        spacing_arcsec=np.asarray(0.5),
+        matched_area_arcsec2=np.asarray(4*0.25),
+        mismatch_area_arcsec2=np.asarray(0.25),
+    )
+    assert any(
+        "spacing_arcsec" in item for item in reconcile_mask_cells(forged, "map")
+    )
+    matched_only = dict(
+        artifact,
+        delta_nm=np.asarray(0.0),
+        mismatch_cells=np.asarray(-1),
+        mismatch_area_arcsec2=np.asarray(np.nan),
+        spurious_cells=np.asarray(-1),
+        spurious_area_arcsec2=np.asarray(np.nan),
+    )
+    assert reconcile_mask_cells(matched_only, "map") == []
 
 
 def test_nonlinear_first_separating_delta_uses_cp_bounds():

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -448,6 +449,9 @@ def main(argv=None) -> None:
         staged_config = yaml.safe_load(stream)
     with open(args.positions, encoding="utf-8") as stream:
         injection = json.load(stream)
+    positions_artifact_sha256 = hashlib.sha256(
+        Path(args.positions).read_bytes()
+    ).hexdigest()
 
     system_id_value = str(staged_config["run_name"])
     if str(injection["system_id"]) != system_id_value:
@@ -665,6 +669,7 @@ def main(argv=None) -> None:
         "noise_replicate": noise_replicate,
         "noise_spawn_key": noise_spawn_key,
         "rung": dict(rung_payload),
+        "positions_artifact_sha256": positions_artifact_sha256,
         "censored": bool(injection["censored"]),
         "ladder_campaign_uuid": str(injection["ladder_campaign_uuid"]),
         "ladder_config_hash": str(injection["ladder_config_hash"]),

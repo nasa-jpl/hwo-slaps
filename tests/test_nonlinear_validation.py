@@ -505,6 +505,90 @@ class TestHarvestIntegrity:
         findings = _campaign_findings(manifest, protocol)
         assert any("job arms" in finding for finding in findings)
 
+    def _source_bound_protocol(self):
+        """Return a protocol whose campaign binds a null source."""
+        protocol = {
+            "arms": deepcopy(ARMS_FIXTURE),
+            "member_sets": {"production59": {"n_systems": 1}},
+            "seeds": {"entropy": ENTROPY},
+            "campaigns": {
+                "nonlinear_null_v1": {
+                    "member_set": "production59",
+                    "arms": ["noisy_control"],
+                    "positions_source": "nonlinear_validation_v1",
+                    "positions_source_campaign_uuid": "positions-uuid",
+                    "null_source": {
+                        "campaign": "nonlinear_null_v1",
+                        "campaign_uuid": "null-uuid",
+                        "harvest": "nonlinear_null_v1/harvest/harvest.json",
+                        "harvest_sha256": "a"*64,
+                        "review_sha256": "b"*64,
+                    },
+                }
+            },
+        }
+        protocol["arms"]["noisy_control"]["fit_psf_delta"] = {
+            "amplitude_rms_nm": 5.0,
+            "directions": [1],
+        }
+        return protocol
+
+    def _source_bound_manifest(self):
+        """Return a v5 manifest echoing the resolved null source."""
+        job, _, manifest, _ = _verification_fixture()
+        manifest["design_freeze"]["version"] = 5
+        manifest["n_systems"] = 1
+        job["arms"] = {
+            "noisy_control": {
+                "arm_index": 2,
+                "directions": {
+                    "1": {"seed": derive_direction_seed(ENTROPY, 1, 625)}
+                },
+            }
+        }
+        job["positions_artifact_sha256"] = "c"*64
+        manifest["jobs"] = [job]
+        manifest["campaign"].update({
+            "positions_source": "nonlinear_validation_v1",
+            "positions_source_campaign_uuid": "positions-uuid",
+            "null_source": {
+                "campaign": "nonlinear_null_v1",
+                "campaign_uuid": "null-uuid",
+                "harvest": "/data/root/nonlinear_null_v1/harvest/harvest.json",
+                "harvest_sha256": "a"*64,
+                "review": "/data/root/nonlinear_null_v1/harvest/review.json",
+                "review_sha256": "b"*64,
+                "review_integrity": "CLEAN",
+            },
+        })
+        return manifest
+
+    def test_echoed_absolute_source_paths_are_accepted(self):
+        """The generator's resolved source echo satisfies the frozen binding."""
+        manifest = self._source_bound_manifest()
+        assert _campaign_findings(manifest, self._source_bound_protocol()) == []
+
+    def test_source_digest_and_path_edits_are_reported(self):
+        """A retargeted source digest or path is an integrity finding."""
+        manifest = self._source_bound_manifest()
+        manifest["campaign"]["null_source"]["harvest_sha256"] = "f"*64
+        findings = _campaign_findings(manifest, self._source_bound_protocol())
+        assert any("null_source.harvest_sha256" in item for item in findings)
+        manifest = self._source_bound_manifest()
+        manifest["campaign"]["null_source"]["harvest"] = "/elsewhere/harvest.json"
+        findings = _campaign_findings(manifest, self._source_bound_protocol())
+        assert any("null_source.harvest" in item for item in findings)
+
+    def test_v5_reused_positions_require_a_manifest_digest(self):
+        """A delta-arm job without positions_artifact_sha256 is a finding."""
+        manifest = self._source_bound_manifest()
+        del manifest["jobs"][0]["positions_artifact_sha256"]
+        findings = _campaign_findings(manifest, self._source_bound_protocol())
+        assert any("positions_artifact_sha256" in item for item in findings)
+        manifest["design_freeze"]["version"] = 4
+        findings = _campaign_findings(manifest, self._source_bound_protocol())
+        assert any("positions_artifact_sha256" in item for item in findings)
+
     def test_v4_missing_campaign_fails_closed_with_manifest_name(self):
         _, _, manifest, protocol = _verification_fixture()
         del manifest["campaign"]

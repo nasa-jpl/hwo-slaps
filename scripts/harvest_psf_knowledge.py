@@ -29,7 +29,8 @@ from run_psf_knowledge_map import (  # noqa: E402
 
 FISHER_CAMPAIGN_NAME = "psf_knowledge_fisher_v1"
 MAP_ARTIFACT_SCHEMA_VERSION = 1
-CELL_AREA_ARCSEC2 = 0.05**2
+NODE_SPACING_ARCSEC = 0.05
+CELL_AREA_ARCSEC2 = NODE_SPACING_ARCSEC**2
 
 
 def _scalar(record: dict, name: str):
@@ -157,6 +158,84 @@ def unpack_record_mask(
             f"recorded {expected}"
         )
     return mask
+
+
+def reconcile_mask_cells(artifact: dict, label: str) -> list[str]:
+    """Recount the aperture-clipped cells from the stored masks.
+
+    Parameters
+    ----------
+    artifact : dict
+        Loaded map artifact carrying the four packed masks.
+    label : str
+        Artifact label used in finding messages.
+
+    Returns
+    -------
+    findings : list
+        One finding per scalar cell count that the masks do not reproduce.
+    """
+    findings = []
+    try:
+        inside = unpack_record_mask(artifact, "aperture_mask", label)
+    except ValueError as exc:
+        return [str(exc)]
+    nodes_inside = int(np.count_nonzero(inside))
+    if nodes_inside != int(_scalar(artifact, "nodes_inside_aperture")):
+        findings.append(
+            f"{label}: nodes_inside_aperture "
+            f"{int(_scalar(artifact, 'nodes_inside_aperture'))} does not "
+            f"equal the aperture mask count {nodes_inside}"
+        )
+    delta = float(_scalar(artifact, "delta_nm"))
+    checks = [("detectable_mask", "matched_cells")]
+    if delta > 0.0:
+        checks.extend([
+            ("mismatch_detectable_mask", "mismatch_cells"),
+            ("false_positive_mask", "spurious_cells"),
+        ])
+    for prefix, scalar_name in checks:
+        try:
+            mask = unpack_record_mask(artifact, prefix, label)
+        except ValueError as exc:
+            findings.append(str(exc))
+            continue
+        if mask.shape != inside.shape:
+            findings.append(
+                f"{label}: mask {prefix} shape {mask.shape} differs from "
+                f"the aperture mask shape {inside.shape}"
+            )
+            continue
+        recount = int(np.count_nonzero(mask & inside))
+        recorded = int(_scalar(artifact, scalar_name))
+        if recount != recorded:
+            findings.append(
+                f"{label}: {scalar_name} {recorded} does not equal the "
+                f"aperture-clipped {prefix} count {recount}"
+            )
+    spacing = float(_scalar(artifact, "spacing_arcsec"))
+    if spacing != NODE_SPACING_ARCSEC:
+        findings.append(
+            f"{label}: spacing_arcsec {spacing!r} is not the frozen "
+            f"{NODE_SPACING_ARCSEC}"
+        )
+    for scalar_name, area_name in (
+        ("matched_cells", "matched_area_arcsec2"),
+        ("mismatch_cells", "mismatch_area_arcsec2"),
+        ("spurious_cells", "spurious_area_arcsec2"),
+    ):
+        if delta == 0.0 and scalar_name != "matched_cells":
+            continue
+        expected_area = int(_scalar(artifact, scalar_name))*NODE_SPACING_ARCSEC**2
+        recorded_area = float(_scalar(artifact, area_name))
+        if not np.isfinite(recorded_area) or abs(
+            recorded_area - expected_area
+        ) > 1.0e-12*max(1.0, expected_area):
+            findings.append(
+                f"{label}: {area_name} {recorded_area!r} is not "
+                f"{scalar_name} times the cell area ({expected_area!r})"
+            )
+    return findings
 
 
 def _quantiles(values: list[float]) -> dict:
@@ -501,6 +580,7 @@ def verify_map_artifact(
             unpack_record_mask(artifact, prefix, label)
         except ValueError as exc:
             findings.append(str(exc))
+    findings.extend(reconcile_mask_cells(artifact, label))
     if delta == 0.0:
         findings.extend(matched_receipt_findings(artifact, manifest_rung, label))
     try:

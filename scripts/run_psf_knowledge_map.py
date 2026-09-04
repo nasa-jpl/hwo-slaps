@@ -379,21 +379,20 @@ def _pack_mask(mask: np.ndarray) -> tuple[np.ndarray, np.ndarray, str]:
     )
 
 
-def _aperture_node_count(
+def _aperture_inside_mask(
     y_coords,
     x_coords,
     centre_arcsec,
     radius_arcsec: float,
-) -> int:
-    """Count grid nodes in the closed D-F7 aperture."""
+) -> np.ndarray:
+    """Return the grid-node mask of the closed D-F7 aperture."""
     y_values = np.asarray(y_coords, dtype=float)
     x_values = np.asarray(x_coords, dtype=float)
-    inside = (
+    return (
         (y_values[:, None] - float(centre_arcsec[0]))**2
         + (x_values[None, :] - float(centre_arcsec[1]))**2
         <= float(radius_arcsec)**2
     )
-    return int(np.count_nonzero(inside))
 
 
 def _job_identity(
@@ -442,11 +441,13 @@ def _job_identity(
 
 
 def _write_json(path: Path, payload: dict) -> None:
-    """Write one JSON payload with a trailing newline."""
-    path.write_text(
+    """Write one JSON payload atomically through a same-directory file."""
+    tmp_path = path.with_name(path.name + ".tmp")
+    tmp_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    os.replace(tmp_path, path)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -476,7 +477,7 @@ def _map_payload(
     mismatch_metrics: dict | None,
     spurious_metrics: dict | None,
     grid_map,
-    nodes_inside_aperture: int,
+    aperture_mask: np.ndarray,
     detector_build_seconds: float,
     map_wall_seconds: float,
     truth_psf_config_hash: str,
@@ -500,6 +501,7 @@ def _map_payload(
         ("detectable_mask", matched_mask),
         ("mismatch_detectable_mask", mismatch_mask),
         ("false_positive_mask", spurious_mask),
+        ("aperture_mask", np.asarray(aperture_mask, dtype=bool)),
     ):
         packed, shape, digest = _pack_mask(mask)
         packed_masks[f"{prefix}_packed"] = packed
@@ -612,7 +614,9 @@ def _map_payload(
             if spurious_metrics is not None
             else np.nan
         ),
-        "nodes_inside_aperture": np.asarray(int(nodes_inside_aperture)),
+        "nodes_inside_aperture": np.asarray(
+            int(np.count_nonzero(aperture_mask))
+        ),
         "spacing_arcsec": np.asarray(float(grid_map.spacing_arcsec)),
         "detector_build_seconds": np.asarray(float(detector_build_seconds)),
         "map_wall_seconds": np.asarray(float(map_wall_seconds)),
@@ -649,7 +653,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Replace existing map artifacts and the job summary",
+        help="Recompute existing map artifacts instead of resuming them",
     )
     return parser
 
@@ -803,10 +807,6 @@ def main(argv=None) -> None:
     config_hash_value = config_hash(config)
     output_dir = Path(args.output_dir)
     summary_path = output_dir/job_summary_name(delta, direction)
-    if summary_path.exists() and not args.force:
-        raise ValueError(
-            f"Refusing to overwrite {summary_path}; pass --force to replace it"
-        )
 
     identity = _job_identity(
         campaign_uuid,
@@ -890,7 +890,7 @@ def main(argv=None) -> None:
                 centre,
                 radius,
             )
-        nodes_inside = _aperture_node_count(
+        aperture_mask = _aperture_inside_mask(
             grid_map.y_coords,
             grid_map.x_coords,
             centre,
@@ -914,7 +914,7 @@ def main(argv=None) -> None:
             mismatch_metrics,
             spurious_metrics,
             grid_map,
-            nodes_inside,
+            aperture_mask,
             detector_build_seconds,
             map_wall_seconds,
             truth_psf_config_hash,
@@ -961,7 +961,11 @@ def main(argv=None) -> None:
         )
 
     summary_identity = {
-        key: str(value.item()) if isinstance(value, np.ndarray) else value
+        key: (
+            (value.tolist() if value.ndim else str(value.item()))
+            if isinstance(value, np.ndarray)
+            else value
+        )
         for key, value in identity.items()
     }
     summary = {

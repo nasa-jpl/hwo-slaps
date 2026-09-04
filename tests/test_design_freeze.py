@@ -854,3 +854,62 @@ def test_loader_rejects_unknown_psf_knowledge_smoke_member(freeze):
     ]["smoke_rule"]["members"] = ["unknown"]
     with pytest.raises(df.DesignFreezeError, match="smoke_rule.members"):
         df.validate_design_freeze(broken)
+
+
+@pytest.mark.parametrize(
+    "mutation,match",
+    [
+        (
+            lambda document: document["freeze"].pop("amendment_v5"),
+            "amendment_v5",
+        ),
+        (
+            lambda document: document["psf_knowledge_error"].update(
+                {"rulings_v5": None}
+            ),
+            "rulings_v5",
+        ),
+        (
+            lambda document: document["psf_knowledge_error"].update(
+                {"success_criteria": None}
+            ),
+            "success_criteria",
+        ),
+        (
+            lambda document: document["nonlinear_validation"].update(
+                {"rulings_v5": {}}
+            ),
+            "nonlinear_validation.rulings_v5",
+        ),
+        (
+            lambda document: document["nonlinear_validation"].update(
+                {"declared_v5": None}
+            ),
+            "nonlinear_validation.declared_v5",
+        ),
+        (
+            lambda document: document["nonlinear_validation"].update(
+                {"declared_v5": "   "}
+            ),
+            "nonlinear_validation.declared_v5",
+        ),
+        (
+            lambda document: document["nonlinear_validation"].update(
+                {"success_criteria": [None]}
+            ),
+            "nonlinear_validation.success_criteria",
+        ),
+        (
+            lambda document: document["psf_knowledge_error"].update(
+                {"declared_v5": "yesterday"}
+            ),
+            "psf_knowledge_error.declared_v5",
+        ),
+    ],
+)
+def test_loader_rejects_a_semantically_hollow_v5_block(freeze, mutation, match):
+    """A version-5 document must carry its amendment, rulings and criteria."""
+    broken = copy.deepcopy(freeze)
+    mutation(broken)
+    with pytest.raises(df.DesignFreezeError, match=match):
+        df.validate_design_freeze(broken)

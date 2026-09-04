@@ -180,6 +180,7 @@ def _verify_row(
     manifest: dict,
     protocol: dict,
     knowledge: dict | None = None,
+    direction: int | None = None,
 ) -> list:
     """Return the integrity findings of one arm artifact.
 
@@ -197,6 +198,9 @@ def _verify_row(
         Validated nonlinear-validation freeze block.
     knowledge : `dict`, optional
         Validated PSF knowledge-error freeze block.
+    direction : `int`, optional
+        Direction the artifact path and queue coordinate declare; the
+        payload must record the same direction.
 
     Returns
     -------
@@ -406,17 +410,24 @@ def _verify_row(
                         f"{label}: fit_psf_delta amplitude is "
                         f"{delta_payload['amplitude_rms_nm']!r}, expected {amplitude}"
                     )
-                direction = delta_payload["direction"]
+                payload_direction = delta_payload["direction"]
                 if (
-                    isinstance(direction, bool)
-                    or not isinstance(direction, int)
-                    or direction not in declared["fit_psf_delta"]["directions"]
+                    isinstance(payload_direction, bool)
+                    or not isinstance(payload_direction, int)
+                    or payload_direction not in declared["fit_psf_delta"]["directions"]
                 ):
                     findings.append(
-                        f"{label}: fit_psf_delta direction {direction!r} is not "
-                        "declared"
+                        f"{label}: fit_psf_delta direction "
+                        f"{payload_direction!r} is not declared"
+                    )
+                elif direction is not None and payload_direction != direction:
+                    findings.append(
+                        f"{label}: fit_psf_delta direction "
+                        f"{payload_direction!r} is not the artifact's "
+                        f"direction {direction}"
                     )
                 else:
+                    direction = payload_direction
                     expected_direction_seed = derive_direction_seed(
                         int(protocol["seeds"]["entropy"]),
                         direction,
@@ -523,6 +534,14 @@ def _verify_row(
         )
     if not is_delta and payload["kernel_sha256"] != payload["truth_kernel_sha256"]:
         findings.append(f"{label}: fit kernel is not the truth kernel")
+    if "positions_artifact_sha256" in job and payload.get(
+        "positions_artifact_sha256"
+    ) != job["positions_artifact_sha256"]:
+        findings.append(
+            f"{label}: positions artifact sha256 "
+            f"{payload.get('positions_artifact_sha256')!r} is not the "
+            f"manifest's {job['positions_artifact_sha256']!r}"
+        )
     if int(payload["n_unmasked_pixels"]) <= 0:
         findings.append(f"{label}: degenerate mask support")
     for side in ("smooth_status", "subhalo_status"):
@@ -1468,6 +1487,61 @@ def _campaign_findings(
             f"manifest member_set {campaign.get('member_set')!r} does not "
             f"equal the freeze member_set {frozen_member_set!r}"
         )
+    for key in ("positions_source", "positions_source_campaign_uuid"):
+        if campaign.get(key) != frozen_campaign.get(key):
+            add_for_jobs(
+                f"manifest campaign {key} {campaign.get(key)!r} does not "
+                f"equal the freeze value {frozen_campaign.get(key)!r}"
+            )
+    for source_key in ("reference_source", "null_source", "pooled_source",
+                       "replicate_zero_source"):
+        frozen_source = frozen_campaign.get(source_key)
+        manifest_source = campaign.get(source_key)
+        if frozen_source is None and manifest_source is None:
+            continue
+        if not isinstance(frozen_source, dict) or not isinstance(
+            manifest_source, dict
+        ):
+            add_for_jobs(
+                f"manifest campaign {source_key} presence does not match "
+                "the freeze"
+            )
+            continue
+        for key, frozen_value in frozen_source.items():
+            manifest_value = manifest_source.get(key)
+            if key == "harvest":
+                # The generator echoes the resolved absolute path of the
+                # frozen repo-relative harvest path; the bytes are bound by
+                # harvest_sha256, so only the relative suffix is compared.
+                if not (
+                    isinstance(manifest_value, str)
+                    and manifest_value.endswith(str(frozen_value))
+                ):
+                    add_for_jobs(
+                        f"manifest campaign {source_key}.harvest "
+                        f"{manifest_value!r} does not resolve the frozen "
+                        f"path {frozen_value!r}"
+                    )
+                continue
+            if manifest_value != frozen_value:
+                add_for_jobs(
+                    f"manifest campaign {source_key}.{key} "
+                    f"{manifest_value!r} does not equal the "
+                    f"freeze value {frozen_value!r}"
+                )
+    protocol_arm_table = protocol.get("arms") or {}
+    frozen_delta_campaign = any(
+        "fit_psf_delta" in (protocol_arm_table.get(arm_name) or {})
+        for arm_name in (frozen_arms or [])
+    )
+    if frozen_campaign.get("positions_source") != "self" and frozen_delta_campaign:
+        for job in manifest.get("jobs", []):
+            digest = job.get("positions_artifact_sha256")
+            if not isinstance(digest, str) or len(digest) != 64:
+                findings.append(
+                    f"{job.get('run_name', '<job>')}: manifest job is missing "
+                    "positions_artifact_sha256 for a reused positions source"
+                )
     member_sets = protocol.get("member_sets")
     member_set = (
         member_sets.get(frozen_member_set)
@@ -1824,7 +1898,14 @@ def _science_psf_knowledge(
         findings.append(
             f"null_source: expected 531 rows, found {len(null_rows)}"
         )
-    reference_controls = list(expected_reference["noisy_control"].values())
+    reference_controls = [
+        row for row in reference_rows if row.get("arm") == "noisy_control"
+    ]
+    if len(reference_controls) != 59:
+        findings.append(
+            "reference_source: expected 59 noisy_control rows, found "
+            f"{len(reference_controls)}"
+        )
     pooled_null = list(null_rows) + reference_controls
     restricted_null = [
         row for row in pooled_null if row.get("system_id") in member_set
@@ -2105,6 +2186,7 @@ def main(argv=None) -> None:
                         manifest,
                         protocol,
                         freeze.get("psf_knowledge_error"),
+                        direction,
                     )
                 )
                 rows.append(_row(job, arm, payload))
