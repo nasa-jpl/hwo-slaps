@@ -10,7 +10,7 @@ log() {
 }
 
 usage() {
-  log "usage: nonlinear_extension_launch.sh <prep|fleet|all> <campaigns_root> <gpu_list> [--workers-per-gpu N] [--allow-shared-gpus]"
+  log "usage: nonlinear_extension_launch.sh <prep|fleet|all> <campaigns_root> <gpu_list> [--workers-per-gpu N] [--positions-workers-per-gpu N] [--allow-shared-gpus]"
 }
 
 if [ "$#" -lt 3 ]; then
@@ -33,6 +33,7 @@ case "$MODE" in
 esac
 
 WORKERS_PER_GPU=1
+POSITIONS_WORKERS_PER_GPU=1
 ALLOW_SHARED_GPUS=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -42,6 +43,14 @@ while [ "$#" -gt 0 ]; do
         exit 2
       fi
       WORKERS_PER_GPU="$2"
+      shift 2
+      ;;
+    --positions-workers-per-gpu)
+      if [ "$#" -lt 2 ]; then
+        log "--positions-workers-per-gpu requires a value"
+        exit 2
+      fi
+      POSITIONS_WORKERS_PER_GPU="$2"
       shift 2
       ;;
     --allow-shared-gpus)
@@ -65,6 +74,10 @@ if ! [[ "$WORKERS_PER_GPU" =~ ^[1-9][0-9]*$ ]]; then
   log "--workers-per-gpu must be a positive integer"
   exit 2
 fi
+if ! [[ "$POSITIONS_WORKERS_PER_GPU" =~ ^[1-9][0-9]*$ ]]; then
+  log "--positions-workers-per-gpu must be a positive integer"
+  exit 2
+fi
 
 IFS=',' read -r -a GPUS <<< "$GPU_LIST"
 if [ "${#GPUS[@]}" -eq 0 ]; then
@@ -85,6 +98,7 @@ LOCK_PATH="$CAMPAIGNS_ROOT/.nonlinear_extension_launch.lock"
 HEAD=""
 STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 EXPANDED_GPUS=""
+POSITIONS_GPUS=""
 
 exec 9>"$LOCK_PATH"
 if ! flock -n 9; then
@@ -124,9 +138,15 @@ fi
 if ! AVAILABLE_GB="$(df -BG --output=avail "$CAMPAIGNS_ROOT" | awk 'NR == 2 {gsub(/G/, "", $1); print $1}')"; then
   preflight_fail "could not read free space for $CAMPAIGNS_ROOT"
 fi
-if ! [[ "$AVAILABLE_GB" =~ ^[0-9]+$ ]] || [ "$AVAILABLE_GB" -le 500 ]; then
-  preflight_fail "free space is ${AVAILABLE_GB:-unknown} GB, need above 500 GB"
+# The campaigns root must be local disk (/data). The two campaigns hold
+# about 30 GB; NFS is never in the hot path because nautilus rewrites its
+# checkpoint after every likelihood batch.
+if ! [[ "$AVAILABLE_GB" =~ ^[0-9]+$ ]] || [ "$AVAILABLE_GB" -le 100 ]; then
+  preflight_fail "free space is ${AVAILABLE_GB:-unknown} GB, need above 100 GB"
 fi
+case "$CAMPAIGNS_ROOT" in
+  /nfs/*) preflight_fail "campaigns root $CAMPAIGNS_ROOT is on NFS; use /data" ;;
+esac
 # pgrep exits 1 when it prints a count of 0, so the exit status is ignored
 # and the printed count is compared numerically.
 PGREP_COUNT="$(pgrep -fc nonlinear_validation_dispatch.sh || true)"
@@ -176,6 +196,12 @@ for gpu in "${GPUS[@]}"; do
     fi
     EXPANDED_GPUS+="$gpu"
   done
+  for ((worker=1; worker<=POSITIONS_WORKERS_PER_GPU; worker++)); do
+    if [ -n "$POSITIONS_GPUS" ]; then
+      POSITIONS_GPUS+=","
+    fi
+    POSITIONS_GPUS+="$gpu"
+  done
 done
 
 export OMP_NUM_THREADS=1
@@ -185,7 +211,8 @@ export NUMEXPR_NUM_THREADS=1
 
 state_init() {
   "$PY" - "$STATE" init "$$" "$MODE" "$STARTED" "$HEAD" \
-    "$CAMPAIGNS_ROOT" "$GPU_LIST" "$WORKERS_PER_GPU" <<'PY'
+    "$CAMPAIGNS_ROOT" "$GPU_LIST" "$WORKERS_PER_GPU" \
+    "$POSITIONS_WORKERS_PER_GPU" <<'PY'
 import json
 import os
 import sys
@@ -200,6 +227,7 @@ state = {
     "campaigns_root": sys.argv[7],
     "gpu_list": sys.argv[8],
     "workers_per_gpu": int(sys.argv[9]),
+    "positions_workers_per_gpu": int(sys.argv[10]),
     "steps": [],
     "status": "RUNNING",
 }
@@ -347,14 +375,18 @@ run_logged_step() {
 run_dispatch() {
   local campaign="$1"; local phase="$2"; local campaign_name="$3"
   local dispatch_log="$campaign/${phase}_dispatch.log"
+  local gpus="$EXPANDED_GPUS"
+  if [ "$phase" = "positions" ]; then
+    gpus="$POSITIONS_GPUS"
+  fi
   printf '%s [launch] dispatcher invocation campaign=%s phase=%s gpus=%s\n' \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$campaign_name" "$phase" \
-    "$EXPANDED_GPUS" >> "$dispatch_log"
+    "$gpus" >> "$dispatch_log"
   printf '0\n' > "$campaign/.${phase}_cursor"
   state_step_start "dispatch" "$campaign_name" "$phase"
   log "start step=dispatch campaign=$campaign_name phase=$phase"
   set +e
-  "$DISPATCHER" "$campaign" "$phase" "$EXPANDED_GPUS" 2>&1 9>&- |
+  "$DISPATCHER" "$campaign" "$phase" "$gpus" 2>&1 9>&- |
     tee -a "$dispatch_log" |
     while IFS= read -r line; do
       log "$line"
