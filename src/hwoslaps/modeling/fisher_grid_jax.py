@@ -59,6 +59,162 @@ _RADIAL_TABLE_MARGIN_FRACTION = 1.0e-6
 _EXTENDED_RADIAL_SAMPLE_FACTOR = 4
 
 
+def _affine_log_grid_parameters(
+    log_radii: np.ndarray,
+) -> Optional[Tuple[float, float]]:
+    """Return affine lookup parameters when one correction is sufficient.
+
+    The stored ``log(logspace())`` knots are not bitwise affine.  Let the
+    endpoint-defined affine knot ``k`` be ``origin + k * step``.  If every
+    stored knot is less than half a step from that location (including a
+    conservative floating-point arithmetic allowance), a query in stored
+    interval ``k`` can have an affine floor of only ``k - 1``, ``k``, or
+    ``k + 1``.  The hot lookup can therefore recover the exact right-sided
+    interval with one comparison against each actual neighbour.
+
+    Unsupported, non-finite, non-monotonic, or too-irregular grids return
+    ``None`` so callers can retain the general ``jnp.interp`` path.
+    """
+    knots = np.asarray(log_radii)
+    if knots.dtype != np.dtype(np.float64):
+        return None
+    if (
+        knots.ndim != 1
+        or knots.size < 2
+        or knots.size > np.iinfo(np.int32).max
+        or not np.all(np.isfinite(knots))
+    ):
+        return None
+    knot_steps = np.diff(knots)
+    interp_epsilon = np.spacing(np.finfo(np.float64).eps)
+    if np.any(knot_steps <= interp_epsilon):
+        return None
+
+    origin = float(knots[0])
+    step = float((knots[-1] - knots[0]) / (knots.size - 1))
+    if not np.isfinite(step) or step <= 0.0:
+        return None
+    inverse_step = 1.0 / step
+    if not np.isfinite(inverse_step) or inverse_step <= 0.0:
+        return None
+
+    affine_knots = origin + step * np.arange(knots.size, dtype=np.float64)
+    displacement_bins = float(
+        np.max(np.abs(knots - affine_knots)) * inverse_step
+    )
+    # Bound the subtraction and multiplication used for an in-range affine
+    # coordinate.  The factor eight is deliberately conservative for the two
+    # rounded operations; production tables leave many orders of magnitude
+    # more margin than this guard requires.
+    eps = np.finfo(np.float64).eps
+    arithmetic_bins = 8.0 * eps * (
+        (float(np.max(np.abs(knots))) + abs(origin)) * inverse_step
+        + float(knots.size)
+    )
+    total_error_bins = displacement_bins + arithmetic_bins
+    if not np.isfinite(total_error_bins) or total_error_bins >= 0.5:
+        return None
+
+    # Directly cover the right-sided cases most sensitive to rounding.  This
+    # is a construction-time check only; it never scans the table in a rung.
+    probes = np.concatenate(
+        (
+            knots,
+            np.nextafter(knots, -np.inf),
+            np.nextafter(knots, np.inf),
+        )
+    )
+    probes = probes[np.isfinite(probes)]
+    affine_indices = np.floor((probes - origin) * inverse_step).astype(np.int64)
+    reference_indices = np.clip(
+        np.searchsorted(knots, probes, side="right") - 1,
+        0,
+        knots.size - 2,
+    )
+    affine_indices = np.clip(affine_indices, 0, knots.size - 2)
+    if np.any(np.abs(affine_indices - reference_indices) > 1):
+        return None
+    return origin, inverse_step
+
+
+def _affine_log_grid_interval_index(
+    query,
+    log_radii,
+    origin: float,
+    inverse_step: float,
+):
+    """Locate intervals on a validated float64 near-affine log grid.
+
+    This internal helper requires parameters returned for the same
+    ``log_radii`` by :func:`_affine_log_grid_parameters`.  Queries are cast to
+    the knot dtype before lookup, matching the engine's float64 contract.
+    """
+    import jax.numpy as jnp
+
+    query = jnp.asarray(query, dtype=log_radii.dtype)
+    last_interval = log_radii.shape[0] - 2
+    affine_coordinate = (query - origin) * inverse_step
+    # Avoid implementation-defined float-to-int conversion for NaN/inf.  The
+    # final interpolation still propagates NaN and clamps infinities exactly
+    # like jnp.interp; choosing the last bin for NaN matches searchsorted.
+    affine_coordinate = jnp.where(
+        jnp.isnan(affine_coordinate),
+        float(last_interval + 1),
+        jnp.clip(affine_coordinate, -1.0, float(last_interval + 1)),
+    )
+    estimate = jnp.clip(
+        jnp.floor(affine_coordinate).astype(jnp.int32),
+        0,
+        last_interval,
+    )
+
+    lower = log_radii[estimate]
+    upper = log_radii[estimate + 1]
+    corrected = estimate + (query >= upper).astype(jnp.int32)
+    corrected = corrected - (query < lower).astype(jnp.int32)
+    return jnp.clip(corrected, 0, last_interval)
+
+
+def _interp_on_affine_log_grid(
+    query,
+    log_radii,
+    values,
+    origin: float,
+    inverse_step: float,
+):
+    """Interpolate float64 values using exact stored endpoints.
+
+    ``log_radii`` and ``values`` are the validated float64 production arrays;
+    queries are cast to their knot dtype before the right-sided bin lookup.
+    """
+    import jax.numpy as jnp
+
+    query = jnp.asarray(query, dtype=log_radii.dtype)
+    interval = _affine_log_grid_interval_index(
+        query,
+        log_radii,
+        origin,
+        inverse_step,
+    )
+    x_lo = log_radii[interval]
+    x_hi = log_radii[interval + 1]
+    y_lo = values[interval]
+    y_hi = values[interval + 1]
+    value_delta = y_hi - y_lo
+    knot_delta = x_hi - x_lo
+    query_delta = query - x_lo
+    interp_epsilon = np.spacing(np.finfo(np.float64).eps)
+    zero_delta = jnp.abs(knot_delta) <= interp_epsilon
+    interpolated = jnp.where(
+        zero_delta,
+        y_lo,
+        y_lo
+        + (query_delta / jnp.where(zero_delta, 1.0, knot_delta)) * value_delta,
+    )
+    interpolated = jnp.where(query < log_radii[0], values[0], interpolated)
+    return jnp.where(query > log_radii[-1], values[-1], interpolated)
+
+
 def _next_fast_fft_len(target: int) -> int:
     """Return the smallest 7-smooth integer greater than or equal to ``target``.
 
@@ -298,7 +454,14 @@ class JaxGridTemplateEngine:
 
         self._coords = jnp.asarray(over_sampled)
         self._alpha_macro_fit = jnp.asarray(deflections_macro)
-        self._log_radii = jnp.asarray(np.log(radii))
+        log_radii = np.log(radii)
+        self._log_radii = jnp.asarray(log_radii)
+        affine_log_grid = _affine_log_grid_parameters(log_radii)
+        if affine_log_grid is None:
+            self._log_grid_origin = None
+            self._log_grid_inverse_step = None
+        else:
+            self._log_grid_origin, self._log_grid_inverse_step = affine_log_grid
         self._alpha_radial = jnp.asarray(alpha_radial)
         self._source_profiles = tuple(source_profiles)
         self._image_profiles = tuple(
@@ -876,9 +1039,17 @@ class JaxGridTemplateEngine:
         delta = self._coords - position_yx[None, :]
         radius = jnp.sqrt(delta[:, 0] ** 2 + delta[:, 1] ** 2)
         radius_safe = jnp.clip(radius, jnp.exp(self._log_radii[0]), None)
-        alpha_r = jnp.interp(
-            jnp.log(radius_safe), self._log_radii, alpha_radial
-        )
+        log_radius = jnp.log(radius_safe)
+        if self._log_grid_origin is None:
+            alpha_r = jnp.interp(log_radius, self._log_radii, alpha_radial)
+        else:
+            alpha_r = _interp_on_affine_log_grid(
+                log_radius,
+                self._log_radii,
+                alpha_radial,
+                self._log_grid_origin,
+                self._log_grid_inverse_step,
+            )
         alpha_sub = alpha_r[:, None] * delta / radius_safe[:, None]
         image = self._render_for_macro(self._alpha_macro_fit, alpha_sub)
 
