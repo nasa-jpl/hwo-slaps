@@ -69,6 +69,10 @@ def test_runner_writes_readable_artifacts_and_calls_observer(tmp_path, monkeypat
     import hwoslaps.psf.utils as psf_utils
     extraction = _extraction()
     config = _staged_config(extraction, tier=tier)
+    from test_image_source import _write_asset
+    asset = tmp_path/'source.npz'
+    _write_asset(asset)
+    config['lensing']['source_galaxy']['light']['asset_path'] = str(asset)
     config['plotting']['output_dir'] = str(tmp_path)
     path = tmp_path/'config.yaml'
     path.write_text(yaml.safe_dump(config))
