@@ -713,7 +713,7 @@ def _write_artifact(artifact_path: Path, payload: dict) -> None:
     os.replace(tmp_path, artifact_path)
 
 
-def main(argv=None) -> None:
+def main(argv=None, *, allowed_tiers=TIERS, observer=None) -> None:
     """Walk one member's mass ladder and write its result artifact."""
     args = _build_parser().parse_args(argv)
     config_path = Path(args.config).expanduser().resolve()
@@ -727,12 +727,14 @@ def main(argv=None) -> None:
             f"Refusing to overwrite {artifact_path}; pass --force to replace it"
         )
 
-    ladder = _verify_ladder_block(config)
+    ladder = _verify_ladder_block(config, allowed_tiers=allowed_tiers)
     policy = policy_from_mass_ladder(ladder["mass_ladder"])
     _verify_psf_state(config)
 
     _enable_float64()
     _enable_jax_compilation_cache()
+    if observer is not None:
+        observer("initialization")
 
     from hwoslaps.config.validation import validate_or_raise
     from hwoslaps.provenance import config_hash, write_provenance
@@ -782,6 +784,8 @@ def main(argv=None) -> None:
         )
         row["wall_seconds"] = perf_counter() - start
         table.append(row)
+        if observer is not None:
+            observer("rung", logm=step.logm)
         print(
             f"  rung {row['logm']:.2f} ({step.phase}): q_max "
             f"{row['q_max']:.4g}, aperture fraction "
