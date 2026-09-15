@@ -71,6 +71,9 @@ from run_stage0_observation import (  # noqa: E402
 
 ARTIFACT_NAME = "ladder_result.npz"
 
+EXECUTION_PROVENANCE_NAME = "ladder_execution.yaml"
+"""Sidecar describing the ladder-only evaluation coverage (`str`)."""
+
 PSF_STATE = "science35"
 """Truth PSF state label the ladder renders at (`str`)."""
 
@@ -713,6 +716,33 @@ def _write_artifact(artifact_path: Path, payload: dict) -> None:
     os.replace(tmp_path, artifact_path)
 
 
+def _write_execution_provenance(path: Path, selection) -> None:
+    """Record the reduced evaluation coverage without changing science keys."""
+    full_grid_evaluated = (
+        selection.selected_node_count == selection.full_grid_node_count
+    )
+    payload = {
+        "strategy": "aperture_plus_full_lattice_perimeter",
+        "full_grid_evaluated": full_grid_evaluated,
+        "skipped_auxiliary_positions_evaluated": False,
+        "jax_radial_geometry": "original_full_square_lattice",
+        "full_grid_node_count": selection.full_grid_node_count,
+        "aperture_node_count": selection.aperture_node_count,
+        "perimeter_node_count": selection.perimeter_node_count,
+        "union_node_count": selection.selected_node_count,
+        "actual_evaluated_node_count_per_rung": selection.selected_node_count,
+        "skipped_auxiliary_node_count": (
+            selection.full_grid_node_count - selection.selected_node_count
+        ),
+    }
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(payload, stream, sort_keys=True)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(tmp_path, path)
+
+
 def main(argv=None, *, allowed_tiers=TIERS, observer=None) -> None:
     """Walk one member's mass ladder and write its result artifact."""
     args = _build_parser().parse_args(argv)
@@ -761,6 +791,10 @@ def main(argv=None, *, allowed_tiers=TIERS, observer=None) -> None:
 
     centre_arcsec = extraction.aperture.centre_arcsec
     radius_arcsec = extraction.aperture.radius_arcsec
+    ladder_selection = detector.prepare_ladder_grid_selection(
+        centre_arcsec,
+        radius_arcsec,
+    )
     table = []
     while True:
         step = next_rung(table, policy)
@@ -769,19 +803,14 @@ def main(argv=None, *, allowed_tiers=TIERS, observer=None) -> None:
             break
         start = perf_counter()
         _point_detector_at_rung(detector, step.logm)
-        grid_map = detector.compute_grid_map()
-        row = {"logm": step.logm}
-        row.update(
-            _rung_metrics(
-                grid_map.y_coords,
-                grid_map.x_coords,
-                grid_map.q_asimov_2d,
-                grid_map.detectable_mask_2d,
-                grid_map.spacing_arcsec,
-                centre_arcsec,
-                radius_arcsec,
-            )
-        )
+        summary = detector.compute_ladder_summary(ladder_selection)
+        row = {
+            "logm": step.logm,
+            "q_max": summary.q_max,
+            "detectable_area_arcsec2": summary.detectable_area_arcsec2,
+            "aperture_fraction": summary.aperture_fraction,
+            "perimeter_clipped": summary.perimeter_clipped,
+        }
         row["wall_seconds"] = perf_counter() - start
         table.append(row)
         if observer is not None:
@@ -801,6 +830,10 @@ def main(argv=None, *, allowed_tiers=TIERS, observer=None) -> None:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     write_provenance(output_dir/"provenance.yaml", config=config, command=sys.argv)
+    _write_execution_provenance(
+        output_dir/EXECUTION_PROVENANCE_NAME,
+        ladder_selection,
+    )
     _write_artifact(
         artifact_path,
         _artifact_payload(

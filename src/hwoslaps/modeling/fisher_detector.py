@@ -126,6 +126,72 @@ class _GridLayout:
     node_indices: Tuple[Tuple[int, int], ...]
 
 
+@dataclass(frozen=True)
+class FisherLadderGridSelection:
+    """Reusable aperture-plus-perimeter selection on a full square lattice.
+
+    ``selected_mask_2d`` describes exactly the nodes evaluated by the ladder
+    path.  Values outside it are absent from the corresponding rung result;
+    they are not represented as zero or as a partially populated grid map.
+    The full coordinate arrays remain available so the selection is tied to
+    the original square geometry used to construct the JAX radial engine.
+    """
+
+    y_coords: np.ndarray
+    x_coords: np.ndarray
+    spacing_arcsec: float
+    grid_centre_yx: Tuple[float, float]
+    aperture_centre_yx: Tuple[float, float]
+    aperture_radius_arcsec: float
+    aperture_mask_2d: np.ndarray
+    perimeter_mask_2d: np.ndarray
+    selected_mask_2d: np.ndarray
+    positions_yx: Tuple[Tuple[float, float], ...]
+    node_indices: Tuple[Tuple[int, int], ...]
+
+    @property
+    def full_grid_node_count(self) -> int:
+        return int(self.y_coords.size * self.x_coords.size)
+
+    @property
+    def aperture_node_count(self) -> int:
+        return int(np.count_nonzero(self.aperture_mask_2d))
+
+    @property
+    def perimeter_node_count(self) -> int:
+        return int(np.count_nonzero(self.perimeter_mask_2d))
+
+    @property
+    def selected_node_count(self) -> int:
+        return len(self.positions_yx)
+
+
+@dataclass(frozen=True)
+class FisherLadderRungData:
+    """Compact Fisher result for nodes consumed by one ladder rung.
+
+    The one-dimensional arrays share row-major position order.  They contain
+    only aperture or original-square-perimeter nodes, making the incomplete
+    full-grid coverage explicit while retaining every value used by the
+    ladder estimands and clipping diagnostic.
+    """
+
+    selection: FisherLadderGridSelection
+    positions_yx: np.ndarray
+    node_indices: np.ndarray
+    q_asimov_by_position: np.ndarray
+    detectable_by_position: np.ndarray
+    detection_q_threshold: float
+    q_max: float
+    detectable_area_arcsec2: float
+    aperture_fraction: float
+    perimeter_clipped: bool
+
+    @property
+    def num_positions_evaluated(self) -> int:
+        return int(self.q_asimov_by_position.size)
+
+
 def _truth_kernel_accept_digests(regen_kernel) -> set:
     """Digests of a regenerated truth kernel and its sum-normalization.
 
@@ -587,6 +653,7 @@ class FisherDetector:
         }
         self._candidate_positions_cache: Optional[List[Tuple[float, float]]] = None
         self._grid_layout_cache: Optional[_GridLayout] = None
+        self._ladder_grid_selections: Dict[int, FisherLadderGridSelection] = {}
         self._jax_grid_engine = None
 
         self.fit_psf_config_template = self._build_science_psf_config_template(
@@ -1035,6 +1102,203 @@ class FisherDetector:
 
     _GRID_EVAL_BATCH = 256
 
+    def prepare_ladder_grid_selection(
+        self,
+        centre_arcsec: Tuple[float, float],
+        radius_arcsec: float,
+    ) -> FisherLadderGridSelection:
+        """Select the closed aperture plus the complete square perimeter.
+
+        This is an explicit ladder-only operation.  It starts from the same
+        full square lattice as :meth:`compute_grid_map`, retains aperture
+        nodes using the ladder reducer's squared-distance convention, and
+        then adds every node on all four original edges.  The returned object
+        is intended to be built once and reused across mass rungs.
+        """
+        if self.map_type != "grid":
+            raise ValueError(
+                "prepare_ladder_grid_selection requires "
+                "modeling.fisher.map.type: 'grid'."
+            )
+        if self.map_config["grid"].get("annulus") is not None:
+            raise ValueError(
+                "The ladder selection requires the original full square "
+                "grid; annulus-restricted grid maps remain available through "
+                "compute_grid_map."
+            )
+
+        centre = np.asarray(centre_arcsec, dtype=float)
+        if centre.shape != (2,) or not np.all(np.isfinite(centre)):
+            raise ValueError(
+                "The ladder aperture centre must contain two finite coordinates."
+            )
+        radius = float(radius_arcsec)
+        if not np.isfinite(radius) or radius <= 0.0:
+            raise ValueError(
+                "The ladder aperture radius must be positive and finite."
+            )
+
+        layout = self._grid_layout()
+        offsets_y = layout.y_coords[:, None] - centre[0]
+        offsets_x = layout.x_coords[None, :] - centre[1]
+        aperture_mask = offsets_y**2 + offsets_x**2 <= radius**2
+        if not np.any(aperture_mask):
+            raise ValueError(
+                f"The grid map holds no node inside the D-F7 aperture of "
+                f"radius {radius} arcsec about {tuple(centre)}"
+            )
+
+        perimeter_mask = np.zeros(layout.evaluated_mask.shape, dtype=bool)
+        perimeter_mask[0, :] = True
+        perimeter_mask[-1, :] = True
+        perimeter_mask[:, 0] = True
+        perimeter_mask[:, -1] = True
+        selected_mask = aperture_mask | perimeter_mask
+
+        node_array = np.argwhere(selected_mask)
+        node_indices = tuple((int(i), int(j)) for i, j in node_array)
+        positions = tuple(
+            (float(layout.y_coords[i]), float(layout.x_coords[j]))
+            for i, j in node_indices
+        )
+
+        def _readonly_copy(values: np.ndarray) -> np.ndarray:
+            contiguous = np.ascontiguousarray(values)
+            return np.frombuffer(
+                contiguous.tobytes(), dtype=contiguous.dtype
+            ).reshape(contiguous.shape)
+
+        selection = FisherLadderGridSelection(
+            y_coords=_readonly_copy(layout.y_coords),
+            x_coords=_readonly_copy(layout.x_coords),
+            spacing_arcsec=layout.spacing_arcsec,
+            grid_centre_yx=layout.centre_yx,
+            aperture_centre_yx=(float(centre[0]), float(centre[1])),
+            aperture_radius_arcsec=radius,
+            aperture_mask_2d=_readonly_copy(aperture_mask),
+            perimeter_mask_2d=_readonly_copy(perimeter_mask),
+            selected_mask_2d=_readonly_copy(selected_mask),
+            positions_yx=positions,
+            node_indices=node_indices,
+        )
+        registry = getattr(self, "_ladder_grid_selections", None)
+        if registry is None:
+            registry = {}
+            self._ladder_grid_selections = registry
+        registry[id(selection)] = selection
+        return selection
+
+    def compute_ladder_summary(
+        self,
+        selection: FisherLadderGridSelection,
+    ) -> FisherLadderRungData:
+        """Evaluate and reduce only nodes consumed by a Fisher ladder rung.
+
+        The returned arrays are compact position lists, not partial 2D maps.
+        Skipped interior nodes outside the aperture are therefore neither
+        assigned fabricated values nor included in finite-value validation.
+        """
+        if self.map_type != "grid":
+            raise ValueError(
+                "compute_ladder_summary requires modeling.fisher.map.type: 'grid'."
+            )
+        if self.map_config["grid"].get("annulus") is not None:
+            raise ValueError(
+                "The ladder summary requires the original full square grid; "
+                "use compute_grid_map for annulus-restricted maps."
+            )
+        if self.mismatch_enabled:
+            raise ValueError(
+                "compute_ladder_summary supports matched fit and truth PSFs only; "
+                "use compute_grid_map for PSF-mismatch maps."
+            )
+        if not isinstance(selection, FisherLadderGridSelection):
+            raise TypeError(
+                "selection must be built by prepare_ladder_grid_selection."
+            )
+        registered = getattr(self, "_ladder_grid_selections", {}).get(
+            id(selection)
+        )
+        if registered is not selection:
+            raise ValueError(
+                "The ladder selection was not prepared by this detector or "
+                "has been replaced; prepare a fresh selection."
+            )
+
+        layout = self._grid_layout()
+        if (
+            selection.spacing_arcsec != layout.spacing_arcsec
+            or selection.grid_centre_yx != layout.centre_yx
+            or not np.array_equal(selection.y_coords, layout.y_coords)
+            or not np.array_equal(selection.x_coords, layout.x_coords)
+        ):
+            raise ValueError(
+                "The ladder selection does not describe this detector's full "
+                "square grid geometry."
+            )
+        if selection.selected_node_count == 0:
+            raise ValueError("The ladder selection contains no evaluated nodes.")
+
+        # Radial interpolation bounds are part of the numerical model.  Build
+        # the JAX engine from the complete original square even though only
+        # the compact aperture-plus-perimeter position list is evaluated.
+        engine = str(self.map_config.get("engine", "reference")).lower()
+        if engine == "jax" and self._jax_grid_engine is None:
+            self._jax_grid_engine = self._build_jax_grid_engine(
+                list(layout.positions_yx)
+            )
+
+        results = self._evaluate_grid_positions(list(selection.positions_yx))
+        q_asimov = np.concatenate(
+            [np.atleast_1d(result.q_asimov_local) for result in results]
+        )
+        if q_asimov.size != selection.selected_node_count:
+            raise RuntimeError(
+                "The ladder evaluator returned a different number of q_F "
+                "values than selected positions."
+            )
+        if not np.all(np.isfinite(q_asimov)):
+            raise ValueError(
+                "The ladder evaluator produced non-finite q_F at a consumed "
+                "aperture or perimeter node."
+            )
+
+        threshold = float(self.map_config.get("detection_q_threshold", 10.0))
+        detectable = q_asimov >= threshold
+        node_idx = np.asarray(selection.node_indices, dtype=int)
+        aperture_by_position = selection.aperture_mask_2d[
+            node_idx[:, 0], node_idx[:, 1]
+        ]
+        perimeter_by_position = selection.perimeter_mask_2d[
+            node_idx[:, 0], node_idx[:, 1]
+        ]
+        aperture_count = int(np.count_nonzero(aperture_by_position))
+        if aperture_count != selection.aperture_node_count or aperture_count == 0:
+            raise ValueError(
+                "The ladder selection does not contain its complete non-empty "
+                "aperture node set."
+            )
+        detected_inside = int(
+            np.count_nonzero(detectable & aperture_by_position)
+        )
+
+        return FisherLadderRungData(
+            selection=selection,
+            positions_yx=np.asarray(selection.positions_yx, dtype=float),
+            node_indices=node_idx,
+            q_asimov_by_position=q_asimov,
+            detectable_by_position=detectable,
+            detection_q_threshold=threshold,
+            q_max=float(np.max(q_asimov[aperture_by_position])),
+            detectable_area_arcsec2=(
+                detected_inside * selection.spacing_arcsec**2
+            ),
+            aperture_fraction=detected_inside / aperture_count,
+            perimeter_clipped=bool(
+                np.any(detectable & perimeter_by_position)
+            ),
+        )
+
     def compute_grid_map(self) -> FisherGridMapData:
         """Compute a 2D sensitivity grid map with streaming bank evaluation.
 
@@ -1055,59 +1319,9 @@ class FisherDetector:
         layout = self._grid_layout()
         positions = list(layout.positions_yx)
         n_positions = len(positions)
-        num_workers = self._grid_num_workers()
         runtime_provenance = self._grid_runtime_provenance()
         threshold = float(self.map_config.get("detection_q_threshold", 10.0))
-
-        start = perf_counter()
-        if self._grid_device_projection_enabled():
-            results = self._stream_reduction_batches(positions, n_positions)
-        else:
-            signal_iter: Iterator[Any] = self._grid_signal_iterator(
-                positions, num_workers=num_workers
-            )
-            progressed = self._progress_iter(
-                signal_iter,
-                desc="Fisher grid map templates",
-                total=n_positions,
-            )
-
-            batch: List[Any] = []
-            results = []
-
-            def _flush() -> None:
-                if not batch:
-                    return
-                if self.mismatch_enabled:
-                    signal_matrix = np.column_stack([pair[0] for pair in batch])
-                    data_matrix = np.column_stack([pair[1] for pair in batch])
-                    signal_whitened = self.whitener.apply(signal_matrix)
-                    data_whitened = self.whitener.apply(data_matrix)
-                    assert self._bias_whitened is not None
-                    results.append(
-                        self.workspace.evaluate_signal_bank(
-                            signal_whitened.T,
-                            data_bank_whitened=data_whitened.T,
-                            bias_whitened=self._bias_whitened,
-                        )
-                    )
-                else:
-                    signal_matrix = np.column_stack(batch)
-                    whitened = self.whitener.apply(signal_matrix)
-                    results.append(self.workspace.evaluate_signal_bank(whitened.T))
-                batch.clear()
-
-            for signal in progressed:
-                batch.append(np.asarray(signal, dtype=float))
-                if len(batch) >= self._GRID_EVAL_BATCH:
-                    _flush()
-            _flush()
-        self._log_timing(
-            "grid map streaming evaluation",
-            perf_counter() - start,
-            count=n_positions,
-            unit="position",
-        )
+        results = self._evaluate_grid_positions(positions)
 
         fisher_raw = np.concatenate([np.atleast_1d(r.fisher_raw) for r in results])
         fisher_profiled = np.concatenate([np.atleast_1d(r.fisher_profiled) for r in results])
@@ -1247,6 +1461,66 @@ class FisherDetector:
             nuisance_subset=self.nuisance_subset_label,
             profiled_nuisance_names=list(self.nuisance_names),
         )
+
+    def _evaluate_grid_positions(
+        self,
+        positions: Sequence[Tuple[float, float]],
+    ) -> List[Any]:
+        """Evaluate an ordered grid-position bank through the active engine."""
+        n_positions = len(positions)
+        if n_positions == 0:
+            raise ValueError("A Fisher grid-position bank must be non-empty.")
+        num_workers = self._grid_num_workers()
+        start = perf_counter()
+        if self._grid_device_projection_enabled():
+            results = self._stream_reduction_batches(positions, n_positions)
+        else:
+            signal_iter: Iterator[Any] = self._grid_signal_iterator(
+                positions, num_workers=num_workers
+            )
+            progressed = self._progress_iter(
+                signal_iter,
+                desc="Fisher grid map templates",
+                total=n_positions,
+            )
+
+            batch: List[Any] = []
+            results: List[Any] = []
+
+            def _flush() -> None:
+                if not batch:
+                    return
+                if self.mismatch_enabled:
+                    signal_matrix = np.column_stack([pair[0] for pair in batch])
+                    data_matrix = np.column_stack([pair[1] for pair in batch])
+                    signal_whitened = self.whitener.apply(signal_matrix)
+                    data_whitened = self.whitener.apply(data_matrix)
+                    assert self._bias_whitened is not None
+                    results.append(
+                        self.workspace.evaluate_signal_bank(
+                            signal_whitened.T,
+                            data_bank_whitened=data_whitened.T,
+                            bias_whitened=self._bias_whitened,
+                        )
+                    )
+                else:
+                    signal_matrix = np.column_stack(batch)
+                    whitened = self.whitener.apply(signal_matrix)
+                    results.append(self.workspace.evaluate_signal_bank(whitened.T))
+                batch.clear()
+
+            for signal in progressed:
+                batch.append(np.asarray(signal, dtype=float))
+                if len(batch) >= self._GRID_EVAL_BATCH:
+                    _flush()
+            _flush()
+        self._log_timing(
+            "grid map streaming evaluation",
+            perf_counter() - start,
+            count=n_positions,
+            unit="position",
+        )
+        return results
 
     def _stream_reduction_batches(
         self,
