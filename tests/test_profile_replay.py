@@ -193,3 +193,13 @@ def test_dataset_fingerprint_accepts_runtime_convolver():
     kernel=np.arange(9.,dtype=np.float64).reshape(3,3)
     convolver=SimpleNamespace(kernel=SimpleNamespace(native=kernel))
     assert array_identity(convolver)==array_identity(kernel)
+
+
+def test_explicit_jacobian_and_disabled_relative_cost_stop():
+    fit=local_profile.fit_local_least_squares_profile(model_name='analytic',
+        residual_fn=lambda x:np.array([1000., x[0]-2.]),
+        jacobian_fn=lambda x:np.array([[0.],[1.]]),initial_points=[[0.]],
+        lower_bounds=[-10.],upper_bounds=[10.],ftol=None,xtol=1e-12,gtol=1e-12)
+    assert fit.best.x==pytest.approx([2.],abs=1e-8)
+    assert fit.best.jacobian_calls>0
+    assert fit.best.residual_calls>=fit.best.jacobian_calls

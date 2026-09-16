@@ -204,6 +204,27 @@ class ProfileReplayRunner(AutoLensFitRunner):
         self.functions[role] = (residual, starts, lower, upper, model, compiled_likelihood)
         best_x = starts[0]
         best_chi2 = float(r_ml @ r_ml)
+        jacobian = None
+        if self.procedure.get('jacobian', 'finite_difference') == 'jax_forward':
+            before_jacobian = time.perf_counter()
+            compiled_jacobian = jax.jit(jax.jacfwd(residual_call))
+            jacobian = lambda x: np.asarray(compiled_jacobian(x), dtype=np.float64)
+            matrix = jacobian(starts[0])
+            if not np.all(np.isfinite(matrix)):
+                raise ValueError('JAX residual Jacobian has nonfinite elements')
+            direction = (upper - lower) * np.where(np.arange(len(lower)) % 2, -1., 1.)
+            step = min(1.e-6, float(np.min(np.minimum(starts[0] - lower, upper - starts[0]) / (upper - lower))) / 4)
+            if step <= 0:
+                raise ValueError('Archived ML point is on a bound; directional Jacobian gate needs an interior point')
+            central = (residual(starts[0] + step * direction) - residual(starts[0] - step * direction)) / (2 * step)
+            predicted = matrix @ direction
+            relative_error = float(np.linalg.norm(central - predicted) / max(np.linalg.norm(predicted), 1.))
+            record['jacobian_gate'] = {'relative_directional_error': relative_error, 'step': step,
+                                       'compile_and_check_s': time.perf_counter() - before_jacobian,
+                                       'passed': relative_error <= self.procedure['jacobian_tolerance']}
+            atomic_json(Path(self.output_dir) / 'profile_progress.json', self.records)
+            if not record['jacobian_gate']['passed']:
+                raise ValueError('Analytic Jacobian directional check failed')
         if self.procedure['mode'] == 'profile':
             def checkpoint(point):
                 record['partial_best'] = point
@@ -211,14 +232,16 @@ class ProfileReplayRunner(AutoLensFitRunner):
             profile = fit_local_least_squares_profile(
                 model_name=role, residual_fn=residual, initial_points=starts,
                 lower_bounds=lower, upper_bounds=upper, max_nfev=self.procedure['max_nfev'],
-                ftol=self.procedure['solver_tolerance'], xtol=self.procedure['solver_tolerance'],
-                gtol=self.procedure['solver_tolerance'], progress_callback=checkpoint,
+                ftol=None if self.procedure.get('disable_ftol') else self.procedure['solver_tolerance'],
+                xtol=self.procedure['solver_tolerance'],
+                gtol=self.procedure['solver_tolerance'], progress_callback=checkpoint, jacobian_fn=jacobian,
             )
             repeat = fit_local_least_squares_profile(
                 model_name=role, residual_fn=residual, initial_points=[profile.best.x],
                 lower_bounds=lower, upper_bounds=upper, max_nfev=self.procedure['max_nfev'],
-                ftol=self.procedure['solver_tolerance'] / 10, xtol=self.procedure['solver_tolerance'] / 10,
-                gtol=self.procedure['solver_tolerance'] / 10, progress_callback=checkpoint,
+                ftol=None if self.procedure.get('disable_ftol') else self.procedure['solver_tolerance'] / 10,
+                xtol=self.procedure['solver_tolerance'] / 10,
+                gtol=self.procedure['solver_tolerance'] / 10, progress_callback=checkpoint, jacobian_fn=jacobian,
             )
             best = min([profile.best, repeat.best], key=lambda item: item.chi2)
             best_x, best_chi2 = np.asarray(best.x), best.chi2

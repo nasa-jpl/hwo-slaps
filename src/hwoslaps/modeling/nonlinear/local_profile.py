@@ -24,6 +24,7 @@ class LocalFitAttempt:
     nfev: int
     optimality: float
     residual_calls: int = 0
+    jacobian_calls: int = 0
     endpoint_chi2: Optional[float] = None
     active_mask: Optional[List[int]] = None
 
@@ -77,13 +78,14 @@ def fit_local_least_squares_profile(
     lower_bounds: Optional[Sequence[float]] = None,
     upper_bounds: Optional[Sequence[float]] = None,
     max_nfev: int = 60,
-    ftol: float = 1.0e-5,
+    ftol: Optional[float] = 1.0e-5,
     xtol: float = 1.0e-5,
     gtol: float = 1.0e-5,
     x_scale: str | Sequence[float] = "jac",
     reliability_note: str = "",
     selection_rel_tolerance: float = 1.0e-6,
     progress_callback: Optional[Callable[[dict], None]] = None,
+    jacobian_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
 ) -> LocalProfileFitResult:
     """Run multistart local least-squares profiling and return the best fit."""
     points = _coerce_initial_points(initial_points)
@@ -113,6 +115,7 @@ def fit_local_least_squares_profile(
     attempts: List[LocalFitAttempt] = []
     for label, point in zip(labels, points):
         calls = 0
+        jacobian_calls = 0
         best_chi2 = np.inf
         best_x = point.copy()
 
@@ -135,14 +138,23 @@ def fit_local_least_squares_profile(
                                        "x": x.tolist(), "residual_calls": calls})
             return residual
 
+        def tracked_jacobian(x):
+            nonlocal jacobian_calls
+            jacobian_calls += 1
+            matrix = np.asarray(jacobian_fn(x), dtype=float)
+            if matrix.ndim != 2 or matrix.shape[1] != n_params or not np.all(np.isfinite(matrix)):
+                raise ValueError("Jacobian must be a finite matrix with one column per parameter")
+            return matrix
+
         result = None
         error = None
         try:
             tracked(point)  # Preserve the initial point even if the solver fails.
             result = least_squares(
                 tracked, point, bounds=(lower, upper), method="trf",
-                max_nfev=int(max_nfev), ftol=float(ftol), xtol=float(xtol),
+                max_nfev=int(max_nfev), ftol=None if ftol is None else float(ftol), xtol=float(xtol),
                 gtol=float(gtol), x_scale=x_scale,
+                jac=tracked_jacobian if jacobian_fn is not None else "2-point",
             )
             tracked(result.x)
         except Exception as exc:
@@ -154,7 +166,7 @@ def fit_local_least_squares_profile(
             x=[float(value) for value in best_x],
             nfev=int(result.nfev) if result is not None else 0,
             optimality=float(result.optimality) if result is not None else float("inf"),
-            residual_calls=calls,
+            residual_calls=calls, jacobian_calls=jacobian_calls,
             endpoint_chi2=float(np.asarray(result.fun) @ np.asarray(result.fun)) if result is not None else None,
             active_mask=np.asarray(result.active_mask, dtype=int).tolist() if result is not None else None,
         )
