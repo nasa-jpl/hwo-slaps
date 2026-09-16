@@ -92,6 +92,7 @@ def main():
                     [str(staged), job["positions"], job["arm"], str(case_output)],
                     runner_factory=factory,
                     validator_factory=ProfileReplayValidator,
+                    artifact_prefix="profile_protocol",
                 )
                 atomic_json(output / "cache_stats.json", cache_stats)
         status = "COMPLETE"
@@ -106,6 +107,11 @@ def main():
                 "error": error,
                 "elapsed_s": time.monotonic() - started,
                 "ended_unix": time.time(),
+                "artifacts": {
+                    str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in output.rglob("*.json")
+                    if p.name != "worker_exit.json"
+                },
             },
         )
 

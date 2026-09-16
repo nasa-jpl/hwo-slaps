@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -25,8 +26,10 @@ class BudgetLedger:
             else {
                 "cap_seconds": float(cap_seconds),
                 "attempts": {},
-                "accounting": ("sum worker wall time including preparation; "
-                               "active attempts reserve full timeout plus shutdown margin"),
+                "accounting": (
+                    "sum worker wall time including preparation; "
+                    "active attempts reserve full timeout plus shutdown margin"
+                ),
             }
         )
         if self.data["cap_seconds"] != cap_seconds:
@@ -135,10 +138,18 @@ def supervise(manifest_path):
                 if not process_matches(item):
                     if ended.exists():
                         receipt = json.loads(ended.read_text())
+                        status = receipt["status"]
+                        for filename, expected in receipt.get("artifacts", {}).items():
+                            artifact = Path(filename)
+                            if (
+                                not artifact.resolve().is_relative_to(Path(item["output"]).resolve())
+                                or not artifact.is_file()
+                                or hashlib.sha256(artifact.read_bytes()).hexdigest() != expected
+                            ):
+                                status = "FAILED_ARTIFACT_INTEGRITY"
+                                break
                         ledger.finish(
-                            key,
-                            receipt["status"],
-                            max(receipt["elapsed_s"], time.time() - item["start_unix"]),
+                            key, status, max(receipt["elapsed_s"], time.time() - item["start_unix"])
                         )
                     else:
                         ledger.finish(key, "INTERRUPTED_UNCERTAIN", item["reservation_seconds"])
@@ -170,6 +181,23 @@ def supervise(manifest_path):
             for row in raw.splitlines():
                 index, uuid, total, used = [v.strip() for v in row.split(",")]
                 gpus[int(index)] = {"uuid": uuid, "total": int(total), "used": int(used)}
+            app_rows = subprocess.check_output(
+                ["nvidia-smi", "--query-compute-apps=pid,gpu_uuid", "--format=csv,noheader,nounits"],
+                text=True,
+            )
+            compute_apps = [
+                (int(parts[0].strip()), parts[1].strip())
+                for row in app_rows.splitlines()
+                if len(parts := row.split(",")) == 2
+            ]
+            owned_pids = set()
+            for item in active.values():
+                if process_matches(item):
+                    owner = psutil.Process(item["pid"])
+                    owned_pids.update(p.pid for p in [owner] + owner.children(recursive=True))
+            foreign_uuids = {uuid for pid, uuid in compute_apps if pid not in owned_pids}
+            if any(gpus[item["gpu"]]["uuid"] in foreign_uuids for item in active.values()):
+                raise RuntimeError("Foreign GPU process entered an owned assignment")
             rss = 0
             for item in active.values():
                 if process_matches(item):
@@ -210,6 +238,8 @@ def supervise(manifest_path):
                 if gpu not in manifest["gpus"]:
                     raise ValueError("GPU outside manifest allocation")
                 same = [v for v in active.values() if v["gpu"] == gpu]
+                if gpus[gpu]["uuid"] in foreign_uuids:
+                    continue
                 if not same and gpus[gpu]["used"] > 1024:
                     continue
                 if not memory_admissible(

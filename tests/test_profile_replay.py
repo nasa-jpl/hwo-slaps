@@ -175,9 +175,8 @@ def controller_fixture(tmp_path, monkeypatch, worker_body, timeout=10):
     (work / "scripts").mkdir(parents=True)
     script = work / "scripts/run_nonlinear_profile.py"
     script.write_text(
-        'import sys,json,time\nfrom pathlib import Path\n'
-        'spec=json.loads(Path(sys.argv[1]).read_text())\nout=Path(spec["output"])\n'
-        + worker_body
+        "import sys,json,time\nfrom pathlib import Path\n"
+        'spec=json.loads(Path(sys.argv[1]).read_text())\nout=Path(spec["output"])\n' + worker_body
     )
     spec = root / "job.json"
     spec.write_text(json.dumps({"output": str(root / "attempt")}))
@@ -198,7 +197,11 @@ def controller_fixture(tmp_path, monkeypatch, worker_body, timeout=10):
             }
         )
     )
-    monkeypatch.setattr(subprocess, "check_output", lambda *a, **k: "2, GPU-test, 1000, 0\n")
+    monkeypatch.setattr(
+        subprocess,
+        "check_output",
+        lambda cmd, **k: "" if "--query-compute-apps=pid,gpu_uuid" in cmd else "2, GPU-test, 1000, 0\n",
+    )
     monkeypatch.setattr(psutil, "virtual_memory", lambda: SimpleNamespace(available=1024 * 2**30))
     monkeypatch.setattr(shutil, "disk_usage", lambda _: SimpleNamespace(free=100 * 2**30))
     return root, manifest
@@ -297,3 +300,34 @@ def test_best_mode_stability_keeps_worse_local_optima_visible():
     assert report["start_best_logL_spread"] == 14.5
     assert not profile_stability(attempts, 1.0, 0.5, 0.01)["stable"]
     assert not profile_stability(attempts[:1], 1.0, 1.0, 0.01)["stable"]
+
+
+def test_controller_rejects_modified_completion_artifact(tmp_path, monkeypatch):
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    body = (
+        'artifact=out/"science.json"\nartifact.write_text("changed")\n'
+        '(out/"worker_exit.json").write_text(json.dumps({"status":"COMPLETE",'
+        '"elapsed_s":0.2,"artifacts":{str(artifact):"wrong-digest"}}))\n'
+    )
+    root, manifest = controller_fixture(tmp_path, monkeypatch, body)
+    with pytest.raises(RuntimeError, match="Manifest failure"):
+        supervise(manifest)
+    ledger = json.loads((root / "state/budget.json").read_text())
+    assert ledger["attempts"]["a"]["status"] == "FAILED_ARTIFACT_INTEGRITY"
+
+
+def test_controller_excludes_foreign_gpu_process_with_small_allocation(tmp_path, monkeypatch):
+    import subprocess
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
+    monkeypatch.setattr(
+        subprocess, "check_output",
+        lambda cmd, **kwargs: "123456, GPU-test\n" if "--query-compute-apps=pid,gpu_uuid" in cmd
+        else "2, GPU-test, 1000, 1\n",
+    )
+    supervise(manifest)
+    assert not (root / "attempt").exists()
+    assert json.loads((root / "state/budget.json").read_text())["committed_seconds"] == 0
+    assert (root / "state/dispatch_blocked.json").exists()

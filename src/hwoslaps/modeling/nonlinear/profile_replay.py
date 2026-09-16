@@ -422,6 +422,20 @@ class ProfileReplayValidator(NonlinearMetricValidator):
         comparison["q_F_support_matched"] = runner.replay["case"]["rung"]["q_f_matched"]
         runner.records["comparator"] = comparison
         q = 2 * (runner.records["subhalo"]["logL"] - runner.records["smooth"]["logL"])
+        q_from_chi2 = runner.records["smooth"]["best_chi2"] - runner.records["subhalo"]["best_chi2"]
+        runner.records["q_identity_error"] = abs(q - q_from_chi2)
+        if runner.records["q_identity_error"] > runner.procedure["identity_tolerance"]:
+            raise ValueError("Signed q disagrees between scalar likelihood and chi-squared")
+        stable = all(runner.records[role].get("stable", False) for role in ("smooth", "subhalo"))
+        in_band = abs(q - 10) <= runner.procedure["threshold_band"]
+        runner.records["profile_decision"] = bool(q > 10) if stable and not in_band else None
+        runner.records["numerical_status"] = (
+            "stable_local_maxima" if stable else "unresolved_or_identity_only"
+        )
+        if not stable:
+            result.quality_flags.append("profile_maximum_unresolved")
+        if in_band:
+            result.quality_flags.append("profile_threshold_unresolved")
         runner.records["q_signed"] = q
         runner.records["threshold_unresolved"] = abs(q - 10) <= runner.procedure["threshold_band"]
         atomic_json(Path(runner.output_dir) / "profile_result.json", runner.records)

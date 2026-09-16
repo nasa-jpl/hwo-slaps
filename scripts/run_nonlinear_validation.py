@@ -413,11 +413,14 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv=None, *, runner_factory=None, validator_factory=None) -> None:
+def main(argv=None, *, runner_factory=None, validator_factory=None,
+         artifact_prefix="nonlinear_validation") -> None:
     """Run one validation arm; optional factories support versioned replay.
 
     Default execution and every preparation/validation guard remain unchanged.
     """
+    if artifact_prefix not in {"nonlinear_validation", "profile_protocol"}:
+        raise ValueError("Unsupported validation artifact prefix")
     args = _build_parser().parse_args(argv)
     output_dir = Path(args.output_dir)
     protocol = load_protocol()
@@ -433,7 +436,7 @@ def main(argv=None, *, runner_factory=None, validator_factory=None) -> None:
     artifact_suffix = (
         "" if args.direction is None else f"_dir{args.direction}"
     )
-    artifact_path = output_dir/f"nonlinear_validation_{args.arm}{artifact_suffix}.json"
+    artifact_path = output_dir/f"{artifact_prefix}_{args.arm}{artifact_suffix}.json"
     if artifact_path.exists() and not args.force:
         raise ValueError(
             f"Refusing to overwrite {artifact_path}; pass --force to replace it"
@@ -712,6 +715,11 @@ def main(argv=None, *, runner_factory=None, validator_factory=None) -> None:
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "campaign_uuid": os.environ.get("HWOSLAPS_CAMPAIGN_UUID", ""),
     }
+    if hasattr(runner, "procedure"):
+        payload["artifact_role"] = "nonlinear_profile_diagnostic"
+        payload["inference_procedure"] = runner.procedure
+        payload["sampler_executed"] = False
+        payload["profile_decision"] = runner.records.get("profile_decision")
     if args.direction is None:
         payload["fit_psf_delta"] = None
     else:
