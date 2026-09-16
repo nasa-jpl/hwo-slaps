@@ -34,6 +34,11 @@ def atomic_json(path, payload):
     temporary.replace(path)
 
 
+def residual_array(value, xp):
+    """Unwrap AutoArray without invoking its host-only NumPy protocol."""
+    return xp.asarray(getattr(value, "array", value)).reshape(-1)
+
+
 def array_identity(value):
     array = np.ascontiguousarray(np.asarray(value))
     return {'shape': list(array.shape), 'dtype': array.dtype.str,
@@ -161,7 +166,7 @@ class ProfileReplayRunner(AutoLensFitRunner):
         def residual_call(x):
             instance = model.instance_from_vector(vector=x, xp=jnp)
             fit = analysis.fit_from(instance=instance)
-            return jnp.asarray(fit.normalized_residual_map).reshape(-1)
+            return residual_array(fit.normalized_residual_map, jnp)
 
         def likelihood_call(x):
             instance = model.instance_from_vector(vector=x, xp=jnp)

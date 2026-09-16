@@ -175,3 +175,14 @@ def test_controller_exclusive_ownership(tmp_path):
     with (state/'controller.lock').open('w') as owner:
         fcntl.flock(owner,fcntl.LOCK_EX|fcntl.LOCK_NB)
         with pytest.raises(BlockingIOError):supervise(manifest)
+
+
+def test_compiled_residual_unwraps_autoarray_without_host_conversion():
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.modeling.nonlinear.profile_replay import residual_array
+    class Wrapper:
+        def __init__(self, array): self.array=array
+        def __array__(self, *args): raise AssertionError("host conversion")
+    compiled=jax.jit(lambda x: residual_array(Wrapper(x * 2), jnp))
+    assert np.array_equal(compiled(np.array([1.,2.])), [2.,4.])
