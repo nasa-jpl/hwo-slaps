@@ -413,8 +413,11 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv=None) -> None:
-    """Run one validation arm's fit pair and write its artifact."""
+def main(argv=None, *, runner_factory=None, validator_factory=None) -> None:
+    """Run one validation arm; optional factories support versioned replay.
+
+    Default execution and every preparation/validation guard remain unchanged.
+    """
     args = _build_parser().parse_args(argv)
     output_dir = Path(args.output_dir)
     protocol = load_protocol()
@@ -613,7 +616,7 @@ def main(argv=None) -> None:
         else None
     )
 
-    runner = AutoLensFitRunner(
+    runner = (runner_factory or AutoLensFitRunner)(
         NonlinearSearchSettings(
             n_live_smooth=int(fit_block["n_live_smooth"]),
             n_live_subhalo_search=int(fit_block["n_live_subhalo_search"]),
@@ -627,7 +630,7 @@ def main(argv=None) -> None:
         ),
         output_dir=str(output_dir),
     )
-    validator = NonlinearMetricValidator(runner)
+    validator = (validator_factory or NonlinearMetricValidator)(runner)
 
     start = time.time()
     result = run_psf_mismatch_case(

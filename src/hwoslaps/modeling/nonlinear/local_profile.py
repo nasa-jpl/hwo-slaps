@@ -23,6 +23,9 @@ class LocalFitAttempt:
     x: List[float]
     nfev: int
     optimality: float
+    residual_calls: int = 0
+    endpoint_chi2: Optional[float] = None
+    active_mask: Optional[List[int]] = None
 
     def to_dict(self) -> dict:
         """Return this attempt as a plain dictionary."""
@@ -80,6 +83,7 @@ def fit_local_least_squares_profile(
     x_scale: str | Sequence[float] = "jac",
     reliability_note: str = "",
     selection_rel_tolerance: float = 1.0e-6,
+    progress_callback: Optional[Callable[[dict], None]] = None,
 ) -> LocalProfileFitResult:
     """Run multistart local least-squares profiling and return the best fit."""
     points = _coerce_initial_points(initial_points)
@@ -100,41 +104,66 @@ def fit_local_least_squares_profile(
     if lower.shape != (n_params,) or upper.shape != (n_params,):
         raise ValueError("Bounds must match the initial-point dimensionality.")
 
+    # Retain this legacy argument for callers, but never exchange objective
+    # quality for a successful solver flag, at any relative tolerance.
+    if selection_rel_tolerance < 0:
+        raise ValueError("selection_rel_tolerance must be nonnegative")
+    if np.any(lower >= upper):
+        raise ValueError("Every lower bound must be below its upper bound")
     attempts: List[LocalFitAttempt] = []
     for label, point in zip(labels, points):
-        result = least_squares(
-            residual_fn,
-            point,
-            bounds=(lower, upper),
-            method="trf",
-            max_nfev=int(max_nfev),
-            ftol=float(ftol),
-            xtol=float(xtol),
-            gtol=float(gtol),
-            x_scale=x_scale,
-        )
-        residual = np.asarray(result.fun, dtype=float)
-        attempts.append(
-            LocalFitAttempt(
-                label=str(label),
-                success=bool(result.success),
-                status=int(result.status),
-                message=str(result.message),
-                chi2=float(residual @ residual),
-                x=[float(value) for value in np.asarray(result.x, dtype=float)],
-                nfev=int(result.nfev),
-                optimality=float(result.optimality),
-            )
-        )
+        calls = 0
+        best_chi2 = np.inf
+        best_x = point.copy()
 
-    attempts.sort(key=lambda attempt: attempt.chi2)
-    min_chi2 = float(attempts[0].chi2)
-    selection_tol = float(selection_rel_tolerance) * max(abs(min_chi2), 1.0)
-    successful_near_best = [
-        attempt for attempt in attempts
-        if attempt.success and attempt.chi2 <= min_chi2 + selection_tol
-    ]
-    best = successful_near_best[0] if successful_near_best else attempts[0]
+        def tracked(x):
+            nonlocal calls, best_chi2, best_x
+            calls += 1
+            x = np.asarray(x, dtype=float)
+            if not np.all(np.isfinite(x)) or np.any(x < lower) or np.any(x > upper):
+                raise ValueError("Objective point is outside admissible bounds")
+            residual = np.asarray(residual_fn(x), dtype=float)
+            if residual.ndim != 1 or not np.all(np.isfinite(residual)):
+                raise ValueError("Residual must be a finite one-dimensional vector")
+            chi2 = float(residual @ residual)
+            if not np.isfinite(chi2):
+                raise ValueError("Nonfinite chi-squared")
+            if chi2 < best_chi2:
+                best_chi2, best_x = chi2, x.copy()
+                if progress_callback is not None:
+                    progress_callback({"label": str(label), "chi2": chi2,
+                                       "x": x.tolist(), "residual_calls": calls})
+            return residual
+
+        result = None
+        error = None
+        try:
+            tracked(point)  # Preserve the initial point even if the solver fails.
+            result = least_squares(
+                tracked, point, bounds=(lower, upper), method="trf",
+                max_nfev=int(max_nfev), ftol=float(ftol), xtol=float(xtol),
+                gtol=float(gtol), x_scale=x_scale,
+            )
+            tracked(result.x)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        attempt = LocalFitAttempt(
+            label=str(label), success=bool(result is not None and result.success and error is None),
+            status=int(result.status) if result is not None else -1,
+            message=error or str(result.message), chi2=float(best_chi2),
+            x=[float(value) for value in best_x],
+            nfev=int(result.nfev) if result is not None else 0,
+            optimality=float(result.optimality) if result is not None else float("inf"),
+            residual_calls=calls,
+            endpoint_chi2=float(np.asarray(result.fun) @ np.asarray(result.fun)) if result is not None else None,
+            active_mask=np.asarray(result.active_mask, dtype=int).tolist() if result is not None else None,
+        )
+        attempts.append(attempt)
+    finite_attempts = [attempt for attempt in attempts if np.isfinite(attempt.chi2)]
+    if not finite_attempts:
+        raise ValueError("No finite admissible objective in any start: " +
+                         "; ".join(attempt.message for attempt in attempts))
+    best = min(finite_attempts, key=lambda attempt: attempt.chi2)
     if len(attempts) >= 2:
         chi2_values = np.asarray([attempt.chi2 for attempt in attempts], dtype=float)
         spread_abs = float(np.max(chi2_values) - np.min(chi2_values))
