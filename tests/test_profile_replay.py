@@ -438,7 +438,7 @@ def test_completed_start_replay_checks_values_and_avoids_duplicate_solver_work()
         "starts": origins,
         "profile": {
             "attempts": [
-                {"label": "start_0", "x": [0.1], "chi2": 0.01},
+                {"label": "start_0", "x": [0.1], "chi2": 0.01, "success": False, "status": 0},
                 {"label": "start_1", "x": [0.2], "chi2": 0.04},
             ]
         },
@@ -448,6 +448,7 @@ def test_completed_start_replay_checks_values_and_avoids_duplicate_solver_work()
     )
     assert result.chi2_min == pytest.approx(0.01)
     assert all(a.nfev == 0 and a.residual_calls == 1 for a in result.attempts)
+    assert not result.attempts[0].success
     with pytest.raises(ValueError, match="residual identity"):
         replay_completed_profile(previous, origins, lambda x: x + 1, lambda x: 0, 1e-4, "smooth")
 

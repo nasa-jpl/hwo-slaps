@@ -249,9 +249,9 @@ def replay_completed_profile(previous, origins, residual, likelihood, tolerance,
         attempts.append(
             LocalFitAttempt(
                 label=old["label"],
-                success=True,
-                status=0,
-                message="Verified completed start; original solver metadata retained separately",
+                success=bool(old.get("success", False)),
+                status=int(old.get("status", -1)),
+                message="Re-evaluated point; original solver status retained",
                 chi2=chi2,
                 x=x.tolist(),
                 nfev=0,
