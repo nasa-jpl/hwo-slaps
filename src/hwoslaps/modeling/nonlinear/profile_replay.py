@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import lsq_linear
 
-from .autolens_runner import AutoLensFitRunner
+from .autolens_runner import AutoLensFitRunner, _native_array
 from .local_profile import fit_local_least_squares_profile
 from .output_schema import NonlinearFitSummary, _json_safe
 from .validator import NonlinearMetricValidator
@@ -40,7 +40,7 @@ def residual_array(value, xp):
 
 
 def array_identity(value):
-    array = np.ascontiguousarray(np.asarray(value))
+    array = _native_array(value)
     return {'shape': list(array.shape), 'dtype': array.dtype.str,
             'sha256': hashlib.sha256(array.tobytes()).hexdigest()}
 
@@ -193,7 +193,7 @@ class ProfileReplayRunner(AutoLensFitRunner):
                     'data': array_identity(analysis.dataset.data.native),
                     'noise': array_identity(analysis.dataset.noise_map.native),
                     'mask': array_identity(analysis.dataset.mask),
-                    'psf': array_identity(analysis.dataset.psf.native)}
+                    'psf': array_identity(analysis.dataset.psf)}
         identity['passed'] = bool(np.all(np.isfinite([saved_l, l_ml, direct_l, same_path_error])) and
                                   max(error, abs(direct_l - l_ml), same_path_error) <= self.procedure['identity_tolerance'])
         record = {'identity': identity, 'starts': origins, 'mode': self.procedure['mode']}

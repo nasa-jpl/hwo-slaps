@@ -186,3 +186,10 @@ def test_compiled_residual_unwraps_autoarray_without_host_conversion():
         def __array__(self, *args): raise AssertionError("host conversion")
     compiled=jax.jit(lambda x: residual_array(Wrapper(x * 2), jnp))
     assert np.array_equal(compiled(np.array([1.,2.])), [2.,4.])
+
+
+def test_dataset_fingerprint_accepts_runtime_convolver():
+    from hwoslaps.modeling.nonlinear.profile_replay import array_identity
+    kernel=np.arange(9.,dtype=np.float64).reshape(3,3)
+    convolver=SimpleNamespace(kernel=SimpleNamespace(native=kernel))
+    assert array_identity(convolver)==array_identity(kernel)
