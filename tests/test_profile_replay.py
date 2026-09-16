@@ -124,3 +124,54 @@ def test_atomic_json_preserves_previous_file_on_serialization_error(tmp_path):
     with pytest.raises(TypeError):
         atomic_json(p, {'bad': object()})
     assert json.loads(p.read_text()) == {'state': 'old'}
+
+
+def controller_fixture(tmp_path, monkeypatch, worker_body, timeout=10):
+    import sys
+    import shutil
+    import subprocess
+    import psutil
+    root=tmp_path/'task';root.mkdir()
+    work=tmp_path/'work';(work/'scripts').mkdir(parents=True)
+    script=work/'scripts/run_nonlinear_profile.py'
+    script.write_text('import sys,json,time\nfrom pathlib import Path\nspec=json.loads(Path(sys.argv[1]).read_text())\nout=Path(spec["output"])\n'+worker_body)
+    spec=root/'job.json';spec.write_text(json.dumps({'output':str(root/'attempt')}))
+    manifest=root/'manifest.json';manifest.write_text(json.dumps({'task_root':str(root),'max_workers':1,
+        'gpus':[2],'cap_seconds':100,'python':sys.executable,'worktree':str(work),'campaign_uuid':'test',
+        'jobs':[{'key':'a','spec':str(spec),'gpu':2,'peak_mib':100,'timeout_seconds':timeout}]}))
+    monkeypatch.setattr(subprocess,'check_output',lambda *a,**k:'2, GPU-test, 1000, 0\n')
+    monkeypatch.setattr(psutil,'virtual_memory',lambda:SimpleNamespace(available=1024*2**30))
+    monkeypatch.setattr(shutil,'disk_usage',lambda _:SimpleNamespace(free=100*2**30))
+    return root,manifest
+
+
+def test_controller_completes_and_restart_does_not_repeat(tmp_path,monkeypatch):
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    root,manifest=controller_fixture(tmp_path,monkeypatch,
+        '(out/"worker_exit.json").write_text(json.dumps({"status":"COMPLETE","elapsed_s":0.2,"artifacts":{}}))\n')
+    supervise(manifest)
+    before=(root/'state/budget.json').read_text()
+    supervise(manifest)
+    assert (root/'state/budget.json').read_text()==before
+    assert json.loads(before)['attempts']['a']['status']=='COMPLETE'
+
+
+def test_controller_timeout_preserves_charge_and_stops_owned_process(tmp_path,monkeypatch):
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    root,manifest=controller_fixture(tmp_path,monkeypatch,'time.sleep(30)\n',timeout=.1)
+    with pytest.raises(RuntimeError,match='Manifest failure'):
+        supervise(manifest)
+    item=json.loads((root/'state/budget.json').read_text())['attempts']['a']
+    assert item['status']=='TIMED_OUT'
+    assert item['charged_seconds']>0
+    assert not process_matches(item)
+
+
+def test_controller_exclusive_ownership(tmp_path):
+    import fcntl
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    state=tmp_path/'state';state.mkdir()
+    manifest=tmp_path/'manifest.json';manifest.write_text(json.dumps({'task_root':str(tmp_path)}))
+    with (state/'controller.lock').open('w') as owner:
+        fcntl.flock(owner,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):supervise(manifest)

@@ -115,7 +115,7 @@ def supervise(manifest_path):
                 if not process_matches(item):
                     if ended.exists():
                         receipt = json.loads(ended.read_text())
-                        ledger.finish(key, receipt['status'], receipt['elapsed_s'])
+                        ledger.finish(key, receipt['status'], max(receipt['elapsed_s'], time.time() - item['start_unix']))
                     else:
                         ledger.finish(key, 'INTERRUPTED_UNCERTAIN', item['reservation_seconds'])
                     continue
