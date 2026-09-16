@@ -15,6 +15,23 @@ import time
 from .profile_replay import atomic_json
 
 
+def clock_epoch():
+    """Identify the boot that defines the monotonic clock domain."""
+    path = Path("/proc/sys/kernel/random/boot_id")
+    if path.exists():
+        return path.read_text().strip()
+    import psutil
+
+    return str(psutil.boot_time())
+
+
+def attempt_elapsed(item):
+    """Use monotonic duration and a conservative charge after a boot change."""
+    if item.get("clock_epoch") == clock_epoch() and "start_monotonic" in item:
+        return max(0.0, time.monotonic() - item["start_monotonic"])
+    return float(item["reservation_seconds"])
+
+
 class BudgetLedger:
     """Reserve complete attempt limits and retain charges across restarts."""
 
@@ -53,6 +70,8 @@ class BudgetLedger:
             reservation_seconds=seconds,
             charged_seconds=0.0,
             start_unix=time.time(),
+            start_monotonic=time.monotonic(),
+            clock_epoch=clock_epoch(),
         )
         self.save()
         return True
@@ -148,16 +167,14 @@ def supervise(manifest_path):
                             ):
                                 status = "FAILED_ARTIFACT_INTEGRITY"
                                 break
-                        ledger.finish(
-                            key, status, max(receipt["elapsed_s"], time.time() - item["start_unix"])
-                        )
+                        ledger.finish(key, status, max(receipt["elapsed_s"], attempt_elapsed(item)))
                     else:
                         ledger.finish(key, "INTERRUPTED_UNCERTAIN", item["reservation_seconds"])
                     continue
-                elapsed = time.time() - item["start_unix"]
+                elapsed = attempt_elapsed(item)
                 if elapsed >= item["timeout_seconds"]:
                     stop_owned(item)
-                    ledger.finish(key, "TIMED_OUT", time.time() - item["start_unix"])
+                    ledger.finish(key, "TIMED_OUT", attempt_elapsed(item))
             active = {k: v for k, v in ledger.data["attempts"].items() if v["status"] == "RUNNING"}
             pending = [j for j in manifest["jobs"] if j["key"] not in ledger.data["attempts"]]
             failed = [
@@ -260,7 +277,7 @@ def supervise(manifest_path):
                     peak_mib=job["peak_mib"],
                     timeout_seconds=job["timeout_seconds"],
                 )
-                if not ledger.reserve(job["key"], job["timeout_seconds"] + 30, item):
+                if not ledger.reserve(job["key"], job["timeout_seconds"] + 60, item):
                     output.rmdir()
                     continue
                 env = dict(
@@ -317,7 +334,7 @@ def supervise(manifest_path):
         for key, item in ledger.data["attempts"].items():
             if item["status"] == "RUNNING":
                 stop_owned(item)
-                ledger.finish(key, "STOPPED_AFTER_FAILURE", time.time() - item["start_unix"])
+                ledger.finish(key, "STOPPED_AFTER_FAILURE", attempt_elapsed(item))
         raise
     finally:
         ledger.save()

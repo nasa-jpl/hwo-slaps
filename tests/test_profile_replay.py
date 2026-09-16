@@ -375,3 +375,95 @@ def test_interruption_keeps_best_earlier_start_and_its_completed_record(monkeypa
     assert record["partial_best"]["chi2"] == 0.0
     assert record["start_progress"]["multistart:start_1"]["chi2"] == 9.0
     assert len(completed) == 1 and completed[0]["chi2"] == 0.0
+
+
+def test_retained_points_are_replayed_and_not_counted_as_independent(tmp_path):
+    import hashlib
+    from hwoslaps.modeling.nonlinear.profile_replay import verified_retained_points
+
+    source = tmp_path / "previous.json"
+    previous = {
+        "smooth": {
+            "identity": {"passed": True, "analysis_key": "same", "parameter_names": ["x"]},
+            "best_vector": [0.1],
+            "best_chi2": 0.01,
+            "logL": -0.005,
+        }
+    }
+    source.write_text(json.dumps(previous))
+    reference = {"path": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest()}
+    args = (
+        [reference],
+        "smooth",
+        ["x"],
+        np.array([-2.0]),
+        np.array([2.0]),
+        "same",
+        lambda x: x,
+        lambda x: -float(x @ x) / 2,
+        1e-4,
+    )
+    retained = verified_retained_points(*args)
+    assert retained[0]["chi2"] == pytest.approx(0.01)
+    assert not retained[0]["independent_start"]
+    with pytest.raises(ValueError, match="runtime objective"):
+        verified_retained_points(*args[:-2], lambda x: 10.0, args[-1])
+    source.write_text("modified")
+    with pytest.raises(ValueError, match="hash mismatch"):
+        verified_retained_points(*args)
+
+
+def test_near_boundary_initialization_preserves_free_box_and_other_coordinates():
+    from hwoslaps.modeling.nonlinear.profile_replay import near_boundary_starts
+
+    lo = np.array([-2.0, 0.0, -1.0])
+    hi = np.array([2.0, 10.0, 1.0])
+    before_lo = lo.copy()
+    before_hi = hi.copy()
+    starts = [np.array([0.1, 4.0, 0.2]), np.array([0.3, 6.0, 0.4])]
+    changed, indices = near_boundary_starts(starts, np.array([0.0, 9.9999999, 0.0]), lo, hi)
+    assert indices == [1]
+    assert np.array_equal(lo, before_lo) and np.array_equal(hi, before_hi)
+    assert changed[0][0] == 0.1 and changed[1][2] == 0.4
+    assert np.all(changed[0] >= lo) and np.all(changed[0] <= hi)
+    assert starts[0][1] == 4.0
+
+
+def test_completed_start_replay_checks_values_and_avoids_duplicate_solver_work():
+    from hwoslaps.modeling.nonlinear.profile_replay import replay_completed_profile
+
+    origins = [{"origin": "data_a"}, {"origin": "data_b"}]
+    previous = {
+        "stable": True,
+        "starts": origins,
+        "profile": {
+            "attempts": [
+                {"label": "start_0", "x": [0.1], "chi2": 0.01},
+                {"label": "start_1", "x": [0.2], "chi2": 0.04},
+            ]
+        },
+    }
+    result = replay_completed_profile(
+        previous, origins, lambda x: x, lambda x: -float(x @ x) / 2, 1e-4, "smooth"
+    )
+    assert result.chi2_min == pytest.approx(0.01)
+    assert all(a.nfev == 0 and a.residual_calls == 1 for a in result.attempts)
+    with pytest.raises(ValueError, match="residual identity"):
+        replay_completed_profile(previous, origins, lambda x: x + 1, lambda x: 0, 1e-4, "smooth")
+
+
+def test_live_budget_uses_monotonic_time_despite_wall_clock_jump(monkeypatch):
+    from hwoslaps.modeling.nonlinear import profile_execution as execution
+
+    monkeypatch.setattr(execution, "clock_epoch", lambda: "same_boot")
+    monkeypatch.setattr(execution.time, "monotonic", lambda: 150.0)
+    monkeypatch.setattr(execution.time, "time", lambda: -999999.0)
+    item = {
+        "clock_epoch": "same_boot",
+        "start_monotonic": 100.0,
+        "start_unix": 500.0,
+        "reservation_seconds": 1000.0,
+    }
+    assert execution.attempt_elapsed(item) == 50.0
+    item["clock_epoch"] = "old_boot"
+    assert execution.attempt_elapsed(item) == 1000.0

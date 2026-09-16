@@ -17,7 +17,7 @@ import numpy as np
 from scipy.optimize import lsq_linear
 
 from .autolens_runner import AutoLensFitRunner, _native_array
-from .local_profile import fit_local_least_squares_profile
+from .local_profile import LocalFitAttempt, LocalProfileFitResult, fit_local_least_squares_profile
 from .output_schema import NonlinearFitSummary, _json_safe
 from .validator import NonlinearMetricValidator
 
@@ -141,6 +141,138 @@ def linearized_comparator(
         delta = np.linalg.lstsq(augmented, signal, rcond=1.0e-12)[0]
         answer["q_with_free_background_only"] = float(np.linalg.norm(signal - augmented @ delta) ** 2)
     return answer
+
+
+def verified_retained_points(
+    references, role, names, lower, upper, analysis_key, residual, likelihood, tolerance
+):
+    """Re-evaluate known points without counting them as independent starts."""
+    retained = []
+    for reference in references:
+        path = Path(reference["path"])
+        if hashlib.sha256(path.read_bytes()).hexdigest() != reference["sha256"]:
+            raise ValueError("Retained point source hash mismatch")
+        previous = json.loads(path.read_text())[role]
+        identity = previous["identity"]
+        if (
+            not identity["passed"]
+            or identity["analysis_key"] != analysis_key
+            or identity["parameter_names"] != names
+        ):
+            raise ValueError("Retained point belongs to another objective or parameter order")
+        if "best_vector" in previous:
+            x = np.asarray(previous["best_vector"], dtype=float)
+            expected_chi2 = previous["best_chi2"]
+            expected_logL = previous["logL"]
+        else:
+            x = np.asarray(previous["partial_best"]["x"], dtype=float)
+            expected_chi2 = previous["partial_best"]["chi2"]
+            expected_logL = None
+        if x.shape != lower.shape or not np.all(np.isfinite(x)) or np.any(x < lower) or np.any(x > upper):
+            raise ValueError("Retained point is outside the current prior support")
+        values = residual(x)
+        chi2 = float(values @ values)
+        logL = float(likelihood(x))
+        if (
+            not np.isfinite(logL)
+            or not np.isfinite(chi2)
+            or abs(chi2 - expected_chi2) > 2 * tolerance
+            or (expected_logL is not None and abs(logL - expected_logL) > tolerance)
+        ):
+            raise ValueError("Retained point fails current runtime objective identity")
+        retained.append(
+            {
+                "source": str(path),
+                "source_sha256": reference["sha256"],
+                "vector": x.tolist(),
+                "chi2": chi2,
+                "logL": logL,
+                "expected_logL": expected_logL,
+                "expected_chi2": expected_chi2,
+                "independent_start": False,
+            }
+        )
+    return retained
+
+
+def checked_previous_profile(reference, role, names, lower, upper, analysis_key):
+    path = Path(reference["path"])
+    if hashlib.sha256(path.read_bytes()).hexdigest() != reference["sha256"]:
+        raise ValueError("Previous profile source hash mismatch")
+    previous = json.loads(path.read_text())[role]
+    identity = previous["identity"]
+    if (
+        not identity["passed"]
+        or identity["analysis_key"] != analysis_key
+        or identity["parameter_names"] != names
+        or not np.array_equal(identity["lower_bounds"], lower)
+        or not np.array_equal(identity["upper_bounds"], upper)
+    ):
+        raise ValueError("Previous profile has a different objective, order, or prior support")
+    return previous
+
+
+def near_boundary_starts(starts, previous_best, lower, upper, threshold=1.0e-5):
+    """Change starting points while preserving all parameter bounds."""
+    widths = upper - lower
+    lo_distance = (previous_best - lower) / widths
+    hi_distance = (upper - previous_best) / widths
+    selected = np.flatnonzero(np.minimum(lo_distance, hi_distance) <= threshold)
+    if not len(selected):
+        raise ValueError("No empirically near-active bounds for this initialization diagnostic")
+    transformed = []
+    for start in starts:
+        x = np.array(start, copy=True)
+        for j in selected:
+            x[j] = (
+                lower[j] + 1.0e-10 * widths[j]
+                if lo_distance[j] < hi_distance[j]
+                else upper[j] - 1.0e-10 * widths[j]
+            )
+        transformed.append(x)
+    return transformed, selected.tolist()
+
+
+def replay_completed_profile(previous, origins, residual, likelihood, tolerance, role):
+    """Verify completed independent starts without repeating optimization."""
+    if not previous["stable"] or previous["starts"] != origins:
+        raise ValueError("Only stable completed profiles with identical original starts may be reused")
+    attempts = []
+    for old in previous["profile"]["attempts"]:
+        x = np.asarray(old["x"], dtype=float)
+        values = residual(x)
+        chi2 = float(values @ values)
+        if not np.isfinite(chi2) or abs(chi2 - old["chi2"]) > 2 * tolerance:
+            raise ValueError("Reused start fails runtime residual identity")
+        if not np.isfinite(float(likelihood(x))):
+            raise ValueError("Reused start has nonfinite likelihood")
+        attempts.append(
+            LocalFitAttempt(
+                label=old["label"],
+                success=True,
+                status=0,
+                message="Verified completed start; original solver metadata retained separately",
+                chi2=chi2,
+                x=x.tolist(),
+                nfev=0,
+                optimality=float("nan"),
+                residual_calls=1,
+                endpoint_chi2=chi2,
+                active_mask=old.get("active_mask"),
+            )
+        )
+    if len(attempts) != len(origins):
+        raise ValueError("Incomplete prior start set")
+    best = min(attempts, key=lambda a: a.chi2)
+    spread = max(a.chi2 for a in attempts) - best.chi2
+    return LocalProfileFitResult(
+        model_name=role,
+        best=best,
+        attempts=attempts,
+        convergence_abs_spread=spread,
+        convergence_rel_spread=spread / max(best.chi2, 1.0),
+        reliability_note="Re-evaluated completed independent starts; not new independent trials",
+    )
 
 
 def update_profile_checkpoint(record, point, phase):
@@ -322,6 +454,24 @@ class ProfileReplayRunner(AutoLensFitRunner):
             if not record["jacobian_gate"]["passed"]:
                 raise ValueError("Analytic Jacobian directional check failed")
         if self.procedure["mode"] == "profile":
+            retained = verified_retained_points(
+                self.replay[role].get("retained_points", []),
+                role,
+                names,
+                lower,
+                upper,
+                analysis_key,
+                residual,
+                compiled_likelihood,
+                self.procedure["identity_tolerance"],
+            )
+            record["retained_points"] = retained
+            for index, point in enumerate(retained):
+                update_profile_checkpoint(
+                    record,
+                    {"label": str(index), "chi2": point["chi2"], "x": point["vector"], "residual_calls": 1},
+                    "retained",
+                )
             phase = "multistart"
 
             def checkpoint(point):
@@ -332,25 +482,100 @@ class ProfileReplayRunner(AutoLensFitRunner):
                 record.setdefault("completed_attempts", {})[phase + ":" + attempt.label] = attempt.to_dict()
                 atomic_json(Path(self.output_dir) / "profile_progress.json", self.records)
 
-            profile = fit_local_least_squares_profile(
-                model_name=role,
-                residual_fn=residual,
-                initial_points=starts,
-                lower_bounds=lower,
-                upper_bounds=upper,
-                max_nfev=self.procedure["max_nfev"],
-                ftol=None if self.procedure.get("disable_ftol") else self.procedure["solver_tolerance"],
-                xtol=self.procedure["solver_tolerance"],
-                gtol=self.procedure["solver_tolerance"],
-                progress_callback=checkpoint,
-                jacobian_fn=jacobian,
-                attempt_callback=completed_attempt,
+            reuse_reference = self.replay[role].get("reuse_profile")
+            boundary_reference = self.replay[role].get("boundary_seed_reference")
+            if reuse_reference and boundary_reference:
+                raise ValueError("Cannot reuse starts and transform them in the same attempt")
+            if boundary_reference:
+                previous = checked_previous_profile(
+                    boundary_reference, role, names, lower, upper, analysis_key
+                )
+                candidate_starts, candidate_origins = archive_vectors(
+                    self.replay[role]["summary"],
+                    self.replay[role].get("samples"),
+                    names,
+                    lower,
+                    upper,
+                    self.procedure.get("boundary_candidate_count", 64),
+                    self.procedure["start_separation"],
+                )
+                candidates, indices = near_boundary_starts(
+                    candidate_starts, np.asarray(previous["best_vector"]), lower, upper
+                )
+                selected = []
+                for index, point in enumerate(candidates):
+                    if (
+                        selected
+                        and min(np.linalg.norm((point - candidates[j]) / (upper - lower)) for j in selected)
+                        < self.procedure["start_separation"]
+                    ):
+                        continue
+                    selected.append(index)
+                    if len(selected) == self.procedure["max_starts"]:
+                        break
+                if len(selected) < self.procedure.get("minimum_supporting_starts", 2):
+                    raise ValueError("Too few separated data-derived starts after boundary initialization")
+                starts = [candidates[j] for j in selected]
+                record["original_archived_starts"] = origins
+                origins = [candidate_origins[j] for j in selected]
+                record["starts"] = origins
+                record["boundary_initialization"] = {
+                    "reference": boundary_reference,
+                    "indices": indices,
+                    "parameter_names": [names[j] for j in indices],
+                    "starting_vectors": [x.tolist() for x in starts],
+                    "all_parameters_remain_free": True,
+                    "candidate_count": len(candidates),
+                    "selected_candidate_indices": selected,
+                    "normalized_separation": self.procedure["start_separation"],
+                }
+            if reuse_reference:
+                previous = checked_previous_profile(reuse_reference, role, names, lower, upper, analysis_key)
+                record["reused_profile_source"] = reuse_reference
+                record["original_completed_solver_records"] = previous["profile"]
+                record["reused_jacobian_gate"] = previous.get("jacobian_gate")
+                if self.procedure.get("jacobian") == "jax_forward" and not previous.get(
+                    "jacobian_gate", {}
+                ).get("passed"):
+                    raise ValueError("Reused profile lacks a verified analytic Jacobian")
+                profile = replay_completed_profile(
+                    previous,
+                    origins,
+                    residual,
+                    compiled_likelihood,
+                    self.procedure["identity_tolerance"],
+                    role,
+                )
+                for attempt in profile.attempts:
+                    checkpoint(
+                        {"label": attempt.label, "chi2": attempt.chi2, "x": attempt.x, "residual_calls": 1}
+                    )
+                    completed_attempt(attempt)
+            else:
+                profile = fit_local_least_squares_profile(
+                    model_name=role,
+                    residual_fn=residual,
+                    initial_points=starts,
+                    lower_bounds=lower,
+                    upper_bounds=upper,
+                    max_nfev=self.procedure["max_nfev"],
+                    ftol=None if self.procedure.get("disable_ftol") else self.procedure["solver_tolerance"],
+                    xtol=self.procedure["solver_tolerance"],
+                    gtol=self.procedure["solver_tolerance"],
+                    progress_callback=checkpoint,
+                    jacobian_fn=jacobian,
+                    attempt_callback=completed_attempt,
+                )
+            repeat_seed = min(
+                [{"chi2": profile.chi2_min, "vector": profile.best.x}] + retained,
+                key=lambda point: point["chi2"],
             )
+            record["repeat_seed"] = repeat_seed
             phase = "repeat"
             repeat = fit_local_least_squares_profile(
                 model_name=role,
                 residual_fn=residual,
-                initial_points=[profile.best.x],
+                initial_points=[repeat_seed["vector"]],
                 lower_bounds=lower,
                 upper_bounds=upper,
                 max_nfev=self.procedure["max_nfev"],
