@@ -94,6 +94,24 @@ def main():
                     validator_factory=ProfileReplayValidator,
                     artifact_prefix="profile_protocol",
                 )
+                case_result = json.loads((case_output / "profile_result.json").read_text())
+                atomic_json(
+                    case_output / "case_complete.json",
+                    {
+                        "execution_status": "COMPLETE",
+                        "system_id": job["system_id"],
+                        "arm": job["arm"],
+                        "numerical_status": case_result["numerical_status"],
+                        "profile_decision": case_result["profile_decision"],
+                        "procedure": spec["procedure"],
+                        "revision": revision,
+                        "artifacts": {
+                            str(p): hashlib.sha256(p.read_bytes()).hexdigest()
+                            for p in case_output.iterdir()
+                            if p.is_file() and p.name != "case_complete.json"
+                        },
+                    },
+                )
                 atomic_json(output / "cache_stats.json", cache_stats)
         status = "COMPLETE"
     except BaseException as exc:

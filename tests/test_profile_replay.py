@@ -323,11 +323,55 @@ def test_controller_excludes_foreign_gpu_process_with_small_allocation(tmp_path,
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     monkeypatch.setattr(
-        subprocess, "check_output",
-        lambda cmd, **kwargs: "123456, GPU-test\n" if "--query-compute-apps=pid,gpu_uuid" in cmd
-        else "2, GPU-test, 1000, 1\n",
+        subprocess,
+        "check_output",
+        lambda cmd, **kwargs: (
+            "123456, GPU-test\n" if "--query-compute-apps=pid,gpu_uuid" in cmd else "2, GPU-test, 1000, 1\n"
+        ),
     )
     supervise(manifest)
     assert not (root / "attempt").exists()
     assert json.loads((root / "state/budget.json").read_text())["committed_seconds"] == 0
     assert (root / "state/dispatch_blocked.json").exists()
+
+
+def test_jacobian_check_refines_step_without_loosening_error_limit():
+    from hwoslaps.modeling.nonlinear.profile_replay import verify_residual_jacobian
+
+    def residual(x):
+        return np.array([x[0] + 1.0e10 * x[0] ** 3])
+
+    result = verify_residual_jacobian(residual, np.ones((1, 1)), np.zeros(1), -np.ones(1), np.ones(1), 1.0e-3)
+    assert result["passed"]
+    assert not result["step_trials"][0]["passed"]
+    assert len(result["step_trials"]) >= 3
+    bad = verify_residual_jacobian(
+        residual, np.full((1, 1), 5.0), np.zeros(1), -np.ones(1), np.ones(1), 1.0e-3
+    )
+    assert not bad["passed"]
+
+
+def test_interruption_keeps_best_earlier_start_and_its_completed_record(monkeypatch):
+    from hwoslaps.modeling.nonlinear.profile_replay import update_profile_checkpoint
+
+    record = {}
+    completed = []
+
+    def solver(fun, x, **kwargs):
+        if x[0] == 3.0:
+            raise KeyboardInterrupt()
+        fun(np.array([0.0]))
+        return solver_result(0.0, True)
+
+    monkeypatch.setattr(local_profile, "least_squares", solver)
+    with pytest.raises(KeyboardInterrupt):
+        local_profile.fit_local_least_squares_profile(
+            model_name="interrupt",
+            residual_fn=lambda x: x,
+            initial_points=[[2.0], [3.0]],
+            progress_callback=lambda point: update_profile_checkpoint(record, point, "multistart"),
+            attempt_callback=lambda attempt: completed.append(attempt.to_dict()),
+        )
+    assert record["partial_best"]["chi2"] == 0.0
+    assert record["start_progress"]["multistart:start_1"]["chi2"] == 9.0
+    assert len(completed) == 1 and completed[0]["chi2"] == 0.0

@@ -143,6 +143,47 @@ def linearized_comparator(
     return answer
 
 
+def update_profile_checkpoint(record, point, phase):
+    """Keep each start's progress and the best point across all starts."""
+    point = dict(point, phase=phase)
+    record.setdefault("start_progress", {})[phase + ":" + point["label"]] = point
+    if "partial_best" not in record or point["chi2"] < record["partial_best"]["chi2"]:
+        record["partial_best"] = point
+
+
+def verify_residual_jacobian(residual, matrix, x, lower, upper, tolerance):
+    """Require two directions to agree at two successive shrinking steps."""
+    widths = upper - lower
+    base_step = min(1.0e-6, float(np.min(np.minimum(x - lower, upper - x) / widths)) / 4)
+    if base_step <= 0:
+        raise ValueError("Jacobian check needs an interior point")
+    directions = [
+        widths * np.where(np.arange(len(x)) % 2, -1.0, 1.0),
+        widths * np.cos(np.arange(len(x)) + 1.0),
+    ]
+    trials = []
+    consecutive = 0
+    for factor in [1.0, 0.1, 0.01, 0.001, 0.0001]:
+        step = base_step * factor
+        errors = []
+        for direction in directions:
+            central = (residual(x + step * direction) - residual(x - step * direction)) / (2 * step)
+            predicted = matrix @ direction
+            errors.append(float(np.linalg.norm(central - predicted) / max(np.linalg.norm(predicted), 1.0)))
+        passed = bool(np.all(np.isfinite(errors)) and max(errors) <= tolerance)
+        trials.append({"step": step, "relative_errors": errors, "passed": passed})
+        consecutive = consecutive + 1 if passed else 0
+        if consecutive >= 2:
+            break
+    return {
+        "passed": consecutive >= 2,
+        "relative_directional_error": max(trials[-1]["relative_errors"]),
+        "step_trials": trials,
+        "required_consecutive_steps": 2,
+        "directions": len(directions),
+    }
+
+
 def profile_stability(attempts, initial_best, repeat_best, tolerance, minimum_support=2):
     """Assess repeatability of the best value, retaining poorer local optima.
 
@@ -273,32 +314,22 @@ class ProfileReplayRunner(AutoLensFitRunner):
             matrix = jacobian(starts[0])
             if not np.all(np.isfinite(matrix)):
                 raise ValueError("JAX residual Jacobian has nonfinite elements")
-            direction = (upper - lower) * np.where(np.arange(len(lower)) % 2, -1.0, 1.0)
-            step = min(
-                1.0e-6, float(np.min(np.minimum(starts[0] - lower, upper - starts[0]) / (upper - lower))) / 4
+            record["jacobian_gate"] = verify_residual_jacobian(
+                residual, matrix, starts[0], lower, upper, self.procedure["jacobian_tolerance"]
             )
-            if step <= 0:
-                raise ValueError(
-                    "Archived ML point is on a bound; directional Jacobian gate needs an interior point"
-                )
-            central = (residual(starts[0] + step * direction) - residual(starts[0] - step * direction)) / (
-                2 * step
-            )
-            predicted = matrix @ direction
-            relative_error = float(np.linalg.norm(central - predicted) / max(np.linalg.norm(predicted), 1.0))
-            record["jacobian_gate"] = {
-                "relative_directional_error": relative_error,
-                "step": step,
-                "compile_and_check_s": time.perf_counter() - before_jacobian,
-                "passed": relative_error <= self.procedure["jacobian_tolerance"],
-            }
+            record["jacobian_gate"]["compile_and_check_s"] = time.perf_counter() - before_jacobian
             atomic_json(Path(self.output_dir) / "profile_progress.json", self.records)
             if not record["jacobian_gate"]["passed"]:
                 raise ValueError("Analytic Jacobian directional check failed")
         if self.procedure["mode"] == "profile":
+            phase = "multistart"
 
             def checkpoint(point):
-                record["partial_best"] = point
+                update_profile_checkpoint(record, point, phase)
+                atomic_json(Path(self.output_dir) / "profile_progress.json", self.records)
+
+            def completed_attempt(attempt):
+                record.setdefault("completed_attempts", {})[phase + ":" + attempt.label] = attempt.to_dict()
                 atomic_json(Path(self.output_dir) / "profile_progress.json", self.records)
 
             profile = fit_local_least_squares_profile(
@@ -313,7 +344,9 @@ class ProfileReplayRunner(AutoLensFitRunner):
                 gtol=self.procedure["solver_tolerance"],
                 progress_callback=checkpoint,
                 jacobian_fn=jacobian,
+                attempt_callback=completed_attempt,
             )
+            phase = "repeat"
             repeat = fit_local_least_squares_profile(
                 model_name=role,
                 residual_fn=residual,
@@ -326,6 +359,7 @@ class ProfileReplayRunner(AutoLensFitRunner):
                 gtol=self.procedure["solver_tolerance"] / 10,
                 progress_callback=checkpoint,
                 jacobian_fn=jacobian,
+                attempt_callback=completed_attempt,
             )
             best = min([profile.best, repeat.best], key=lambda item: item.chi2)
             best_x, best_chi2 = np.asarray(best.x), best.chi2

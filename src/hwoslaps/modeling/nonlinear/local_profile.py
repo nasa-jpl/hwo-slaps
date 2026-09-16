@@ -86,6 +86,7 @@ def fit_local_least_squares_profile(
     selection_rel_tolerance: float = 1.0e-6,
     progress_callback: Optional[Callable[[dict], None]] = None,
     jacobian_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+    attempt_callback: Optional[Callable[[LocalFitAttempt], None]] = None,
 ) -> LocalProfileFitResult:
     """Run multistart local least-squares profiling and return the best fit."""
     points = _coerce_initial_points(initial_points)
@@ -183,6 +184,8 @@ def fit_local_least_squares_profile(
             active_mask=np.asarray(result.active_mask, dtype=int).tolist() if result is not None else None,
         )
         attempts.append(attempt)
+        if attempt_callback is not None:
+            attempt_callback(attempt)
     finite_attempts = [attempt for attempt in attempts if np.isfinite(attempt.chi2)]
     if not finite_attempts:
         raise ValueError(
