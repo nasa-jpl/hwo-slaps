@@ -4,7 +4,7 @@ import os
 
 
 def require_cuda_execution():
-    """Fail before sampling unless the default backend and probe use one GPU."""
+    """Require one default GPU and a successful float64 device probe."""
     import jax
     import numpy as np
 
@@ -13,9 +13,7 @@ def require_cuda_execution():
     backend = jax.default_backend()
     devices = jax.devices()
     if backend != "gpu" or len(devices) != 1 or devices[0].platform != "gpu":
-        raise RuntimeError(
-            f"CUDA admission rejected: backend={backend}, devices={devices}"
-        )
+        raise RuntimeError(f"CUDA admission rejected: backend={backend}, devices={devices}")
     probe = jax.device_put(np.zeros(1, dtype=np.float64), devices[0])
     probe.block_until_ready()
     actual = tuple(probe.devices())

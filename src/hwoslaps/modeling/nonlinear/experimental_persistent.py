@@ -38,14 +38,23 @@ def persistent_preparation(max_lensing=2, max_psf=2, max_grid_bytes=1024**3):
     psf_cache = OrderedDict()
     grid_cache = OrderedDict()
     stats = {
-        "lensing_hits": 0, "lensing_misses": 0,
-        "psf_hits": 0, "psf_misses": 0,
-        "copy_seconds": 0.0, "pool_close_deferred": 0,
-        "max_lensing_entries": max_lensing, "max_psf_entries": max_psf,
-        "grid_hits": 0, "grid_misses": 0, "grid_cache_bytes": 0,
-        "grid_peak_cache_bytes": 0, "grid_oversized_bypasses": 0,
-        "grid_key_seconds": 0.0, "grid_build_seconds": 0.0,
-        "grid_copy_seconds": 0.0, "max_grid_bytes": max_grid_bytes,
+        "lensing_hits": 0,
+        "lensing_misses": 0,
+        "psf_hits": 0,
+        "psf_misses": 0,
+        "copy_seconds": 0.0,
+        "pool_close_deferred": 0,
+        "max_lensing_entries": max_lensing,
+        "max_psf_entries": max_psf,
+        "grid_hits": 0,
+        "grid_misses": 0,
+        "grid_cache_bytes": 0,
+        "grid_peak_cache_bytes": 0,
+        "grid_oversized_bypasses": 0,
+        "grid_key_seconds": 0.0,
+        "grid_build_seconds": 0.0,
+        "grid_copy_seconds": 0.0,
+        "max_grid_bytes": max_grid_bytes,
     }
 
     def use(cache, identity, kind, original, config, full_config, limit):
@@ -69,8 +78,7 @@ def persistent_preparation(max_lensing=2, max_psf=2, max_grid_bytes=1024**3):
 
     def lens(config, full_config):
         identity = _key({"lensing": config, "global_seed": full_config["global_seed"]})
-        return use(lens_cache, identity, "lensing", original_lens,
-                   config, full_config, max_lensing)
+        return use(lens_cache, identity, "lensing", original_lens, config, full_config, max_lensing)
 
     def psf(config, full_config=None):
         # The generator reads the PSF block and detector scale for its science.
@@ -78,8 +86,7 @@ def persistent_preparation(max_lensing=2, max_psf=2, max_grid_bytes=1024**3):
         if full_config is None or config.get("hres_psf", {}).get("save_highres_psf_npy", False):
             return original_psf(config, full_config=full_config)
         identity = _key({"psf": config, "pixel_scale": full_config["lensing"]["grid"]["pixel_scale"]})
-        return use(psf_cache, identity, "psf", original_psf,
-                   config, full_config, max_psf)
+        return use(psf_cache, identity, "psf", original_psf, config, full_config, max_psf)
 
     def defer_close():
         stats["pool_close_deferred"] += 1
@@ -97,32 +104,32 @@ def persistent_preparation(max_lensing=2, max_psf=2, max_grid_bytes=1024**3):
             digest.update(repr(array.shape).encode())
             digest.update(array.tobytes())
         identity = digest.hexdigest()
-        stats['grid_key_seconds'] += time.perf_counter() - before
+        stats["grid_key_seconds"] += time.perf_counter() - before
         if identity in grid_cache:
-            stats['grid_hits'] += 1
+            stats["grid_hits"] += 1
             result = grid_cache.pop(identity)
             grid_cache[identity] = result
             before = time.perf_counter()
-            detached = result.copy(order='K')
-            stats['grid_copy_seconds'] += time.perf_counter() - before
+            detached = result.copy(order="K")
+            stats["grid_copy_seconds"] += time.perf_counter() - before
             return detached
-        stats['grid_misses'] += 1
+        stats["grid_misses"] += 1
         before = time.perf_counter()
         result = original_grid(*args, **kwargs)
-        stats['grid_build_seconds'] += time.perf_counter() - before
+        stats["grid_build_seconds"] += time.perf_counter() - before
         if result.nbytes > max_grid_bytes:
-            stats['grid_oversized_bypasses'] += 1
+            stats["grid_oversized_bypasses"] += 1
             return result
-        while grid_cache and (len(grid_cache) >= 4 or
-                              stats['grid_cache_bytes'] + result.nbytes > max_grid_bytes):
+        while grid_cache and (
+            len(grid_cache) >= 4 or stats["grid_cache_bytes"] + result.nbytes > max_grid_bytes
+        ):
             _, removed = grid_cache.popitem(last=False)
-            stats['grid_cache_bytes'] -= removed.nbytes
-        saved = result.copy(order='K')
+            stats["grid_cache_bytes"] -= removed.nbytes
+        saved = result.copy(order="K")
         saved.flags.writeable = False
         grid_cache[identity] = saved
-        stats['grid_cache_bytes'] += saved.nbytes
-        stats['grid_peak_cache_bytes'] = max(stats['grid_peak_cache_bytes'],
-                                            stats['grid_cache_bytes'])
+        stats["grid_cache_bytes"] += saved.nbytes
+        stats["grid_peak_cache_bytes"] = max(stats["grid_peak_cache_bytes"], stats["grid_cache_bytes"])
         return result
 
     lens_module.generate_lensing_system = lens
@@ -140,4 +147,4 @@ def persistent_preparation(max_lensing=2, max_psf=2, max_grid_bytes=1024**3):
         lens_cache.clear()
         psf_cache.clear()
         grid_cache.clear()
-        stats['grid_cache_bytes'] = 0
+        stats["grid_cache_bytes"] = 0
