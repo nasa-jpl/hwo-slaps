@@ -400,8 +400,14 @@ class ProfileReplayRunner(AutoLensFitRunner):
             instance = model.instance_from_vector(vector=x, xp=jnp)
             return analysis.log_likelihood_function(instance=instance)
 
-        compiled_residual = jax.jit(residual_call)
-        compiled_likelihood = jax.jit(likelihood_call)
+        direct_point = self.procedure.get("direct_point_evaluation", False)
+        if direct_point and (
+            self.procedure.get("mode") != "identity"
+            or self.procedure.get("jacobian", "none") not in (None, "none")
+        ):
+            raise ValueError("Direct point evaluation requires identity-only mode without a Jacobian")
+        compiled_residual = residual_call if direct_point else jax.jit(residual_call)
+        compiled_likelihood = likelihood_call if direct_point else jax.jit(likelihood_call)
         compile_start = time.perf_counter()
 
         def residual(x):
@@ -410,8 +416,8 @@ class ProfileReplayRunner(AutoLensFitRunner):
         r_ml = residual(starts[0])
         l_ml = float(compiled_likelihood(starts[0]))
         compile_seconds = time.perf_counter() - compile_start
-        direct_l = float(likelihood_call(starts[0]))
-        direct_r = np.asarray(residual_call(starts[0]), dtype=float)
+        direct_l = l_ml if direct_point else float(likelihood_call(starts[0]))
+        direct_r = r_ml if direct_point else np.asarray(residual_call(starts[0]), dtype=float)
         saved_l = float(old["log_likelihood_max"])
         error = abs(l_ml - saved_l)
         same_path_error = float(np.linalg.norm(direct_r - r_ml) ** 2)
@@ -419,8 +425,10 @@ class ProfileReplayRunner(AutoLensFitRunner):
             "saved_logL": saved_l,
             "replayed_logL": l_ml,
             "absolute_error": error,
-            "direct_compiled_logL_error": abs(direct_l - l_ml),
-            "direct_compiled_squared_residual_error": same_path_error,
+            "direct_compiled_logL_error": None if direct_point else abs(direct_l - l_ml),
+            "direct_compiled_squared_residual_error": None if direct_point else same_path_error,
+            "compiled_evaluation_performed": not direct_point,
+            "evaluation_mode": "direct_saved_point" if direct_point else "compiled_with_direct_check",
             "analysis_key": analysis_key,
             "archived_analysis_key": old["analysis_key"],
             "legacy_analysis_key": legacy_key,
@@ -637,7 +645,10 @@ class ProfileReplayRunner(AutoLensFitRunner):
             use_jax_effective=True,
             runtime_s=record["wall_s"],
             result_path=self.output_dir,
-            log_likelihood_extraction_method="same_analysis_compiled_log_likelihood",
+            log_likelihood_extraction_method=(
+                "same_analysis_direct_log_likelihood" if direct_point
+                else "same_analysis_compiled_log_likelihood"
+            ),
             runtime_provenance={"procedure": self.procedure},
         )
 

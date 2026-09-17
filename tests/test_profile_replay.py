@@ -139,6 +139,59 @@ def test_default_replay_comparator_keeps_historical_quantities():
     assert result["q_F_support_matched"] == 16.
 
 
+def test_direct_identity_replay_matches_archive_without_jit(tmp_path, monkeypatch):
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.modeling.nonlinear.autolens_runner import NonlinearSearchSettings
+    from hwoslaps.modeling.nonlinear.profile_replay import ProfileReplayRunner
+
+    summary = tmp_path / "summary.json"
+    value = -.5 * .75**2
+    summary.write_text(json.dumps({"arguments": {"max_log_likelihood_sample": {
+        "arguments": {"kwargs": {"arguments": {"x": .25}}, "log_likelihood": value}}}}))
+
+    class Model:
+        unique_prior_paths = [("x",)]
+        priors_ordered_by_id = [SimpleNamespace(lower_limit=0., upper_limit=1.)]
+
+        def instance_from_vector(self, vector, xp):
+            return SimpleNamespace(x=xp.asarray(vector)[0])
+
+    class Analysis:
+        dataset = SimpleNamespace(
+            data=SimpleNamespace(native=np.zeros(1)), noise_map=SimpleNamespace(native=np.ones(1)),
+            mask=np.zeros(1, dtype=bool), psf=np.ones(1),
+        )
+
+        def fit_from(self, instance):
+            return SimpleNamespace(normalized_residual_map=jnp.array([1. - instance.x]))
+
+        def log_likelihood_function(self, instance):
+            return -.5 * (1. - instance.x)**2
+
+    def forbidden_jit(*args, **kwargs):
+        raise AssertionError("Direct saved-point evaluation must not create a whole-model JIT")
+
+    monkeypatch.setattr(jax, "jit", forbidden_jit)
+    replay = {"case": {"case": {"smooth_fit": {"analysis_key": "same", "log_likelihood_max": value}}},
+              "smooth": {"summary": str(summary)}}
+    procedure = {"mode": "identity", "direct_point_evaluation": True, "jacobian": "none",
+                 "max_starts": 1, "start_separation": .05, "identity_tolerance": 1e-4}
+    runner = ProfileReplayRunner(NonlinearSearchSettings(), tmp_path, replay, procedure)
+    result = runner.run_model(model=Model(), analysis=Analysis(), role="smooth",
+                              fit_mode="smooth", case_id="toy", analysis_key="same")
+    identity = runner.records["smooth"]["identity"]
+    assert result.log_likelihood_max == pytest.approx(value)
+    assert identity["passed"] and not identity["compiled_evaluation_performed"]
+    assert identity["direct_compiled_logL_error"] is None
+    assert identity["direct_compiled_squared_residual_error"] is None
+    assert runner.records["smooth"]["best_chi2"] == pytest.approx(.75**2)
+    runner.procedure["mode"] = "profile"
+    with pytest.raises(ValueError, match="identity-only"):
+        runner.run_model(model=Model(), analysis=Analysis(), role="smooth",
+                         fit_mode="smooth", case_id="toy", analysis_key="same")
+
+
 def test_budget_survives_restart_and_rejects_duplicate(tmp_path):
     path = tmp_path / "budget.json"
     ledger = BudgetLedger(path, 100)
