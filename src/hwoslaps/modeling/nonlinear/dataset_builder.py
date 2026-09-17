@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
 from copy import deepcopy
+import hashlib
+import json
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -14,6 +16,8 @@ from ...psf.utils import (
     pyauto_kernel_native,
 )
 from ...psf.mismatch import _kernel_sha256
+
+RENDERING_CONTRACT_REVISION = "uniform-core-ring-v2.1"
 
 
 @dataclass(frozen=True)
@@ -330,7 +334,7 @@ def imaging_from_observation(
 
         generation_sub_size = positive_sub_size(generation_sub_size)
         recorded_size = getattr(observation, "metadata", {}).get("generation_sub_size")
-        if recorded_size != generation_sub_size:
+        if recorded_size is None or positive_sub_size(recorded_size) != generation_sub_size:
             raise ValueError("Declared sampling differs from actual generation sampling")
         dataset = al.Imaging(
             data=data_array, noise_map=noise_array, psf=psf,
@@ -340,6 +344,12 @@ def imaging_from_observation(
     else:
         if generation_sub_size is not None:
             raise ValueError("Legacy reconstruction does not accept a sampling override")
+        recorded_size = getattr(observation, "metadata", {}).get("generation_sub_size")
+        if recorded_size is not None:
+            from ...lensing.sampling import positive_sub_size
+
+            if positive_sub_size(recorded_size) != 4:
+                raise ValueError("Legacy objective requires historical generation sampling of 4")
         dataset = al.Imaging(data=data_array, noise_map=noise_array, psf=psf)
 
     # al.Imaging sum-normalizes the PSF at construction, so the recorded
@@ -358,7 +368,8 @@ def imaging_from_observation(
         psf_fit_supplied=psf_fit_supplied,
         psf_fit_sha256=_kernel_sha256(fitted_psf_native),
         objective_version=objective_version,
-        generation_sub_size=generation_sub_size,
+        generation_sub_size=(generation_sub_size if objective_version == "consistent_sampling_v2"
+                             else recorded_size),
     )
     if objective_version == "consistent_sampling_v2":
         metadata = _sampling_metadata(dataset, metadata, generation_sub_size)
@@ -409,8 +420,21 @@ def consistent_sampling_copy(dataset, metadata, generation_sub_size=4):
     size = positive_sub_size(generation_sub_size)
     if actual_sub_size(dataset.grids.lp) != size:
         raise ValueError("Cannot migrate a core/generation sampling mismatch")
+    if isinstance(metadata, dict):
+        try:
+            metadata = NonlinearDatasetMetadata(**metadata)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Historical dataset metadata cannot be reconstructed") from exc
+    if not isinstance(metadata, NonlinearDatasetMetadata):
+        raise ValueError("Historical metadata must be NonlinearDatasetMetadata or its dictionary")
     if metadata.objective_version != "legacy_ring1_v1":
         raise ValueError("Migration requires an explicitly historical baseline")
+    if metadata.generation_sub_size is None:
+        raise ValueError("Migration requires verified generation sampling metadata")
+    if positive_sub_size(metadata.generation_sub_size) != size:
+        raise ValueError("Historical generation metadata differs from migration sampling")
+    if actual_sub_size(dataset.grids.blurring) not in (None, 1):
+        raise ValueError("Historical migration requires ring1 or no external blurring pixels")
     before = {
         "data": np.array(dataset.data.native, copy=True),
         "noise": np.array(dataset.noise_map.native, copy=True),
@@ -441,6 +465,29 @@ def consistent_sampling_copy(dataset, metadata, generation_sub_size=4):
     return candidate, _sampling_metadata(candidate, metadata, size)
 
 
+def _grid_geometry_identity(grid):
+    """Bind actual ray coordinates, mask and geometry without byte copies."""
+    if grid is None:
+        return None
+
+    def digest(value):
+        if value is None:
+            return None
+        arr = np.ascontiguousarray(getattr(value, "array", value))
+        h = hashlib.sha256()
+        h.update(str(arr.dtype).encode())
+        h.update(json.dumps(list(arr.shape)).encode())
+        if arr.size:
+            h.update(memoryview(arr).cast("B"))
+        return h.hexdigest()
+
+    return {
+        "mask_sha256": digest(grid.mask), "coordinates_sha256": digest(grid),
+        "subpixel_coordinates_sha256": digest(grid.over_sampled),
+        "pixel_scales": list(grid.pixel_scales), "origin": list(grid.mask.origin),
+    }
+
+
 def rendering_identity(dataset, metadata):
     """Read the actual corrected-grid contract before hashing an analysis."""
     from ...lensing.sampling import actual_sub_size, positive_sub_size
@@ -460,8 +507,11 @@ def rendering_identity(dataset, metadata):
         raise ValueError("Generation/core/ring sampling contract is violated")
     if get("light_profile_sub_size") != core or get("blurring_sub_size") != ring:
         raise ValueError("Sampling metadata differs from actual grids")
-    return {"objective_version": version, "generation_sub_size": size,
-            "light_profile_sub_size": core, "blurring_sub_size": ring}
+    return {"objective_version": version, "renderer_contract_revision": RENDERING_CONTRACT_REVISION,
+            "generation_sub_size": size, "light_profile_sub_size": core, "blurring_sub_size": ring,
+            "external_blurring_pixels_present": ring is not None,
+            "light_profile_geometry": _grid_geometry_identity(dataset.grids.lp),
+            "blurring_geometry": _grid_geometry_identity(dataset.grids.blurring)}
 
 
 def fitted_kernel_sha256(dataset, wrapped_kernel, kernel_pixel_scale):
