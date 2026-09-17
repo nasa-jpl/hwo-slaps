@@ -335,19 +335,22 @@ def supervise(manifest_path):
     per_gpu_limit = manifest.get("max_workers_per_gpu")
     if worker_limit > allocation_limit and (
         isinstance(per_gpu_limit, bool) or not isinstance(per_gpu_limit, int)
-        or not 1 <= per_gpu_limit <= 4
+        or not 1 <= per_gpu_limit <= 8
         or worker_limit > len(manifest["gpus"]) * per_gpu_limit
     ):
-        raise ValueError("Packed allocation requires an explicit limit of at most four workers per GPU")
+        raise ValueError("Packed allocation requires an explicit limit of at most eight workers per GPU")
     if (
         allocation_limit not in (4, 8)
         or isinstance(worker_limit, bool) or not isinstance(worker_limit, int)
-        or not 1 <= worker_limit <= 4 * allocation_limit
+        or not 1 <= worker_limit <= 8 * allocation_limit
         or not 1 <= manifest["max_workers"] <= worker_limit
         or not 1 <= len(manifest["gpus"]) <= allocation_limit
         or len(set(manifest["gpus"])) != len(manifest["gpus"])
     ):
         raise ValueError("Invalid GPU allocation or worker limit; default authorization is four")
+    rss_limit_gib = manifest.get("max_owned_rss_gib", 192)
+    if isinstance(rss_limit_gib, bool) or not isinstance(rss_limit_gib, int) or not 1 <= rss_limit_gib <= 512:
+        raise ValueError("Invalid declared host-RAM cap")
     ledger = BudgetLedger(state / "budget.json", manifest["cap_seconds"])
     deadline_path = root / "state" / "deadline.json"
     handles = {}
@@ -475,11 +478,12 @@ def supervise(manifest_path):
                 "admission_max_workers": current_limit,
                 "admission_max_workers_per_gpu": per_gpu_limit,
                 "physical_gpu_indices": manifest["gpus"],
+                "max_owned_rss_gib": rss_limit_gib,
             }
             with (state / "resources.jsonl").open("a") as stream:
                 stream.write(json.dumps(telemetry) + "\n")
             if (
-                rss > 192 * 2**30
+                rss > rss_limit_gib * 2**30
                 or telemetry["host_available"] < 512 * 2**30
                 or telemetry["disk_free"] < 70 * 2**30
                 or disk > 15 * 2**30

@@ -585,7 +585,7 @@ def test_controller_rejects_excess_or_duplicate_allocation(tmp_path, monkeypatch
     assert not (root / "attempt").exists()
 
 
-@pytest.mark.parametrize("count,cards", [(8, 8), (16, 4)])
+@pytest.mark.parametrize("count,cards", [(8, 8), (16, 4), (32, 4)])
 def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch, count, cards):
     import subprocess
     from hwoslaps.modeling.nonlinear.profile_execution import supervise
@@ -601,9 +601,9 @@ def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch, 
     )
     root, manifest = controller_fixture(tmp_path, monkeypatch, body)
     data = json.loads(manifest.read_text())
-    data.update(authorized_gpu_limit=cards, max_workers=count, gpus=list(range(cards)), cap_seconds=2000)
+    data.update(authorized_gpu_limit=cards, max_workers=count, gpus=list(range(cards)), cap_seconds=5000)
     if count > cards:
-        data.update(authorized_worker_limit=count, max_workers_per_gpu=4)
+        data.update(authorized_worker_limit=count, max_workers_per_gpu=count // cards)
     data["jobs"] = []
     for index in range(count):
         spec = root / f"job{index}.json"
