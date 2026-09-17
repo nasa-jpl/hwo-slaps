@@ -8,6 +8,7 @@ position or bracket-generation input is pending.
 
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import re
@@ -772,7 +773,7 @@ def runner_invocation(
 
 def _scientific_config_view(config: dict[str, Any]) -> dict[str, Any]:
     """Return a config view whose only allowed restamp field is removed."""
-    view = json.loads(json.dumps(config))
+    view = deepcopy(config)
     try:
         del view["stage0"]["code_revision"]
     except KeyError as exc:
@@ -800,7 +801,7 @@ def _restamp_config(
         original = yaml.safe_load(stream)
     if not isinstance(original, dict):
         raise ReleaseCatalogError(f"config is not a mapping: {source_path}")
-    updated = json.loads(json.dumps(original))
+    updated = deepcopy(original)
     updated["stage0"]["code_revision"] = revision
     if _scientific_config_view(original) != _scientific_config_view(updated):
         raise ReleaseCatalogError(f"restamp changed scientific config fields: {source_path}")

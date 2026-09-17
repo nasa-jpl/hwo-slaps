@@ -176,3 +176,20 @@ def test_materialization_changes_only_code_revision_and_writes_hash_receipt(tmp_
     assert spec["positions"] == "/remote/positions.json"
     assert spec["hashes"]["/remote/positions.json"] == sha256_file(positions_path)
     assert spec["output"].endswith("/attempt")
+
+
+def test_restamp_preserves_yaml_integer_psf_keys(tmp_path):
+    import yaml
+    from hwoslaps.campaign.release_catalog import _restamp_config
+
+    original = {
+        "stage0": {"code_revision": {"git_hash": "old"}},
+        "psf": {"aberrations": {"global_zernikes": {4: 0.03, 10: -0.02}}},
+    }
+    source, target = tmp_path / "source.yaml", tmp_path / "target.yaml"
+    source.write_text(yaml.safe_dump(original))
+    revision = {"git_hash": "new", "git_dirty": False, "sha256": "c" * 64}
+    _restamp_config(source, target, revision)
+    output = yaml.safe_load(target.read_text())
+    assert output["psf"] == original["psf"]
+    assert all(isinstance(key, int) for key in output["psf"]["aberrations"]["global_zernikes"])

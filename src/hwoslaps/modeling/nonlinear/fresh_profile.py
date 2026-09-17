@@ -10,6 +10,7 @@ finite evaluation, repeat, and scalar consistency check.
 from __future__ import annotations
 
 import csv
+from copy import deepcopy
 from dataclasses import dataclass, replace
 import hashlib
 import json
@@ -830,7 +831,7 @@ def evaluate_established_fisher_q(
     from hwoslaps.config.validation import validate_or_raise
     from hwoslaps.psf.generator import generate_psf_system
 
-    source_config = json.loads(json.dumps(dict(config)))
+    source_config = deepcopy(dict(config))
     ladder = source_config.get("ladder")
     if not isinstance(ladder, dict) or not isinstance(ladder.get("aperture"), dict):
         raise ValueError("Fisher-q adapter requires the established ladder aperture declaration")
