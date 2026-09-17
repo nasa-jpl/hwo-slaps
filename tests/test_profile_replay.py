@@ -213,6 +213,20 @@ def test_delayed_gpu_visibility_reserves_expected_memory():
     assert not memory_admissible(75, [], 10, 100)
 
 
+def test_packing_admission_stays_within_frozen_limits(tmp_path):
+    from hwoslaps.modeling.nonlinear.profile_execution import concurrency_limits
+
+    manifest = {"max_workers": 16, "max_workers_per_gpu": 4, "gpus": [0, 1, 2, 3]}
+    assert concurrency_limits(manifest, tmp_path) == (16, 4)
+    atomic_json(tmp_path / "concurrency.json", {"max_workers": 8, "max_workers_per_gpu": 2})
+    assert concurrency_limits(manifest, tmp_path) == (8, 2)
+    atomic_json(tmp_path / "concurrency.json", {"max_workers": 16, "max_workers_per_gpu": 4})
+    assert concurrency_limits(manifest, tmp_path) == (16, 4)
+    atomic_json(tmp_path / "concurrency.json", {"max_workers": 17, "max_workers_per_gpu": 4})
+    with pytest.raises(ValueError, match="frozen worker limits"):
+        concurrency_limits(manifest, tmp_path)
+
+
 def test_stale_or_missing_process_cannot_be_owned():
     assert not process_matches({"pid": 999999999, "process_start": 0.0, "spec_path": "/none"})
 

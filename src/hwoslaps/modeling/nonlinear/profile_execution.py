@@ -300,6 +300,25 @@ def stop_owned(record):
             pass
 
 
+def concurrency_limits(manifest, state):
+    """Read bounded admission limits without changing the physical GPU cap."""
+    maximum = manifest["max_workers"]
+    per_gpu = manifest.get("max_workers_per_gpu", maximum)
+    control = Path(state) / "concurrency.json"
+    if control.exists():
+        value = json.loads(control.read_text())
+        current = value.get("max_workers", maximum)
+        current_per_gpu = value.get("max_workers_per_gpu", per_gpu)
+        if (
+            isinstance(current, bool) or not isinstance(current, int)
+            or isinstance(current_per_gpu, bool) or not isinstance(current_per_gpu, int)
+            or not 1 <= current <= maximum or not 1 <= current_per_gpu <= per_gpu
+        ):
+            raise ValueError("Admission override exceeds the frozen worker limits")
+        return current, current_per_gpu
+    return maximum, per_gpu
+
+
 def supervise(manifest_path):
     """Run a fixed manifest with an exclusive lock and durable budget."""
     import psutil
@@ -312,9 +331,12 @@ def supervise(manifest_path):
     lock = (state / "controller.lock").open("a+")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     allocation_limit = manifest.get("authorized_gpu_limit", 4)
+    worker_limit = manifest.get("authorized_worker_limit", allocation_limit)
     if (
         allocation_limit not in (4, 8)
-        or not 1 <= manifest["max_workers"] <= allocation_limit
+        or isinstance(worker_limit, bool) or not isinstance(worker_limit, int)
+        or not 1 <= worker_limit <= 4 * allocation_limit
+        or not 1 <= manifest["max_workers"] <= worker_limit
         or not 1 <= len(manifest["gpus"]) <= allocation_limit
         or len(set(manifest["gpus"])) != len(manifest["gpus"])
     ):
@@ -456,18 +478,21 @@ def supervise(manifest_path):
                 if gpus[item["gpu"]]["used"] > 0.85 * gpus[item["gpu"]]["total"]:
                     raise RuntimeError("GPU memory ceiling exceeded")
             admitted = False
+            current_limit, per_gpu_limit = concurrency_limits(manifest, state)
             for job in pending:
                 if deadline is not None and (
                     time.monotonic() >= deadline["admission_stop_monotonic"]
                     or time.monotonic() + job["timeout_seconds"] + 60 > deadline["hard_stop_monotonic"]
                 ):
                     continue
-                if len(active) >= manifest["max_workers"]:
+                if len(active) >= current_limit:
                     break
                 gpu = job["gpu"]
                 if gpu not in manifest["gpus"]:
                     raise ValueError("GPU outside manifest allocation")
                 same = [v for v in active.values() if v["gpu"] == gpu]
+                if len(same) >= per_gpu_limit:
+                    continue
                 if gpus[gpu]["uuid"] in foreign_uuids:
                     continue
                 if not same and gpus[gpu]["used"] > 1024:
