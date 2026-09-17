@@ -139,9 +139,10 @@ def _seed(entropy: int, system_id: str, arm_index: int) -> int:
 
 
 def _noise_seed(entropy: int, system_id: str, replicate: int) -> int:
+    index = _system_index(system_id)
     sequence = np.random.SeedSequence(
         entropy=int(entropy),
-        spawn_key=(6, int(replicate), _system_index(system_id)),
+        spawn_key=(1, index) if int(replicate) == 0 else (6, int(replicate), index),
     )
     return int(sequence.generate_state(1, dtype=np.uint32)[0])
 
@@ -197,6 +198,9 @@ def _archive_case(job: dict, entropy: int) -> dict[str, Any]:
     case_id = f"archived:{job['row_id']}"
     derived_sampler_seed = _seed(entropy, system_id, arm_index)
     stored_sampler_seed = row.get("sampler_seed")
+    noise_seed = _noise_seed(entropy, system_id, int(replicate or 0))
+    if row.get("noise_seed") is not None and int(row["noise_seed"]) != noise_seed:
+        raise ReleaseCatalogError(f"archived noise seed mismatch for {job['row_id']}")
     if stored_sampler_seed is not None and int(stored_sampler_seed) != derived_sampler_seed:
         raise ReleaseCatalogError(
             f"archived sampler seed mismatch for {job['row_id']}: "
@@ -238,7 +242,7 @@ def _archive_case(job: dict, entropy: int) -> dict[str, Any]:
         },
         "sampler_seed": derived_sampler_seed,
         "sampler_seed_spawn_key": [5, _system_index(system_id), arm_index],
-        "noise_seed": (_noise_seed(entropy, system_id, int(replicate)) if replicate is not None else None),
+        "noise_seed": noise_seed,
         "direction_seed": (
             _direction_seed(entropy, system_id, int(direction)) if direction is not None else None
         ),
@@ -606,6 +610,7 @@ def _runner_spec_template(
         return {
             "case_id": case["case_id"],
             "system_id": case["system_id"],
+            "direction": case.get("direction"),
             "case_identity": case["case_id"],
             "case_identity_payload": identity_payload,
             "case_identity_signature": _sha256_json(identity_payload),
@@ -643,6 +648,7 @@ def _runner_spec_template(
     template = {
         "case_id": case["case_id"],
         "system_id": case["system_id"],
+        "direction": case.get("direction"),
         "case_identity": case["case_id"],
         "case_identity_payload": identity_payload,
         "case_identity_signature": _sha256_json(identity_payload),

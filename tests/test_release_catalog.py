@@ -193,3 +193,23 @@ def test_restamp_preserves_yaml_integer_psf_keys(tmp_path):
     output = yaml.safe_load(target.read_text())
     assert output["psf"] == original["psf"]
     assert all(isinstance(key, int) for key in output["psf"]["aberrations"]["global_zernikes"])
+
+
+def test_psf_direction_survives_case_to_worker_routing():
+    from hwoslaps.campaign.release_catalog import _runner_spec_template
+
+    case = _ready_case()
+    case.update(arm="noisy_control_d2", direction=1)
+    case["case_identity_payload"] = {
+        "case_id": case["case_id"], "system_id": case["system_id"],
+        "arm": case["arm"], "direction": 1,
+    }
+    spec = _runner_spec_template(case, "/release", "f" * 64, "/procedure", "a" * 64, "/approval")
+    assert spec["direction"] == spec["case_identity_payload"]["direction"] == 1
+
+
+def test_primary_psf_noise_keeps_the_archived_seed():
+    from hwoslaps.campaign.release_catalog import _noise_seed
+
+    assert _noise_seed(20260823, "sys0043", 0) == 1703553965
+    assert _noise_seed(20260823, "sys0043", 1) != 1703553965
