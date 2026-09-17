@@ -359,6 +359,21 @@ def _verification_fixture():
 
 
 class TestBuildArmConfig:
+    def test_h0_only_bracket_still_contains_the_injected_truth_signal(self):
+        from run_nonlinear_validation import bracket_arm_declaration
+
+        declaration = bracket_arm_declaration("above_upper_0p1", 24)
+        rung = _rung_payload()
+        rung["mass_msun"] *= 10**0.1
+        config = build_arm_config(
+            _staged_config(), declaration, rung, FIT_BLOCK_FIXTURE
+        )
+        assert declaration["dataset_kind"] == "asimov"
+        assert declaration["fit_mode"] == "fixed_template"
+        assert config["lensing"]["subhalo"]["enabled"] is True
+        assert config["lensing"]["subhalo"]["mass"] == pytest.approx(10**8.15)
+        assert config["lensing"]["subhalo"]["position"]["centre"] == [0.25, -0.85]
+
     def test_injected_arm_places_the_declared_subhalo(self):
         config = build_arm_config(
             _staged_config(),

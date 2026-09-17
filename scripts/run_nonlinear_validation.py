@@ -568,6 +568,19 @@ def _require_fresh_namespace(output_dir: Path) -> None:
         )
 
 
+def bracket_arm_declaration(rung: str, arm_index: int) -> dict:
+    """Declare injected noiseless data whose null model is searched afresh."""
+    return {
+        "arm_index": int(arm_index),
+        "dataset_kind": "asimov",
+        "subhalo_in_truth": True,
+        "fit_mode": "fixed_template",
+        "rung": str(rung),
+        "sample": "selected12_bracket",
+        "purpose": "fresh H0 profile with verified zero-residual H1 anchor",
+    }
+
+
 def main(argv=None, *, runner_factory=None, validator_factory=None,
          artifact_prefix="nonlinear_validation") -> None:
     """Run one validation arm; optional factories support versioned replay.
@@ -596,15 +609,7 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
             f"{sorted(arms)}"
         )
     declaration = (
-        {
-            "arm_index": int(args.bracket_arm_index),
-            "dataset_kind": "asimov",
-            "subhalo_in_truth": False,
-            "fit_mode": "fixed_template",
-            "rung": str(args.bracket_rung),
-            "sample": "selected12_bracket",
-            "purpose": "fresh H0 profile with verified zero-residual H1 anchor",
-        }
+        bracket_arm_declaration(args.bracket_rung, args.bracket_arm_index)
         if bracket_mode
         else arms[args.arm]
     )
