@@ -106,6 +106,39 @@ def test_background_convention_changes_comparator():
     assert comparison["q_with_free_background_only"] < 1.0e-20
 
 
+def test_saved_point_replay_skips_all_tangent_evaluations():
+    from hwoslaps.modeling.nonlinear.profile_replay import replay_comparator
+
+    def forbidden_residual(_):
+        raise AssertionError("A saved-point check must not evaluate tangent perturbations")
+
+    runner = SimpleNamespace(procedure={"mode": "identity", "compute_comparator": False})
+    result = replay_comparator(runner, forbidden_residual, None, None, None, None, None)
+    assert result["computed"] is False
+    assert "q" not in result
+    runner.procedure["mode"] = "profile"
+    with pytest.raises(ValueError, match="identity-only"):
+        replay_comparator(runner, forbidden_residual, None, None, None, None, None)
+
+
+def test_default_replay_comparator_keeps_historical_quantities():
+    from hwoslaps.modeling.nonlinear.profile_replay import replay_comparator
+
+    def residual(x):
+        return np.array([3.0 - x[0], 4.0])
+    runner = SimpleNamespace(
+        procedure={"mode": "identity", "comparator_tolerance": .001},
+        replay={"case": {"rung": {"q_f_production_at_position": 20., "q_f_matched": 16.}}},
+    )
+    result = replay_comparator(
+        runner, residual, np.zeros(1), np.zeros(2), -np.ones(1), np.ones(1), np.ones(2),
+    )
+    assert result["computed"] is True
+    assert result["q"] == pytest.approx(16.)
+    assert result["q_F_production"] == 20.
+    assert result["q_F_support_matched"] == 16.
+
+
 def test_budget_survives_restart_and_rejects_duplicate(tmp_path):
     path = tmp_path / "budget.json"
     ledger = BudgetLedger(path, 100)

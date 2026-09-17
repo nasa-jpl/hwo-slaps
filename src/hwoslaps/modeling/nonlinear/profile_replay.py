@@ -642,6 +642,26 @@ class ProfileReplayRunner(AutoLensFitRunner):
         )
 
 
+def replay_comparator(runner, residual, x0, reference, lower, upper, noise):
+    """Compute tangents only when requested; keep saved-point replay cheap."""
+    if runner.procedure.get("compute_comparator", True) is False:
+        if runner.procedure.get("mode") != "identity":
+            raise ValueError("Comparator omission is restricted to identity-only replay")
+        return {"computed": False, "reason": "saved_point_identity_only_no_new_Fisher_result"}
+    comparison = linearized_comparator(
+        residual, x0, reference, lower, upper, background_column=1 / noise,
+    )
+    tighter = linearized_comparator(residual, x0, reference, lower, upper, step_fraction=5.0e-6)
+    comparison["half_step_q_difference"] = abs(comparison["q"] - tighter["q"])
+    comparison["derivatives_stable"] = (
+        comparison["half_step_q_difference"] <= runner.procedure["comparator_tolerance"]
+    )
+    comparison["q_F_production"] = runner.replay["case"]["rung"]["q_f_production_at_position"]
+    comparison["q_F_support_matched"] = runner.replay["case"]["rung"]["q_f_matched"]
+    comparison["computed"] = True
+    return comparison
+
+
 class ProfileReplayValidator(NonlinearMetricValidator):
     """Keep dataset/model guards and add explicit reference diagnostics."""
 
@@ -737,15 +757,9 @@ class ProfileReplayValidator(NonlinearMetricValidator):
             raise ValueError("Fixed/freed reference rendering identity failed")
         runner.records["reference"] = reference
         noise = np.asarray(dataset.noise_map).reshape(-1)
-        comparison = linearized_comparator(r0, x0, ref_residual, lo0, hi0, background_column=1 / noise)
-        tighter = linearized_comparator(r0, x0, ref_residual, lo0, hi0, step_fraction=5.0e-6)
-        comparison["half_step_q_difference"] = abs(comparison["q"] - tighter["q"])
-        comparison["derivatives_stable"] = (
-            comparison["half_step_q_difference"] <= runner.procedure["comparator_tolerance"]
+        runner.records["comparator"] = replay_comparator(
+            runner, r0, x0, ref_residual, lo0, hi0, noise,
         )
-        comparison["q_F_production"] = runner.replay["case"]["rung"]["q_f_production_at_position"]
-        comparison["q_F_support_matched"] = runner.replay["case"]["rung"]["q_f_matched"]
-        runner.records["comparator"] = comparison
         q = 2 * (runner.records["subhalo"]["logL"] - runner.records["smooth"]["logL"])
         q_from_chi2 = runner.records["smooth"]["best_chi2"] - runner.records["subhalo"]["best_chi2"]
         runner.records["q_identity_error"] = abs(q - q_from_chi2)

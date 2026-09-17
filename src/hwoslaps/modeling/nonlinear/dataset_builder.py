@@ -373,6 +373,13 @@ def imaging_from_observation(
     )
     if objective_version == "consistent_sampling_v2":
         metadata = _sampling_metadata(dataset, metadata, generation_sub_size)
+    else:
+        from ...lensing.sampling import actual_sub_size
+
+        metadata = replace(
+            metadata, light_profile_sub_size=actual_sub_size(dataset.grids.lp),
+            blurring_sub_size=actual_sub_size(dataset.grids.blurring),
+        )
     return dataset, metadata
 
 
