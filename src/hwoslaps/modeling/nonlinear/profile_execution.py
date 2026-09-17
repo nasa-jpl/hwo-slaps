@@ -120,8 +120,197 @@ class BudgetLedger:
         atomic_json(self.path, self.data)
 
 
-def memory_admissible(used_mib, reservations, new_peak_mib, total_mib):
-    return max(used_mib, sum(reservations)) + new_peak_mib <= 0.8 * total_mib
+def memory_admissible(used_mib, reservations, new_peak_mib, total_mib, fraction=0.8):
+    return max(used_mib, sum(reservations)) + new_peak_mib <= fraction * total_mib
+
+
+STAGE3_POLICY_VERSION = "stage3_v7"
+STAGE3_MEMORY_PROFILE_REGISTRY = {
+    "790": {
+        "peak_mib": 51200,
+        "registry_id": "stage3_b200_790_v1",
+        "image_shape": [790, 790],
+        "kernel_shape": [51, 51],
+        "batch_size": 32,
+        "precision": "float64",
+    },
+    "900": {
+        "peak_mib": 70000,
+        "registry_id": "stage3_b200_900_v1",
+        "image_shape": [900, 900],
+        "kernel_shape": [51, 51],
+        "batch_size": 32,
+        "precision": "float64",
+    },
+    "1284": {
+        "peak_mib": 80000,
+        "registry_id": "stage3_b200_1284_v1",
+        "image_shape": [1284, 1284],
+        "kernel_shape": [51, 51],
+        "batch_size": 32,
+        "precision": "float64",
+    },
+}
+
+
+def stage3_policy(manifest):
+    """Return opt-in Stage 3 limits while preserving legacy defaults."""
+    if manifest.get("execution_policy_version") != STAGE3_POLICY_VERSION:
+        return {
+            "version": "legacy",
+            "worker_limit": manifest.get("authorized_worker_limit", manifest.get("authorized_gpu_limit", 4)),
+            "per_gpu_limit": manifest.get("max_workers_per_gpu", manifest.get("max_workers", 4)),
+            "admission_fraction": 0.8,
+            "runtime_fraction": 0.85,
+            "rss_limit_gib": manifest.get("max_owned_rss_gib", 192),
+            "task_disk_limit_gib": 15,
+            "min_disk_free_gib": 70,
+            "disk_check_interval_seconds": 2,
+        }
+    allocation_limit = manifest.get("authorized_gpu_limit", 4)
+    gpus = manifest.get("gpus", [])
+    worker_limit = manifest.get("authorized_worker_limit")
+    per_gpu_limit = manifest.get("max_workers_per_gpu")
+    admission_fraction = manifest.get("admission_memory_fraction")
+    runtime_fraction = manifest.get("runtime_gpu_memory_fraction")
+    rss_limit_gib = manifest.get("max_owned_rss_gib", 384)
+    memory_profiles = manifest.get("memory_profile_registry", STAGE3_MEMORY_PROFILE_REGISTRY)
+    task_disk_limit_gib = manifest.get("task_disk_limit_gib", 512)
+    min_disk_free_gib = manifest.get("min_disk_free_gib", 100)
+    disk_check_interval_seconds = manifest.get("disk_check_interval_seconds", 30)
+    if (
+        allocation_limit not in (4, 8)
+        or not isinstance(gpus, list)
+        or len(gpus) not in (4, 8)
+        or any(isinstance(gpu, bool) or not isinstance(gpu, int) or not 0 <= gpu < 8 for gpu in gpus)
+        or len(set(gpus)) != len(gpus)
+        or allocation_limit != len(gpus)
+        or isinstance(worker_limit, bool)
+        or not isinstance(worker_limit, int)
+        or not 1 <= worker_limit <= 3 * len(gpus)
+        or isinstance(manifest.get("max_workers"), bool)
+        or not isinstance(manifest.get("max_workers"), int)
+        or not 1 <= manifest.get("max_workers", 0) <= worker_limit
+        or isinstance(per_gpu_limit, bool)
+        or not isinstance(per_gpu_limit, int)
+        or not 1 <= per_gpu_limit <= 3
+        or worker_limit > len(gpus) * per_gpu_limit
+        or admission_fraction != 0.85
+        or runtime_fraction != 0.90
+        or isinstance(task_disk_limit_gib, bool)
+        or not isinstance(task_disk_limit_gib, int)
+        or task_disk_limit_gib <= 0
+        or isinstance(min_disk_free_gib, bool)
+        or not isinstance(min_disk_free_gib, int)
+        or min_disk_free_gib <= 0
+        or isinstance(disk_check_interval_seconds, bool)
+        or not isinstance(disk_check_interval_seconds, int)
+        or disk_check_interval_seconds <= 0
+        or not isinstance(memory_profiles, dict)
+        or any(
+            not isinstance(profile, dict)
+            or not isinstance(profile.get("registry_id"), str)
+            or isinstance(profile.get("peak_mib"), bool)
+            or not isinstance(profile.get("peak_mib"), int)
+            or profile["peak_mib"] <= 0
+            or not isinstance(profile.get("image_shape"), list)
+            or len(profile["image_shape"]) != 2
+            or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in profile["image_shape"])
+            or not isinstance(profile.get("kernel_shape"), list)
+            or len(profile["kernel_shape"]) != 2
+            or any(isinstance(value, bool) or not isinstance(value, int) or value <= 0 for value in profile["kernel_shape"])
+            or isinstance(profile.get("batch_size"), bool)
+            or not isinstance(profile.get("batch_size"), int)
+            or profile["batch_size"] <= 0
+            or not isinstance(profile.get("precision"), str)
+            for profile in memory_profiles.values()
+        )
+        or isinstance(rss_limit_gib, bool)
+        or not isinstance(rss_limit_gib, int)
+        or not 1 <= rss_limit_gib <= 512
+    ):
+        raise ValueError("Invalid Stage 3 v7 worker/card/memory policy")
+    return {
+        "version": STAGE3_POLICY_VERSION,
+        "worker_limit": worker_limit,
+        "per_gpu_limit": per_gpu_limit,
+        "admission_fraction": admission_fraction,
+        "runtime_fraction": runtime_fraction,
+        "rss_limit_gib": rss_limit_gib,
+        "memory_profiles": memory_profiles,
+        "task_disk_limit_gib": task_disk_limit_gib,
+        "min_disk_free_gib": min_disk_free_gib,
+        "disk_check_interval_seconds": disk_check_interval_seconds,
+    }
+
+
+def validate_stage3_job(job, policy):
+    """Require measured or explicitly known per-worker memory reservations."""
+    if policy["version"] != STAGE3_POLICY_VERSION:
+        return
+    peak = job.get("peak_mib")
+    if isinstance(peak, bool) or not isinstance(peak, int) or peak <= 0:
+        raise ValueError("Stage 3 jobs require an integer positive peak_mib")
+    memory_class = job.get("memory_class")
+    profile = policy["memory_profiles"].get(memory_class)
+    if profile is not None:
+        if (
+            peak != profile["peak_mib"]
+            or job.get("memory_profile_id") != profile["registry_id"]
+            or job.get("image_shape") != profile["image_shape"]
+            or job.get("kernel_shape") != profile["kernel_shape"]
+            or job.get("batch_size") != profile["batch_size"]
+            or job.get("precision") != profile["precision"]
+        ):
+            raise ValueError("Stage 3 job does not match its hash-bound memory profile registry")
+    elif memory_class == "unmeasured_conservative":
+        if peak != 140000 or job.get("exclusive_gpu") is not True:
+            raise ValueError("Unmeasured Stage 3 jobs require a 140000 MiB exclusive-card reservation")
+    else:
+        raise ValueError("Stage 3 worker requires a registry profile or conservative exclusive reservation")
+
+
+def stop_overfull_cards(active, gpus, ledger, blocked_cards, state, threshold=0.9):
+    """Stop only this manifest's workers on overfull cards and persist evidence."""
+    overfull = {
+        item["gpu"]
+        for item in active.values()
+        if gpus[item["gpu"]]["used"] > threshold * gpus[item["gpu"]]["total"]
+    }
+    if not overfull:
+        return False
+    stopped = []
+    for key, item in active.items():
+        if item["gpu"] in overfull:
+            stop_owned(item)
+            ledger.finish(key, "STOPPED_CARD_MEMORY_LIMIT", attempt_elapsed(item))
+            stopped.append(key)
+    blocked_cards.update(overfull)
+    receipt = {
+        "utc_unix": time.time(),
+        "blocked_cards": sorted(blocked_cards),
+        "stopped_attempts": stopped,
+        "gpu_snapshot": gpus,
+        "threshold_fraction": threshold,
+        "other_cards_preserved": True,
+        "next_action": "Parent must inspect memory and declare a new bounded retry; no automatic same-card retry.",
+    }
+    with (Path(state) / "card_memory_events.jsonl").open("a") as stream:
+        stream.write(json.dumps(receipt) + "\n")
+    return True
+
+
+def cached_task_bytes(root, cache, interval_seconds):
+    """Return task size, rescanning only at the configured interval."""
+    now = time.monotonic()
+    if cache.get("sample_monotonic") is None or now - cache["sample_monotonic"] >= interval_seconds:
+        cache["bytes"] = sum(
+            path.stat().st_size
+            for path in Path(root).rglob("*")
+            if path.is_file() and not path.is_symlink()
+        )
+        cache["sample_monotonic"] = now
+    return cache["bytes"], cache["sample_monotonic"]
 
 
 def process_matches(record):
@@ -330,9 +519,13 @@ def supervise(manifest_path):
     state.mkdir(parents=True, exist_ok=True)
     lock = (state / "controller.lock").open("a+")
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    policy = stage3_policy(manifest)
     allocation_limit = manifest.get("authorized_gpu_limit", 4)
-    worker_limit = manifest.get("authorized_worker_limit", allocation_limit)
-    per_gpu_limit = manifest.get("max_workers_per_gpu")
+    worker_limit = policy["worker_limit"]
+    per_gpu_limit = policy["per_gpu_limit"]
+    if policy["version"] == STAGE3_POLICY_VERSION:
+        for job in manifest.get("jobs", []):
+            validate_stage3_job(job, policy)
     if worker_limit > allocation_limit and (
         isinstance(per_gpu_limit, bool) or not isinstance(per_gpu_limit, int)
         or not 1 <= per_gpu_limit <= 8
@@ -348,12 +541,17 @@ def supervise(manifest_path):
         or len(set(manifest["gpus"])) != len(manifest["gpus"])
     ):
         raise ValueError("Invalid GPU allocation or worker limit; default authorization is four")
-    rss_limit_gib = manifest.get("max_owned_rss_gib", 192)
+    rss_limit_gib = policy["rss_limit_gib"]
     if isinstance(rss_limit_gib, bool) or not isinstance(rss_limit_gib, int) or not 1 <= rss_limit_gib <= 512:
         raise ValueError("Invalid declared host-RAM cap")
     ledger = BudgetLedger(state / "budget.json", manifest["cap_seconds"])
     deadline_path = root / "state" / "deadline.json"
     handles = {}
+    block_state_path = state / ("blocked_cards_" + manifest_path.stem + ".json")
+    blocked_cards = set(json.loads(block_state_path.read_text())) if block_state_path.exists() else set()
+    if policy["version"] == STAGE3_POLICY_VERSION and not blocked_cards.issubset(set(manifest["gpus"])):
+        raise ValueError("Persisted blocked card is outside this manifest allocation")
+    disk_cache = {"sample_monotonic": None, "bytes": 0}
     deadline = None
     try:
         # Adopt recoverable starts, including the crash window after launch.
@@ -369,6 +567,8 @@ def supervise(manifest_path):
                         item.update(pid=proc.pid, process_start=proc.info["create_time"])
                         break
         ledger.save()
+        if policy["version"] == STAGE3_POLICY_VERSION and not deadline_path.exists():
+            raise ValueError("Stage 3 v7 requires state/deadline.json before dispatch")
         if deadline_path.exists():
             deadline = validate_deadline(json.loads(deadline_path.read_text()))
         while True:
@@ -396,7 +596,7 @@ def supervise(manifest_path):
                 for k, v in ledger.data["attempts"].items()
                 if k in {j["key"] for j in manifest["jobs"]} and v["status"] not in ("RUNNING", "COMPLETE")
             ]
-            if failed:
+            if failed and policy["version"] != STAGE3_POLICY_VERSION:
                 raise RuntimeError("Manifest failure; dependent admissions stopped: " + ",".join(failed))
             if not active and not pending:
                 # Reconcile completed workers before a deadline that may
@@ -464,7 +664,11 @@ def supervise(manifest_path):
                             rss += child.memory_info().rss
                         except psutil.Error:
                             pass
-            disk = sum(p.stat().st_size for p in root.rglob("*") if p.is_file() and not p.is_symlink())
+            disk, disk_sample_monotonic = cached_task_bytes(
+                root,
+                disk_cache,
+                policy["disk_check_interval_seconds"],
+            )
             current_limit, per_gpu_limit = concurrency_limits(manifest, state)
             telemetry = {
                 "utc_unix": time.time(),
@@ -479,19 +683,36 @@ def supervise(manifest_path):
                 "admission_max_workers_per_gpu": per_gpu_limit,
                 "physical_gpu_indices": manifest["gpus"],
                 "max_owned_rss_gib": rss_limit_gib,
+                "admission_memory_fraction": policy["admission_fraction"],
+                "runtime_gpu_memory_fraction": policy["runtime_fraction"],
+                "failed_attempts": failed,
+                "blocked_cards": sorted(blocked_cards),
+                "task_bytes_sample_monotonic": disk_sample_monotonic,
             }
             with (state / "resources.jsonl").open("a") as stream:
                 stream.write(json.dumps(telemetry) + "\n")
             if (
                 rss > rss_limit_gib * 2**30
                 or telemetry["host_available"] < 512 * 2**30
-                or telemetry["disk_free"] < 70 * 2**30
-                or disk > 15 * 2**30
+                or telemetry["disk_free"] < policy["min_disk_free_gib"] * 2**30
+                or disk > policy["task_disk_limit_gib"] * 2**30
             ):
                 raise RuntimeError("RAM/disk guard failed")
-            for item in active.values():
-                if gpus[item["gpu"]]["used"] > 0.85 * gpus[item["gpu"]]["total"]:
-                    raise RuntimeError("GPU memory ceiling exceeded")
+            if policy["version"] == STAGE3_POLICY_VERSION:
+                if stop_overfull_cards(
+                    active,
+                    gpus,
+                    ledger,
+                    blocked_cards,
+                    state,
+                    policy["runtime_fraction"],
+                ):
+                    atomic_json(block_state_path, sorted(blocked_cards))
+                    continue
+            else:
+                for item in active.values():
+                    if gpus[item["gpu"]]["used"] > policy["runtime_fraction"] * gpus[item["gpu"]]["total"]:
+                        raise RuntimeError("GPU memory ceiling exceeded")
             admitted = False
             for job in pending:
                 if deadline is not None and (
@@ -502,17 +723,27 @@ def supervise(manifest_path):
                 if len(active) >= current_limit:
                     break
                 gpu = job["gpu"]
+                if policy["version"] == STAGE3_POLICY_VERSION and gpu in blocked_cards:
+                    continue
                 if gpu not in manifest["gpus"]:
                     raise ValueError("GPU outside manifest allocation")
                 same = [v for v in active.values() if v["gpu"] == gpu]
                 if len(same) >= per_gpu_limit:
+                    continue
+                if job.get("exclusive_gpu") and same:
+                    continue
+                if any(item.get("exclusive_gpu") for item in same):
                     continue
                 if gpus[gpu]["uuid"] in foreign_uuids:
                     continue
                 if not same and gpus[gpu]["used"] > 1024:
                     continue
                 if not memory_admissible(
-                    gpus[gpu]["used"], [v["peak_mib"] for v in same], job["peak_mib"], gpus[gpu]["total"]
+                    gpus[gpu]["used"],
+                    [v["peak_mib"] for v in same],
+                    job["peak_mib"],
+                    gpus[gpu]["total"],
+                    policy["admission_fraction"],
                 ):
                     continue
                 # Resource inspection can cross the hard stop. Recheck
@@ -534,6 +765,9 @@ def supervise(manifest_path):
                     gpu_uuid=gpus[gpu]["uuid"],
                     peak_mib=job["peak_mib"],
                     timeout_seconds=job["timeout_seconds"],
+                    exclusive_gpu=bool(job.get("exclusive_gpu", False)),
+                    memory_class=job.get("memory_class"),
+                    memory_profile_id=job.get("memory_profile_id"),
                 )
                 if not ledger.reserve(job["key"], job["timeout_seconds"] + 60, item):
                     output.rmdir()

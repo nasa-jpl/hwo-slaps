@@ -35,12 +35,15 @@ import yaml
 __all__ = [
     "DESIGN_FREEZE_SCHEMA_VERSION",
     "DEFAULT_DESIGN_FREEZE_PATH",
+    "RELEASE_FREEZE_SCHEMA_VERSION",
+    "DEFAULT_RELEASE_FREEZE_PATH",
     "REQUIRED_BLOCKS",
     "REQUIRED_PROVISIONAL_ITEMS",
     "DesignFreezeError",
     "design_freeze_digest",
     "file_sha256",
     "load_design_freeze",
+    "load_release_freeze",
     "repo_root",
     "template_levels",
     "validate_design_freeze",
@@ -50,6 +53,9 @@ __all__ = [
 
 DESIGN_FREEZE_SCHEMA_VERSION = 1
 """Supported ``schema_version`` of the freeze document (`int`)."""
+
+RELEASE_FREEZE_SCHEMA_VERSION = 7
+"""Schema version of the additive Stage 3 release declaration."""
 
 REQUIRED_BLOCKS = (
     "freeze",
@@ -129,6 +135,9 @@ def repo_root() -> Path:
 
 DEFAULT_DESIGN_FREEZE_PATH = repo_root()/"configs"/"design"/"design_freeze_v1.yaml"
 """Committed freeze artifact (`pathlib.Path`)."""
+
+DEFAULT_RELEASE_FREEZE_PATH = repo_root()/"configs"/"design"/"design_freeze_v7.yaml"
+"""Additive Stage 3 release declaration (`pathlib.Path`)."""
 
 
 def file_sha256(path) -> str:
@@ -1614,6 +1623,208 @@ def load_design_freeze(
     if not skip_bound_artifact_verification:
         verify_bound_artifacts(freeze)
     return freeze
+
+
+def load_release_freeze(path=None, *, verify_consumed: bool = True) -> dict:
+    """Load the additive v7 production-package declaration.
+
+    The v7 document is intentionally separate from the ratified v5
+    ``DesignFreeze`` schema.  It declares how the existing inputs are routed
+    into fresh searches and records the exact v5 artifact it consumes.  This
+    loader validates the release-package contract without silently treating
+    the v7 preparation document as a ratified replacement for v5.
+
+    Parameters
+    ----------
+    path : path-like, optional
+        v7 YAML path. Defaults to ``DEFAULT_RELEASE_FREEZE_PATH``.
+    verify_consumed : bool, optional
+        Verify the consumed v5 bytes when they are present. This can be
+        disabled only for a hash-only preparation context.
+
+    Returns
+    -------
+    release : `dict`
+        The validated v7 declaration.
+
+    Raises
+    ------
+    DesignFreezeError
+        Raised when the v7 declaration or its consumed v5 binding is
+        malformed or inconsistent.
+    """
+    resolved = Path(path or DEFAULT_RELEASE_FREEZE_PATH).expanduser().resolve()
+    if not resolved.is_file():
+        raise DesignFreezeError(f"Release freeze {resolved} does not exist")
+    with resolved.open("r", encoding="utf-8") as stream:
+        release = yaml.safe_load(stream)
+    if not isinstance(release, dict):
+        raise DesignFreezeError(f"Release freeze {resolved} must contain a mapping")
+    if release.get("schema_version") != RELEASE_FREEZE_SCHEMA_VERSION:
+        raise DesignFreezeError(
+            "Release freeze schema_version must be "
+            f"{RELEASE_FREEZE_SCHEMA_VERSION}, got {release.get('schema_version')!r}"
+        )
+    freeze = _require_mapping(release.get("freeze"), "release.freeze")
+    if freeze.get("version") != 7:
+        raise DesignFreezeError("release.freeze.version must be 7")
+    if freeze.get("status") not in {"prepared_not_ratified", "proposed", "reviewed", "ratified"}:
+        raise DesignFreezeError(
+            "release.freeze.status must be prepared_not_ratified, proposed, reviewed or ratified"
+        )
+    consumed = _require_mapping(
+        release.get("consumed_freeze"), "release.consumed_freeze"
+    )
+    if consumed.get("version") != 5:
+        raise DesignFreezeError("release.consumed_freeze.version must be 5")
+    consumed_path = consumed.get("path")
+    consumed_sha = consumed.get("sha256")
+    if not isinstance(consumed_path, str) or not consumed_path:
+        raise DesignFreezeError("release.consumed_freeze.path must be nonempty")
+    _require_sha256(consumed_sha, "release.consumed_freeze.sha256")
+    if verify_consumed:
+        path_on_disk = repo_root()/consumed_path
+        if not path_on_disk.is_file():
+            raise DesignFreezeError(
+                f"Consumed v5 freeze {path_on_disk} does not exist"
+            )
+        observed = file_sha256(path_on_disk)
+        if observed != consumed_sha:
+            raise DesignFreezeError(
+                f"Consumed v5 freeze digest {observed} does not match {consumed_sha}"
+            )
+    protocol = _require_mapping(release.get("protocol"), "release.protocol")
+    if protocol.get("fresh_searches") is not True:
+        raise DesignFreezeError("release.protocol.fresh_searches must be true")
+    if protocol.get("reuse_archived_fit_state") is not False:
+        raise DesignFreezeError(
+            "release.protocol.reuse_archived_fit_state must be false"
+        )
+    sampler = _require_mapping(protocol.get("sampler"), "release.protocol.sampler")
+    for key, expected in (
+        ("n_eff", 500),
+        ("n_live_smooth", 100),
+        ("n_live_subhalo_search", 200),
+        ("n_live_subhalo_fixed", 100),
+        ("n_shell", 1),
+    ):
+        if sampler.get(key) != expected:
+            raise DesignFreezeError(
+                f"release.protocol.sampler.{key} must be {expected}"
+            )
+    if sampler.get("discard_exploration") is not False:
+        raise DesignFreezeError(
+            "release.protocol.sampler.discard_exploration must be false"
+        )
+    if sampler.get("retain_sampler_internals") is not True:
+        raise DesignFreezeError(
+            "release.protocol.sampler.retain_sampler_internals must be true"
+        )
+    if protocol.get("fallback_solver") is not False:
+        raise DesignFreezeError("release.protocol.fallback_solver must be false")
+    optimizer = _require_mapping(
+        protocol.get("optimizer"), "release.protocol.optimizer"
+    )
+    current_optimization = _require_mapping(
+        optimizer.get("current_search_optimization"),
+        "release.protocol.optimizer.current_search_optimization",
+    )
+    for key, expected in (
+        ("original_start_count", 8),
+        ("start_separation_normalized_l2", 0.05),
+        ("maxiter", 500),
+        ("ftol", 0.0),
+        ("gtol", 1.0e-10),
+        ("maxls", 50),
+        ("scalar_residual_tolerance", 1.0e-4),
+    ):
+        if float(current_optimization.get(key, -1)) != expected:
+            raise DesignFreezeError(
+                f"release.protocol.optimizer.current_search_optimization.{key} must be {expected}"
+            )
+    repeat = _require_mapping(
+        protocol["optimizer"].get("tighter_repeat"),
+        "release.protocol.optimizer.tighter_repeat",
+    )
+    for key, expected in (("maxiter", 1000), ("ftol", 0.0), ("gtol", 1.0e-12)):
+        if float(repeat.get(key, -1)) != expected:
+            raise DesignFreezeError(
+                f"release.protocol.optimizer.tighter_repeat.{key} must be {expected}"
+            )
+    acceptance = _require_mapping(
+        protocol.get("acceptance"), "release.protocol.acceptance"
+    )
+    if acceptance.get("distinct_original_starts") != 2:
+        raise DesignFreezeError(
+            "release.protocol.acceptance.distinct_original_starts must be 2"
+        )
+    if float(acceptance.get("support_log_likelihood_tolerance", -1)) != 0.1:
+        raise DesignFreezeError(
+            "release.protocol.acceptance.support_log_likelihood_tolerance must be 0.1"
+        )
+    if float(acceptance.get("tighter_repeat_tolerance", -1)) != 0.1:
+        raise DesignFreezeError(
+            "release.protocol.acceptance.tighter_repeat_tolerance must be 0.1"
+        )
+    sources = _require_mapping(release.get("sources"), "release.sources")
+    for name in ("archived_case_inventory", "archived_dispatch", "v6_ladder_manifest", "cohort_reference"):
+        source = _require_mapping(sources.get(name), f"release.sources.{name}")
+        if not isinstance(source.get("path"), str) or not source["path"]:
+            raise DesignFreezeError(f"release.sources.{name}.path must be nonempty")
+        _require_sha256(source.get("sha256"), f"release.sources.{name}.sha256")
+    scopes = _require_mapping(release.get("scopes"), "release.scopes")
+    expected_counts = {
+        "archived_cases": 1453,
+        "new_top50_standard_cases": 112,
+        "selected12_brackets": 36,
+    }
+    for name, expected in expected_counts.items():
+        scope = _require_mapping(scopes.get(name), f"release.scopes.{name}")
+        if scope.get("count") != expected:
+            raise DesignFreezeError(
+                f"release.scopes.{name}.count must be {expected}"
+            )
+    verified_positions = _require_mapping(
+        release.get("verified_position_inputs"),
+        "release.verified_position_inputs",
+    )
+    if verified_positions.get("status") != "three_reusable_position_artifacts_only":
+        raise DesignFreezeError(
+            "release.verified_position_inputs.status must declare the three reusable artifacts"
+        )
+    if len(_require_mapping(verified_positions.get("systems"), "release.verified_position_inputs.systems")) != 3:
+        raise DesignFreezeError(
+            "release.verified_position_inputs.systems must contain exactly three systems"
+        )
+    membership = _require_mapping(
+        release.get("membership"), "release.membership"
+    )
+    missing_membership = _require_mapping(
+        membership.get("top50_missing_historical_nonlinear"),
+        "release.membership.top50_missing_historical_nonlinear",
+    )
+    verified_ids = set(_require_mapping(verified_positions.get("systems"), "release.verified_position_inputs.systems"))
+    pending_ids = missing_membership.get("pending_position_systems")
+    if not isinstance(pending_ids, list) or len(pending_ids) != 25:
+        raise DesignFreezeError(
+            "release.membership.top50_missing_historical_nonlinear.pending_position_systems must contain 25 systems"
+        )
+    if len(verified_ids.intersection(pending_ids)) != 0 or len(verified_ids) + len(pending_ids) != 28:
+        raise DesignFreezeError(
+            "release verified and pending top-50 position memberships must be disjoint and total 28"
+        )
+    runner = _require_mapping(release.get("runner_contract"), "release.runner_contract")
+    approval = _require_mapping(
+        runner.get("approval_gate"),
+        "release.runner_contract.approval_gate",
+    )
+    if approval.get("required") is not True:
+        raise DesignFreezeError("release.runner_contract.approval_gate.required must be true")
+    if approval.get("sidecar_status") != "PENDING_EXPLICIT_APPROVAL":
+        raise DesignFreezeError(
+            "release.runner_contract.approval_gate.sidecar_status must remain pending until launch approval"
+        )
+    return release
 
 
 def design_freeze_digest(path=None) -> str:

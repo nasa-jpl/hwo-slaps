@@ -142,6 +142,10 @@ class NonlinearFitSummary:
         Search backend name.
     n_live : `int`, optional
         Number of live points requested for nested sampling.
+    n_live_effective : `int`, optional
+        Number of live points exposed by the constructed search object.
+    f_live_requested, f_live_effective : `float`, optional
+        Requested and effective Nautilus live-point fractions.
     analysis_key : `str`, optional
         Dataset-and-model identity embedded in the search name.
     n_like_max_reached : `bool`, optional
@@ -198,6 +202,9 @@ class NonlinearFitSummary:
     use_jax_requested: Optional[bool] = None
     search_engine: Optional[str] = None
     n_live: Optional[int] = None
+    n_live_effective: Optional[int] = None
+    f_live_requested: Optional[float] = None
+    f_live_effective: Optional[float] = None
     analysis_key: Optional[str] = None
     n_like_max_reached: Optional[bool] = None
     use_jax_effective: Optional[bool] = None

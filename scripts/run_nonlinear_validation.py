@@ -44,6 +44,8 @@ if str(REPO_ROOT/"scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT/"scripts"))
 
 DESIGN_FREEZE_PATH = REPO_ROOT/"configs"/"design"/"design_freeze_v1.yaml"
+V7_OBJECTIVE_VERSION = "consistent_sampling_v2"
+V7_PROFILE_PROCEDURE = "fresh_profile_v1"
 
 SAMPLER_SPAWN_KEY = 5
 """Leading spawn key of the declared sampler stream (`int`)."""
@@ -410,7 +412,160 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Declared PSF knowledge-error direction index",
     )
+    parser.add_argument(
+        "--freeze-path",
+        help="Explicit consumed DesignFreeze path; omitted for the legacy default",
+    )
+    parser.add_argument(
+        "--release-freeze-path",
+        help="Explicit additive v7 release declaration (required for v7)",
+    )
+    parser.add_argument(
+        "--objective-version",
+        choices=("legacy_ring1_v1", V7_OBJECTIVE_VERSION),
+        help="Opt-in objective identity; legacy remains the default",
+    )
+    parser.add_argument(
+        "--procedure",
+        choices=("legacy", V7_PROFILE_PROCEDURE),
+        help="Opt-in local-profile procedure; legacy remains the default",
+    )
+    parser.add_argument(
+        "--h1-anchor",
+        help="JSON zero-residual H1 anchor for an explicit bracket invocation",
+    )
+    parser.add_argument(
+        "--bracket-rung",
+        default="above_upper_rung",
+        help="Synthetic positions rung used by an H0 bracket invocation",
+    )
+    parser.add_argument(
+        "--bracket-arm-index",
+        type=int,
+        default=24,
+        help="Declared sampler spawn index for an H0 bracket invocation",
+    )
+    parser.add_argument(
+        "--compute-tangent-comparator",
+        action="store_true",
+        help="Attach the likelihood-matched tangent diagnostic for selected cases",
+    )
+    parser.add_argument(
+        "--compute-bracket-fisher-q",
+        action="store_true",
+        help="Evaluate the established 999x999 Fisher q for a bracket point",
+    )
     return parser
+
+
+def _execution_contract(args):
+    """Resolve the consumed freeze and explicit v7 procedure."""
+    objective = args.objective_version or "legacy_ring1_v1"
+    procedure = args.procedure or "legacy"
+    wants_v7 = (
+        objective == V7_OBJECTIVE_VERSION
+        or procedure == V7_PROFILE_PROCEDURE
+        or args.release_freeze_path is not None
+        or args.h1_anchor is not None
+    )
+    if not wants_v7:
+        freeze_path = Path(args.freeze_path or DESIGN_FREEZE_PATH).resolve()
+        return {
+            "freeze_path": freeze_path,
+            "protocol": load_protocol(freeze_path),
+            "release": None,
+            "objective_version": objective,
+            "procedure": procedure,
+            "anchor": None,
+            "compute_comparator": False,
+            "compute_bracket_fisher_q": False,
+        }
+    if args.release_freeze_path is None:
+        raise ValueError(
+            "The v7 objective/procedure requires an explicit --release-freeze-path"
+        )
+    from hwoslaps.campaign.design_freeze import load_release_freeze
+
+    release_path = Path(args.release_freeze_path).resolve()
+    release = load_release_freeze(release_path)
+    consumed = (REPO_ROOT / release["consumed_freeze"]["path"]).resolve()
+    if args.freeze_path is not None and Path(args.freeze_path).resolve() != consumed:
+        raise ValueError("--freeze-path does not match release consumed_freeze.path")
+    release_identity = release["protocol"]["identity"]
+    declared_objective = release_identity["objective_version"]
+    if objective != declared_objective:
+        raise ValueError(
+            f"v7 release declares objective {declared_objective!r}, got {objective!r}"
+        )
+    if procedure != V7_PROFILE_PROCEDURE:
+        raise ValueError("v7 release requires --procedure fresh_profile_v1")
+    anchor = None
+    if args.h1_anchor is not None:
+        with Path(args.h1_anchor).open(encoding="utf-8") as stream:
+            anchor = json.load(stream)
+        if not isinstance(anchor, dict):
+            raise ValueError("--h1-anchor must contain a JSON object")
+    return {
+        "freeze_path": consumed,
+        "protocol": load_protocol(consumed),
+        "release": release,
+        "release_path": release_path,
+        "objective_version": objective,
+        "procedure": procedure,
+        "anchor": anchor,
+        "compute_comparator": bool(args.compute_tangent_comparator),
+        "compute_bracket_fisher_q": bool(args.compute_bracket_fisher_q),
+    }
+
+
+def _v7_sampler_settings(protocol, release):
+    """Build the explicit v7 search settings from the additive declaration."""
+    if release is None:
+        raise ValueError("v7 sampler settings require an additive release declaration")
+    sampler = release["protocol"]["sampler"]
+    fit = protocol["fit"]
+    expected = {
+        "n_live_smooth": 100,
+        "n_live_subhalo_search": 200,
+        "n_live_subhalo_fixed": 100,
+    }
+    for key, value in expected.items():
+        if int(fit[key]) != value or int(sampler[key]) != value:
+            raise ValueError(f"v7 sampler contract mismatch for {key}")
+    if (
+        int(sampler["n_eff"]) != 500
+        or sampler.get("f_live") != 0.01
+        or sampler.get("retain_sampler_internals") is not True
+    ):
+        raise ValueError("v7 sampler contract must pin n_eff=500 and retention")
+    if sampler.get("n_shell") != 1 or sampler.get("discard_exploration") is not False:
+        raise ValueError("v7 sampler contract must explicitly pin n_shell=1 and discard_exploration=false")
+    return {
+        "n_eff": sampler["n_eff"],
+        "n_shell": sampler["n_shell"],
+        "f_live": sampler["f_live"],
+        "discard_exploration": sampler["discard_exploration"],
+        "retain_search_internal": True,
+        "sampler_contract": {
+            "n_eff": 500,
+            "n_shell": 1,
+            "f_live": 0.01,
+            "discard_exploration": False,
+            "n_live_by_fit_mode": {
+                "smooth": int(sampler["n_live_smooth"]),
+                "freed": int(sampler["n_live_subhalo_search"]),
+                "fixed_template": int(sampler["n_live_subhalo_fixed"]),
+            },
+        },
+    }
+
+
+def _require_fresh_namespace(output_dir: Path) -> None:
+    """Fail before rendering/fitting if a v7 case output is non-empty."""
+    if output_dir.exists() and any(output_dir.iterdir()):
+        raise ValueError(
+            f"v7 fresh-search namespace is not empty: {output_dir}"
+        )
 
 
 def main(argv=None, *, runner_factory=None, validator_factory=None,
@@ -423,15 +578,36 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
         raise ValueError("Unsupported validation artifact prefix")
     args = _build_parser().parse_args(argv)
     output_dir = Path(args.output_dir)
-    protocol = load_protocol()
+    execution = _execution_contract(args)
+    protocol = execution["protocol"]
+    objective_version = execution["objective_version"]
+    procedure = execution["procedure"]
+    release = execution["release"]
+    if release is not None:
+        _require_fresh_namespace(output_dir)
+    if execution["anchor"] is not None and args.arm != "h0_bracket":
+        raise ValueError("an H1 anchor is valid only for the h0_bracket adapter")
     fit_block = protocol["fit"]
     arms = protocol["arms"]
-    if args.arm not in arms:
+    bracket_mode = args.arm == "h0_bracket" and args.h1_anchor is not None
+    if args.arm not in arms and not bracket_mode:
         raise ValueError(
             f"Arm {args.arm!r} is not declared; declared arms: "
             f"{sorted(arms)}"
         )
-    declaration = arms[args.arm]
+    declaration = (
+        {
+            "arm_index": int(args.bracket_arm_index),
+            "dataset_kind": "asimov",
+            "subhalo_in_truth": False,
+            "fit_mode": "fixed_template",
+            "rung": str(args.bracket_rung),
+            "sample": "selected12_bracket",
+            "purpose": "fresh H0 profile with verified zero-residual H1 anchor",
+        }
+        if bracket_mode
+        else arms[args.arm]
+    )
     validate_direction_argument(declaration, args.direction)
     artifact_suffix = (
         "" if args.direction is None else f"_dir{args.direction}"
@@ -534,6 +710,19 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
             staged_config, declaration, rung_payload, fit_block
         )
     )
+    if objective_version == V7_OBJECTIVE_VERSION:
+        current_rendering = arm_config.get("nonlinear_rendering")
+        if current_rendering not in (
+            None,
+            {"objective_version": V7_OBJECTIVE_VERSION},
+        ):
+            raise ValueError(
+                "v7 objective selection conflicts with config rendering identity"
+            )
+        arm_config = copy.deepcopy(arm_config)
+        arm_config["nonlinear_rendering"] = {
+            "objective_version": V7_OBJECTIVE_VERSION,
+        }
     arm_config, noise_seed, noise_replicate, noise_spawn_key = (
         apply_noise_replicate(
             arm_config,
@@ -600,12 +789,31 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
             f"support half-widths {half_widths}"
         )
 
+    bracket_fisher_q = None
+    if bracket_mode and execution["compute_bracket_fisher_q"]:
+        from hwoslaps.modeling.nonlinear.fresh_profile import (
+            evaluate_established_fisher_q,
+        )
+
+        bracket_fisher_q = evaluate_established_fisher_q(
+            config=staged_config,
+            position_yx_arcsec=position,
+            log10_m200=float(rung_payload["logm"]),
+            kernel_shape_native=(999, 999),
+        )
+
     trial = trial_from_fisher_map_position(
         injected_config,
         lensing_injected,
         float(rung_payload["mass_msun"]),
         (float(position[0]), float(position[1])),
-        fisher_q=float(rung_payload["q_f_matched"]),
+        fisher_q=(
+            bracket_fisher_q["q_f_production_at_position"]
+            if bracket_fisher_q is not None
+            else None
+            if bracket_mode
+            else float(rung_payload["q_f_matched"])
+        ),
         case_id=f"{system_id_value}_{args.arm}{artifact_suffix}",
     )
     # The M200 mapping context exists only for the freed search; the
@@ -619,21 +827,60 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
         else None
     )
 
-    runner = (runner_factory or AutoLensFitRunner)(
-        NonlinearSearchSettings(
-            n_live_smooth=int(fit_block["n_live_smooth"]),
-            n_live_subhalo_search=int(fit_block["n_live_subhalo_search"]),
-            n_live_subhalo_fixed=int(fit_block["n_live_subhalo_fixed"]),
-            number_of_cores=int(fit_block["number_of_cores"]),
-            maxcall=int(fit_block["maxcall"]),
-            seed=seed,
-            path_prefix=f"{system_id_value}_{args.arm}{artifact_suffix}",
-            use_jax=True,
-            jax_n_batch=int(fit_block["jax_n_batch"]),
-        ),
+    settings_kwargs = {
+        "n_live_smooth": int(fit_block["n_live_smooth"]),
+        "n_live_subhalo_search": int(fit_block["n_live_subhalo_search"]),
+        "n_live_subhalo_fixed": int(fit_block["n_live_subhalo_fixed"]),
+        "number_of_cores": int(fit_block["number_of_cores"]),
+        "maxcall": int(fit_block["maxcall"]),
+        "seed": seed,
+        "path_prefix": f"{system_id_value}_{args.arm}{artifact_suffix}",
+        "use_jax": True,
+        "jax_n_batch": int(fit_block["jax_n_batch"]),
+    }
+    selected_runner_factory = runner_factory
+    selected_validator_factory = validator_factory
+    if release is not None:
+        settings_kwargs.update(_v7_sampler_settings(protocol, release))
+        from hwoslaps.modeling.nonlinear.fresh_profile import (
+            FreshProfileRunner,
+            FreshProfileSettings,
+            FreshProfileValidator,
+            ZeroResidualAnchorRunner,
+        )
+
+        profile_settings = FreshProfileSettings.from_release_protocol(release)
+        if execution["anchor"] is None:
+            selected_runner_factory = selected_runner_factory or (
+                lambda configured, directory: FreshProfileRunner(
+                    configured,
+                    directory,
+                    profile_settings=profile_settings,
+                )
+            )
+        elif selected_runner_factory is None:
+            selected_runner_factory = (
+                lambda configured, directory: ZeroResidualAnchorRunner(
+                    FreshProfileRunner(
+                        configured,
+                        directory,
+                        profile_settings=profile_settings,
+                    ),
+                    execution["anchor"],
+                )
+            )
+        if selected_validator_factory is None:
+            def selected_validator_factory(configured_runner):
+                return FreshProfileValidator(
+                    configured_runner,
+                    compute_comparator=execution["compute_comparator"],
+                )
+    settings = NonlinearSearchSettings(**settings_kwargs)
+    runner = (selected_runner_factory or AutoLensFitRunner)(
+        settings,
         output_dir=str(output_dir),
     )
-    validator = (validator_factory or NonlinearMetricValidator)(runner)
+    validator = (selected_validator_factory or NonlinearMetricValidator)(runner)
 
     start = time.time()
     result = run_psf_mismatch_case(
@@ -657,6 +904,36 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
             case.subhalo_fit.log_likelihood_max
             - case.smooth_fit.log_likelihood_max
         )
+    profile_records = getattr(runner, "profile_records", {})
+    profile_role_statuses = {
+        role: record.get("candidate_acceptance_status")
+        for role, record in profile_records.items()
+        if isinstance(record, dict)
+    }
+    numerical_role_ok = {
+        "accepted_repeatable_profile",
+        "verified_zero_residual_anchor",
+    }
+    numerical_status = None
+    profile_decision = None
+    marginal_q_flag = None
+    if release is not None:
+        numerical_status = (
+            "accepted"
+            if all(
+                profile_role_statuses.get(role) in numerical_role_ok
+                for role in ("smooth", "subhalo")
+            )
+            else "unresolved"
+        )
+        if numerical_status != "accepted":
+            if "fresh_profile_unresolved" not in case.quality_flags:
+                case.quality_flags.append("fresh_profile_unresolved")
+        signed_q = None if delta_log_likelihood is None else 2.0 * delta_log_likelihood
+        if signed_q is not None:
+            marginal_q_flag = bool(abs(signed_q - 10.0) < 1.0)
+            if numerical_status == "accepted":
+                profile_decision = bool(signed_q >= 10.0)
     payload = {
         "schema_version": 3,
         "artifact": artifact_path.name,
@@ -715,6 +992,57 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
         "campaign_uuid": os.environ.get("HWOSLAPS_CAMPAIGN_UUID", ""),
     }
+    if release is not None:
+        payload.update(
+            {
+                "freeze_protocol_path": str(execution["freeze_path"]),
+                "objective_version": objective_version,
+                "procedure_version": getattr(
+                    getattr(runner, "profile_settings", None),
+                    "version",
+                    procedure,
+                ),
+                "fresh_search": True,
+                "numerical_status": numerical_status,
+                "profile_role_statuses": profile_role_statuses,
+                "profile_decision": profile_decision,
+                "marginal_q_flag": marginal_q_flag,
+                "sampler_pair_status": {
+                    "smooth": case.smooth_fit.status,
+                    "subhalo": case.subhalo_fit.status,
+                },
+                "bracket_fisher_q": bracket_fisher_q,
+            }
+        )
+        payload["freeze_protocol_sha256"] = hashlib.sha256(
+            Path(execution["freeze_path"]).read_bytes()
+        ).hexdigest()
+        payload["release_freeze_path"] = str(execution["release_path"])
+        payload["release_freeze_sha256"] = hashlib.sha256(
+            Path(execution["release_path"]).read_bytes()
+        ).hexdigest()
+        payload["consumed_freeze_sha256"] = release["consumed_freeze"]["sha256"]
+        payload["release_protocol"] = release["protocol"]
+        payload["fit_settings"].update(
+            {
+                "n_eff": settings.n_eff,
+                "n_shell": settings.n_shell,
+                "discard_exploration": settings.discard_exploration,
+                "retain_search_internal": settings.retain_search_internal,
+                "sampler_contract": settings.sampler_contract,
+            }
+        )
+        if hasattr(runner, "profile_records"):
+            payload["fresh_profile_records"] = runner.profile_records
+            payload["likelihood_matched_tangent"] = runner.profile_records.get(
+                "likelihood_matched_tangent"
+            )
+        if execution["anchor"] is not None:
+            payload["h1_anchor"] = {
+                "sampler_executed": False,
+                "evidence_claim": False,
+                "anchor_source": execution["anchor"].get("source"),
+            }
     if hasattr(runner, "procedure"):
         payload["artifact_role"] = "nonlinear_profile_diagnostic"
         payload["inference_procedure"] = runner.procedure

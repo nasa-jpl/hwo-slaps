@@ -8,7 +8,11 @@ import pytest
 
 from hwoslaps.modeling.nonlinear import local_profile
 from hwoslaps.modeling.nonlinear.profile_replay import archive_vectors, linearized_comparator, atomic_json
-from hwoslaps.modeling.nonlinear.profile_execution import BudgetLedger, memory_admissible, process_matches
+from hwoslaps.modeling.nonlinear.profile_execution import (
+    BudgetLedger,
+    memory_admissible,
+    process_matches,
+)
 
 
 def solver_result(x, success):
@@ -227,6 +231,156 @@ def test_packing_admission_stays_within_frozen_limits(tmp_path):
         concurrency_limits(manifest, tmp_path)
 
 
+def test_stage3_v7_policy_allows_three_per_card_and_four_card_fallback():
+    from hwoslaps.modeling.nonlinear.profile_execution import stage3_policy
+
+    full = {
+        "execution_policy_version": "stage3_v7",
+        "authorized_gpu_limit": 8,
+        "gpus": list(range(8)),
+        "authorized_worker_limit": 24,
+        "max_workers": 24,
+        "max_workers_per_gpu": 3,
+        "admission_memory_fraction": 0.85,
+        "runtime_gpu_memory_fraction": 0.90,
+    }
+    assert stage3_policy(full)["worker_limit"] == 24
+    fallback = dict(
+        full,
+        authorized_gpu_limit=4,
+        gpus=list(range(4)),
+        authorized_worker_limit=12,
+        max_workers=12,
+    )
+    assert stage3_policy(fallback)["per_gpu_limit"] == 3
+    with pytest.raises(ValueError, match="Stage 3"):
+        stage3_policy(dict(full, max_workers_per_gpu=4))
+    with pytest.raises(ValueError, match="Stage 3"):
+        stage3_policy(dict(full, authorized_worker_limit=25, max_workers=25))
+    with pytest.raises(ValueError, match="Stage 3"):
+        stage3_policy(dict(full, max_workers_per_gpu=True))
+
+
+def test_stage3_v7_memory_policy_requires_calibration_for_unknown_class():
+    from hwoslaps.modeling.nonlinear.profile_execution import stage3_policy, validate_stage3_job
+
+    manifest = {
+        "execution_policy_version": "stage3_v7",
+        "authorized_gpu_limit": 4,
+        "gpus": list(range(4)),
+        "authorized_worker_limit": 12,
+        "max_workers": 12,
+        "max_workers_per_gpu": 3,
+        "admission_memory_fraction": 0.85,
+        "runtime_gpu_memory_fraction": 0.90,
+    }
+    policy = stage3_policy(manifest)
+    validate_stage3_job(
+        {
+            "peak_mib": 51200,
+            "memory_class": "790",
+            "memory_profile_id": "stage3_b200_790_v1",
+            "image_shape": [790, 790],
+            "kernel_shape": [51, 51],
+            "batch_size": 32,
+            "precision": "float64",
+        },
+        policy,
+    )
+    with pytest.raises(ValueError, match="registry"):
+        validate_stage3_job(
+            {
+                "peak_mib": 51000,
+                "memory_class": "790",
+                "memory_profile_id": "stage3_b200_790_v1",
+                "image_shape": [790, 790],
+                "kernel_shape": [51, 51],
+                "batch_size": 32,
+                "precision": "float64",
+            },
+            policy,
+        )
+    with pytest.raises(ValueError, match="registry"):
+        validate_stage3_job(
+            {
+                "peak_mib": 51200,
+                "memory_class": "790",
+                "image_shape": [790, 790],
+                "kernel_shape": [51, 51],
+                "batch_size": 32,
+                "precision": "float64",
+            },
+            policy,
+        )
+    with pytest.raises(ValueError, match="registry"):
+        validate_stage3_job({"peak_mib": 40000, "memory_class": "unknown"}, policy)
+    with pytest.raises(ValueError, match="exclusive"):
+        validate_stage3_job(
+            {"peak_mib": 140000, "memory_class": "unmeasured_conservative", "exclusive_gpu": False},
+            policy,
+        )
+    validate_stage3_job(
+        {"peak_mib": 140000, "memory_class": "unmeasured_conservative", "exclusive_gpu": True},
+        policy,
+    )
+
+
+def test_stage3_v7_memory_fraction_is_distinct_from_legacy_default():
+    assert memory_admissible(0, [50000], 50000, 183359, 0.85)
+    assert not memory_admissible(0, [50000], 110000, 183359, 0.85)
+
+
+def test_stage3_card_memory_stop_is_local_and_persistent(tmp_path, monkeypatch):
+    from hwoslaps.modeling.nonlinear import profile_execution as execution
+
+    stopped = []
+    charged = []
+    monkeypatch.setattr(execution, "stop_owned", lambda item: stopped.append(item["pid"]))
+    monkeypatch.setattr(execution, "attempt_elapsed", lambda item: 13.0)
+
+    class Ledger:
+        def finish(self, key, status, elapsed):
+            charged.append((key, status, elapsed))
+
+    active = {
+        "a": {"gpu": 0, "pid": 1},
+        "b": {"gpu": 2, "pid": 2},
+        "c": {"gpu": 2, "pid": 3},
+    }
+    gpus = {
+        0: {"used": 30, "total": 100},
+        2: {"used": 91, "total": 100},
+    }
+    blocked = set()
+    assert execution.stop_overfull_cards(active, gpus, Ledger(), blocked, tmp_path, 0.90)
+    assert stopped == [2, 3] and blocked == {2}
+    assert charged == [
+        ("b", "STOPPED_CARD_MEMORY_LIMIT", 13.0),
+        ("c", "STOPPED_CARD_MEMORY_LIMIT", 13.0),
+    ]
+    receipt = json.loads((tmp_path / "card_memory_events.jsonl").read_text())
+    assert receipt["blocked_cards"] == [2]
+    assert receipt["other_cards_preserved"]
+    assert not execution.stop_overfull_cards({"a": active["a"]}, gpus, Ledger(), blocked, tmp_path, 0.90)
+
+
+def test_stage3_task_disk_accounting_is_periodically_cached(tmp_path, monkeypatch):
+    from hwoslaps.modeling.nonlinear import profile_execution as execution
+
+    data = tmp_path / "artifact.bin"
+    data.write_bytes(b"first")
+    clock = iter((10.0, 10.5, 41.0))
+    monkeypatch.setattr(execution.time, "monotonic", lambda: next(clock))
+    cache = {"sample_monotonic": None, "bytes": 0}
+    first, first_at = execution.cached_task_bytes(tmp_path, cache, 30)
+    assert first == 5 and first_at == 10.0
+    data.write_bytes(b"second-size")
+    cached, cached_at = execution.cached_task_bytes(tmp_path, cache, 30)
+    assert cached == first and cached_at == first_at
+    refreshed, refreshed_at = execution.cached_task_bytes(tmp_path, cache, 30)
+    assert refreshed == len(b"second-size") and refreshed_at == 41.0
+
+
 def test_stale_or_missing_process_cannot_be_owned():
     assert not process_matches({"pid": 999999999, "process_start": 0.0, "spec_path": "/none"})
 
@@ -433,6 +587,95 @@ def test_controller_excludes_foreign_gpu_process_with_small_allocation(tmp_path,
     assert not (root / "attempt").exists()
     assert json.loads((root / "state/budget.json").read_text())["committed_seconds"] == 0
     assert (root / "state/dispatch_blocked.json").exists()
+
+
+def test_stage3_independent_failure_preserves_unrelated_job(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+    import time
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from hwoslaps.modeling.nonlinear.profile_execution import clock_epoch
+
+    body = (
+        'if out.name == "attempt0":\n'
+        '    raise RuntimeError("independent failure")\n'
+        'time.sleep(0.1)\n'
+        '(out/"worker_exit.json").write_text(json.dumps('
+        '{"status":"COMPLETE","elapsed_s":0.1,"artifacts":{}}))\n'
+    )
+    root, manifest = controller_fixture(tmp_path, monkeypatch, body)
+    data = json.loads(manifest.read_text())
+    data.update(
+        execution_policy_version="stage3_v7",
+        authorized_gpu_limit=4,
+        authorized_worker_limit=12,
+        max_workers=2,
+        max_workers_per_gpu=3,
+        gpus=[0, 1, 2, 3],
+        cap_seconds=1000,
+        admission_memory_fraction=0.85,
+        runtime_gpu_memory_fraction=0.90,
+    )
+    first_spec = root / "job0.json"
+    first_spec.write_text(json.dumps({"output": str(root / "attempt0")}))
+    second_spec = root / "job1.json"
+    second_spec.write_text(json.dumps({"output": str(root / "attempt1")}))
+    data["jobs"] = [
+        {
+            "key": "fail",
+            "spec": str(first_spec),
+            "gpu": 0,
+            "peak_mib": 51200,
+            "memory_class": "790",
+            "memory_profile_id": "stage3_b200_790_v1",
+            "image_shape": [790, 790],
+            "kernel_shape": [51, 51],
+            "batch_size": 32,
+            "precision": "float64",
+            "timeout_seconds": 10,
+        },
+        {
+            "key": "survive",
+            "spec": str(second_spec),
+            "gpu": 1,
+            "peak_mib": 51200,
+            "memory_class": "790",
+            "memory_profile_id": "stage3_b200_790_v1",
+            "image_shape": [790, 790],
+            "kernel_shape": [51, 51],
+            "batch_size": 32,
+            "precision": "float64",
+            "timeout_seconds": 10,
+        },
+    ]
+    manifest.write_text(json.dumps(data))
+    monkeypatch.setattr(
+        subprocess,
+        "check_output",
+        lambda cmd, **kwargs: (
+            ""
+            if "--query-compute-apps=pid,gpu_uuid" in cmd
+            else "".join(f"{g}, GPU-test{g}, 183359, 0\n" for g in range(4))
+        ),
+    )
+    monkeypatch.setattr(shutil, "disk_usage", lambda _: SimpleNamespace(free=100 * 2**30))
+    state = root / "state"
+    state.mkdir()
+    now = time.monotonic()
+    (state / "deadline.json").write_text(
+        json.dumps(
+            {
+                "clock_epoch": clock_epoch(),
+                "captured_monotonic": now,
+                "admission_stop_monotonic": now + 100,
+                "hard_stop_monotonic": now + 200,
+            }
+        )
+    )
+    supervise(manifest)
+    attempts = json.loads((root / "state/budget.json").read_text())["attempts"]
+    assert attempts["fail"]["status"] == "INTERRUPTED_UNCERTAIN"
+    assert attempts["survive"]["status"] == "COMPLETE"
 
 
 def test_jacobian_check_refines_step_without_loosening_error_limit():

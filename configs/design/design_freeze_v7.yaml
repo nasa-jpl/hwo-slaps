@@ -1,0 +1,309 @@
+# Additive v7 release declaration for the fresh nonlinear campaign.
+#
+# This file is a preparation artifact.  It does not replace the ratified v5
+# freeze and it does not authorize a launch.  The generator consumes this
+# declaration together with the hash-bound C inventory and v6 ladder manifest.
+
+schema_version: 7
+
+freeze:
+  name: design_freeze_v7_nonlinear_release
+  version: 7
+  status: prepared_not_ratified
+  authored: '2026-09-17'
+  purpose: >-
+    Bind the reviewed fresh-search production package while preserving the
+    ratified v5 science and the additive v6 ladder inputs.  All cases are
+    prepared for fresh searches; archived fit vectors, posterior samples,
+    evidence values, optimizer state and sampler checkpoints are identity
+    references only and are never loaded as search state.
+  launch_authority: >-
+    Preparation only.  Bulk execution requires the separate GPT Pro review and
+    George's explicit approval of the concrete manifest, allocation and cap.
+
+consumed_freeze:
+  path: configs/design/design_freeze_v1.yaml
+  version: 5
+  sha256: 7c6302ef4217573c0e2def0094844941922a04f050bd4fccfc7889b1b4341f75
+  semantics: >-
+    v5 remains the scientific authority for the detector, observing reference,
+    source assets, lens/source distributions, mass mapping, PSF conventions,
+    noise model and original ladder design.  v7 adds campaign routing and
+    fresh-search procedure fields only.
+
+protocol:
+  fresh_searches: true
+  reuse_archived_fit_state: false
+  archived_case_policy: >-
+    Archived aggregate artifacts bind the original case identity, input paths
+    and historical scalar context.  They are not fit starts, posterior inputs,
+    evidence inputs or optimizer checkpoints for v7.
+  fallback_solver: false
+  bracket_fisher_q:
+    enabled_views: [selected12_brackets]
+    kernel_shape_native: [999, 999]
+    position: unchanged_upper_rung
+    mass: current_shifted_mass
+    other_cases: false
+  tangent_comparator:
+    enabled_views: [selected12_standard, selected12_brackets]
+    other_cases: false
+  sampler:
+    n_eff: 500
+    n_live_smooth: 100
+    n_live_subhalo_search: 200
+    n_live_subhalo_fixed: 100
+    n_shell: 1
+    discard_exploration: false
+    f_live: 0.01
+    f_live_status: >-
+      Verified in the pinned backend. The execution adapter passes 0.01 and
+      records the effective value before launch.
+    retain_sampler_internals: true
+    sampler_internals_note: >-
+      The final v7 declaration requires raw sampler internals to be retained;
+      the earlier Stage 2 smoke did not retain them and is diagnostic only.
+  acceptance:
+    distinct_original_starts: 2
+    support_log_likelihood_tolerance: 0.1
+    tighter_repeat_tolerance: 0.1
+    diagnostic_tolerance: 0.01
+    retain_best_observed_evaluation: true
+    unresolved_policy: retain_and_report
+  optimizer:
+    solver: L-BFGS-B
+    fresh_promising_vectors_only: true
+    old_vectors_allowed: false
+    no_fallback_solver: true
+    current_search_optimization:
+      original_start_count: 8
+      start_separation_normalized_l2: 0.05
+      maxiter: 500
+      ftol: 0.0
+      gtol: 1.0e-10
+      maxls: 50
+      scalar_residual_tolerance: 1.0e-4
+    tighter_repeat:
+      maxiter: 1000
+      ftol: 0.0
+      gtol: 1.0e-12
+  identity:
+    objective_version: consistent_sampling_v2
+    generation_sub_size: 4
+    fit_kernel_shape_native: [51, 51]
+    fisher_kernel_shape_native: [999, 999]
+    original_noise_and_seed_pairing: preserved_from_v5_inputs
+    source_basis: preserved_from_v5_inputs
+
+sources:
+  archived_case_inventory:
+    path: scratch/nonlinear_release_20260917/agents/reference/PHASE_C_INVENTORY.json
+    sha256: 8d1731787ae89d2cebbcf16c032baeaf1e8ddd474b1eb2c44b224363d1a9a03f
+    expected_rows: 1453
+    duplicate_case_signatures: 0
+    role: C identity and dispatch inventory; all rows retained
+  archived_dispatch:
+    path: scratch/nonlinear_release_20260917/agents/reference/PHASE_C_DISPATCH_JOBS.json
+    sha256: 187b3e4a1b5c045a01411616822dd4aef68f17ee1eb3dd793f1788eced42805e
+    expected_rows: 1453
+    role: C direct worker routing and identity cross-check
+  v6_ladder_manifest:
+    path: scratch/v6_full_pool/production_ab_20260915/manifest.json
+    sha256: c46b40f4bcdbc50e6be08b37e85bf325936a76661e8d1ab0f9d865c1c3bf46b6
+    expected_jobs: 798
+    role: source of the 28 additive top-50 ladder bindings
+  cohort_reference:
+    path: scratch/gpt_pro_review_20260917/HWO_SLAPS_PostFisher_NextSteps/COHORT_REFERENCE.json
+    sha256: a690db21151a8cdfac750fe1b0de80fb5ec56196385309ee3f49469dfb681d71
+    role: frozen selected-12/top-50 membership reference; planning input only
+  v6_design_freeze:
+    path: scratch/v6_full_pool/production_ab_20260915/evidence/v6_fisher_production_20260915/design_freeze_v6_execution.yaml
+    sha256: d43ccae97c98b157d57b3ab4c439fdadcc78645ff65c4256c37bb4266594f944
+    role: additive ladder provenance
+
+membership:
+  selected12:
+    count: 12
+    systems: [sys0043, sys0069, sys0106, sys0228, sys0264, sys0429,
+              sys0533, sys0536, sys0728, sys0751, sys0813, sys0971]
+    source: cohort_reference.original_selected12
+  top50:
+    count: 50
+    source: cohort_reference.frozen_R_top50
+  top50_missing_historical_nonlinear:
+    count: 28
+    systems: [sys0013, sys0016, sys0082, sys0168, sys0278, sys0279,
+              sys0354, sys0357, sys0364, sys0383, sys0389, sys0400,
+              sys0409, sys0424, sys0437, sys0497, sys0583, sys0592,
+              sys0594, sys0601, sys0605, sys0643, sys0665, sys0707,
+              sys0771, sys0812, sys0951, sys0987]
+    source: cohort_reference.top50_missing_historical_nonlinear
+    binding_source: v6_ladder_manifest
+    position_status: >-
+      Three position artifacts are explicitly reusable from completed
+      preparation-only extraction checks; the remaining 25 systems require a
+      new extraction. No position is inferred from a directory name or a
+      Fisher output.
+    verified_position_systems: [sys0013, sys0082, sys0987]
+    pending_position_systems: [sys0016, sys0168, sys0278, sys0279, sys0354,
+                              sys0357, sys0364, sys0383, sys0389, sys0400,
+                              sys0409, sys0424, sys0437, sys0497, sys0583,
+                              sys0592, sys0594, sys0601, sys0605, sys0643,
+                              sys0665, sys0707, sys0771, sys0812, sys0951]
+  null590:
+    count: 590
+    systems: [sys0037, sys0043, sys0059, sys0069, sys0077, sys0106,
+              sys0128, sys0151, sys0227, sys0228, sys0264, sys0276,
+              sys0295, sys0304, sys0314, sys0318, sys0350, sys0381,
+              sys0405, sys0410, sys0416, sys0418, sys0422, sys0429,
+              sys0439, sys0459, sys0468, sys0475, sys0513, sys0533,
+              sys0536, sys0552, sys0553, sys0554, sys0561, sys0570,
+              sys0603, sys0613, sys0625, sys0633, sys0668, sys0670,
+              sys0710, sys0728, sys0730, sys0742, sys0751, sys0776,
+              sys0787, sys0813, sys0826, sys0882, sys0891, sys0912,
+              sys0971, sys0976, sys0983, sys0991, sys0993]
+    composition: 59 primary noisy_control cases plus 531 noisy_control_r1_to_r9 cases
+    source: archived_case_inventory
+  psf288:
+    count: 288
+    systems: selected12.systems
+    composition: 12 systems x 8 delta arms x 3 declared directions
+    source: archived_case_inventory
+
+verified_position_inputs:
+  status: three_reusable_position_artifacts_only
+  source_procedure_sha256: 696fab903584011b44935657c48c3857aaedb8e94326739abca5a42c18a23e87
+  systems:
+    sys0013:
+      path: /data/home/gvassilakis/nonlinear_release_20260917/stage12_20260917/attempts/SMOKE_READY_RETRY_003_001/position/injection_position.json
+      sha256: ace0e73cc9ab7715ec7d7364f45957104932de41246b45b2cc43e68002c6de22
+      config_sha256: 5fc3e740d0a72bc68fceda07e5c47ff87c61855246109719da9e9fadc64e3047
+      ladder_artifact_sha256: fbd4a04b38ef809c9a95e3c8876dd854e9cc8ddc312e5b7d3c6ccb71af960a62
+      extraction_receipt: /data/home/gvassilakis/nonlinear_release_20260917/stage12_20260917/attempts/SMOKE_READY_RETRY_003_001/position_binding.json
+      fresh_fits_executed: false
+    sys0082:
+      path: /data/home/gvassilakis/nonlinear_release_20260917/stage12_20260917/attempts/SMOKE_READY_RETRY_003_000/position/injection_position.json
+      sha256: e80bd10f31358437d3cd2bb4a520a2dd7945f16a983a249bdb92b93cfb8ca104
+      config_sha256: d3fc53b06c35d4a50eda698391eb6528f32676b486da0b2627b865dcc4ce1a90
+      ladder_artifact_sha256: 8deeba2e51eff96000bec2a047d69ae8711992d995e1b80d128b9e535565e0e0
+      extraction_receipt: /data/home/gvassilakis/nonlinear_release_20260917/stage12_20260917/attempts/SMOKE_READY_RETRY_003_000/position_binding.json
+      fresh_fits_executed: false
+    sys0987:
+      path: /data/home/gvassilakis/nonlinear_release_20260917/stage12_20260917/attempts/SMOKE_PREP_AND_EXISTING_001_002/position/injection_position.json
+      sha256: df5f5f98efa302da71654f054c55b7999b6bf2294f5853826d67ee79298815e6
+      config_sha256: d6e9fdf59cf50242690f9398dc805c064a8d6bf478234b1e9a0b21ce84dc15d8
+      ladder_artifact_sha256: 789e955b37feb862a33a1a2d35d20c359ff1a2e1f91a2c8e6c35e70d53a68d9d
+      extraction_receipt: /data/home/gvassilakis/nonlinear_release_20260917/stage12_20260917/attempts/SMOKE_PREP_AND_EXISTING_001_002/position_binding.json
+      fresh_fits_executed: false
+
+scopes:
+  archived_cases:
+    count: 1453
+    source: archived_case_inventory.jobs
+    routing: fresh standard runner using archived input identity
+  new_top50_standard_cases:
+    count: 112
+    source: top50_missing_historical_nonlinear x standard_arms
+    routing: pending position extraction, then fresh standard runner
+  selected12_brackets:
+    count: 36
+    source: selected12 x [0.1, 0.2, 0.3] dex above each existing upper rung
+    routing: bracket case generation, H1 truth anchor, then H0-only profile
+  standard_arms: [asimov_injected, asimov_below, noisy_injected, noisy_control]
+  standard_pair_count: 1565
+  execution_catalog_count: 1601
+
+mass_position_seed_policy:
+  historical_cases: >-
+    Preserve each archived row's exact config, positions artifact, rung,
+    physical mass, position and primary noise seed binding.  Reconstruct the
+    observation from these inputs under v7; do not import the archived fitted
+    vector or sampler state.
+  new_top50_cases: >-
+    Preserve the v6 config, ladder artifact and source hash.  Extract the
+    position artifact before dispatch.  The top arm uses the extracted top
+    rung and the below arm uses the extracted below rung when available;
+    noisy arms preserve the v6 configuration's primary global noise seed.
+    Until extraction completes, mass and position fields remain explicitly
+    pending and are never filled with estimates.
+  selected12_brackets: >-
+    Use each selected member's existing upper-rung position from its frozen
+    injection_position.json.  Declare offsets of +0.1, +0.2 and +0.3 dex in
+    log10(M200) and recompute physical subhalo parameters at generation time.
+    No bracket fit artifact is claimed by this declaration.
+  sampler_seed:
+    entropy: 20260823
+    spawn_key: [5, system_index, arm_index]
+    arm_indices:
+      asimov_injected: 0
+      asimov_below: 3
+      noisy_injected: 1
+      noisy_control: 2
+    noise_seed: preserve_declared_config_global_seed
+  paired_seed_policy: >-
+    Smooth and subhalo fits in one standard pair share the derived sampler
+    seed.  This is a sampler reproducibility convention, not a claim of
+    independent nested-sampling error.
+
+runner_contract:
+  entrypoint: scripts/run_nonlinear_production.py
+  case_spec_argv: [case_spec_path]
+  position_producer:
+    entrypoint: scripts/extract_injection_positions.py
+    argv: [config_path, v6_ladder_artifact_path, position_output_dir]
+    output: injection_position.json
+    completion_requirements:
+      - system/config/ladder identity and SHA-256 bindings match
+      - fit kernel shape is [51, 51]
+      - every available top/below rung has finite mass and position
+      - source asset and aperture identities are recorded
+      - no nonlinear fit or search is executed by the producer
+    downstream_requires_verified_hash: true
+  dependency_policy:
+    producer_must_complete_before_case_materialization: true
+    missing_position_blocks_dispatch: true
+    generated_bracket_case_must_bind_h1_anchor_hash: true
+    future_hashes_forbidden: true
+  underlying_runner: scripts/run_nonlinear_validation.py
+  standard_argv: [config_path, positions_path, arm, output_dir]
+  release_freeze_execution_path: /data/home/gvassilakis/nonlinear_release_20260917/stage3/worktree/configs/design/design_freeze_v7.yaml
+  execution_policy_version: stage3_v7
+  procedure_version: fresh_nonlinear_v7_lbfgsb_v1
+  procedure_source_execution_path: /data/home/gvassilakis/nonlinear_release_20260917/stage3/worktree/src/hwoslaps/modeling/nonlinear/fresh_profile.py
+  source_asset_execution_root: /data/home/gvassilakis/nonlinear_release_20260917/stage3/worktree/configs/source_assets
+  bracket_mode: h0_bracket_adapter_owned_by_optimizer_stage3
+  fresh_namespace_required: true
+  archived_state_loading_forbidden: true
+  pending_inputs_block_dispatch: true
+  explicit_case_identity_environment:
+    - HWOSLAPS_RELEASE_CASE_ID
+    - HWOSLAPS_EXPECTED_CASE_SHA256
+  physical_gpu_cap: 8
+  max_workers_per_gpu: 3
+  resource_policy: memory_gated
+  launch_status: unapproved_pending_review
+  approval_gate:
+    required: true
+    sidecar_status: PENDING_EXPLICIT_APPROVAL
+    sidecar_path: /data/home/gvassilakis/nonlinear_release_20260917/stage3/APPROVAL.json
+    sidecar_fields: [status, release_freeze_sha256, catalog_sha256,
+                     authorized_gpu_limit, authorized_scope]
+    verification: >-
+      A runner route is admitted only when an immutable approval sidecar
+      names this release-freeze digest and the exact generated catalog digest,
+      carries status APPROVED, and authorizes the requested scope and GPU
+      limit.  A user-editable boolean or a missing catalog digest is invalid.
+
+duplicate_policy:
+  archived_within_inventory: reject_nonzero_duplicate_case_signatures
+  execution_catalog: unique_case_id_required
+  cross_view_membership: intentional_view_overlap_must_be_listed
+  archived_fit_state: never_loaded
+
+reporting:
+  retain_statuses: [READY_FRESH_SEARCH, PENDING_POSITION_EXTRACTION,
+                    PENDING_BRACKET_GENERATION, FAILED, UNRESOLVED, COMPLETE]
+  marginal_rule: abs_q_minus_10_lt_1
+  area: unmeasured
+  population_or_census_inference: false
+  launch_authority: GPT_Pro_review_and_George_explicit_bulk_approval

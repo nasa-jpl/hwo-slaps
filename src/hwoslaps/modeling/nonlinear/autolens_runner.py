@@ -71,6 +71,9 @@ class NonlinearSearchSettings:
         Minimum number of points in the sampler shell before stopping.
         None delegates to the installed backend default; the effective
         value is recorded in the fit summary.
+    f_live : `float`, optional
+        Live-point fraction used by Nautilus. ``None`` delegates to the
+        installed backend default; an explicit v7 declaration pins 0.01.
     discard_exploration : `bool`, optional
         Whether the sampler discards exploration-phase points when
         estimating the posterior and evidence. None delegates to the
@@ -80,6 +83,12 @@ class NonlinearSearchSettings:
         Whether to keep the raw Nautilus search-internal state on disk
         after the fit instead of letting AutoFit post-fit cleanup
         remove it. Required for evidence-convergence audit cells.
+    sampler_contract : `dict`, optional
+        Explicit effective ``n_eff``, ``n_shell`` and
+        ``discard_exploration`` values that must be observed on the
+        constructed search before fitting. It may also carry a
+        ``n_live_by_fit_mode`` mapping for role-specific live-point checks.
+        ``None`` preserves the legacy backend-default behavior.
 
     Notes
     -----
@@ -103,8 +112,10 @@ class NonlinearSearchSettings:
     disable_visualization: bool = True
     n_eff: Optional[float] = None
     n_shell: Optional[int] = None
+    f_live: Optional[float] = None
     discard_exploration: Optional[bool] = None
     retain_search_internal: bool = False
+    sampler_contract: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         """Validate execution settings before analysis or search setup."""
@@ -129,6 +140,14 @@ class NonlinearSearchSettings:
             or self.n_shell <= 0
         ):
             raise ValueError("n_shell must be None or a positive integer")
+        if self.f_live is not None and (
+            isinstance(self.f_live, bool)
+            or not isinstance(self.f_live, (int, float))
+            or not np.isfinite(self.f_live)
+            or self.f_live <= 0
+            or self.f_live > 1
+        ):
+            raise ValueError("f_live must be None or a finite value in (0, 1]")
         if self.discard_exploration is not None and not isinstance(
             self.discard_exploration,
             bool,
@@ -136,6 +155,18 @@ class NonlinearSearchSettings:
             raise ValueError("discard_exploration must be None or a boolean")
         if not isinstance(self.retain_search_internal, bool):
             raise ValueError("retain_search_internal must be a boolean")
+        if self.sampler_contract is not None:
+            if not isinstance(self.sampler_contract, dict):
+                raise ValueError("sampler_contract must be a dictionary or None")
+            unknown = set(self.sampler_contract) - {
+                "n_eff", "n_shell", "f_live", "discard_exploration",
+                "n_live_by_fit_mode",
+            }
+            if unknown:
+                raise ValueError(
+                    "sampler_contract has unsupported fields: "
+                    + ", ".join(sorted(unknown))
+                )
 
 
 def ensure_jax_x64() -> None:
@@ -532,6 +563,68 @@ def _effective_sampler_settings(
     return n_eff, n_shell, discard_exploration
 
 
+def _effective_f_live(search: Any) -> Optional[float]:
+    """Return the constructed Nautilus object's effective live fraction."""
+    value = _search_setting(search, "f_live")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if np.isfinite(value) and value > 0.0 and value <= 1.0 else None
+
+
+def validate_effective_sampler_settings(
+    search: Any,
+    contract: Dict[str, Any],
+    *,
+    expected_n_live: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Validate effective sampler settings before a search is fitted.
+
+    The constructed Nautilus object is authoritative: passing a keyword to
+    the constructor does not prove that the installed backend applied it.
+    Legacy callers omit ``sampler_contract`` and retain the historical
+    backend-default behavior.
+    """
+    if not isinstance(contract, dict):
+        raise ValueError("sampler contract must be a dictionary")
+    n_eff, n_shell, discard_exploration = _effective_sampler_settings(search)
+    observed = {
+        "n_eff": n_eff,
+        "n_shell": n_shell,
+        "f_live": _effective_f_live(search),
+        "discard_exploration": discard_exploration,
+    }
+    if expected_n_live is not None:
+        n_live = _search_setting(search, "n_live")
+        observed["n_live"] = (
+            int(n_live)
+            if isinstance(n_live, (int, np.integer)) and not isinstance(n_live, bool)
+            else None
+        )
+        if observed["n_live"] != int(expected_n_live):
+            raise RuntimeError(
+                "Constructed sampler does not satisfy the declared effective "
+                f"n_live: expected {expected_n_live!r}, observed {observed['n_live']!r}"
+            )
+    mismatches = []
+    for name, expected in contract.items():
+        if name == "n_live_by_fit_mode":
+            continue
+        actual = observed.get(name)
+        if name == "n_eff" and expected is not None and actual is not None:
+            equal = bool(np.isclose(float(actual), float(expected), rtol=0.0, atol=0.0))
+        else:
+            equal = actual == expected
+        if not equal:
+            mismatches.append(f"{name}: expected {expected!r}, observed {actual!r}")
+    if mismatches:
+        raise RuntimeError(
+            "Constructed sampler does not satisfy the declared effective "
+            "settings: " + "; ".join(mismatches)
+        )
+    return observed
+
+
 def _apply_search_internal_retention() -> Tuple[bool, Any]:
     """Enable AutoFit search-internal retention and return prior state.
 
@@ -920,6 +1013,7 @@ class AutoLensFitRunner:
             "seed": self.settings.seed,
             "n_eff": self.settings.n_eff,
             "n_shell": self.settings.n_shell,
+            "f_live": self.settings.f_live,
             "discard_exploration": self.settings.discard_exploration,
         }
         if self.settings.use_jax:
@@ -1016,7 +1110,9 @@ class AutoLensFitRunner:
         jax_n_batch_effective = None
         n_eff_effective = None
         n_shell_effective = None
+        f_live_effective = None
         discard_exploration_effective = None
+        n_live_effective = None
         retention_applied = False
         training_workers_requested = None
         training_workers_effective = None
@@ -1046,6 +1142,28 @@ class AutoLensFitRunner:
             n_eff_effective, n_shell_effective, discard_exploration_effective = (
                 _effective_sampler_settings(search)
             )
+            f_live_effective = _effective_f_live(search)
+            observed_n_live = _search_setting(search, "n_live")
+            if isinstance(observed_n_live, (int, np.integer)) and not isinstance(
+                observed_n_live, bool
+            ):
+                n_live_effective = int(observed_n_live)
+            if self.settings.sampler_contract is not None:
+                live_by_mode = self.settings.sampler_contract.get(
+                    "n_live_by_fit_mode", {}
+                )
+                expected_n_live = (
+                    live_by_mode.get(fit_mode)
+                    if isinstance(live_by_mode, dict)
+                    else None
+                )
+                sampler_contract = dict(self.settings.sampler_contract)
+                sampler_contract.pop("n_live_by_fit_mode", None)
+                validate_effective_sampler_settings(
+                    search,
+                    sampler_contract,
+                    expected_n_live=expected_n_live,
+                )
             saved_visualization = os.environ.get(_VISUALIZATION_ENV)
             os.environ[_VISUALIZATION_ENV] = (
                 "1" if self.settings.disable_visualization else "0"
@@ -1095,6 +1213,9 @@ class AutoLensFitRunner:
                 jax_n_batch_effective=jax_n_batch_effective,
                 search_engine=self.settings.engine,
                 n_live=n_live,
+                n_live_effective=n_live_effective,
+                f_live_requested=self.settings.f_live,
+                f_live_effective=f_live_effective,
                 analysis_key=analysis_key,
                 n_like_max_reached=_n_like_max_reached(
                     result,
@@ -1132,6 +1253,9 @@ class AutoLensFitRunner:
                 jax_n_batch_effective=jax_n_batch_effective,
                 search_engine=self.settings.engine,
                 n_live=n_live,
+                n_live_effective=n_live_effective,
+                f_live_requested=self.settings.f_live,
+                f_live_effective=f_live_effective,
                 analysis_key=analysis_key,
                 visualization_disabled=self.settings.disable_visualization,
                 n_eff_requested=self.settings.n_eff,
