@@ -186,6 +186,10 @@ def generate_observation(
 
     # Add run name if provided
     metadata['run_name'] = full_config['run_name']
+    from ..lensing.sampling import actual_sub_size
+
+    generation_grid = getattr(lensing_data, 'grid', None)
+    metadata['generation_sub_size'] = actual_sub_size(generation_grid)
 
     # Create and return ObservationData object
     return ObservationData(

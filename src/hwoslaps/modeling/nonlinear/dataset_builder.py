@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from copy import deepcopy
 from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
@@ -53,6 +54,10 @@ class NonlinearDatasetMetadata:
     psf_fit_label: str
     psf_fit_supplied: bool = False
     psf_fit_sha256: str = ""
+    objective_version: str = "legacy_ring1_v1"
+    generation_sub_size: Optional[int] = None
+    light_profile_sub_size: Optional[int] = None
+    blurring_sub_size: Optional[int] = None
 
     def to_dict(self) -> Dict[str, object]:
         """Convert metadata to a JSON-compatible dictionary."""
@@ -257,6 +262,8 @@ def imaging_from_observation(
     mask_bool_use: Optional[np.ndarray] = None,
     psf_truth_label: str = "observation",
     psf_fit_label: str = "fit",
+    objective_version: str = "legacy_ring1_v1",
+    generation_sub_size: Optional[int] = None,
 ) -> Tuple[Any, NonlinearDatasetMetadata]:
     """Convert an HWO-SLAPS observation into a PyAutoLens dataset.
 
@@ -316,7 +323,24 @@ def imaging_from_observation(
 
     data_array = al.Array2D(values=data, mask=mask)
     noise_array = al.Array2D(values=noise_rate_from_observation(observation), mask=mask)
-    dataset = al.Imaging(data=data_array, noise_map=noise_array, psf=psf)
+    if objective_version not in ("legacy_ring1_v1", "consistent_sampling_v2"):
+        raise ValueError("Unsupported nonlinear objective_version")
+    if objective_version == "consistent_sampling_v2":
+        from ...lensing.sampling import positive_sub_size
+
+        generation_sub_size = positive_sub_size(generation_sub_size)
+        recorded_size = getattr(observation, "metadata", {}).get("generation_sub_size")
+        if recorded_size != generation_sub_size:
+            raise ValueError("Declared sampling differs from actual generation sampling")
+        dataset = al.Imaging(
+            data=data_array, noise_map=noise_array, psf=psf,
+            over_sample_size_lp=generation_sub_size,
+        )
+        _set_consistent_blurring(dataset, generation_sub_size)
+    else:
+        if generation_sub_size is not None:
+            raise ValueError("Legacy reconstruction does not accept a sampling override")
+        dataset = al.Imaging(data=data_array, noise_map=noise_array, psf=psf)
 
     # al.Imaging sum-normalizes the PSF at construction, so the recorded
     # digest must describe the kernel the fit actually consumes.
@@ -333,8 +357,111 @@ def imaging_from_observation(
         psf_fit_label=psf_fit_label,
         psf_fit_supplied=psf_fit_supplied,
         psf_fit_sha256=_kernel_sha256(fitted_psf_native),
+        objective_version=objective_version,
+        generation_sub_size=generation_sub_size,
     )
+    if objective_version == "consistent_sampling_v2":
+        metadata = _sampling_metadata(dataset, metadata, generation_sub_size)
     return dataset, metadata
+
+
+def _set_consistent_blurring(dataset, generation_sub_size):
+    """Set the pinned AutoArray cached ring on a fresh dataset only."""
+    import autolens as al
+    from ...lensing.sampling import actual_sub_size, positive_sub_size
+
+    size = positive_sub_size(generation_sub_size)
+    if actual_sub_size(dataset.grids.lp) != size:
+        raise ValueError("Light-profile sampling differs from generation")
+    ring = dataset.grids.blurring
+    if ring is not None:
+        # AutoArray has no public ring-size argument in the pinned runtime.
+        # Assert the actual grid afterwards so a cache API change fails closed.
+        dataset.grids._blurring = al.Grid2D.from_mask(
+            mask=ring.mask, over_sample_size=size,
+        )
+        if actual_sub_size(dataset.grids.blurring) not in (None, size):
+            raise RuntimeError("AutoArray ring sampling override did not take effect")
+    dataset._hwoslaps_objective_version = "consistent_sampling_v2"
+
+
+def _sampling_metadata(dataset, metadata, generation_sub_size):
+    from ...lensing.sampling import actual_sub_size
+
+    return replace(
+        metadata, objective_version="consistent_sampling_v2",
+        generation_sub_size=int(generation_sub_size),
+        light_profile_sub_size=actual_sub_size(dataset.grids.lp),
+        blurring_sub_size=actual_sub_size(dataset.grids.blurring),
+    )
+
+
+def consistent_sampling_copy(dataset, metadata, generation_sub_size=4):
+    """Clone an archived dataset and apply an explicitly versioned ring rule.
+
+    Caller must first verify the historical scalar/model identity and bind the
+    actual generation sampling from its execution provenance. No old fit result
+    or convergence flag is returned as accepted output for the new objective.
+    """
+    import autolens as al
+    from ...lensing.sampling import actual_sub_size, positive_sub_size
+
+    size = positive_sub_size(generation_sub_size)
+    if actual_sub_size(dataset.grids.lp) != size:
+        raise ValueError("Cannot migrate a core/generation sampling mismatch")
+    if metadata.objective_version != "legacy_ring1_v1":
+        raise ValueError("Migration requires an explicitly historical baseline")
+    before = {
+        "data": np.array(dataset.data.native, copy=True),
+        "noise": np.array(dataset.noise_map.native, copy=True),
+        "psf": np.array(pyauto_kernel_native(dataset.psf), copy=True),
+    }
+    mask_copy = deepcopy(dataset.mask)
+    psf_kernel = dataset.psf.kernel if hasattr(dataset.psf, "kernel") else dataset.psf
+    psf = make_pyauto_convolver(make_pyauto_kernel(
+        values=before["psf"].copy(), pixel_scales=psf_kernel.pixel_scales, normalize=False,
+    ))
+    candidate = al.Imaging(
+        data=al.Array2D(values=before["data"].copy(), mask=mask_copy),
+        noise_map=al.Array2D(values=before["noise"].copy(), mask=mask_copy),
+        psf=psf, use_normalized_psf=False, over_sample_size_lp=size,
+    )
+    _set_consistent_blurring(candidate, size)
+    for name, actual in [("data", candidate.data.native), ("noise", candidate.noise_map.native),
+                         ("psf", pyauto_kernel_native(candidate.psf))]:
+        if np.asarray(actual).tobytes() != before[name].tobytes():
+            raise ValueError("Objective migration changed input bytes: " + name)
+    for old, new in [(dataset.grids.lp, candidate.grids.lp),
+                     (dataset.grids.blurring, candidate.grids.blurring)]:
+        if (old is None) != (new is None):
+            raise ValueError("Objective migration changed grid presence")
+        if old is not None:
+            if not np.array_equal(old.mask, new.mask) or not np.array_equal(old.array, new.array):
+                raise ValueError("Objective migration changed grid mask/coordinates")
+    return candidate, _sampling_metadata(candidate, metadata, size)
+
+
+def rendering_identity(dataset, metadata):
+    """Read the actual corrected-grid contract before hashing an analysis."""
+    from ...lensing.sampling import actual_sub_size, positive_sub_size
+
+    get = (metadata.get if isinstance(metadata, dict)
+           else lambda key, default=None: getattr(metadata, key, default))
+    version = get("objective_version", "legacy_ring1_v1")
+    if version == "legacy_ring1_v1":
+        if getattr(dataset, "_hwoslaps_objective_version", None) is not None:
+            raise ValueError("Corrected dataset cannot use historical identity metadata")
+        return None
+    if version != "consistent_sampling_v2":
+        raise ValueError("Unsupported rendering identity version")
+    size = positive_sub_size(get("generation_sub_size"))
+    core, ring = actual_sub_size(dataset.grids.lp), actual_sub_size(dataset.grids.blurring)
+    if core != size or ring not in (None, size):
+        raise ValueError("Generation/core/ring sampling contract is violated")
+    if get("light_profile_sub_size") != core or get("blurring_sub_size") != ring:
+        raise ValueError("Sampling metadata differs from actual grids")
+    return {"objective_version": version, "generation_sub_size": size,
+            "light_profile_sub_size": core, "blurring_sub_size": ring}
 
 
 def fitted_kernel_sha256(dataset, wrapped_kernel, kernel_pixel_scale):

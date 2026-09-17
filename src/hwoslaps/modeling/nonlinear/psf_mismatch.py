@@ -326,6 +326,13 @@ def run_psf_mismatch_case(
     )
     wrapped = make_pyauto_convolver(_ensure_odd_kernel(wrapped))
     psf_case = f"{spec.mode}:{spec.delta_id}"
+    rendering = full_config.get("nonlinear_rendering", {})
+    if set(rendering) - {"objective_version"}:
+        raise ValueError("Unsupported nonlinear_rendering fields")
+    objective_version = rendering.get("objective_version", "legacy_ring1_v1")
+    generation_sub_size = None
+    if objective_version == "consistent_sampling_v2":
+        generation_sub_size = full_config["lensing"]["grid"]["over_sample_size"]
     dataset, metadata = imaging_from_observation(
         observation,
         psf_for_fit=wrapped,
@@ -334,6 +341,8 @@ def run_psf_mismatch_case(
         mask_bool_use=mask_bool_use,
         psf_truth_label=psf_truth_label,
         psf_fit_label=psf_case,
+        objective_version=objective_version,
+        generation_sub_size=generation_sub_size,
     )
     wrapped_kernel_sha256 = fitted_kernel_sha256(
         dataset,

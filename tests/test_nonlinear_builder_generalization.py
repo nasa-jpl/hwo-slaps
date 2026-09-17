@@ -214,11 +214,15 @@ def _identity_inputs():
     return dataset, metadata, model_metadata
 
 
-def test_analysis_key_covers_dataset_and_model_identity():
+@pytest.mark.parametrize("legacy", [False, True])
+def test_analysis_key_covers_dataset_and_model_identity(legacy):
     """Change every required identity field and reproduce equal inputs."""
     dataset, metadata, model_metadata = _identity_inputs()
-    baseline = analysis_key_from(dataset, metadata, model_metadata)
-    assert analysis_key_from(dataset, metadata, model_metadata) == baseline
+    baseline = analysis_key_from(dataset, metadata, model_metadata, legacy_clumpy_null=legacy)
+    assert analysis_key_from(dataset, metadata, model_metadata, legacy_clumpy_null=legacy) == baseline
+
+    # Historical key computed with the exact function at a155b2a6.
+    assert baseline == ("a933966338db6cee" if legacy else "d699475a9bfb4861")
 
     variants = []
     changed = deepcopy(metadata)
@@ -237,7 +241,7 @@ def test_analysis_key_covers_dataset_and_model_identity():
         changed_model[key] = value
         variants.append((dataset, metadata, changed_model))
     for values in variants:
-        assert analysis_key_from(*values) != baseline
+        assert analysis_key_from(*values, legacy_clumpy_null=legacy) != baseline
 
 
 def test_nautilus_settings_and_search_name_are_exact(monkeypatch, tmp_path):

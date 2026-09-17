@@ -468,3 +468,400 @@ def test_live_budget_uses_monotonic_time_despite_wall_clock_jump(monkeypatch):
     assert execution.attempt_elapsed(item) == 50.0
     item["clock_epoch"] = "old_boot"
     assert execution.attempt_elapsed(item) == 1000.0
+
+
+@pytest.mark.parametrize(
+    "limit,workers,gpus", [(4, 8, list(range(8))), (8, 9, list(range(8))), (8, 8, [0] * 8)]
+)
+def test_controller_rejects_excess_or_duplicate_allocation(tmp_path, monkeypatch, limit, workers, gpus):
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
+    data = json.loads(manifest.read_text())
+    data.update(authorized_gpu_limit=limit, max_workers=workers, gpus=gpus)
+    manifest.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="Invalid GPU allocation"):
+        supervise(manifest)
+    assert not (root / "attempt").exists()
+
+
+def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch):
+    import subprocess
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    body = (
+        '(out/"ready").write_text("ready")\n'
+        "deadline=time.monotonic()+8\n"
+        'while len(list(out.parent.glob("attempt*/ready"))) < 8:\n'
+        '    assert time.monotonic() < deadline, "eight workers did not run concurrently"\n'
+        "    time.sleep(0.05)\n"
+        '(out/"worker_exit.json").write_text(json.dumps('
+        '{"status":"COMPLETE","elapsed_s":0.1,"artifacts":{}}))\n'
+    )
+    root, manifest = controller_fixture(tmp_path, monkeypatch, body)
+    data = json.loads(manifest.read_text())
+    data.update(authorized_gpu_limit=8, max_workers=8, gpus=list(range(8)), cap_seconds=1000)
+    data["jobs"] = []
+    for gpu in range(8):
+        spec = root / f"job{gpu}.json"
+        spec.write_text(json.dumps({"output": str(root / f"attempt{gpu}")}))
+        data["jobs"].append(dict(key=f"job{gpu}", spec=str(spec), gpu=gpu, peak_mib=100, timeout_seconds=10))
+    manifest.write_text(json.dumps(data))
+    monkeypatch.setattr(
+        subprocess,
+        "check_output",
+        lambda cmd, **k: (
+            ""
+            if "--query-compute-apps=pid,gpu_uuid" in cmd
+            else "".join(f"{g}, GPU-test{g}, 1000, 0\n" for g in range(8))
+        ),
+    )
+    supervise(manifest)
+    before = (root / "state/budget.json").read_text()
+    assert all(x["status"] == "COMPLETE" for x in json.loads(before)["attempts"].values())
+    supervise(manifest)
+    assert (root / "state/budget.json").read_text() == before
+
+
+def test_controller_deadline_rejects_late_admission(tmp_path, monkeypatch):
+    import time
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise, clock_epoch
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
+    state = root / "state"
+    state.mkdir()
+    (state / "deadline.json").write_text(
+        json.dumps(
+            dict(
+                clock_epoch=clock_epoch(),
+                captured_monotonic=time.monotonic(),
+                admission_stop_monotonic=time.monotonic() - 1,
+                hard_stop_monotonic=time.monotonic() + 100,
+            )
+        )
+    )
+    supervise(manifest)
+    assert not (root / "attempt").exists()
+    assert (state / "dispatch_blocked.json").exists()
+
+
+def test_controller_deadline_stops_owned_worker(tmp_path, monkeypatch):
+    import time
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise, clock_epoch
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "time.sleep(30)\n")
+    state = root / "state"
+    state.mkdir()
+    # Admit first, then advance the clock after the first loop sleep.
+    origin = time.monotonic()
+    real_sleep = time.sleep
+    offset = [0.0]
+    real_clock = time.monotonic
+    monkeypatch.setattr(time, "monotonic", lambda: real_clock() + offset[0])
+
+    def advance(seconds):
+        if seconds == 2:
+            offset[0] = 200
+        else:
+            real_sleep(min(seconds, 0.05))
+
+    monkeypatch.setattr(time, "sleep", advance)
+    (state / "deadline.json").write_text(
+        json.dumps(
+            dict(
+                clock_epoch=clock_epoch(),
+                captured_monotonic=origin,
+                admission_stop_monotonic=origin + 80,
+                hard_stop_monotonic=origin + 100,
+            )
+        )
+    )
+    with pytest.raises(RuntimeError, match="deadline"):
+        supervise(manifest)
+    item = json.loads((state / "budget.json").read_text())["attempts"]["a"]
+    assert item["status"] == "STOPPED_AFTER_FAILURE"
+    assert not process_matches(item)
+
+
+def test_deadline_validation_rejects_nonfinite_and_reversed_windows():
+    import math
+    from hwoslaps.modeling.nonlinear.profile_execution import validate_deadline
+
+    base = {
+        "clock_epoch": "epoch",
+        "captured_monotonic": 10.0,
+        "admission_stop_monotonic": 20.0,
+        "hard_stop_monotonic": 30.0,
+    }
+    for field in ("captured_monotonic", "admission_stop_monotonic", "hard_stop_monotonic"):
+        for value in (math.nan, math.inf, -math.inf):
+            candidate = dict(base, **{field: value})
+            with pytest.raises(ValueError, match="finite"):
+                validate_deadline(candidate, epoch="epoch")
+    with pytest.raises(ValueError, match="later"):
+        validate_deadline(dict(base, admission_stop_monotonic=31.0), epoch="epoch")
+    with pytest.raises(ValueError, match="captured"):
+        validate_deadline(dict(base, captured_monotonic=31.0), epoch="epoch")
+
+
+def test_stop_file_blocks_controller_without_deadline(tmp_path, monkeypatch):
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
+    state = root / "state"
+    state.mkdir()
+    (state / "STOP").write_text("test stop\n")
+    with pytest.raises(RuntimeError, match="explicit stop"):
+        supervise(manifest)
+    assert not (root / "attempt").exists()
+    assert json.loads((state / "budget.json").read_text())["attempts"] == {}
+
+
+def test_boot_mismatch_reconciles_running_attempt_before_refusing_dispatch(tmp_path, monkeypatch):
+    from hwoslaps.modeling.nonlinear import profile_execution as execution
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
+    state = root / "state"
+    state.mkdir()
+    output = root / "attempt"
+    output.mkdir()
+    now = execution.time.monotonic()
+    (state / "budget.json").write_text(
+        json.dumps(
+            {
+                "cap_seconds": 100.0,
+                "attempts": {
+                    "a": {
+                        "output": str(output),
+                        "spec_path": str(root / "job.json"),
+                        "gpu": 2,
+                        "gpu_uuid": "GPU-test",
+                        "peak_mib": 100,
+                        "timeout_seconds": 10,
+                        "status": "RUNNING",
+                        "reservation_seconds": 70,
+                        "charged_seconds": 0.0,
+                        "pid": 999999999,
+                        "process_start": 0.0,
+                        "start_monotonic": now,
+                        "clock_epoch": "old-epoch",
+                    }
+                },
+            }
+        )
+    )
+    (state / "deadline.json").write_text(
+        json.dumps(
+            {
+                "clock_epoch": "old-epoch",
+                "captured_monotonic": now,
+                "admission_stop_monotonic": now + 10,
+                "hard_stop_monotonic": now + 20,
+            }
+        )
+    )
+    stopped = []
+    monkeypatch.setattr(execution, "clock_epoch", lambda: "new-epoch")
+    monkeypatch.setattr(execution, "stop_owned", lambda item: stopped.append(item["output"]))
+    with pytest.raises(ValueError, match="clock domain"):
+        supervise(manifest)
+    assert stopped == [str(output)]
+    item = json.loads((state / "budget.json").read_text())["attempts"]["a"]
+    assert item["status"] == "STOPPED_AFTER_FAILURE"
+
+
+def test_hard_deadline_preserves_valid_exit_receipt(tmp_path, monkeypatch):
+    from hwoslaps.modeling.nonlinear import profile_execution as execution
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
+    state = root / "state"
+    state.mkdir()
+    output = root / "attempt"
+    output.mkdir()
+    (output / "worker_exit.json").write_text(
+        json.dumps({"status": "COMPLETE", "elapsed_s": 0.2, "artifacts": {}})
+    )
+    now = execution.time.monotonic()
+    epoch = execution.clock_epoch()
+    (state / "budget.json").write_text(
+        json.dumps(
+            {
+                "cap_seconds": 100.0,
+                "attempts": {
+                    "a": {
+                        "output": str(output),
+                        "spec_path": str(root / "job.json"),
+                        "gpu": 2,
+                        "gpu_uuid": "GPU-test",
+                        "peak_mib": 100,
+                        "timeout_seconds": 10,
+                        "status": "RUNNING",
+                        "reservation_seconds": 70,
+                        "charged_seconds": 0.0,
+                        "pid": 999999999,
+                        "process_start": 0.0,
+                        "start_monotonic": now - 1,
+                        "clock_epoch": epoch,
+                    }
+                },
+            }
+        )
+    )
+    (state / "deadline.json").write_text(
+        json.dumps(
+            {
+                "clock_epoch": epoch,
+                "captured_monotonic": now - 2,
+                "admission_stop_monotonic": now - 1.5,
+                "hard_stop_monotonic": now - 1,
+            }
+        )
+    )
+    monkeypatch.setattr(execution, "process_matches", lambda item: False)
+    supervise(manifest)
+    item = json.loads((state / "budget.json").read_text())["attempts"]["a"]
+    assert item["status"] == "COMPLETE"
+
+
+def test_admission_recheck_closes_reservation_before_launch(tmp_path, monkeypatch):
+    import time
+    from hwoslaps.modeling.nonlinear import profile_execution as execution
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
+    state = root / "state"
+    state.mkdir()
+    now = time.monotonic()
+    epoch = execution.clock_epoch()
+    (state / "deadline.json").write_text(
+        json.dumps(
+            {
+                "clock_epoch": epoch,
+                "captured_monotonic": now,
+                "admission_stop_monotonic": now + 100,
+                "hard_stop_monotonic": now + 200,
+            }
+        )
+    )
+    checks = iter((False, False, False, True))
+    monkeypatch.setattr(execution, "deadline_reached", lambda deadline, state: next(checks, True))
+    supervise(manifest)
+    assert not (root / "attempt").exists()
+    item = json.loads((state / "budget.json").read_text())["attempts"]["a"]
+    assert item["status"] == "NOT_LAUNCHED_AFTER_DEADLINE"
+    assert item["charged_seconds"] == 0.0
+
+
+def test_nvml_stale_row_after_owned_exit_is_tolerated_but_pid_reuse_is_foreign():
+    import psutil
+    from hwoslaps.modeling.nonlinear.profile_execution import classify_compute_apps
+
+    snapshot = {
+        "a": {
+            "pid": 123,
+            "process_start": 10.0,
+            "gpu_uuid": "GPU-owned",
+            "verified": True,
+        }
+    }
+
+    def exited(pid):
+        raise psutil.NoSuchProcess(pid)
+
+    assert classify_compute_apps([(123, "GPU-owned")], snapshot, exited) == []
+    reused = classify_compute_apps([(123, "GPU-owned")], snapshot, lambda _pid: 11.0)
+    assert reused == [{"pid": 123, "gpu_uuid": "GPU-owned", "reason": "pid_reused"}]
+    foreign = classify_compute_apps([(456, "GPU-owned")], snapshot, lambda _pid: 10.0)
+    assert foreign == [{"pid": 456, "gpu_uuid": "GPU-owned", "reason": "unrecognized_pid"}]
+
+
+def test_unreaped_owned_zombie_nvml_row_is_tolerated(tmp_path):
+    import subprocess
+    import sys
+    import time
+    import psutil
+    from hwoslaps.modeling.nonlinear.profile_execution import (
+        classify_compute_apps,
+        ownership_snapshot,
+    )
+
+    spec = tmp_path / "job.json"
+    spec.write_text("{}")
+    worker = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import os; os._exit(0)",
+            str(spec),
+        ],
+        start_new_session=True,
+    )
+    try:
+        process = psutil.Process(worker.pid)
+        process_start = process.create_time()
+        for _ in range(100):
+            if process.status() == psutil.STATUS_ZOMBIE:
+                break
+            time.sleep(0.01)
+        else:
+            pytest.skip("test platform reaps children before they become observable zombies")
+        active = {
+            "a": {
+                "pid": worker.pid,
+                "process_start": process_start,
+                "spec_path": str(spec),
+                "gpu": 2,
+                "gpu_uuid": "GPU-zombie",
+            }
+        }
+        snapshot = ownership_snapshot(active)
+        assert not snapshot["a"]["verified"]
+        assert classify_compute_apps([(worker.pid, "GPU-zombie")], snapshot) == []
+        reused = classify_compute_apps(
+            [(worker.pid, "GPU-zombie")],
+            snapshot,
+            lambda _pid: process_start + 1.0,
+        )
+        assert reused == [{"pid": worker.pid, "gpu_uuid": "GPU-zombie", "reason": "pid_reused"}]
+        foreign = classify_compute_apps([(456789, "GPU-zombie")], snapshot)
+        assert foreign == [{"pid": 456789, "gpu_uuid": "GPU-zombie", "reason": "unrecognized_pid"}]
+    finally:
+        worker.wait(timeout=2)
+
+
+def test_foreign_gpu_failure_preserves_valid_completed_receipt(tmp_path, monkeypatch):
+    import subprocess
+    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+
+    body = (
+        '(out/"worker_exit.json").write_text(json.dumps({"status":"COMPLETE",'
+        '"elapsed_s":0.2,"artifacts":{}}))\n'
+        "time.sleep(30)\n"
+    )
+    root, manifest = controller_fixture(tmp_path, monkeypatch, body)
+    app_queries = [0]
+
+    def nvidia_query(cmd, **kwargs):
+        if "--query-compute-apps=pid,gpu_uuid" in cmd:
+            app_queries[0] += 1
+            return "" if app_queries[0] == 1 else "123456, GPU-test\n"
+        return "2, GPU-test, 1000, 0\n"
+
+    monkeypatch.setattr(
+        subprocess,
+        "check_output",
+        nvidia_query,
+    )
+    with pytest.raises(RuntimeError, match="Foreign GPU process"):
+        supervise(manifest)
+    state = root / "state"
+    item = json.loads((state / "budget.json").read_text())["attempts"]["a"]
+    assert item["status"] == "COMPLETE"
+    assert not process_matches(item)
+    failure = json.loads((state / "foreign_gpu_failure.json").read_text())
+    assert failure["foreign_rows"] == [
+        {"pid": 123456, "gpu_uuid": "GPU-test", "reason": "unrecognized_pid"}
+    ]
+    assert failure["owned_snapshot"]["a"]["pid"] == item["pid"]

@@ -253,6 +253,8 @@ def analysis_key_from(
     dataset: Any,
     dataset_metadata: Any,
     model_metadata: Dict[str, Any],
+    *,
+    legacy_clumpy_null: bool = False,
 ) -> str:
     """Return a deterministic 16-hex analysis identity key.
 
@@ -268,6 +270,10 @@ def analysis_key_from(
         Dataset provenance fields.
     model_metadata : `dict`
         Resolved fit mode, custom-context hashes, and prior widths.
+
+    legacy_clumpy_null : `bool`, optional
+        Reproduce the pre-removal identity schema with its unused null field.
+        This changes only hash serialization, never data, models, or priors.
 
     Returns
     -------
@@ -322,6 +328,15 @@ def analysis_key_from(
             prior_repr.encode("utf-8")
         ).hexdigest(),
     }
+    if legacy_clumpy_null:
+        payload["clumpy_fit_parameterization"] = None
+    from .dataset_builder import rendering_identity
+
+    rendering = rendering_identity(dataset, dataset_metadata)
+    if rendering is not None:
+        if legacy_clumpy_null:
+            raise ValueError("Historical identity schema cannot label a corrected objective")
+        payload["rendering_contract"] = rendering
     canonical = json.dumps(
         payload,
         sort_keys=True,

@@ -225,6 +225,8 @@ def validate_lensing_config(lensing: Dict[str, Any]) -> None:
     _require_positive_int(shape[1], 'lensing.grid.shape[1]')
     pixel_scale = _require(grid, 'pixel_scale', 'lensing.grid')
     _require_positive_finite_number(pixel_scale, 'lensing.grid.pixel_scale')
+    if 'over_sample_size' in grid:
+        _require_positive_int(grid['over_sample_size'], 'lensing.grid.over_sample_size')
 
     lens_galaxy = _require(lensing, 'lens_galaxy', 'lensing')
     _require_type(lens_galaxy, dict, 'lensing.lens_galaxy')
@@ -1212,6 +1214,21 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
     return
 
 
+def validate_nonlinear_rendering_config(config: Dict[str, Any]) -> None:
+    """Validate the opt-in objective and its explicit generation sampling."""
+    if 'nonlinear_rendering' not in config:
+        return
+    block = config['nonlinear_rendering']
+    _require_type(block, dict, 'nonlinear_rendering')
+    _reject_unknown_keys(block, {'objective_version'}, 'nonlinear_rendering')
+    version = _require(block, 'objective_version', 'nonlinear_rendering')
+    if version != 'consistent_sampling_v2':
+        raise ValueError('nonlinear_rendering.objective_version must be consistent_sampling_v2')
+    grid = config['lensing']['grid']
+    size = _require(grid, 'over_sample_size', 'lensing.grid')
+    _require_positive_int(size, 'lensing.grid.over_sample_size')
+
+
 def validate_or_raise(config: Dict[str, Any]) -> None:
     """Validate every section of a pipeline configuration.
 
@@ -1228,6 +1245,7 @@ def validate_or_raise(config: Dict[str, Any]) -> None:
     """
     validate_top_level(config)
     validate_lensing_config(config['lensing'])
+    validate_nonlinear_rendering_config(config)
     validate_psf_config(config['psf'])
     validate_observation_config(config['observation'])
     validate_modeling_config(config['modeling'])

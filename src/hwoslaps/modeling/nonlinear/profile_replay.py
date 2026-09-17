@@ -366,7 +366,17 @@ class ProfileReplayRunner(AutoLensFitRunner):
 
         started = time.perf_counter()
         old = self.replay["case"]["case"][role + "_fit"]
-        if analysis_key != old["analysis_key"]:
+        legacy_key = getattr(self, "legacy_analysis_keys", {}).get(role)
+        if analysis_key != old["analysis_key"] and legacy_key != old["analysis_key"]:
+            atomic_json(
+                Path(self.output_dir) / "identity_key_failure.json",
+                {
+                    "role": role,
+                    "current": analysis_key,
+                    "legacy": legacy_key,
+                    "archived": old["analysis_key"],
+                },
+            )
             raise ValueError(f"{role}: reconstructed analysis key differs from archived identity")
         names = [".".join(path) for path in model.unique_prior_paths]
         lower = np.array([p.lower_limit for p in model.priors_ordered_by_id], dtype=float)
@@ -412,6 +422,9 @@ class ProfileReplayRunner(AutoLensFitRunner):
             "direct_compiled_logL_error": abs(direct_l - l_ml),
             "direct_compiled_squared_residual_error": same_path_error,
             "analysis_key": analysis_key,
+            "archived_analysis_key": old["analysis_key"],
+            "legacy_analysis_key": legacy_key,
+            "identity_schema": "legacy_clumpy_null" if legacy_key is not None else "current",
             "parameter_names": names,
             "lower_bounds": lower.tolist(),
             "upper_bounds": upper.tolist(),
@@ -635,6 +648,59 @@ class ProfileReplayValidator(NonlinearMetricValidator):
     def validate_case(self, dataset, dataset_metadata, full_config, trial, *args, **kwargs):
         from .autolens_model_builder import autofit_model_from_spec, fixed_point_model_spec_from_trial
 
+        if self.runner.procedure.get("legacy_analysis_key_schema"):
+            from .autolens_model_builder import (
+                DEFAULT_PRIOR_WIDTHS,
+                smooth_model_spec_from_config,
+                subhalo_model_spec_from_trial,
+            )
+            from .autolens_runner import analysis_key_from
+
+            if (
+                self.runner.procedure["legacy_analysis_key_schema"] != "a155b2a6-clumpy-null"
+                or self.runner.replay["case"]["code_revision"]["git_hash"]
+                != "a155b2a6b519a28e99cb7c6df3736f16b415cc78"
+            ):
+                raise ValueError("Unsupported historical analysis identity schema")
+            if args:
+                raise ValueError("Historical schema replay requires named model options")
+            priors = kwargs.get("priors_config")
+            smooth = smooth_model_spec_from_config(full_config, priors_config=priors)
+            subhalo = subhalo_model_spec_from_trial(
+                full_config,
+                trial=trial,
+                priors_config=priors,
+                fit_mode=kwargs.get("fit_mode", "fixed_template"),
+                mass_context=kwargs.get("mass_context"),
+            )
+            widths = dict(DEFAULT_PRIOR_WIDTHS)
+            # a155b2a6 serialized defaults for unused model families as well.
+            # These entries affect only the historical hash.
+            # They do not change constructed priors.
+            widths.update(
+                {
+                    "lens_slope_sigma": 0.05,
+                    "lens_multipole_comp_sigma": 0.01,
+                    "lens_shear_comp_sigma": 0.01,
+                    "source_sersic_index_sigma": 0.5,
+                    "clumpy_flux_scale_frac_sigma": 0.5,
+                    "clumpy_size_scale_frac_sigma": 0.3,
+                    "clump_centre_sigma_arcsec": 0.01,
+                    "clump_intensity_frac_sigma": 0.5,
+                    "clump_effective_radius_frac_sigma": 0.3,
+                }
+            )
+            widths.update(priors or {})
+            smooth_meta = dict(smooth.metadata, fit_mode="smooth", resolved_prior_widths=widths)
+            subhalo_meta = dict(smooth.metadata)
+            subhalo_meta.update(subhalo.metadata)
+            subhalo_meta.update(
+                fit_mode=kwargs.get("fit_mode", "fixed_template"), resolved_prior_widths=widths
+            )
+            self.runner.legacy_analysis_keys = {
+                role: analysis_key_from(dataset, dataset_metadata, metadata, legacy_clumpy_null=True)
+                for role, metadata in [("smooth", smooth_meta), ("subhalo", subhalo_meta)]
+            }
         result = super().validate_case(dataset, dataset_metadata, full_config, trial, *args, **kwargs)
         # A local profile has no posterior recovery distribution to extract.
         result.quality_flags = [flag for flag in result.quality_flags if flag != "recovery_extraction_failed"]

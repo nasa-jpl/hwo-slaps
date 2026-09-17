@@ -300,12 +300,19 @@ def _create_grid(grid_config):
     so one template is built per geometry and each caller receives a
     detached `Grid2D` copy.
     """
-    key = (tuple(grid_config['shape']), float(grid_config['pixel_scale']))
+    from .sampling import configured_sub_size
+
+    key = (
+        tuple(grid_config['shape']),
+        float(grid_config['pixel_scale']),
+        configured_sub_size(grid_config),
+    )
     template = _UNIFORM_GRID_TEMPLATES.pop(key, None)
     if template is None:
         template = al.Grid2D.uniform(
             shape_native=key[0],
-            pixel_scales=key[1]
+            pixel_scales=key[1],
+            over_sample_size=key[2],
         )
         _set_array_writeable(template, False)
     _UNIFORM_GRID_TEMPLATES[key] = template
