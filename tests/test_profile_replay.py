@@ -585,27 +585,31 @@ def test_controller_rejects_excess_or_duplicate_allocation(tmp_path, monkeypatch
     assert not (root / "attempt").exists()
 
 
-def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch):
+@pytest.mark.parametrize("count,cards", [(8, 8), (16, 4)])
+def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch, count, cards):
     import subprocess
     from hwoslaps.modeling.nonlinear.profile_execution import supervise
 
     body = (
         '(out/"ready").write_text("ready")\n'
         "deadline=time.monotonic()+8\n"
-        'while len(list(out.parent.glob("attempt*/ready"))) < 8:\n'
-        '    assert time.monotonic() < deadline, "eight workers did not run concurrently"\n'
+        f'while len(list(out.parent.glob("attempt*/ready"))) < {count}:\n'
+        '    assert time.monotonic() < deadline, "workers did not run concurrently"\n'
         "    time.sleep(0.05)\n"
         '(out/"worker_exit.json").write_text(json.dumps('
         '{"status":"COMPLETE","elapsed_s":0.1,"artifacts":{}}))\n'
     )
     root, manifest = controller_fixture(tmp_path, monkeypatch, body)
     data = json.loads(manifest.read_text())
-    data.update(authorized_gpu_limit=8, max_workers=8, gpus=list(range(8)), cap_seconds=1000)
+    data.update(authorized_gpu_limit=cards, max_workers=count, gpus=list(range(cards)), cap_seconds=2000)
+    if count > cards:
+        data.update(authorized_worker_limit=count, max_workers_per_gpu=4)
     data["jobs"] = []
-    for gpu in range(8):
-        spec = root / f"job{gpu}.json"
-        spec.write_text(json.dumps({"output": str(root / f"attempt{gpu}")}))
-        data["jobs"].append(dict(key=f"job{gpu}", spec=str(spec), gpu=gpu, peak_mib=100, timeout_seconds=10))
+    for index in range(count):
+        spec = root / f"job{index}.json"
+        spec.write_text(json.dumps({"output": str(root / f"attempt{index}")}))
+        data["jobs"].append(dict(key=f"job{index}", spec=str(spec), gpu=index % cards,
+                                 peak_mib=100, timeout_seconds=10))
     manifest.write_text(json.dumps(data))
     monkeypatch.setattr(
         subprocess,
@@ -613,12 +617,14 @@ def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch):
         lambda cmd, **k: (
             ""
             if "--query-compute-apps=pid,gpu_uuid" in cmd
-            else "".join(f"{g}, GPU-test{g}, 1000, 0\n" for g in range(8))
+            else "".join(f"{g}, GPU-test{g}, 1000, 0\n" for g in range(cards))
         ),
     )
     supervise(manifest)
     before = (root / "state/budget.json").read_text()
     assert all(x["status"] == "COMPLETE" for x in json.loads(before)["attempts"].values())
+    assert len(json.loads(before)["attempts"]) == count
+    assert {v["gpu"] for v in json.loads(before)["attempts"].values()} == set(range(cards))
     supervise(manifest)
     assert (root / "state/budget.json").read_text() == before
 

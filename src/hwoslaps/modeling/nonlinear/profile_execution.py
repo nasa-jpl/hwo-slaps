@@ -332,6 +332,13 @@ def supervise(manifest_path):
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     allocation_limit = manifest.get("authorized_gpu_limit", 4)
     worker_limit = manifest.get("authorized_worker_limit", allocation_limit)
+    per_gpu_limit = manifest.get("max_workers_per_gpu")
+    if worker_limit > allocation_limit and (
+        isinstance(per_gpu_limit, bool) or not isinstance(per_gpu_limit, int)
+        or not 1 <= per_gpu_limit <= 4
+        or worker_limit > len(manifest["gpus"]) * per_gpu_limit
+    ):
+        raise ValueError("Packed allocation requires an explicit limit of at most four workers per GPU")
     if (
         allocation_limit not in (4, 8)
         or isinstance(worker_limit, bool) or not isinstance(worker_limit, int)
@@ -455,6 +462,7 @@ def supervise(manifest_path):
                         except psutil.Error:
                             pass
             disk = sum(p.stat().st_size for p in root.rglob("*") if p.is_file() and not p.is_symlink())
+            current_limit, per_gpu_limit = concurrency_limits(manifest, state)
             telemetry = {
                 "utc_unix": time.time(),
                 "gpus": gpus,
@@ -464,6 +472,9 @@ def supervise(manifest_path):
                 "task_bytes": disk,
                 "active": list(active),
                 "pending": [j["key"] for j in pending],
+                "admission_max_workers": current_limit,
+                "admission_max_workers_per_gpu": per_gpu_limit,
+                "physical_gpu_indices": manifest["gpus"],
             }
             with (state / "resources.jsonl").open("a") as stream:
                 stream.write(json.dumps(telemetry) + "\n")
@@ -478,7 +489,6 @@ def supervise(manifest_path):
                 if gpus[item["gpu"]]["used"] > 0.85 * gpus[item["gpu"]]["total"]:
                     raise RuntimeError("GPU memory ceiling exceeded")
             admitted = False
-            current_limit, per_gpu_limit = concurrency_limits(manifest, state)
             for job in pending:
                 if deadline is not None and (
                     time.monotonic() >= deadline["admission_stop_monotonic"]
