@@ -22,6 +22,18 @@ from .output_schema import NonlinearFitSummary, _json_safe
 from .validator import NonlinearMetricValidator
 
 
+LEGACY_CLUMPY_NULL_REVISIONS = frozenset({
+    "a155b2a6b519a28e99cb7c6df3736f16b415cc78",
+    "fe3819cc03386630cdd7cb3350bafc52de7e2108",
+})
+
+
+def validate_historical_identity_schema(schema, revision):
+    """Admit only source-verified historical serialization revisions."""
+    if schema != "a155b2a6-clumpy-null" or revision not in LEGACY_CLUMPY_NULL_REVISIONS:
+        raise ValueError("Unsupported historical analysis identity schema")
+
+
 def atomic_json(path, payload):
     """Replace a JSON checkpoint atomically; refuse non-standard NaN tokens."""
     path = Path(path)
@@ -687,12 +699,10 @@ class ProfileReplayValidator(NonlinearMetricValidator):
             )
             from .autolens_runner import analysis_key_from
 
-            if (
-                self.runner.procedure["legacy_analysis_key_schema"] != "a155b2a6-clumpy-null"
-                or self.runner.replay["case"]["code_revision"]["git_hash"]
-                != "a155b2a6b519a28e99cb7c6df3736f16b415cc78"
-            ):
-                raise ValueError("Unsupported historical analysis identity schema")
+            validate_historical_identity_schema(
+                self.runner.procedure["legacy_analysis_key_schema"],
+                self.runner.replay["case"]["code_revision"]["git_hash"],
+            )
             if args:
                 raise ValueError("Historical schema replay requires named model options")
             priors = kwargs.get("priors_config")
