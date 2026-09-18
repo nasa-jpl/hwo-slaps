@@ -1240,8 +1240,11 @@ class AutoLensFitRunner:
                 live_by_mode = self.settings.sampler_contract.get(
                     "n_live_by_fit_mode", {}
                 )
+                # The smooth model has one declared live-point count whatever
+                # the case's subhalo fit mode is.
+                live_key = "smooth" if role == "smooth" else fit_mode
                 expected_n_live = (
-                    live_by_mode.get(fit_mode)
+                    live_by_mode.get(live_key)
                     if isinstance(live_by_mode, dict)
                     else None
                 )

@@ -667,6 +667,55 @@ def test_effective_live_point_contract_is_checked_before_fit(monkeypatch, tmp_pa
     assert calls == []
 
 
+def test_smooth_role_live_points_are_checked_against_the_smooth_declaration(monkeypatch, tmp_path):
+    """A freed case's smooth search declares its own live points, not the subhalo's."""
+    import autofit as af
+
+    class Search:
+        n_eff = 500.0
+        n_shell = 1
+        discard_exploration = False
+        n_live = 100
+
+        def __init__(self, **kwargs):
+            pass
+
+        def fit(self, model, analysis):
+            raise RuntimeError("contract passed; stop before sampling")
+
+    monkeypatch.setattr(af, "Nautilus", Search)
+    settings_cls = __import__(
+        "hwoslaps.modeling.nonlinear.autolens_runner",
+        fromlist=["NonlinearSearchSettings"],
+    ).NonlinearSearchSettings
+    runner = AutoLensFitRunner(
+        settings_cls(
+            n_eff=500,
+            n_shell=1,
+            discard_exploration=False,
+            sampler_contract={
+                "n_eff": 500,
+                "n_shell": 1,
+                "discard_exploration": False,
+                "n_live_by_fit_mode": {"smooth": 100, "freed": 200, "fixed_template": 100},
+            },
+        ),
+        tmp_path,
+    )
+    summary = runner.run_model(
+        model=SimpleNamespace(total_free_parameters=1),
+        analysis=SimpleNamespace(),
+        role="smooth",
+        fit_mode="freed",
+        case_id="case",
+        n_live=100,
+        analysis_key="key",
+    )
+    assert summary.status == "failed"
+    assert "contract passed" in summary.error
+    assert "n_live" not in summary.error
+
+
 def test_result_callback_warning_blocks_profile_success(monkeypatch, tmp_path):
     base_summary = NonlinearFitSummary(
         model_role="subhalo",
