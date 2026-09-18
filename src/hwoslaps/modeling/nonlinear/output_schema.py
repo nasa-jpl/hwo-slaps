@@ -177,6 +177,11 @@ class NonlinearFitSummary:
         Whether the raw sampler state was verified present on disk
         (directory or zipped archive) after the fit; False when
         verified absent, None when indeterminable.
+    search_internal_payload : `dict`, optional
+        Explicit inventory of the retained sampler-state files for the
+        pinned backend: route, per-file byte counts and SHA-256 digests,
+        required files still missing, and whether the inventory is bound
+        to this fit's result path.
     training_workers_requested : `int`, optional
         Worker count requested for emulator training at runtime.
     training_workers_effective : `int`, optional
@@ -218,6 +223,7 @@ class NonlinearFitSummary:
     discard_exploration_effective: Optional[bool] = None
     search_internal_retention_requested: Optional[bool] = None
     search_internal_retained: Optional[bool] = None
+    search_internal_payload: Optional[Dict[str, Any]] = None
     training_workers_requested: Optional[int] = None
     training_workers_effective: Optional[int] = None
     training_start_method: Optional[str] = None

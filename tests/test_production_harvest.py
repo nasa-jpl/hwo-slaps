@@ -33,7 +33,131 @@ def _fisher_fixture():
     }
 
 
-def fixture(tmp_path, *, q=12.0, accepted=True, bracket=False, direction=None):
+def _retained_search(child, role, *, retain=True, size=16, route="directory"):
+    """Write one fresh search's output tree with or without sampler state."""
+    result_dir = child / f"{role}_search" / "identifier"
+    internal = result_dir / "files" / "search_internal"
+    files = {}
+    if route == "directory":
+        internal.mkdir(parents=True, exist_ok=True)
+        (internal / ".time").write_text("0.1")
+        files[".time"] = {
+            "path": str(internal / ".time"),
+            "bytes": 3,
+            "sha256": sha256_file(internal / ".time"),
+        }
+        if retain:
+            dill = internal / "search_internal.dill"
+            dill.write_bytes(b"s" * size)
+            files["search_internal.dill"] = {
+                "path": str(dill),
+                "bytes": size,
+                "sha256": sha256_file(dill),
+            }
+    else:
+        import zipfile
+
+        result_dir.parent.mkdir(parents=True, exist_ok=True)
+        container = Path(f"{result_dir}.zip")
+        with zipfile.ZipFile(container, "w") as archive:
+            archive.writestr("files/model.json", "{}")
+            if retain:
+                archive.writestr("files/search_internal/search_internal.dill", b"s" * size)
+        if retain:
+            files["search_internal.dill"] = {
+                "container": str(container),
+                "member": "files/search_internal/search_internal.dill",
+                "bytes": size,
+                "sha256": hashlib.sha256(b"s" * size).hexdigest(),
+            }
+    return result_dir, files
+
+
+def _fit_summary(role, result_dir, files, *, retained=True, anchor=False):
+    if anchor:
+        return {
+            "model_role": role,
+            "status": "success",
+            "search_engine": "VerifiedZeroResidualAnchor",
+            "result_path": None,
+            "search_internal_retention_requested": False,
+            "search_internal_retained": False,
+            "search_internal_payload": None,
+        }
+    return {
+        "model_role": role,
+        "status": "success",
+        "search_engine": "Nautilus",
+        "result_path": str(result_dir),
+        "search_internal_retention_requested": True,
+        "search_internal_retained": retained,
+        "search_internal_payload": {
+            "backend": "Nautilus",
+            "required_files": ["search_internal.dill"],
+            "output_path": str(result_dir),
+            "route": "directory" if any("path" in f for f in files.values()) else "zip",
+            "files": files,
+            "missing_required": [] if retained else ["search_internal.dill"],
+            "bound_to_result_path": True,
+            "retained": retained,
+            "error": None,
+        },
+    }
+
+
+def _retention_contract(case_record, *, bracket):
+    roles = {}
+    for role, key in (("smooth", "smooth_fit"), ("subhalo", "subhalo_fit")):
+        fit = case_record[key]
+        payload = fit.get("search_internal_payload") or {}
+        required = not (bracket and role == "subhalo")
+        if required:
+            complete = (
+                fit["search_internal_retention_requested"] is True
+                and fit["search_internal_retained"] is True
+                and payload.get("missing_required") == []
+            )
+        else:
+            complete = (
+                fit["search_internal_retention_requested"] is False
+                and fit["search_internal_retained"] is False
+            )
+        roles[role] = {
+            "sampler_state_required": required,
+            "fit_status": fit["status"],
+            "retention_requested": fit["search_internal_retention_requested"],
+            "retained": fit["search_internal_retained"],
+            "route": payload.get("route"),
+            "files": payload.get("files"),
+            "missing_required": payload.get("missing_required"),
+            "bound_to_result_path": payload.get("bound_to_result_path"),
+            "complete": complete,
+        }
+    return {
+        "policy": "standard pairs retain both fresh searches; brackets retain H0 only",
+        "roles": roles,
+        "complete": all(r["complete"] for r in roles.values()),
+    }
+
+
+def _receipt_artifacts(output):
+    return {
+        str(p): sha256_file(p)
+        for p in output.rglob("*")
+        if p.is_file() and p.name != "worker_exit.json"
+    }
+
+
+def fixture(
+    tmp_path,
+    *,
+    q=12.0,
+    accepted=True,
+    bracket=False,
+    direction=None,
+    retain=("smooth", "subhalo"),
+    route="directory",
+):
     case = {
         "case_id": "case-1",
         "system_id": "sys0001",
@@ -146,6 +270,29 @@ def fixture(tmp_path, *, q=12.0, accepted=True, bracket=False, direction=None):
         if bracket
         else None,
     )
+    smooth_dir, smooth_files = _retained_search(
+        child, "smooth", retain="smooth" in retain, route=route
+    )
+    case_record = {
+        "smooth_fit": _fit_summary(
+            "smooth", smooth_dir, smooth_files, retained="smooth" in retain
+        )
+    }
+    if bracket:
+        case_record["subhalo_fit"] = _fit_summary("subhalo", None, {}, anchor=True)
+    else:
+        subhalo_dir, subhalo_files = _retained_search(
+            child, "subhalo", retain="subhalo" in retain, route=route
+        )
+        case_record["subhalo_fit"] = _fit_summary(
+            "subhalo", subhalo_dir, subhalo_files, retained="subhalo" in retain
+        )
+    contract = _retention_contract(case_record, bracket=bracket)
+    payload.update(
+        case=case_record,
+        retention_contract=contract,
+        artifact_completeness_status="complete" if contract["complete"] else "incomplete",
+    )
     suffix = "" if direction is None else f"_dir{direction}"
     payload_path = dump(
         child / f"nonlinear_validation_{case['arm']}{suffix}.json", payload
@@ -153,7 +300,7 @@ def fixture(tmp_path, *, q=12.0, accepted=True, bracket=False, direction=None):
     receipt = dict(
         identity_bindings,
         status="COMPLETE",
-        artifacts={str(p): sha256_file(p) for p in output.rglob("*.json")},
+        artifacts=_receipt_artifacts(output),
     )
     dump(output / "worker_exit.json", receipt)
     return catalog_path, spec_path, output, payload_path
@@ -166,10 +313,13 @@ def harvest(catalog, specs):
 def refresh(output):
     path = output / "worker_exit.json"
     receipt = json.loads(path.read_text())
-    receipt["artifacts"] = {
-        str(p): sha256_file(p) for p in output.rglob("*.json") if p != path
-    }
+    receipt["artifacts"] = _receipt_artifacts(output)
     dump(path, receipt)
+
+
+def _payload_case_fits(payload_path):
+    data = json.loads(payload_path.read_text())
+    return data, data["case"]["smooth_fit"], data["case"]["subhalo_fit"]
 
 
 def test_accepted_and_report(tmp_path):
@@ -177,9 +327,155 @@ def test_accepted_and_report(tmp_path):
     result = harvest(catalog, [spec])
     assert result["status"] == "COMPLETE"
     assert result["rows"][0]["q_signed"] == 12.0
+    assert result["rows"][0]["artifact_completeness_status"] == "complete"
     assert result["views"]["test"]["accepted_detections"] == 1
+    assert result["views"]["test"]["incomplete"] == 0
     write_harvest(result, tmp_path / "harvest")
     assert len(list((tmp_path / "harvest").iterdir())) == 3
+    assert "Incomplete" in (tmp_path / "harvest" / "PRODUCTION_HARVEST.md").read_text()
+
+
+def test_reviewer_missing_retention_flags_are_never_production_complete(tmp_path):
+    """GPT Pro's reproduction: requested True, retained False, COMPLETE."""
+    catalog, spec, output, payload_path = fixture(tmp_path)
+    data, smooth, subhalo = _payload_case_fits(payload_path)
+    for fit in (smooth, subhalo):
+        fit["search_internal_retained"] = False
+    dump(payload_path, data)
+    refresh(output)
+    result = harvest(catalog, [spec])
+    row = result["rows"][0]
+    assert result["status"] == "INCOMPLETE_OR_UNRESOLVED"
+    assert row["status"] == "failed"
+    assert row["q_signed"] is None
+    assert row["h1_evidence_claim"] is False
+    assert any("retained state" in error for error in row["integrity_errors"])
+
+
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "smooth_dill_deleted",
+        "subhalo_dill_deleted",
+        "zero_bytes",
+        "hash_mismatch",
+        "not_receipt_bound",
+        "time_only_inventory",
+        "escapes_result_path",
+        "foreign_result_path",
+        "contract_incomplete",
+        "payload_status_incomplete",
+        "no_contract",
+    ],
+)
+def test_required_sampler_state_is_verified_not_declared(tmp_path, defect):
+    catalog, spec, output, payload_path = fixture(tmp_path)
+    data, smooth, subhalo = _payload_case_fits(payload_path)
+    smooth_dill = Path(
+        smooth["search_internal_payload"]["files"]["search_internal.dill"]["path"]
+    )
+    if defect == "smooth_dill_deleted":
+        smooth_dill.unlink()
+    elif defect == "subhalo_dill_deleted":
+        Path(
+            subhalo["search_internal_payload"]["files"]["search_internal.dill"]["path"]
+        ).unlink()
+    elif defect == "zero_bytes":
+        smooth_dill.write_bytes(b"")
+        smooth["search_internal_payload"]["files"]["search_internal.dill"].update(
+            bytes=0, sha256=sha256_file(smooth_dill)
+        )
+    elif defect == "hash_mismatch":
+        smooth_dill.write_bytes(b"different-state")
+    elif defect == "time_only_inventory":
+        smooth_dill.unlink()
+        del smooth["search_internal_payload"]["files"]["search_internal.dill"]
+    elif defect == "escapes_result_path":
+        outside = tmp_path / "elsewhere.dill"
+        outside.write_bytes(b"s" * 16)
+        smooth["search_internal_payload"]["files"]["search_internal.dill"]["path"] = str(
+            outside
+        )
+    elif defect == "foreign_result_path":
+        smooth["search_internal_payload"]["bound_to_result_path"] = False
+    elif defect == "contract_incomplete":
+        data["retention_contract"]["roles"]["smooth"]["complete"] = False
+    elif defect == "payload_status_incomplete":
+        data["artifact_completeness_status"] = "incomplete"
+    elif defect == "no_contract":
+        del data["retention_contract"]
+    dump(payload_path, data)
+    refresh(output)
+    if defect == "not_receipt_bound":
+        receipt_path = output / "worker_exit.json"
+        receipt = json.loads(receipt_path.read_text())
+        del receipt["artifacts"][str(smooth_dill)]
+        dump(receipt_path, receipt)
+    row = harvest(catalog, [spec])["rows"][0]
+    assert row["status"] == "failed", defect
+    assert row["integrity_errors"], defect
+    assert row["q_signed"] is None
+    assert row["profile_decision"] is None
+
+
+def test_zip_route_sampler_state_is_verified_inside_the_archive(tmp_path):
+    import zipfile
+
+    catalog, spec, output, payload_path = fixture(tmp_path, route="zip")
+    assert harvest(catalog, [spec])["rows"][0]["status"] == "accepted"
+    data, smooth, _ = _payload_case_fits(payload_path)
+    container = Path(
+        smooth["search_internal_payload"]["files"]["search_internal.dill"]["container"]
+    )
+    with zipfile.ZipFile(container, "w") as archive:
+        archive.writestr("files/model.json", "{}")
+        archive.writestr("files/search_internal/search_internal.dill", b"tampered")
+    refresh(output)
+    row = harvest(catalog, [spec])["rows"][0]
+    assert row["status"] == "failed"
+    assert any("sampler-state hash" in error for error in row["integrity_errors"])
+
+
+def test_bracket_retains_h0_state_only_and_anchor_claims_none(tmp_path):
+    catalog, spec, output, payload_path = fixture(tmp_path, bracket=True)
+    assert harvest(catalog, [spec])["rows"][0]["status"] == "accepted"
+    data, _, anchor = _payload_case_fits(payload_path)
+    anchor["search_internal_retained"] = True
+    dump(payload_path, data)
+    refresh(output)
+    assert harvest(catalog, [spec])["rows"][0]["status"] == "failed"
+
+    catalog, spec, output, payload_path = fixture(tmp_path / "h0_missing", bracket=True)
+    data, smooth, _ = _payload_case_fits(payload_path)
+    Path(smooth["search_internal_payload"]["files"]["search_internal.dill"]["path"]).unlink()
+    refresh(output)
+    row = harvest(catalog, [spec])["rows"][0]
+    assert row["status"] == "failed"
+    assert row["q_f_production_at_position"] is None
+
+
+def test_incomplete_artifact_attempt_is_reported_separately_without_q(tmp_path):
+    catalog, spec, output, payload_path = fixture(tmp_path, retain=("subhalo",))
+    data = json.loads(payload_path.read_text())
+    assert data["artifact_completeness_status"] == "incomplete"
+    for filename in ("production_run.json", "worker_exit.json"):
+        path = output / filename
+        record = json.loads(path.read_text())
+        record["status"] = "INCOMPLETE_ARTIFACTS"
+        dump(path, record)
+    refresh(output)
+    result = harvest(catalog, [spec])
+    row = result["rows"][0]
+    assert result["status"] == "INCOMPLETE_OR_UNRESOLVED"
+    assert row["status"] == "incomplete"
+    assert row["q_signed"] is None
+    assert row["profile_decision"] is None
+    assert row["integrity_errors"] == []
+    assert result["views"]["test"]["incomplete"] == 1
+    assert result["views"]["test"]["accepted"] == 0
+    write_harvest(result, tmp_path / "harvest")
+    report = (tmp_path / "harvest" / "PRODUCTION_HARVEST.md").read_text()
+    assert "| test | 1 | 0 | 0 | 1 | 0 | 0 |" in report
 
 
 @pytest.mark.parametrize(
@@ -535,14 +831,23 @@ def _emit_synthetic_completion(spec_path, case):
         if bracket
         else None,
     )
-    dump(output / "case" / f"nonlinear_validation_{spec['arm']}.json", payload)
+    child = output / "case"
+    smooth_dir, smooth_files = _retained_search(child, "smooth")
+    case_record = {"smooth_fit": _fit_summary("smooth", smooth_dir, smooth_files)}
+    if bracket:
+        case_record["subhalo_fit"] = _fit_summary("subhalo", None, {}, anchor=True)
+    else:
+        subhalo_dir, subhalo_files = _retained_search(child, "subhalo")
+        case_record["subhalo_fit"] = _fit_summary("subhalo", subhalo_dir, subhalo_files)
+    payload.update(
+        case=case_record,
+        retention_contract=_retention_contract(case_record, bracket=bracket),
+        artifact_completeness_status="complete",
+    )
+    dump(child / f"nonlinear_validation_{spec['arm']}.json", payload)
     dump(
         output / "worker_exit.json",
-        dict(
-            bindings,
-            status="COMPLETE",
-            artifacts={str(p): sha256_file(p) for p in output.rglob("*.json")},
-        ),
+        dict(bindings, status="COMPLETE", artifacts=_receipt_artifacts(output)),
     )
 
 

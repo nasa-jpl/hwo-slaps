@@ -11,6 +11,7 @@ import csv
 import hashlib
 import json
 import math
+import zipfile
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -160,6 +161,98 @@ def _bracket_source_chain(case, spec, catalog_digest, paths):
     return generated["config_sha256"]
 
 
+def _verify_retained_sampler_state(
+    payload: dict,
+    kind: str,
+    case_output_original: Path,
+    receipt_digests: Mapping[Path, str],
+    paths: Paths,
+) -> None:
+    """Fail closed unless every required sampler-state file is receipt-bound.
+
+    A standard pair needs the raw state of both fresh searches; a bracket
+    needs the H0 state and an H1 anchor that claims none. Each required file
+    must sit under its own search result path inside the case output, carry
+    nonzero size, and match the worker receipt's digest byte for byte.
+    """
+    contract = payload.get("retention_contract")
+    if not isinstance(contract, dict) or not isinstance(contract.get("roles"), dict):
+        raise ProductionHarvestError("completed payload has no retention contract")
+    _same(payload.get("artifact_completeness_status"), "complete", "artifact completeness")
+    _same(contract.get("complete"), True, "retention contract completeness")
+    case_record = payload.get("case")
+    if not isinstance(case_record, dict):
+        raise ProductionHarvestError("completed payload has no case fit summaries")
+    for role, fit_key in (("smooth", "smooth_fit"), ("subhalo", "subhalo_fit")):
+        record = contract["roles"].get(role)
+        fit = case_record.get(fit_key)
+        if not isinstance(record, dict) or not isinstance(fit, dict):
+            raise ProductionHarvestError(f"retention record or fit summary missing for {role}")
+        required = kind == "standard" or role == "smooth"
+        _same(record.get("sampler_state_required"), required, f"{role} sampler-state requirement")
+        _same(record.get("complete"), True, f"{role} retention completeness")
+        if not required:
+            _same(fit.get("search_internal_retention_requested"), False, f"{role} anchor retention request")
+            _same(fit.get("search_internal_retained"), False, f"{role} anchor retained state")
+            _same(fit.get("search_engine"), "VerifiedZeroResidualAnchor", f"{role} anchor engine")
+            continue
+        _same(fit.get("status"), "success", f"{role} fresh search status")
+        _same(fit.get("search_internal_retention_requested"), True, f"{role} retention request")
+        _same(fit.get("search_internal_retained"), True, f"{role} retained state")
+        _same(record.get("retained"), True, f"{role} contract retained state")
+        inventory = fit.get("search_internal_payload")
+        if not isinstance(inventory, dict):
+            raise ProductionHarvestError(f"{role} fit has no sampler-state inventory")
+        _same(inventory.get("missing_required"), [], f"{role} missing sampler-state files")
+        if inventory.get("bound_to_result_path") is False:
+            raise ProductionHarvestError(f"{role} sampler state belongs to a different result path")
+        required_files = inventory.get("required_files")
+        if not isinstance(required_files, list) or not required_files:
+            raise ProductionHarvestError(f"{role} declares no required sampler-state files")
+        result_path = fit.get("result_path")
+        if not isinstance(result_path, str) or not result_path:
+            raise ProductionHarvestError(f"{role} fresh search has no result path")
+        result_original = Path(result_path)
+        if not result_original.is_relative_to(case_output_original):
+            raise ProductionHarvestError(f"{role} search result escapes the case output")
+        files = inventory.get("files")
+        if not isinstance(files, dict):
+            raise ProductionHarvestError(f"{role} sampler-state inventory has no files")
+        for name in required_files:
+            entry = files.get(name)
+            if not isinstance(entry, dict):
+                raise ProductionHarvestError(f"{role} required sampler-state file missing: {name}")
+            size = entry.get("bytes")
+            if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
+                raise ProductionHarvestError(f"{role} sampler-state file is empty: {name}")
+            if isinstance(entry.get("path"), str):
+                original = Path(entry["path"])
+                if not original.is_relative_to(result_original):
+                    raise ProductionHarvestError(f"{role} sampler-state file escapes its search: {name}")
+                actual = paths(original)
+                digest = receipt_digests.get(actual.resolve())
+                if digest is None:
+                    raise ProductionHarvestError(f"{role} sampler-state file is not receipt-bound: {name}")
+                _same(entry.get("sha256"), digest, f"{role} sampler-state hash {name}")
+                _same(actual.stat().st_size, size, f"{role} sampler-state size {name}")
+            elif isinstance(entry.get("container"), str) and isinstance(entry.get("member"), str):
+                container_original = Path(entry["container"])
+                if not container_original.is_relative_to(case_output_original):
+                    raise ProductionHarvestError(f"{role} sampler-state archive escapes the case output")
+                container = paths(container_original)
+                if receipt_digests.get(container.resolve()) is None:
+                    raise ProductionHarvestError(f"{role} sampler-state archive is not receipt-bound")
+                with zipfile.ZipFile(container) as archive:
+                    data = archive.read(entry["member"])
+                digest = hashlib.sha256(data).hexdigest()
+                _same(digest, entry.get("sha256"), f"{role} sampler-state hash {name}")
+                _same(len(data), size, f"{role} sampler-state size {name}")
+            else:
+                raise ProductionHarvestError(
+                    f"{role} sampler-state file has no disk or archive location: {name}"
+                )
+
+
 def _verify_complete(
     case: dict,
     spec: dict,
@@ -175,6 +268,7 @@ def _verify_complete(
     if not isinstance(artifacts, dict) or not artifacts:
         raise ProductionHarvestError("completed receipt has no artifact hashes")
     verified = set()
+    receipt_digests: dict[Path, str] = {}
     for filename, digest in artifacts.items():
         original = Path(filename)
         if not original.is_absolute() or not original.is_relative_to(output_original):
@@ -184,6 +278,7 @@ def _verify_complete(
             raise ProductionHarvestError(f"receipt artifact is missing: {filename}")
         _same(sha256_file(path), digest, f"artifact SHA256 {filename}")
         verified.add(path.resolve())
+        receipt_digests[path.resolve()] = str(digest)
     run_path = output / "production_run.json"
     if run_path.resolve() not in verified:
         raise ProductionHarvestError("production_run.json is not receipt-bound")
@@ -290,6 +385,7 @@ def _verify_complete(
     _same(None if psf is None else psf.get("direction"), direction, "PSF direction")
     roles = payload.get("profile_role_statuses", {})
     kind = "bracket" if case.get("scope") == "selected12_brackets" else "standard"
+    _verify_retained_sampler_state(payload, kind, child_original, receipt_digests, paths)
     expected_fisher_flag = kind == "bracket"
     for record, label in ((case, "catalog"), (spec, "spec"), (run, "production run")):
         _same(
@@ -370,6 +466,7 @@ def _verify_complete(
         "bracket_fisher_q": bracket_fisher,
         "q_f_production_at_position": fisher_q,
         "profile_role_statuses": roles,
+        "artifact_completeness_status": payload.get("artifact_completeness_status"),
         "quality_flags": payload.get("quality_flags", []),
         "likelihood_matched_tangent": payload.get("likelihood_matched_tangent"),
         "payload_path": str(payload_path),
@@ -390,6 +487,8 @@ def harvest_production(
     Multiple COMPLETE receipts for one case are a fatal ambiguity even if one
     later fails integrity checks. Integrity failures become failed rows without
     scientific values; missing and explicitly failed attempts remain visible.
+    An attempt whose fits finished but whose required sampler state was not
+    retained is reported as ``incomplete``, never as a production result.
     """
     catalog_path = Path(catalog_path)
     catalog = _read(catalog_path)
@@ -432,6 +531,9 @@ def harvest_production(
     for case in cases:
         assigned = attempts[case["case_id"]]
         complete = [a for a in assigned if a[2] and a[2].get("status") == "COMPLETE"]
+        incomplete = [
+            a for a in assigned if a[2] and a[2].get("status") == "INCOMPLETE_ARTIFACTS"
+        ]
         if len(complete) > 1:
             raise ProductionHarvestError(f"duplicate COMPLETE attempts: {case['case_id']}")
         row = {key: case.get(key) for key in ("case_id", "system_id", "campaign", "arm", "direction")}
@@ -466,9 +568,11 @@ def harvest_production(
             row["selected_attempt"] = str(spec_path)
             try:
                 row.update(_verify_complete(case, spec, spec_path, receipt, catalog, digest, paths))
-            except (KeyError, TypeError, ValueError, OSError) as exc:
+            except (KeyError, TypeError, ValueError, OSError, zipfile.BadZipFile) as exc:
                 row["status"] = "failed"
                 row["integrity_errors"].append(str(exc))
+        elif incomplete:
+            row["status"] = "incomplete"
         elif any(a[2] is not None or a[3] is not None for a in assigned):
             row["status"] = "failed"
         rows.append(row)
@@ -479,7 +583,10 @@ def harvest_production(
         statuses = Counter(row["status"] for row in members)
         counts[name] = {
             "expected": len(ids),
-            **{key: statuses[key] for key in ("missing", "failed", "unresolved", "accepted")},
+            **{
+                key: statuses[key]
+                for key in ("missing", "failed", "incomplete", "unresolved", "accepted")
+            },
             "marginal": sum(row["marginal_q_flag"] is True for row in members),
             "accepted_detections": sum(row["profile_decision"] is True for row in members),
             "accepted_non_detections": sum(row["profile_decision"] is False for row in members),
@@ -516,16 +623,19 @@ def write_harvest(result: dict, output_dir: str | Path) -> None:
         "",
         f"Catalog SHA-256: `{result['catalog_sha256']}`",
         "",
-        "Every expected case remains in its denominator. Missing, failed and unresolved cases "
-        "have no classification. Marginal flags are independent of numerical acceptance. "
-        "The signed q is retained separately from max(0, q). Brackets carry no H1 evidence claim.",
+        "Every expected case remains in its denominator. Missing, failed, incomplete and "
+        "unresolved cases have no classification. Incomplete means the fits finished but the "
+        "required raw sampler state was not retained. Marginal flags are independent of "
+        "numerical acceptance. The signed q is retained separately from max(0, q). Brackets "
+        "carry no H1 evidence claim.",
         "",
-        "| View | Expected | Accepted | Unresolved | Failed | Missing | Marginal | Detections |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| View | Expected | Accepted | Unresolved | Incomplete | Failed | Missing | Marginal "
+        "| Detections |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for name, c in result["views"].items():
         lines.append(
-            f"| {name} | {c['expected']} | {c['accepted']} | {c['unresolved']} | {c['failed']} "
-            f"| {c['missing']} | {c['marginal']} | {c['accepted_detections']} |"
+            f"| {name} | {c['expected']} | {c['accepted']} | {c['unresolved']} | {c['incomplete']} "
+            f"| {c['failed']} | {c['missing']} | {c['marginal']} | {c['accepted_detections']} |"
         )
     (output / "PRODUCTION_HARVEST.md").write_text("\n".join(lines) + "\n")

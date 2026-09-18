@@ -518,6 +518,53 @@ def _execution_contract(args):
     }
 
 
+def _v7_retention_contract(case, bracket_mode):
+    """Report per role whether retained sampler state meets the v7 contract.
+
+    A standard pair must retain the raw state of both fresh searches. A
+    bracket retains only the H0 search; its verified H1 anchor is not a
+    sampler output and must claim no retained state. Artifact completeness
+    is reported separately from numerical acceptance.
+    """
+    roles = {}
+    for role, fit in (("smooth", case.smooth_fit), ("subhalo", case.subhalo_fit)):
+        payload = fit.search_internal_payload or {}
+        sampler_state_required = not (bracket_mode and role == "subhalo")
+        if sampler_state_required:
+            complete = bool(
+                fit.status == "success"
+                and fit.search_internal_retention_requested is True
+                and fit.search_internal_retained is True
+                and payload.get("missing_required") == []
+                and payload.get("bound_to_result_path") is not False
+            )
+        else:
+            complete = bool(
+                fit.search_internal_retention_requested is False
+                and fit.search_internal_retained is False
+                and fit.search_engine == "VerifiedZeroResidualAnchor"
+            )
+        roles[role] = {
+            "sampler_state_required": sampler_state_required,
+            "fit_status": fit.status,
+            "retention_requested": fit.search_internal_retention_requested,
+            "retained": fit.search_internal_retained,
+            "route": payload.get("route"),
+            "files": payload.get("files"),
+            "missing_required": payload.get("missing_required"),
+            "bound_to_result_path": payload.get("bound_to_result_path"),
+            "complete": complete,
+        }
+    return {
+        "policy": (
+            "standard pairs retain both fresh searches; brackets retain H0 only "
+            "and the verified H1 anchor has no sampler state"
+        ),
+        "roles": roles,
+        "complete": all(role["complete"] for role in roles.values()),
+    }
+
+
 def _v7_sampler_settings(protocol, release):
     """Build the explicit v7 search settings from the additive declaration."""
     if release is None:
@@ -922,7 +969,9 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
     numerical_status = None
     profile_decision = None
     marginal_q_flag = None
+    retention_contract = None
     if release is not None:
+        retention_contract = _v7_retention_contract(case, bracket_mode)
         numerical_status = (
             "accepted"
             if all(
@@ -1009,6 +1058,10 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
                 ),
                 "fresh_search": True,
                 "numerical_status": numerical_status,
+                "retention_contract": retention_contract,
+                "artifact_completeness_status": (
+                    "complete" if retention_contract["complete"] else "incomplete"
+                ),
                 "profile_role_statuses": profile_role_statuses,
                 "profile_decision": profile_decision,
                 "marginal_q_flag": marginal_q_flag,

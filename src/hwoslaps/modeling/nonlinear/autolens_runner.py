@@ -671,47 +671,135 @@ def _restore_search_internal_retention(state: Tuple[bool, Any]) -> None:
         del output_config["search_internal"]
 
 
-def _search_internal_artifact_exists(search: Any) -> Optional[bool]:
-    """Return whether raw sampler state is verifiably on disk post-fit.
+REQUIRED_SEARCH_INTERNAL_FILES: Dict[str, Tuple[str, ...]] = {
+    "Nautilus": ("search_internal.dill",),
+}
+"""Sampler-state files AutoFit must leave under ``files/search_internal``.
 
-    Checks the search output directory (``files/search_internal``) and
-    the zipped output archive AutoFit leaves when ``remove_files`` is
-    enabled. Deliberately avoids ``paths.search_internal_path`` and
-    ``paths._files_path``, whose property accessors create directories
-    as a side effect. Returns None when the search exposes no usable
-    output path, for example test doubles.
+The pinned AutoFit backend serialises the Nautilus sampler with dill to
+``search_internal.dill``; the timer files beside it are not sampler state.
+"""
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_path(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def inspect_search_internal_payload(
+    search: Any,
+    *,
+    backend: str,
+    expected_output_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Inventory the retained sampler state for one completed search.
+
+    The inventory lists every file directly under ``files/search_internal``
+    in the search output directory, or under a ``search_internal`` member
+    directory in the zipped archive AutoFit leaves when ``remove_files`` is
+    enabled, with byte counts and SHA-256 digests. ``retained`` is True only
+    when every file the pinned backend requires is present with nonzero
+    size and the inventory is not bound to a different result path. A
+    timer file, an empty directory, or an unrelated file never counts.
+    Deliberately avoids ``paths.search_internal_path`` and
+    ``paths._files_path``, whose property accessors create directories as
+    a side effect.
 
     Parameters
     ----------
     search : `object`
         Search object whose fit has completed or failed.
+    backend : `str`
+        Search engine name; selects the required payload inventory.
+    expected_output_path : `str`, optional
+        Result output path the payload must belong to.
 
     Returns
     -------
-    exists : `bool`, optional
-        True when the artifact is verified present, False when verified
-        absent, None when indeterminable.
+    payload : `dict`
+        Inventory with keys ``backend``, ``required_files``,
+        ``output_path``, ``route``, ``files``, ``missing_required``,
+        ``bound_to_result_path``, ``retained`` and ``error``. ``retained``
+        is None when the search exposes no usable output path or the
+        backend has no declared inventory.
     """
+    required = REQUIRED_SEARCH_INTERNAL_FILES.get(str(backend))
+    payload: Dict[str, Any] = {
+        "backend": str(backend),
+        "required_files": list(required or ()),
+        "output_path": None,
+        "route": None,
+        "files": {},
+        "missing_required": list(required or ()),
+        "bound_to_result_path": None,
+        "retained": None,
+        "error": None,
+    }
     paths = getattr(search, "paths", None)
     output_path = getattr(paths, "output_path", None)
     if output_path is None:
-        return None
+        return payload
+    payload["output_path"] = str(output_path)
+    if required is None:
+        payload["error"] = f"no declared sampler-state inventory for backend {backend!r}"
+        return payload
+    if expected_output_path is not None:
+        payload["bound_to_result_path"] = (
+            Path(str(expected_output_path)).resolve() == Path(str(output_path)).resolve()
+        )
     try:
-        internal_dir = Path(output_path) / "files" / "search_internal"
-        if internal_dir.is_dir() and any(internal_dir.iterdir()):
-            return True
+        internal_dir = Path(str(output_path)) / "files" / "search_internal"
         zip_path = Path(f"{output_path}.zip")
-        if zip_path.is_file():
+        if internal_dir.is_dir():
+            payload["route"] = "directory"
+            for item in sorted(internal_dir.iterdir()):
+                if item.is_file():
+                    payload["files"][item.name] = {
+                        "path": str(item),
+                        "bytes": int(item.stat().st_size),
+                        "sha256": _sha256_path(item),
+                    }
+        elif zip_path.is_file():
+            payload["route"] = "zip"
             with zipfile.ZipFile(zip_path) as archive:
-                for member in archive.namelist():
-                    if (
-                        "search_internal/" in member
-                        and not member.endswith("/")
-                    ):
-                        return True
-        return False
-    except Exception:
-        return None
+                for info in archive.infolist():
+                    parts = info.filename.split("/")
+                    if info.is_dir() or len(parts) < 2 or parts[-2] != "search_internal":
+                        continue
+                    payload["files"][parts[-1]] = {
+                        "container": str(zip_path),
+                        "member": info.filename,
+                        "bytes": int(info.file_size),
+                        "sha256": _sha256_bytes(archive.read(info)),
+                    }
+        payload["missing_required"] = [
+            name
+            for name in required
+            if name not in payload["files"] or payload["files"][name]["bytes"] <= 0
+        ]
+        payload["retained"] = bool(
+            not payload["missing_required"]
+            and payload["bound_to_result_path"] is not False
+        )
+    except Exception as exc:
+        payload["error"] = f"{type(exc).__name__}: {exc}"
+        payload["retained"] = None
+    return payload
+
+
+def _search_internal_artifact_exists(search: Any, backend: str = "Nautilus") -> Optional[bool]:
+    """Return whether the required raw sampler state is verifiably on disk.
+
+    Thin boolean view of :func:`inspect_search_internal_payload`.
+    """
+    return inspect_search_internal_payload(search, backend=backend)["retained"]
 
 
 def _filter_kwargs(callable_obj: Any, kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -1185,9 +1273,13 @@ class AutoLensFitRunner:
                     os.environ.pop(_VISUALIZATION_ENV, None)
                 else:
                     os.environ[_VISUALIZATION_ENV] = saved_visualization
-            search_internal_verified = _search_internal_artifact_exists(
-                search
+            result_path = _extract_result_path(result)
+            search_internal_payload = inspect_search_internal_payload(
+                search,
+                backend=self.settings.engine,
+                expected_output_path=result_path,
             )
+            search_internal_verified = search_internal_payload["retained"]
             log_likelihood, method = extract_max_log_likelihood_with_method(result)
             warnings = []
             if result_callback is not None:
@@ -1204,7 +1296,7 @@ class AutoLensFitRunner:
                 figure_of_merit_max=log_likelihood,
                 log_evidence=_extract_log_evidence(result),
                 n_free_parameters=_model_parameter_count(model),
-                result_path=_extract_result_path(result),
+                result_path=result_path,
                 runtime_s=runtime_s,
                 warnings=warnings,
                 log_likelihood_extraction_method=method,
@@ -1238,6 +1330,7 @@ class AutoLensFitRunner:
                     self.settings.retain_search_internal
                 ),
                 search_internal_retained=search_internal_verified,
+                search_internal_payload=search_internal_payload,
             )
         except Exception as exc:
             runtime_s = time.time() - start
@@ -1274,8 +1367,13 @@ class AutoLensFitRunner:
                     self.settings.retain_search_internal
                 ),
                 search_internal_retained=(
-                    _search_internal_artifact_exists(search)
+                    _search_internal_artifact_exists(search, self.settings.engine)
                     if search is not None
                     else False
+                ),
+                search_internal_payload=(
+                    inspect_search_internal_payload(search, backend=self.settings.engine)
+                    if search is not None
+                    else None
                 ),
             )

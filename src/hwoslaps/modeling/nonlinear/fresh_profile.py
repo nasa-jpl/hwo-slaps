@@ -31,6 +31,9 @@ __all__ = [
     "OBJECTIVE_VERSION",
     "FreshProfileSettings",
     "CurrentSearchStart",
+    "prior_box",
+    "normalize_physical_vector",
+    "denormalize_vector",
     "select_current_search_starts",
     "record_best_finite",
     "projected_gradient",
@@ -227,22 +230,113 @@ class FreshProfileSettings:
 
 @dataclass(frozen=True)
 class CurrentSearchStart:
-    """One vector retained from the current fresh search."""
+    """One vector retained from the current fresh search.
+
+    ``physical_vector`` is the parameter vector in model units exactly as the
+    sampler wrote it.  ``normalized_vector`` is its image in the unit box the
+    optimizer works in.  The two are related by
+    :func:`normalize_physical_vector` and are never interchangeable.
+    """
 
     start_index: int
-    vector: tuple[float, ...]
+    physical_vector: tuple[float, ...]
+    normalized_vector: tuple[float, ...]
     source_kind: str
     original_start: bool
     origin: Mapping[str, Any]
 
+    @classmethod
+    def from_physical(
+        cls,
+        *,
+        start_index: int,
+        physical_vector: Sequence[float],
+        lower: Sequence[float],
+        upper: Sequence[float],
+        source_kind: str,
+        original_start: bool,
+        origin: Mapping[str, Any],
+    ) -> "CurrentSearchStart":
+        """Build a start from a physical vector, normalizing exactly once."""
+        lower_array, upper_array, _ = prior_box(lower, upper)
+        x = _finite_vector(physical_vector, lower_array, upper_array)
+        z = normalize_physical_vector(x, lower_array, upper_array)
+        return cls(
+            start_index=int(start_index),
+            physical_vector=tuple(float(item) for item in x),
+            normalized_vector=tuple(float(item) for item in z),
+            source_kind=source_kind,
+            original_start=bool(original_start),
+            origin=origin,
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "start_index": self.start_index,
-            "vector": list(self.vector),
+            "physical_vector": list(self.physical_vector),
+            "normalized_vector": list(self.normalized_vector),
             "source_kind": self.source_kind,
             "original_start": self.original_start,
             "origin": dict(self.origin),
         }
+
+
+def prior_box(
+    lower: Sequence[float],
+    upper: Sequence[float],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return finite prior bounds and their strictly positive widths."""
+    lower_array = np.asarray(lower, dtype=float)
+    upper_array = np.asarray(upper, dtype=float)
+    if (
+        lower_array.ndim != 1
+        or lower_array.shape != upper_array.shape
+        or not np.all(np.isfinite(lower_array))
+        or not np.all(np.isfinite(upper_array))
+        or np.any(upper_array <= lower_array)
+    ):
+        raise ValueError("invalid finite prior box")
+    return lower_array, upper_array, upper_array - lower_array
+
+
+def normalize_physical_vector(
+    physical_vector: Sequence[float],
+    lower: Sequence[float],
+    upper: Sequence[float],
+) -> np.ndarray:
+    """Map a physical vector inside the prior box to unit-box coordinates.
+
+    The mapping is ``z = (x - lower) / (upper - lower)``.  The round trip
+    through :func:`denormalize_vector` is checked so that a start can never
+    be evaluated at a point other than its physical origin.
+    """
+    lower_array, upper_array, widths = prior_box(lower, upper)
+    x = _finite_vector(physical_vector, lower_array, upper_array)
+    z = (x - lower_array) / widths
+    if np.any(z < 0.0) or np.any(z > 1.0) or not np.all(np.isfinite(z)):
+        raise ValueError("normalized start left the unit box")
+    round_trip = lower_array + z * widths
+    if not np.allclose(round_trip, x, rtol=1.0e-12, atol=1.0e-12 * np.max(widths)):
+        raise ValueError("normalized start does not map back to its physical origin")
+    return z
+
+
+def denormalize_vector(
+    normalized_vector: Sequence[float],
+    lower: Sequence[float],
+    upper: Sequence[float],
+) -> np.ndarray:
+    """Map unit-box coordinates back to physical parameters."""
+    lower_array, _, widths = prior_box(lower, upper)
+    z = np.asarray(normalized_vector, dtype=float)
+    if (
+        z.shape != lower_array.shape
+        or not np.all(np.isfinite(z))
+        or np.any(z < 0.0)
+        or np.any(z > 1.0)
+    ):
+        raise ValueError("normalized vector has the wrong shape or lies outside the unit box")
+    return lower_array + z * widths
 
 
 def _finite_vector(vector: Sequence[float], lower: np.ndarray, upper: np.ndarray) -> np.ndarray:
@@ -277,11 +371,12 @@ def select_current_search_starts(
     upper: Sequence[float],
     settings: FreshProfileSettings,
 ) -> tuple[list[CurrentSearchStart], np.ndarray, np.ndarray]:
-    """Select the ML incumbent and separated samples from one fresh search."""
-    lower_array = np.asarray(lower, dtype=float)
-    upper_array = np.asarray(upper, dtype=float)
-    if lower_array.shape != upper_array.shape or np.any(upper_array <= lower_array):
-        raise ValueError("invalid finite prior box")
+    """Select the ML incumbent and separated samples from one fresh search.
+
+    The returned starts carry the sampler's physical vectors and their
+    unit-box images; the optimizer consumes only the latter.
+    """
+    lower_array, upper_array, widths = prior_box(lower, upper)
     ml, ml_origin = _summary_ml(Path(summary_path), names)
     selected = [_finite_vector(ml, lower_array, upper_array)]
     origins: list[Mapping[str, Any]] = [ml_origin]
@@ -291,7 +386,6 @@ def select_current_search_starts(
         enumerate(rows),
         key=lambda pair: (-float(pair[1]["log_likelihood"]), pair[0]),
     )
-    widths = upper_array - lower_array
     for row_index, row in ranked:
         vector = np.asarray([float(row[name]) for name in names], dtype=float)
         if vector.shape != lower_array.shape or not np.all(np.isfinite(vector)):
@@ -319,9 +413,11 @@ def select_current_search_starts(
             f"{settings.original_start_count} separated samples"
         )
     starts = [
-        CurrentSearchStart(
+        CurrentSearchStart.from_physical(
             start_index=index,
-            vector=tuple(float(item) for item in vector),
+            physical_vector=vector,
+            lower=lower_array,
+            upper=upper_array,
             source_kind="current_search_ml" if index == 0 else "current_search_sample",
             original_start=index != 0,
             origin=origin,
@@ -875,7 +971,25 @@ def _run_one_start(
 ) -> dict[str, Any]:
     import scipy.optimize
 
-    z0 = np.asarray(start.vector, dtype=float)
+    z0 = np.asarray(start.normalized_vector, dtype=float)
+    x0 = np.asarray(start.physical_vector, dtype=float)
+    if (
+        z0.ndim != 1
+        or z0.shape != x0.shape
+        or not np.all(np.isfinite(z0))
+        or np.any(z0 < 0.0)
+        or np.any(z0 > 1.0)
+    ):
+        raise ValueError(
+            f"start {start.start_index} is not a finite unit-box vector; "
+            "the objective was not evaluated"
+        )
+    mapped = np.asarray(to_x(z0), dtype=float)
+    if not np.allclose(mapped, x0, rtol=1.0e-9, atol=1.0e-12):
+        raise ValueError(
+            f"start {start.start_index} does not map back to its physical origin; "
+            "the objective was not evaluated"
+        )
     state: dict[str, Any] = {
         "best_half_chi2": None,
         "best_chi2": None,
@@ -904,8 +1018,10 @@ def _run_one_start(
     endpoint_z = None
     endpoint_value = None
     endpoint_gradient = None
+    start_value = None
     try:
-        tracked(z0)
+        start_value, _ = tracked(z0)
+        start_value = float(start_value) if np.isfinite(start_value) else None
         solver_result = scipy.optimize.minimize(
             tracked,
             z0,
@@ -927,6 +1043,8 @@ def _run_one_start(
         "start_index": start.start_index,
         "start_provenance": start.to_dict(),
         "start_z": z0.tolist(),
+        "start_x": x0.tolist(),
+        "start_half_chi2": start_value,
         "solver_endpoint_z": None if endpoint_z is None else endpoint_z.tolist(),
         "solver_endpoint_x": None if endpoint_z is None else to_x(endpoint_z).tolist(),
         "solver_endpoint_half_chi2": endpoint_value,
@@ -961,6 +1079,73 @@ def _run_one_start(
     }
 
 
+def _incumbent_record(
+    incumbent: CurrentSearchStart,
+    incumbent_run: Mapping[str, Any],
+    best_half_chi2: float | None,
+    direct_check: Callable[[np.ndarray, float], Mapping[str, Any]] | None,
+    settings: FreshProfileSettings,
+) -> dict[str, Any]:
+    """Check the current-search ML incumbent against the retained maximum.
+
+    Three conditions must hold at the direct-evaluation tolerance: the
+    incumbent evaluates finitely on the objective, the retained maximum is
+    not worse than it, and the sampler's saved likelihood at the incumbent
+    agrees with the direct evaluation there.
+    """
+    tolerance = settings.scalar_residual_tolerance
+    half = incumbent_run.get("start_half_chi2")
+    evaluated = half is not None and np.isfinite(float(half))
+    record: dict[str, Any] = {
+        "physical_vector": list(incumbent.physical_vector),
+        "normalized_vector": list(incumbent.normalized_vector),
+        "half_chi2": None if not evaluated else float(half),
+        "chi2": None if not evaluated else 2.0 * float(half),
+        "evaluated": bool(evaluated),
+        "saved_log_likelihood": incumbent.origin.get("saved_log_likelihood"),
+        "direct_log_likelihood": None,
+        "direct_log_likelihood_error": None,
+        "saved_log_likelihood_error": None,
+        "candidate_not_worse": False,
+        "scalar_consistent": False,
+        "matches_current_search": False,
+        "tolerance": tolerance,
+        "passed": False,
+    }
+    if not evaluated:
+        return record
+    if best_half_chi2 is not None and np.isfinite(best_half_chi2):
+        record["candidate_not_worse"] = bool(float(best_half_chi2) <= float(half) + tolerance)
+    if direct_check is not None:
+        scalar = dict(direct_check(np.asarray(incumbent.normalized_vector, dtype=float), float(half)))
+        direct = scalar.get("direct_log_likelihood")
+        direct_error = scalar.get("direct_log_likelihood_error")
+        record["direct_log_likelihood"] = direct
+        record["direct_log_likelihood_error"] = direct_error
+        record["scalar_consistent"] = bool(
+            direct_error is not None
+            and np.isfinite(float(direct_error))
+            and float(direct_error) <= tolerance
+        )
+        saved = record["saved_log_likelihood"]
+        if (
+            direct is not None
+            and isinstance(saved, (int, float))
+            and not isinstance(saved, bool)
+            and np.isfinite(float(saved))
+            and np.isfinite(float(direct))
+        ):
+            saved_error = abs(float(saved) - float(direct))
+            record["saved_log_likelihood_error"] = saved_error
+            record["matches_current_search"] = bool(saved_error <= tolerance)
+    record["passed"] = bool(
+        record["candidate_not_worse"]
+        and record["scalar_consistent"]
+        and record["matches_current_search"]
+    )
+    return record
+
+
 def optimize_current_search_profile(
     starts: Sequence[CurrentSearchStart],
     objective: Callable[[np.ndarray], tuple[float, np.ndarray]],
@@ -971,9 +1156,18 @@ def optimize_current_search_profile(
     *,
     progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Run fresh bounded L-BFGS-B starts and a tighter repeat."""
+    """Run fresh bounded L-BFGS-B starts and a tighter repeat.
+
+    The first start must be the current-search maximum-likelihood incumbent.
+    Its objective value is a floor on the returned maximum: a repeatable
+    endpoint worse than the incumbent never replaces it, and an incumbent
+    that no original start supports leaves the profile unresolved.
+    """
     if len(starts) != settings.original_start_count + 1:
         raise ValueError("optimizer received an incomplete current-search start set")
+    incumbent = starts[0]
+    if incumbent.source_kind != "current_search_ml" or incumbent.original_start:
+        raise ValueError("the first start must be the current-search ML incumbent")
     runs = [_run_one_start(start, objective, to_x, settings, progress) for start in starts]
     finite = [row for row in runs if row["observed_best_half_chi2"] is not None]
     if not finite:
@@ -982,6 +1176,8 @@ def optimize_current_search_profile(
             "candidate_acceptance_status": "unresolved_optimization",
             "fresh_start_count": len(starts),
             "fresh_original_start_count": settings.original_start_count,
+            "current_ml_incumbent": incumbent.to_dict(),
+            "incumbent": _incumbent_record(incumbent, runs[0], None, None, settings),
             "start_provenance": [start.to_dict() for start in starts],
             "runs": runs,
             "candidate_start_agreement": support_summary([], np.inf, settings),
@@ -1055,6 +1251,9 @@ def optimize_current_search_profile(
         else abs(float(repeat_best) - float(best_run["observed_best_half_chi2"]))
     )
     gradient_valid = best_gradient is not None and np.all(np.isfinite(np.asarray(best_gradient)))
+    incumbent_record = _incumbent_record(
+        incumbent, runs[0], best_half, direct_check, settings
+    )
     accepted = bool(
         support["support_passed"]
         and repeat_result is not None
@@ -1064,6 +1263,7 @@ def optimize_current_search_profile(
         and residual_error <= settings.scalar_residual_tolerance
         and direct_error is not None
         and float(direct_error) <= settings.scalar_residual_tolerance
+        and incumbent_record["passed"]
     )
     repeat_record = {
         "start_provenance": {"origin": "tighter_repeat_of_current_search_best", "original_start": False},
@@ -1088,7 +1288,9 @@ def optimize_current_search_profile(
         "parameterization": "normalized_box_0_1",
         "fresh_start_count": len(starts),
         "fresh_original_start_count": settings.original_start_count,
-        "current_ml_incumbent": starts[0].to_dict(),
+        "current_ml_incumbent": incumbent.to_dict(),
+        "incumbent": incumbent_record,
+        "candidate_not_worse_than_incumbent": incumbent_record["candidate_not_worse"],
         "start_provenance": [start.to_dict() for start in starts],
         "runs": runs,
         "tighter_repeat": repeat_record,

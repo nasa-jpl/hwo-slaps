@@ -242,6 +242,28 @@ def _receipt_artifacts(output: Path) -> dict[str, str]:
     }
 
 
+def _canonical_payload(case_output: Path, spec: dict[str, Any]) -> dict[str, Any]:
+    """Read the canonical nonlinear payload the route wrote for this case."""
+    direction = spec.get("direction")
+    suffix = "" if direction is None else f"_dir{direction}"
+    payload_path = case_output / f"nonlinear_validation_{spec['arm']}{suffix}.json"
+    payload = read_json(payload_path)
+    if payload.get("artifact_completeness_status") not in {"complete", "incomplete"}:
+        raise ValueError(
+            "canonical payload has no artifact_completeness_status; "
+            f"the v7 route did not run: {payload_path}"
+        )
+    return payload
+
+
+def _incomplete_roles(retention_contract: Any) -> list[str]:
+    roles = (retention_contract or {}).get("roles", {})
+    incomplete = sorted(
+        role for role, record in roles.items() if not record.get("complete")
+    )
+    return incomplete or ["unknown"]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("spec", type=Path)
@@ -300,11 +322,23 @@ def main(argv: list[str] | None = None) -> int:
                 ]
             )
         run_nonlinear_validation.main(route_args)
-        status = "COMPLETE"
+        payload = _canonical_payload(case_output, spec)
+        artifact_completeness = payload.get("artifact_completeness_status")
+        retention_contract = payload.get("retention_contract")
+        if artifact_completeness == "complete":
+            status = "COMPLETE"
+        else:
+            status = "INCOMPLETE_ARTIFACTS"
+            error = (
+                "required sampler state was not retained for: "
+                + ", ".join(_incomplete_roles(retention_contract))
+            )
         _write_json(
             output / "production_run.json",
             {
-                "status": "COMPLETE",
+                "status": status,
+                "artifact_completeness_status": artifact_completeness,
+                "retention_contract": retention_contract,
                 "case_id": spec["case_id"],
                 "system_id": spec["system_id"],
                 "arm": spec["arm"],

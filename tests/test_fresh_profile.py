@@ -29,17 +29,77 @@ except (AttributeError, ImportError) as exc:  # pragma: no cover - host-runtime 
     )
 
 
-def _starts(points):
+def _starts(points, saved_log_likelihood=0.0, lower=None, upper=None):
+    """Build unit-box starts; the incumbent carries its saved likelihood."""
+    dimension = len(points[0])
+    lower = [0.0] * dimension if lower is None else lower
+    upper = [1.0] * dimension if upper is None else upper
     return [
-        CurrentSearchStart(
+        CurrentSearchStart.from_physical(
             start_index=index,
-            vector=tuple(point),
+            physical_vector=point,
+            lower=lower,
+            upper=upper,
             source_kind="current_search_ml" if index == 0 else "current_search_sample",
             original_start=index != 0,
-            origin={"origin": "fixture"},
+            origin=(
+                {"origin": "current_search_ml", "saved_log_likelihood": saved_log_likelihood}
+                if index == 0
+                else {"origin": "current_search_sample"}
+            ),
         )
         for index, point in enumerate(points)
     ]
+
+
+def _physical_problem(lower, upper, half_chi2_x, gradient_x):
+    """Wrap a physical half-chi2 the way ``make_jax_objective`` does."""
+    lower = np.asarray(lower, dtype=float)
+    upper = np.asarray(upper, dtype=float)
+    widths = upper - lower
+
+    def to_x(z):
+        return lower + np.asarray(z, dtype=float) * widths
+
+    def objective(z):
+        x = to_x(z)
+        return float(half_chi2_x(x)), np.asarray(gradient_x(x), dtype=float) * widths
+
+    def residual(z):
+        return np.array([np.sqrt(2.0 * float(half_chi2_x(to_x(z))))])
+
+    def direct_check(z, value):
+        direct = -float(half_chi2_x(to_x(z)))
+        return {
+            "physical_vector": to_x(z).tolist(),
+            "direct_log_likelihood": direct,
+            "implied_log_likelihood": -float(value),
+            "direct_log_likelihood_error": abs(direct + float(value)),
+        }
+
+    return objective, residual, to_x, direct_check
+
+
+def _write_current_search(tmp_path, names, ml, ml_log_likelihood, samples):
+    """Write the AutoFit summary and samples files the selector reads."""
+    summary = {
+        "arguments": {
+            "max_log_likelihood_sample": {
+                "arguments": {
+                    "kwargs": {"arguments": dict(zip(names, ml))},
+                    "log_likelihood": ml_log_likelihood,
+                }
+            }
+        }
+    }
+    summary_path = tmp_path / "samples_summary.json"
+    samples_path = tmp_path / "samples.csv"
+    summary_path.write_text(json.dumps(summary))
+    lines = [",".join([*names, "log_likelihood"])]
+    for vector, log_likelihood in samples:
+        lines.append(",".join(str(v) for v in [*vector, log_likelihood]))
+    samples_path.write_text("\n".join(lines) + "\n")
+    return summary_path, samples_path
 
 
 def test_complete_quadratic_profile_path_and_scalar_gate():
@@ -49,9 +109,10 @@ def test_complete_quadratic_profile_path_and_scalar_gate():
         start_separation_normalized_l2=0.01,
     )
     target = np.array([0.23, 0.71])
+    incumbent = np.array([0.10, 0.70])
     starts = _starts(
         [
-            [0.10, 0.70],
+            incumbent.tolist(),
             [0.05, 0.10],
             [0.90, 0.20],
             [0.80, 0.90],
@@ -60,7 +121,8 @@ def test_complete_quadratic_profile_path_and_scalar_gate():
             [0.70, 0.60],
             [0.20, 0.40],
             [0.40, 0.80],
-        ]
+        ],
+        saved_log_likelihood=-0.5 * float((incumbent - target) @ (incumbent - target)),
     )
 
     def objective(z):
@@ -95,7 +157,213 @@ def test_complete_quadratic_profile_path_and_scalar_gate():
     assert len(result["candidate_start_agreement"]["supporting_original_start_indices"]) == 8
     assert len(result["runs"]) == 9
     assert result["candidate_direct_log_likelihood_error"] == 0.0
+    assert result["incumbent"]["passed"] is True
+    assert result["candidate_not_worse_than_incumbent"] is True
+    assert result["runs"][0]["start_x"] == incumbent.tolist()
     assert progress
+
+
+def test_incumbent_saved_likelihood_mismatch_is_not_accepted():
+    settings = FreshProfileSettings(maxiter=100, repeat_maxiter=100)
+    target = np.array([0.23, 0.71])
+    starts = _starts(
+        [[0.10, 0.70]] + [[0.1 * (i + 1), 0.2 + 0.05 * i] for i in range(8)],
+        saved_log_likelihood=-5.0,
+    )
+    objective, residual, to_x, direct_check = _physical_problem(
+        [0.0, 0.0],
+        [1.0, 1.0],
+        lambda x: 0.5 * float((x - target) @ (x - target)),
+        lambda x: x - target,
+    )
+    result = optimize_current_search_profile(
+        starts, objective, residual, to_x, direct_check, settings
+    )
+    assert result["candidate_start_agreement"]["support_passed"] is True
+    assert result["incumbent"]["matches_current_search"] is False
+    assert result["incumbent"]["saved_log_likelihood_error"] == pytest.approx(
+        5.0 - 0.5 * float((np.array([0.10, 0.70]) - target) @ (np.array([0.10, 0.70]) - target))
+    )
+    assert result["candidate_acceptance_status"] == "unresolved_optimization"
+
+
+def test_physical_starts_are_normalized_once_before_the_first_evaluation(tmp_path):
+    """The reviewer's counterexample: prior [2, 4], two basins, ML at 2.5."""
+    names = ["x"]
+    summary_path, samples_path = _write_current_search(
+        tmp_path, names, [2.5], 0.0, [([2.3], -0.4), ([2.7], -0.4)]
+    )
+    settings = FreshProfileSettings(original_start_count=2, start_separation_normalized_l2=0.05)
+    starts, lower, upper = select_current_search_starts(
+        summary_path, samples_path, names, [2.0], [4.0], settings
+    )
+    assert [s.physical_vector for s in starts] == [(2.5,), (2.3,), (2.7,)]
+    assert [s.normalized_vector[0] for s in starts] == pytest.approx([0.25, 0.15, 0.35])
+
+    def half_chi2(x):
+        a = 10.0 * (x[0] - 2.5) ** 2
+        b = 2.0 + 10.0 * (x[0] - 4.0) ** 2
+        return min(a, b)
+
+    def gradient(x):
+        a = 10.0 * (x[0] - 2.5) ** 2
+        b = 2.0 + 10.0 * (x[0] - 4.0) ** 2
+        return np.array([20.0 * (x[0] - 2.5)]) if a < b else np.array([20.0 * (x[0] - 4.0)])
+
+    objective, residual, to_x, direct_check = _physical_problem([2.0], [4.0], half_chi2, gradient)
+    result = optimize_current_search_profile(
+        starts, objective, residual, to_x, direct_check, settings
+    )
+    assert [run["start_x"] for run in result["runs"]] == [[2.5], [2.3], [2.7]]
+    assert result["runs"][0]["start_half_chi2"] == 0.0
+    assert result["candidate_best_vector"] == pytest.approx([2.5], abs=1.0e-8)
+    assert result["candidate_best_log_likelihood"] == pytest.approx(0.0, abs=1.0e-12)
+    assert result["candidate_acceptance_status"] == "accepted_repeatable_profile"
+    assert result["incumbent"]["passed"] is True
+
+
+def test_non_unit_prior_box_round_trips_through_selection_and_eight_start_optimizer(tmp_path):
+    names = ["a", "b", "c"]
+    lower = [-3.0, 5.0, 1.0e4]
+    upper = [-1.0, 5.5, 3.0e4]
+    widths = np.asarray(upper) - np.asarray(lower)
+    target = np.array([-2.2, 5.1, 2.4e4])
+
+    def half_chi2(x):
+        delta = (np.asarray(x) - target) / widths
+        return 0.5 * float(delta @ delta)
+
+    def gradient(x):
+        return (np.asarray(x) - target) / widths ** 2
+
+    ml = [-2.1, 5.12, 2.5e4]
+    samples = [
+        ([-2.9, 5.05, 1.1e4], -half_chi2([-2.9, 5.05, 1.1e4])),
+        ([-1.2, 5.45, 2.9e4], -half_chi2([-1.2, 5.45, 2.9e4])),
+        ([-2.5, 5.40, 1.5e4], -half_chi2([-2.5, 5.40, 1.5e4])),
+        ([-1.5, 5.02, 2.0e4], -half_chi2([-1.5, 5.02, 2.0e4])),
+        ([-2.8, 5.30, 2.8e4], -half_chi2([-2.8, 5.30, 2.8e4])),
+        ([-1.1, 5.20, 1.2e4], -half_chi2([-1.1, 5.20, 1.2e4])),
+        ([-2.0, 5.48, 2.2e4], -half_chi2([-2.0, 5.48, 2.2e4])),
+        ([-1.7, 5.15, 1.7e4], -half_chi2([-1.7, 5.15, 1.7e4])),
+    ]
+    summary_path, samples_path = _write_current_search(
+        tmp_path, names, ml, -half_chi2(ml), samples
+    )
+    settings = FreshProfileSettings(maxiter=200, repeat_maxiter=200)
+    starts, lower_array, upper_array = select_current_search_starts(
+        summary_path, samples_path, names, lower, upper, settings
+    )
+    assert len(starts) == 9
+    ranked = [vector for vector, _ in sorted(samples, key=lambda item: -item[1])]
+    for start, expected in zip(starts, [ml, *ranked]):
+        assert start.physical_vector == tuple(expected)
+        z = np.asarray(start.normalized_vector)
+        assert np.all(z >= 0.0) and np.all(z <= 1.0)
+        assert lower_array + z * (upper_array - lower_array) == pytest.approx(expected, rel=1e-12)
+    objective, residual, to_x, direct_check = _physical_problem(lower, upper, half_chi2, gradient)
+    result = optimize_current_search_profile(
+        starts, objective, residual, to_x, direct_check, settings
+    )
+    assert [run["start_x"] for run in result["runs"]] == [ml, *ranked]
+    assert result["candidate_best_vector"] == pytest.approx(target.tolist(), rel=1e-7)
+    assert result["candidate_acceptance_status"] == "accepted_repeatable_profile"
+    assert len(result["candidate_start_agreement"]["supporting_original_start_indices"]) == 8
+    assert result["incumbent"]["half_chi2"] == pytest.approx(half_chi2(ml))
+    assert result["incumbent"]["passed"] is True
+
+
+@pytest.mark.parametrize("defect", ["outside_unit_box", "physical_mismatch"])
+def test_bad_normalized_start_fails_before_any_objective_evaluation(defect):
+    settings = FreshProfileSettings(original_start_count=1)
+    if defect == "outside_unit_box":
+        incumbent = CurrentSearchStart(
+            start_index=0,
+            physical_vector=(0.5,),
+            normalized_vector=(1.2,),
+            source_kind="current_search_ml",
+            original_start=False,
+            origin={"saved_log_likelihood": 0.0},
+        )
+    else:
+        incumbent = CurrentSearchStart(
+            start_index=0,
+            physical_vector=(0.9,),
+            normalized_vector=(0.5,),
+            source_kind="current_search_ml",
+            original_start=False,
+            origin={"saved_log_likelihood": 0.0},
+        )
+    sample = CurrentSearchStart.from_physical(
+        start_index=1,
+        physical_vector=(0.3,),
+        lower=(0.0,),
+        upper=(1.0,),
+        source_kind="current_search_sample",
+        original_start=True,
+        origin={},
+    )
+    evaluations = []
+
+    def objective(z):
+        evaluations.append(np.asarray(z).tolist())
+        return 0.0, np.zeros(1)
+
+    with pytest.raises(ValueError, match="not evaluated"):
+        optimize_current_search_profile(
+            [incumbent, sample],
+            objective,
+            lambda z: np.zeros(1),
+            lambda z: np.asarray(z),
+            None,
+            settings,
+        )
+    assert evaluations == []
+
+
+def test_selected_starts_must_lead_with_the_ml_incumbent():
+    starts = _starts([[0.2], [0.4]], saved_log_likelihood=0.0)
+    swapped = [starts[1], starts[0]]
+    with pytest.raises(ValueError, match="ML incumbent"):
+        optimize_current_search_profile(
+            swapped,
+            lambda z: (0.0, np.zeros(1)),
+            lambda z: np.zeros(1),
+            lambda z: np.asarray(z),
+            None,
+            FreshProfileSettings(original_start_count=1),
+        )
+
+
+def test_better_unsupported_incumbent_is_kept_and_leaves_profile_unresolved():
+    """A repeatable worse basin never replaces the current-search maximum."""
+    settings = FreshProfileSettings(maxiter=200, repeat_maxiter=200)
+
+    def half_chi2(x):
+        value = x[0]
+        return 5.0 * (value - 0.2) ** 2 if value < 0.5 else 1.0 + 50.0 * (value - 0.8) ** 2
+
+    def gradient(x):
+        value = x[0]
+        return np.array([10.0 * (value - 0.2)]) if value < 0.5 else np.array([100.0 * (value - 0.8)])
+
+    starts = _starts(
+        [[0.2]] + [[0.56 + 0.03 * i] for i in range(8)],
+        saved_log_likelihood=0.0,
+    )
+    objective, residual, to_x, direct_check = _physical_problem([0.0], [1.0], half_chi2, gradient)
+    result = optimize_current_search_profile(
+        starts, objective, residual, to_x, direct_check, settings
+    )
+    assert result["candidate_best_half_chi2"] == pytest.approx(0.0, abs=1e-12)
+    assert result["candidate_best_vector"] == pytest.approx([0.2], abs=1e-8)
+    assert result["incumbent"]["candidate_not_worse"] is True
+    assert result["candidate_start_agreement"]["support_passed"] is False
+    assert result["candidate_acceptance_status"] == "unresolved_optimization"
+    assert all(
+        run["observed_best_half_chi2"] == pytest.approx(1.0, abs=1e-8)
+        for run in result["runs"][1:]
+    )
 
 
 def test_current_search_start_selection_requires_ml_plus_eight_or_declared_count(tmp_path):
@@ -134,6 +402,24 @@ def test_current_search_start_selection_requires_ml_plus_eight_or_declared_count
     assert all(start.original_start for start in starts[1:])
     assert np.array_equal(lower, [0.0, 0.0])
     assert np.array_equal(upper, [1.0, 1.0])
+    assert starts[0].physical_vector == (0.1, 0.1)
+    assert starts[0].normalized_vector == (0.1, 0.1)
+    assert starts[0].origin["saved_log_likelihood"] == -1.0
+    assert starts[0].to_dict()["physical_vector"] == [0.1, 0.1]
+    assert "vector" not in starts[0].to_dict()
+
+    offset_starts, _, _ = select_current_search_starts(
+        summary_path,
+        samples_path,
+        ["a", "b"],
+        [0.0, -1.0],
+        [2.0, 1.0],
+        settings,
+    )
+    assert offset_starts[0].physical_vector == (0.1, 0.1)
+    assert offset_starts[0].normalized_vector == pytest.approx((0.05, 0.55))
+    assert offset_starts[1].physical_vector == (0.9, 0.9)
+    assert offset_starts[1].normalized_vector == pytest.approx((0.45, 0.95))
 
 
 def test_profile_settings_reject_undeclared_flat_release_protocol():
@@ -236,7 +522,10 @@ def test_profile_records_numerically_unresolved_when_support_gate_fails():
         repeat_maxiter=20,
         minimum_distinct_original_start_support=9,
     )
-    starts = _starts([[0.2, 0.3]] + [[0.2 + 0.05 * i, 0.3] for i in range(8)])
+    starts = _starts(
+        [[0.2, 0.3]] + [[0.2 + 0.05 * i, 0.3] for i in range(8)],
+        saved_log_likelihood=0.0,
+    )
     target = np.array([0.2, 0.3])
 
     def objective(z):
@@ -277,6 +566,8 @@ def test_no_finite_profile_has_no_fallback_candidate():
     assert result["candidate_acceptance_status"] == "unresolved_optimization"
     assert "candidate_best_log_likelihood" not in result
     assert result["old_convergence_transferred"] is False
+    assert result["incumbent"]["evaluated"] is False
+    assert result["incumbent"]["passed"] is False
 
 
 def test_effective_sampler_contract_blocks_fit_before_search_fit(monkeypatch, tmp_path):
@@ -534,7 +825,10 @@ def test_established_fisher_q_adapter_binds_999_kernel_and_mass_point(monkeypatc
     assert observed["positions"] == [(0.2, -0.3)]
 
 
-def test_retention_is_applied_restored_and_raw_state_is_recorded(monkeypatch, tmp_path):
+@pytest.mark.parametrize("retained_files", [("search_internal.dill", ".time"), (".time",)])
+def test_retention_is_applied_restored_and_raw_state_is_recorded(
+    monkeypatch, tmp_path, retained_files
+):
     import autofit as af
     from autoconf import conf
 
@@ -552,7 +846,8 @@ def test_retention_is_applied_restored_and_raw_state_is_recorded(monkeypatch, tm
             observed.append(conf.instance["output"]["search_internal"])
             internal = Path(self.paths.output_path) / "files" / "search_internal"
             internal.mkdir(parents=True)
-            (internal / "state.bin").write_bytes(b"state")
+            for name in retained_files:
+                (internal / name).write_bytes(b"sampler-state" if name.endswith(".dill") else b"0.1")
             return SimpleNamespace(
                 samples=SimpleNamespace(
                     max_log_likelihood=lambda: SimpleNamespace(log_likelihood=-2.0)
@@ -591,5 +886,19 @@ def test_retention_is_applied_restored_and_raw_state_is_recorded(monkeypatch, tm
     assert summary.status == "success"
     assert observed == [True]
     assert summary.search_internal_retention_requested is True
-    assert summary.search_internal_retained is True
     assert conf.instance["output"]["search_internal"] is False
+    payload = summary.search_internal_payload
+    assert payload["route"] == "directory"
+    assert payload["bound_to_result_path"] is True
+    assert set(payload["files"]) == set(retained_files)
+    if "search_internal.dill" in retained_files:
+        assert summary.search_internal_retained is True
+        assert payload["missing_required"] == []
+        dill = Path(tmp_path / "search" / "files" / "search_internal" / "search_internal.dill")
+        assert payload["files"]["search_internal.dill"]["bytes"] == dill.stat().st_size
+        assert payload["files"]["search_internal.dill"]["sha256"] == __import__(
+            "hashlib"
+        ).sha256(dill.read_bytes()).hexdigest()
+    else:
+        assert summary.search_internal_retained is False
+        assert payload["missing_required"] == ["search_internal.dill"]

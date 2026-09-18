@@ -143,6 +143,90 @@ def test_worker_receipt_excludes_live_controller_logs(tmp_path):
     assert str(output / "worker_exit.json") not in receipt
 
 
+@pytest.mark.parametrize("completeness", ["complete", "incomplete"])
+def test_worker_marks_missing_sampler_state_as_not_complete(tmp_path, monkeypatch, completeness):
+    """The receipt says COMPLETE only when all sampler state was retained."""
+    import sys
+    from types import ModuleType
+
+    cli, spec = valid_spec(tmp_path)
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec))
+    route_calls = []
+    fake_route = ModuleType("run_nonlinear_validation")
+
+    def fake_main(route_args):
+        route_calls.append(list(route_args))
+        case_output = Path(route_args[3])
+        case_output.mkdir(parents=True, exist_ok=True)
+        contract = {
+            "roles": {
+                "smooth": {"sampler_state_required": True, "complete": True},
+                "subhalo": {
+                    "sampler_state_required": True,
+                    "complete": completeness == "complete",
+                },
+            },
+            "complete": completeness == "complete",
+        }
+        (case_output / "nonlinear_validation_asimov_injected.json").write_text(
+            json.dumps(
+                {
+                    "numerical_status": "accepted",
+                    "delta_log_likelihood": 6.0,
+                    "artifact_completeness_status": completeness,
+                    "retention_contract": contract,
+                }
+            )
+        )
+
+    fake_route.main = fake_main
+    monkeypatch.setitem(sys.modules, "run_nonlinear_validation", fake_route)
+    assert cli.main([str(spec_path)]) == 0
+    assert route_calls and route_calls[0][2] == "asimov_injected"
+    output = Path(spec["output"])
+    run = json.loads((output / "production_run.json").read_text())
+    receipt = json.loads((output / "worker_exit.json").read_text())
+    expected = "COMPLETE" if completeness == "complete" else "INCOMPLETE_ARTIFACTS"
+    assert run["status"] == expected
+    assert receipt["status"] == expected
+    assert run["artifact_completeness_status"] == completeness
+    assert run["retention_contract"]["complete"] is (completeness == "complete")
+    if completeness == "complete":
+        assert receipt["error"] is None
+    else:
+        assert "subhalo" in receipt["error"]
+        assert "smooth" not in receipt["error"]
+    assert not (output / "production_failure.json").exists()
+    assert str(output / "production_run.json") in receipt["artifacts"]
+
+
+def test_worker_refuses_a_payload_without_completeness_status(tmp_path, monkeypatch):
+    """A legacy payload without the v7 completeness field cannot complete."""
+    import sys
+    from types import ModuleType
+
+    cli, spec = valid_spec(tmp_path)
+    spec_path = tmp_path / "spec.json"
+    spec_path.write_text(json.dumps(spec))
+    fake_route = ModuleType("run_nonlinear_validation")
+
+    def fake_main(route_args):
+        case_output = Path(route_args[3])
+        case_output.mkdir(parents=True, exist_ok=True)
+        (case_output / "nonlinear_validation_asimov_injected.json").write_text(
+            json.dumps({"numerical_status": "accepted"})
+        )
+
+    fake_route.main = fake_main
+    monkeypatch.setitem(sys.modules, "run_nonlinear_validation", fake_route)
+    with pytest.raises(ValueError, match="artifact_completeness_status"):
+        cli.main([str(spec_path)])
+    output = Path(spec["output"])
+    assert json.loads((output / "worker_exit.json").read_text())["status"] == "FAILED"
+    assert not (output / "production_run.json").exists()
+
+
 def test_cli_rejects_unapproved_sidecar(tmp_path):
     cli, spec = valid_spec(tmp_path)
     approval_path = Path(spec["approval_receipt"])

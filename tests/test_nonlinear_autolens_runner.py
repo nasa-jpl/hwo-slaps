@@ -12,6 +12,7 @@ from hwoslaps.modeling.nonlinear.autolens_runner import (
     _search_internal_artifact_exists,
     extract_max_log_likelihood,
     extract_max_log_likelihood_with_method,
+    inspect_search_internal_payload,
 )
 
 
@@ -397,21 +398,56 @@ class _SearchWithOutputPath:
 
 
 def test_search_internal_artifact_verified_from_directory(tmp_path):
-    """Verify retention from the on-disk artifact, never the request."""
+    """Only the backend's real sampler-state file counts as retained state."""
     out = tmp_path / "case_subhalo_analysis" / "identifier"
     internal = out / "files" / "search_internal"
-    assert _search_internal_artifact_exists(
-        _SearchWithOutputPath(out)
-    ) is False
+    search = _SearchWithOutputPath(out)
+    assert _search_internal_artifact_exists(search) is False
     internal.mkdir(parents=True)
-    assert _search_internal_artifact_exists(
-        _SearchWithOutputPath(out)
-    ) is False
+    assert _search_internal_artifact_exists(search) is False
+    (internal / ".time").write_text("0.1")
+    (internal / ".start_time").write_text("0.0")
+    assert _search_internal_artifact_exists(search) is False
+    (internal / "unrelated.txt").write_text("not sampler state")
+    assert _search_internal_artifact_exists(search) is False
+    (internal / "search_internal.dill").write_bytes(b"")
+    assert _search_internal_artifact_exists(search) is False
     (internal / "search_internal.dill").write_bytes(b"x")
-    assert _search_internal_artifact_exists(
-        _SearchWithOutputPath(out)
-    ) is True
+    assert _search_internal_artifact_exists(search) is True
     assert _search_internal_artifact_exists(SimpleNamespace()) is None
+    assert _search_internal_artifact_exists(search, "Emcee") is None
+
+
+def test_search_internal_payload_inventory_binds_hashes_and_result_path(tmp_path):
+    import hashlib
+
+    out = tmp_path / "case_subhalo_analysis" / "identifier"
+    internal = out / "files" / "search_internal"
+    internal.mkdir(parents=True)
+    (internal / "search_internal.dill").write_bytes(b"sampler-state")
+    (internal / ".time").write_text("0.1")
+    payload = inspect_search_internal_payload(
+        _SearchWithOutputPath(out),
+        backend="Nautilus",
+        expected_output_path=str(out),
+    )
+    assert payload["retained"] is True
+    assert payload["route"] == "directory"
+    assert payload["required_files"] == ["search_internal.dill"]
+    assert payload["missing_required"] == []
+    assert payload["bound_to_result_path"] is True
+    entry = payload["files"]["search_internal.dill"]
+    assert entry["path"] == str(internal / "search_internal.dill")
+    assert entry["bytes"] == len(b"sampler-state")
+    assert entry["sha256"] == hashlib.sha256(b"sampler-state").hexdigest()
+    assert payload["files"][".time"]["bytes"] == 3
+    foreign = inspect_search_internal_payload(
+        _SearchWithOutputPath(out),
+        backend="Nautilus",
+        expected_output_path=str(tmp_path / "other_run"),
+    )
+    assert foreign["bound_to_result_path"] is False
+    assert foreign["retained"] is False
 
 
 def test_search_internal_artifact_verified_from_zip(tmp_path):
@@ -420,16 +456,26 @@ def test_search_internal_artifact_verified_from_zip(tmp_path):
 
     out = tmp_path / "case_subhalo_analysis" / "identifier"
     out.parent.mkdir(parents=True)
+    search = _SearchWithOutputPath(out)
     with zipfile.ZipFile(f"{out}.zip", "w") as archive:
         archive.writestr("files/model.json", "{}")
-    assert _search_internal_artifact_exists(
-        _SearchWithOutputPath(out)
-    ) is False
+    assert _search_internal_artifact_exists(search) is False
     with zipfile.ZipFile(f"{out}.zip", "w") as archive:
         archive.writestr("files/model.json", "{}")
-        archive.writestr(
-            "files/search_internal/search_internal.dill", "x"
-        )
-    assert _search_internal_artifact_exists(
-        _SearchWithOutputPath(out)
-    ) is True
+        archive.writestr("files/search_internal/.time", "0.1")
+    assert _search_internal_artifact_exists(search) is False
+    with zipfile.ZipFile(f"{out}.zip", "w") as archive:
+        archive.writestr("files/model.json", "{}")
+        archive.writestr("files/search_internal/search_internal.dill", "")
+    assert _search_internal_artifact_exists(search) is False
+    with zipfile.ZipFile(f"{out}.zip", "w") as archive:
+        archive.writestr("files/model.json", "{}")
+        archive.writestr("files/search_internal/.time", "0.1")
+        archive.writestr("files/search_internal/search_internal.dill", "x")
+    assert _search_internal_artifact_exists(search) is True
+    payload = inspect_search_internal_payload(search, backend="Nautilus")
+    assert payload["route"] == "zip"
+    entry = payload["files"]["search_internal.dill"]
+    assert entry["container"] == f"{out}.zip"
+    assert entry["member"] == "files/search_internal/search_internal.dill"
+    assert entry["bytes"] == 1
