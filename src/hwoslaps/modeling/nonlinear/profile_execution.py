@@ -301,14 +301,46 @@ def stop_overfull_cards(active, gpus, ledger, blocked_cards, state, threshold=0.
 
 
 def cached_task_bytes(root, cache, interval_seconds):
-    """Return task size, rescanning only at the configured interval."""
+    """Scan local bytes without following links, including during archive swaps.
+
+    Open directories remain bound to their inode across rename/unlink. Using
+    descriptor-relative operations prevents a replaced ancestor from redirecting
+    a scan into the NFS symlink. Only disappearance/type-change races are ignored;
+    permission and genuine I/O errors still stop the controller.
+    """
+    import errno
+    import os
+    import stat
+
+    def scan(directory_fd):
+        total = 0
+        with os.scandir(directory_fd) as entries:
+            for entry in entries:
+                try:
+                    info = entry.stat(follow_symlinks=False)
+                    if stat.S_ISREG(info.st_mode):
+                        total += info.st_size
+                    elif stat.S_ISDIR(info.st_mode):
+                        child = os.open(
+                            entry.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                            dir_fd=directory_fd,
+                        )
+                        try:
+                            total += scan(child)
+                        finally:
+                            os.close(child)
+                except OSError as exc:
+                    if exc.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP):
+                        raise
+        return total
+
     now = time.monotonic()
     if cache.get("sample_monotonic") is None or now - cache["sample_monotonic"] >= interval_seconds:
-        cache["bytes"] = sum(
-            path.stat().st_size
-            for path in Path(root).rglob("*")
-            if path.is_file() and not path.is_symlink()
-        )
+        root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            cache["bytes"] = scan(root_fd)
+        finally:
+            os.close(root_fd)
         cache["sample_monotonic"] = now
     return cache["bytes"], cache["sample_monotonic"]
 
