@@ -178,6 +178,72 @@ def test_materialization_changes_only_code_revision_and_writes_hash_receipt(tmp_
     assert spec["output"].endswith("/attempt")
 
 
+def test_materialize_case_spec_uses_the_execution_path_when_the_mirror_is_absent(tmp_path):
+    """A case resolved on the execution host has no local mirror of its inputs."""
+    config_path = tmp_path / "remote_config.yaml"
+    config_path.write_text(
+        "run_name: ladder_selected_sys0002\n"
+        "stage0:\n"
+        "  source_asset_sha256: 'a'\n"
+        "  code_revision:\n"
+        "    git_hash: old\n"
+        "    git_dirty: false\n"
+        "    sha256: 'b'\n"
+        "psf:\n"
+        "  kernel:\n"
+        "    shape_native: [999, 999]\n"
+    )
+    positions_path = tmp_path / "remote_positions.json"
+    positions_path.write_text('{"system_id": "ladder_selected_sys0002"}\n')
+    case = {
+        "case_id": "new_top50:test:0002",
+        "scope": "new_top50_standard_cases",
+        "status": "READY_FRESH_SEARCH",
+        "dispatchable": True,
+        "release_freeze_sha256": "f" * 64,
+        "fresh_search_namespace": "v7/test/0002",
+        "arm": "asimov_injected",
+        "input_records": {
+            "config": {
+                "path": "/Users/nobody/absent/config.yaml",
+                "execution_path": str(config_path),
+                "sha256": sha256_file(config_path),
+            },
+            "positions": {
+                "path": str(tmp_path / "absent_positions.json"),
+                "execution_path": str(positions_path),
+                "sha256": sha256_file(positions_path),
+            },
+        },
+        "runner_spec_template": {
+            "case_id": "new_top50:test:0002",
+            "case_identity": "new_top50:test:0002",
+            "case_kind": "standard",
+            "config": str(config_path),
+            "positions": str(positions_path),
+            "arm": "asimov_injected",
+            "release_freeze_path": "/remote/release.yaml",
+            "release_freeze_sha256": "f" * 64,
+            "objective_version": "consistent_sampling_v2",
+            "procedure_version": "fresh_nonlinear_v7_lbfgsb_v1",
+            "execution_policy_version": "stage3_v7",
+            "output": "{output_dir}",
+            "hashes": {},
+        },
+    }
+    revision = {"git_hash": "new", "git_dirty": False, "sha256": "c" * 64}
+    receipt = materialize_case_spec(case, tmp_path / "materialized", revision)
+    assert receipt["config_restamp"]["original_path"] == str(config_path.resolve())
+    assert receipt["config_restamp"]["declared_kernel_conversion"] == "999_to_51_fit_only"
+    spec = json.loads(Path(receipt["case_spec"]).read_text())
+    assert spec["positions"] == str(positions_path)
+    assert spec["hashes"][str(positions_path)] == sha256_file(positions_path)
+
+    case["input_records"]["config"]["execution_path"] = str(tmp_path / "also_absent.yaml")
+    with pytest.raises(ReleaseCatalogError, match="absent at both declared locations"):
+        materialize_case_spec(case, tmp_path / "materialized_again", revision)
+
+
 def test_restamp_preserves_yaml_integer_psf_keys(tmp_path):
     import yaml
     from hwoslaps.campaign.release_catalog import _restamp_config

@@ -24,6 +24,7 @@ from .release_catalog import (
     _restamp_config,
     _runner_spec_template,
     _verify_declared_file,
+    input_source,
     sha256_file,
     validate_case_approval,
 )
@@ -33,13 +34,7 @@ def _path(ref):
     """
     Use a checked local mirror, otherwise its declared execution location.
     """
-    for key in ("path", "execution_path"):
-        value = ref.get(key)
-        if value and Path(value).is_file():
-            path = Path(value).resolve()
-            _verify_declared_file(path, ref["sha256"], key)
-            return path
-    raise ReleaseCatalogError("dependency input is absent at both declared locations")
+    return input_source(ref, "dependency input")
 
 
 def position_input_identity(task):

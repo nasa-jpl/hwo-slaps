@@ -79,6 +79,25 @@ def _verify_declared_file(path: Path, expected: str, label: str) -> None:
         raise ReleaseCatalogError(f"{label} sha256 {observed} does not match declared {expected}")
 
 
+def input_source(record: dict[str, Any], label: str) -> Path:
+    """Return the checked local mirror of a declared input, else its execution location.
+
+    Catalog input records name the file where the catalog was generated
+    (``path``) and where it runs (``execution_path``); a consumer on either
+    host takes the first location that exists and proves its declared hash.
+    """
+    for key in ("path", "execution_path"):
+        value = record.get(key)
+        if value and Path(value).expanduser().is_file():
+            path = Path(value).expanduser().resolve()
+            _verify_declared_file(path, record["sha256"], f"{label} {key}")
+            return path
+    raise ReleaseCatalogError(
+        f"{label} is absent at both declared locations: "
+        f"{record.get('path')!r}, {record.get('execution_path')!r}"
+    )
+
+
 def _verify_inventory_input_records(jobs: list[dict[str, Any]]) -> dict[str, Any]:
     """Verify every concrete C case config/position/case/asset binding once."""
     roles = ("config", "positions", "aggregate_artifact", "source_asset")
@@ -850,18 +869,8 @@ def materialize_case_spec(
     positions = inputs.get("positions")
     if not isinstance(config, dict) or not isinstance(positions, dict):
         raise ReleaseCatalogError(f"case {case['case_id']} has incomplete inputs")
-    config_source = Path(config.get("path") or "").expanduser()
-    positions_source = Path(positions.get("path") or "").expanduser()
-    _verify_declared_file(
-        config_source,
-        config["sha256"],
-        f"case {case['case_id']} config",
-    )
-    _verify_declared_file(
-        positions_source,
-        positions["sha256"],
-        f"case {case['case_id']} positions",
-    )
+    config_source = input_source(config, f"case {case['case_id']} config")
+    positions_source = input_source(positions, f"case {case['case_id']} positions")
     case_dir = Path(output_root).expanduser().resolve() / case["case_id"].replace(":", "__")
     if case_dir.exists() and any(case_dir.iterdir()):
         raise ReleaseCatalogError(f"materialization output is not empty: {case_dir}")
