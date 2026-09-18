@@ -202,7 +202,7 @@ def fixture(
         },
         catalog_sha256=sha256_file(catalog_path),
         objective_version="consistent_sampling_v2",
-        procedure_version="fresh_nonlinear_v7_lbfgsb_v1",
+        procedure_version="fresh_nonlinear_v7_lbfgsb_v2",
         release_freeze_sha256="freeze-hash",
     )
     spec_path = dump(tmp_path / "spec.json", spec)

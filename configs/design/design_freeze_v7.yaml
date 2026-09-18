@@ -78,6 +78,7 @@ protocol:
     current_search_optimization:
       original_start_count: 8
       start_separation_normalized_l2: 0.05
+      start_separation_posterior_sigma: 1.0
       maxiter: 500
       ftol: 0.0
       gtol: 1.0e-10
@@ -268,7 +269,7 @@ runner_contract:
   standard_argv: [config_path, positions_path, arm, output_dir]
   release_freeze_execution_path: /data/home/gvassilakis/nonlinear_release_20260917/stage3/worktree/configs/design/design_freeze_v7.yaml
   execution_policy_version: stage3_v7
-  procedure_version: fresh_nonlinear_v7_lbfgsb_v1
+  procedure_version: fresh_nonlinear_v7_lbfgsb_v2
   procedure_source_execution_path: /data/home/gvassilakis/nonlinear_release_20260917/stage3/worktree/src/hwoslaps/modeling/nonlinear/fresh_profile.py
   source_asset_execution_root: /data/home/gvassilakis/nonlinear_release_20260917/stage3/worktree/configs/source_assets
   bracket_mode: h0_bracket_adapter_owned_by_optimizer_stage3

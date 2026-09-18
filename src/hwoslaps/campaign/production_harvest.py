@@ -289,7 +289,7 @@ def _verify_complete(
         "catalog_sha256": catalog_digest,
         "case_identity_signature": spec["case_identity_signature"],
         "objective_version": "consistent_sampling_v2",
-        "procedure_version": "fresh_nonlinear_v7_lbfgsb_v1",
+        "procedure_version": "fresh_nonlinear_v7_lbfgsb_v2",
         "release_freeze_sha256": catalog["release_freeze"]["sha256"],
         "spec_sha256": sha256_file(spec_path),
     }

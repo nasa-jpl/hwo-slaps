@@ -23,7 +23,7 @@ from .autolens_runner import AutoLensFitRunner
 from .output_schema import NonlinearFitSummary
 
 
-PROCEDURE_VERSION = "fresh_nonlinear_v7_lbfgsb_v1"
+PROCEDURE_VERSION = "fresh_nonlinear_v7_lbfgsb_v2"
 OBJECTIVE_VERSION = "consistent_sampling_v2"
 
 __all__ = [
@@ -61,6 +61,7 @@ class FreshProfileSettings:
 
     original_start_count: int = 8
     start_separation_normalized_l2: float = 0.05
+    start_separation_posterior_sigma: float = 1.0
     maxiter: int = 500
     ftol: float = 0.0
     gtol: float = 1.0e-10
@@ -79,6 +80,8 @@ class FreshProfileSettings:
             raise ValueError("original_start_count must be positive")
         if self.start_separation_normalized_l2 <= 0:
             raise ValueError("start separation must be positive")
+        if self.start_separation_posterior_sigma <= 0:
+            raise ValueError("posterior-sigma start separation must be positive")
         if self.maxiter < 1 or self.repeat_maxiter < 1 or self.maxls < 1:
             raise ValueError("optimizer iteration and line-search limits must be positive")
         if self.ftol < 0 or self.gtol < 0 or self.repeat_ftol < 0 or self.repeat_gtol < 0:
@@ -106,6 +109,9 @@ class FreshProfileSettings:
             "original_start_count": current.get("original_start_count", cls.original_start_count),
             "start_separation_normalized_l2": current.get(
                 "start_separation_normalized_l2", cls.start_separation_normalized_l2
+            ),
+            "start_separation_posterior_sigma": current.get(
+                "start_separation_posterior_sigma", cls.start_separation_posterior_sigma
             ),
             "maxiter": current.get("maxiter", cls.maxiter),
             "ftol": current.get("ftol", cls.ftol),
@@ -162,7 +168,8 @@ class FreshProfileSettings:
                         resolved[target] = repeat[alias]
                         break
         required = (
-            "original_start_count", "start_separation_normalized_l2", "maxiter",
+            "original_start_count", "start_separation_normalized_l2",
+            "start_separation_posterior_sigma", "maxiter",
             "ftol", "gtol", "maxls", "repeat_maxiter", "repeat_ftol",
             "repeat_gtol", "scalar_residual_tolerance",
         )
@@ -363,6 +370,30 @@ def _summary_ml(summary_path: Path, names: Sequence[str]) -> tuple[np.ndarray, M
     )
 
 
+def posterior_sigma_normalized(
+    rows: Sequence[Mapping[str, Any]],
+    names: Sequence[str],
+    lower: np.ndarray,
+    widths: np.ndarray,
+) -> np.ndarray:
+    """Weighted posterior standard deviation per parameter in unit-box units."""
+    if not rows or "weight" not in rows[0]:
+        raise ValueError("current search samples must carry posterior weights")
+    vectors = np.asarray([[float(row[name]) for name in names] for row in rows], dtype=float)
+    weights = np.asarray([float(row["weight"]) for row in rows], dtype=float)
+    if vectors.ndim != 2 or vectors.shape[1] != lower.shape[0] or not np.all(np.isfinite(vectors)):
+        raise ValueError("current search samples must be finite vectors of the model dimension")
+    if not np.all(np.isfinite(weights)) or np.any(weights < 0) or weights.sum() <= 0:
+        raise ValueError("current search sample weights must be finite, non-negative and not all zero")
+    weights = weights / weights.sum()
+    z = (vectors - lower) / widths
+    mean = weights @ z
+    sigma = np.sqrt(weights @ (z - mean) ** 2)
+    if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0):
+        raise ValueError("posterior sigma must be positive and finite for every parameter")
+    return sigma
+
+
 def select_current_search_starts(
     summary_path: Path,
     samples_path: Path,
@@ -373,15 +404,34 @@ def select_current_search_starts(
 ) -> tuple[list[CurrentSearchStart], np.ndarray, np.ndarray]:
     """Select the ML incumbent and separated samples from one fresh search.
 
+    Two starts are distinct when they are at least
+    ``start_separation_normalized_l2`` prior widths apart, the rule for broad
+    posteriors, or at least ``start_separation_posterior_sigma`` posterior
+    standard deviations apart, the scale a sharp (noiseless) posterior
+    actually has. The posterior sigma is the weighted spread of the search's
+    own samples in unit-box coordinates and is recorded with the incumbent.
+
     The returned starts carry the sampler's physical vectors and their
     unit-box images; the optimizer consumes only the latter.
     """
     lower_array, upper_array, widths = prior_box(lower, upper)
     ml, ml_origin = _summary_ml(Path(summary_path), names)
     selected = [_finite_vector(ml, lower_array, upper_array)]
-    origins: list[Mapping[str, Any]] = [ml_origin]
     with Path(samples_path).open(encoding="utf-8", newline="") as stream:
         rows = list(csv.DictReader(stream, skipinitialspace=True))
+    posterior_sigma = posterior_sigma_normalized(rows, names, lower_array, widths)
+    origins: list[Mapping[str, Any]] = [
+        {
+            **dict(ml_origin),
+            "selection_rule": {
+                "distinct_if": "prior_normalized_l2 >= start_separation_normalized_l2 "
+                "or posterior_sigma_l2 >= start_separation_posterior_sigma",
+                "start_separation_normalized_l2": float(settings.start_separation_normalized_l2),
+                "start_separation_posterior_sigma": float(settings.start_separation_posterior_sigma),
+                "posterior_sigma_normalized": posterior_sigma.tolist(),
+            },
+        }
+    ]
     ranked = sorted(
         enumerate(rows),
         key=lambda pair: (-float(pair[1]["log_likelihood"]), pair[0]),
@@ -392,10 +442,15 @@ def select_current_search_starts(
             continue
         if np.any(vector < lower_array) or np.any(vector > upper_array):
             continue
-        if (
-            min(np.linalg.norm((vector - old) / widths) for old in selected)
-            < settings.start_separation_normalized_l2
-        ):
+        deltas = [(vector - old) / widths for old in selected]
+        prior_l2 = [float(np.linalg.norm(delta)) for delta in deltas]
+        sigma_l2 = [float(np.linalg.norm(delta / posterior_sigma)) for delta in deltas]
+        distinct = all(
+            prior >= settings.start_separation_normalized_l2
+            or sigma >= settings.start_separation_posterior_sigma
+            for prior, sigma in zip(prior_l2, sigma_l2)
+        )
+        if not distinct:
             continue
         selected.append(vector)
         origins.append(
@@ -403,6 +458,8 @@ def select_current_search_starts(
                 "origin": "current_search_sample",
                 "row": int(row_index),
                 "saved_log_likelihood": float(row["log_likelihood"]),
+                "separation_prior_normalized_l2": min(prior_l2),
+                "separation_posterior_sigma": min(sigma_l2),
             }
         )
         if len(selected) == settings.original_start_count + 1:

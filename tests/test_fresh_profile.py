@@ -97,9 +97,9 @@ def _write_current_search(tmp_path, names, ml, ml_log_likelihood, samples):
     summary_path = tmp_path / "samples_summary.json"
     samples_path = tmp_path / "samples.csv"
     summary_path.write_text(json.dumps(summary))
-    lines = [",".join([*names, "log_likelihood"])]
+    lines = [",".join([*names, "log_likelihood", "weight"])]
     for vector, log_likelihood in samples:
-        lines.append(",".join(str(v) for v in [*vector, log_likelihood]))
+        lines.append(",".join(str(v) for v in [*vector, log_likelihood, 1.0 / len(samples)]))
     samples_path.write_text("\n".join(lines) + "\n")
     return summary_path, samples_path
 
@@ -385,10 +385,10 @@ def test_current_search_start_selection_requires_ml_plus_eight_or_declared_count
     samples_path = tmp_path / "samples.csv"
     summary_path.write_text(json.dumps(summary))
     samples_path.write_text(
-        "a,b,log_likelihood\n"
-        "0.9,0.9,-0.1\n"
-        "0.1,0.9,-0.2\n"
-        "0.9,0.1,-0.3\n"
+        "a,b,log_likelihood,weight\n"
+        "0.9,0.9,-0.1,0.4\n"
+        "0.1,0.9,-0.2,0.3\n"
+        "0.9,0.1,-0.3,0.3\n"
     )
     settings = FreshProfileSettings(original_start_count=2)
     starts, lower, upper = select_current_search_starts(
@@ -430,6 +430,7 @@ def test_profile_settings_reject_undeclared_flat_release_protocol():
             "optimizer": {
                 "original_start_count": 8,
                 "start_separation_normalized_l2": 0.05,
+                "start_separation_posterior_sigma": 1.0,
                 "maxiter": 500,
                 "ftol": 0.0,
                 "gtol": 1.0e-10,
@@ -1074,3 +1075,71 @@ def test_bracket_materializer_rejects_a_reference_without_the_target(tmp_path, m
     with pytest.raises(RuntimeError, match="declared target subhalo"):
         _materialize(tmp_path)
     assert not (tmp_path / "generated").exists()
+
+
+def test_sharp_posterior_supplies_eight_starts_at_its_own_sigma_scale(tmp_path):
+    """Noiseless posteriors are far tighter than 0.05 prior widths."""
+    names = ["a", "b"]
+    ml = [0.5, 0.5]
+    radius = 0.006
+    ring = [
+        [0.5 + radius * np.cos(k * np.pi / 4), 0.5 + radius * np.sin(k * np.pi / 4)]
+        for k in range(8)
+    ]
+    samples = [(point, -100.0 * radius**2) for point in ring]
+    samples.append(([0.5 + 0.0002, 0.5], -100.0 * 0.0002**2))
+    summary_path, samples_path = _write_current_search(tmp_path, names, ml, 0.0, samples)
+    settings = FreshProfileSettings()
+    starts, _, _ = select_current_search_starts(
+        summary_path, samples_path, names, [0.0, 0.0], [1.0, 1.0], settings
+    )
+    assert len(starts) == 9
+    rule = starts[0].origin["selection_rule"]
+    assert rule["start_separation_normalized_l2"] == 0.05
+    assert rule["start_separation_posterior_sigma"] == 1.0
+    sigma = np.asarray(rule["posterior_sigma_normalized"])
+    assert np.all(sigma > 0) and np.all(sigma < 0.01)
+    selected = {start.physical_vector for start in starts[1:]}
+    assert selected == {tuple(point) for point in ring}
+    assert (0.5002, 0.5) not in selected
+    for start in starts[1:]:
+        assert start.origin["separation_prior_normalized_l2"] < 0.05
+        assert start.origin["separation_posterior_sigma"] >= 1.0
+
+
+def test_broad_posterior_keeps_the_prior_width_rule_and_rejects_near_duplicates(tmp_path):
+    names = ["a", "b"]
+    ml = [0.5, 0.5]
+    samples = [
+        ([0.9, 0.9], -0.1),
+        ([0.1, 0.1], -0.2),
+        ([0.16, 0.1], -0.3),
+        ([0.5, 0.5005], -0.4),
+    ]
+    summary_path, samples_path = _write_current_search(tmp_path, names, ml, 0.0, samples)
+    settings = FreshProfileSettings(original_start_count=3)
+    starts, _, _ = select_current_search_starts(
+        summary_path, samples_path, names, [0.0, 0.0], [1.0, 1.0], settings
+    )
+    assert [start.physical_vector for start in starts] == [(0.5, 0.5), (0.9, 0.9), (0.1, 0.1), (0.16, 0.1)]
+    third = starts[3].origin
+    assert third["separation_prior_normalized_l2"] == pytest.approx(0.06)
+    assert third["separation_posterior_sigma"] < 1.0
+    with pytest.raises(ValueError, match="separated samples"):
+        select_current_search_starts(
+            summary_path, samples_path, names, [0.0, 0.0], [1.0, 1.0],
+            FreshProfileSettings(original_start_count=4),
+        )
+
+
+def test_start_selection_requires_posterior_weights(tmp_path):
+    summary_path, samples_path = _write_current_search(
+        tmp_path, ["a"], [0.5], 0.0, [([0.4], -1.0), ([0.6], -1.0)]
+    )
+    samples_path.write_text("a,log_likelihood\n0.4,-1.0\n0.6,-1.0\n")
+    with pytest.raises(ValueError, match="posterior weights"):
+        select_current_search_starts(
+            summary_path, samples_path, ["a"], [0.0], [1.0], FreshProfileSettings(original_start_count=2)
+        )
+    with pytest.raises(ValueError, match="posterior-sigma"):
+        FreshProfileSettings(start_separation_posterior_sigma=0.0)

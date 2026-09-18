@@ -57,7 +57,7 @@ def validate_spec(spec: dict[str, Any], spec_path: Path) -> None:
         raise ValueError("production case requires execution_policy_version=stage3_v7")
     if spec.get("objective_version") != "consistent_sampling_v2":
         raise ValueError("production case must select consistent_sampling_v2")
-    if spec.get("procedure_version") != "fresh_nonlinear_v7_lbfgsb_v1":
+    if spec.get("procedure_version") != "fresh_nonlinear_v7_lbfgsb_v2":
         raise ValueError("production case must select the reviewed fresh profile procedure")
     if not isinstance(spec.get("compute_tangent_comparator"), bool):
         raise ValueError("compute_tangent_comparator must be an explicit boolean")

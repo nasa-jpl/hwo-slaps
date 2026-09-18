@@ -1732,6 +1732,7 @@ def load_release_freeze(path=None, *, verify_consumed: bool = True) -> dict:
     for key, expected in (
         ("original_start_count", 8),
         ("start_separation_normalized_l2", 0.05),
+        ("start_separation_posterior_sigma", 1.0),
         ("maxiter", 500),
         ("ftol", 0.0),
         ("gtol", 1.0e-10),

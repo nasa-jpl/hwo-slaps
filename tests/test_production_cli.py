@@ -79,7 +79,7 @@ def valid_spec(tmp_path, *, case_kind="standard"):
         "approval_receipt_sha256": hashlib.sha256(paths["approval.json"].read_bytes()).hexdigest(),
         "catalog_sha256": hashlib.sha256(paths["catalog.json"].read_bytes()).hexdigest(),
         "objective_version": "consistent_sampling_v2",
-        "procedure_version": "fresh_nonlinear_v7_lbfgsb_v1",
+        "procedure_version": "fresh_nonlinear_v7_lbfgsb_v2",
         "case_kind": case_kind,
         "scope": "selected12_brackets" if case_kind == "bracket" else "archived_cases",
         "compute_tangent_comparator": case_kind == "standard",
