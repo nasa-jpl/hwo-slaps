@@ -625,6 +625,30 @@ def bracket_arm_declaration(rung: str, arm_index: int) -> dict:
     }
 
 
+def v7_runner_factory(profile_settings, anchor):
+    """Build the v7 fresh-profile runner factory the route calls.
+
+    The route constructs its runner as ``factory(settings, output_dir=...)``,
+    the ``AutoLensFitRunner`` signature, so the factory must accept exactly
+    that call. An H0 bracket wraps the fresh runner in the zero-residual
+    anchor check.
+    """
+    from hwoslaps.modeling.nonlinear.fresh_profile import (
+        FreshProfileRunner,
+        ZeroResidualAnchorRunner,
+    )
+
+    def factory(settings, output_dir):
+        runner = FreshProfileRunner(
+            settings, output_dir, profile_settings=profile_settings
+        )
+        if anchor is None:
+            return runner
+        return ZeroResidualAnchorRunner(runner, anchor)
+
+    return factory
+
+
 def main(argv=None, *, runner_factory=None, validator_factory=None,
          artifact_prefix="nonlinear_validation") -> None:
     """Run one validation arm; optional factories support versioned replay.
@@ -892,31 +916,14 @@ def main(argv=None, *, runner_factory=None, validator_factory=None,
     if release is not None:
         settings_kwargs.update(_v7_sampler_settings(protocol, release))
         from hwoslaps.modeling.nonlinear.fresh_profile import (
-            FreshProfileRunner,
             FreshProfileSettings,
             FreshProfileValidator,
-            ZeroResidualAnchorRunner,
         )
 
         profile_settings = FreshProfileSettings.from_release_protocol(release)
-        if execution["anchor"] is None:
-            selected_runner_factory = selected_runner_factory or (
-                lambda configured, directory: FreshProfileRunner(
-                    configured,
-                    directory,
-                    profile_settings=profile_settings,
-                )
-            )
-        elif selected_runner_factory is None:
-            selected_runner_factory = (
-                lambda configured, directory: ZeroResidualAnchorRunner(
-                    FreshProfileRunner(
-                        configured,
-                        directory,
-                        profile_settings=profile_settings,
-                    ),
-                    execution["anchor"],
-                )
+        if selected_runner_factory is None:
+            selected_runner_factory = v7_runner_factory(
+                profile_settings, execution["anchor"]
             )
         if selected_validator_factory is None:
             def selected_validator_factory(configured_runner):

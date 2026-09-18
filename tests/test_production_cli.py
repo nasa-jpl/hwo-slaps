@@ -285,3 +285,37 @@ def test_v7_route_pins_sampler_contract_without_changing_legacy_defaults():
     }
     assert route.V7_OBJECTIVE_VERSION == "consistent_sampling_v2"
     assert route.V7_PROFILE_PROCEDURE == "fresh_profile_v1"
+
+
+def test_v7_runner_factory_accepts_the_route_call_signature(monkeypatch):
+    """The route builds its runner as factory(settings, output_dir=...)."""
+    import hwoslaps.modeling.nonlinear.fresh_profile as fresh_profile
+
+    built = {}
+
+    class Runner:
+        def __init__(self, settings, output_dir, profile_settings=None):
+            built.update(
+                settings=settings,
+                output_dir=output_dir,
+                profile_settings=profile_settings,
+            )
+
+    class Anchored:
+        def __init__(self, runner, anchor):
+            self.runner, self.anchor = runner, anchor
+
+    monkeypatch.setattr(fresh_profile, "FreshProfileRunner", Runner)
+    monkeypatch.setattr(fresh_profile, "ZeroResidualAnchorRunner", Anchored)
+    route = load_validation()
+
+    runner = route.v7_runner_factory("profile", None)("settings", output_dir="/out")
+    assert isinstance(runner, Runner)
+    assert built == {"settings": "settings", "output_dir": "/out", "profile_settings": "profile"}
+
+    anchored = route.v7_runner_factory("profile", {"vector": [1.0]})(
+        "settings", output_dir="/out"
+    )
+    assert isinstance(anchored, Anchored)
+    assert isinstance(anchored.runner, Runner)
+    assert anchored.anchor == {"vector": [1.0]}
