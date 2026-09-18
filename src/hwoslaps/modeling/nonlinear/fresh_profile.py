@@ -864,8 +864,9 @@ def materialize_bracket_case_from_files(
     position_yx_arcsec: Sequence[float],
 ) -> dict[str, Any]:
     """Materialize a bracket from a catalog-bound config and position."""
+    import math
     import yaml
-    from .trial import trial_from_fisher_map_position
+    from .trial import subhalo_truth_config, trial_from_fisher_map_position
     from ...lensing.generator import generate_lensing_system
 
     config_path = Path(config_path).expanduser().resolve()
@@ -876,18 +877,45 @@ def materialize_bracket_case_from_files(
     positions = json.loads(positions_path.read_text(encoding="utf-8"))
     if not isinstance(full_config, dict) or not isinstance(positions, dict):
         raise ValueError("bracket inputs must contain a config and positions mapping")
-    lensing_reference = generate_lensing_system(
-        full_config["lensing"],
-        full_config=full_config,
+    target_mass_msun = float(target_mass_msun)
+    position_yx_arcsec = tuple(float(value) for value in position_yx_arcsec)
+    # The staged ladder config carries no subhalo (run_ladder injects one per
+    # rung); the reference must be rendered from the declared target exactly
+    # as the validation arm renders it at fit time.
+    injected_config = subhalo_truth_config(
+        full_config, target_mass_msun, position_yx_arcsec
     )
+    lensing_reference = generate_lensing_system(
+        injected_config["lensing"],
+        full_config=injected_config,
+    )
+    reference_mass = getattr(lensing_reference, "subhalo_mass", None)
+    reference_position = getattr(lensing_reference, "subhalo_position", None)
+    if (
+        reference_mass is None
+        or reference_position is None
+        or not math.isclose(
+            float(reference_mass), target_mass_msun, rel_tol=1.0e-12, abs_tol=0.0
+        )
+        or tuple(float(value) for value in reference_position) != position_yx_arcsec
+    ):
+        raise RuntimeError(
+            "generated bracket reference does not carry the declared target "
+            f"subhalo: rendered mass {reference_mass!r} at {reference_position!r}, "
+            f"declared {target_mass_msun} at {position_yx_arcsec}"
+        )
     trial = trial_from_fisher_map_position(
-        full_config,
+        injected_config,
         lensing_reference,
-        float(target_mass_msun),
-        tuple(float(value) for value in position_yx_arcsec),
+        target_mass_msun,
+        position_yx_arcsec,
         fisher_q=None,
         case_id=case_id,
     )
+    if trial.metadata.get("profile_scales_source") != "reference":
+        raise RuntimeError(
+            "bracket trial did not take its profile scales from the rendered reference"
+        )
     return materialize_bracket_case(
         full_config=full_config,
         positions=positions,

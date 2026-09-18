@@ -36,6 +36,7 @@ from hwoslaps.modeling.nonlinear.autolens_runner import (
 )
 from hwoslaps.modeling.nonlinear.trial import SubhaloTrial
 from hwoslaps.modeling.nonlinear.trial import (
+    subhalo_truth_config,
     trial_from_fisher_map_position,
 )
 
@@ -476,3 +477,25 @@ def test_fisher_map_trial_recomputes_non_nfw_mass_scales(model, helper):
     assert trial.scale_radius_arcsec is None
     assert trial.concentration is None
     assert trial.metadata["profile_scales_source"] == "recomputed"
+
+
+def test_subhalo_truth_config_places_the_declared_subhalo_without_mutation():
+    """Point a no-subhalo ladder config at one declared truth."""
+    staged = _scene("scene1_smooth_ring.yaml")
+    staged["lensing"]["subhalo"]["enabled"] = False
+    reference = deepcopy(staged)
+
+    injected = subhalo_truth_config(staged, 10.0**7.3, (0.8, 0.05))
+
+    assert staged == reference
+    subhalo = injected["lensing"]["subhalo"]
+    assert subhalo["enabled"] is True
+    assert subhalo["mass"] == pytest.approx(10.0**7.3)
+    assert subhalo["position"] == {"type": "direct", "centre": [0.8, 0.05]}
+    assert subhalo["model"] == "NFW"
+    assert subhalo["concentration"] == staged["lensing"]["subhalo"]["concentration"]
+
+    control = subhalo_truth_config(staged, 10.0**7.3, (0.8, 0.05), enabled=False)
+    assert control["lensing"]["subhalo"]["enabled"] is False
+    assert control["lensing"]["subhalo"]["mass"] == pytest.approx(10.0**7.3)
+    assert control["lensing"]["subhalo"]["position"]["centre"] == [0.8, 0.05]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Dict, Optional, Tuple
@@ -161,6 +162,46 @@ def trial_from_lensing_truth(lensing_data: Any, case_id: Optional[str] = None) -
         fisher_delta_log_l_equiv=fisher_delta_log_l_equiv,
         metadata=metadata,
     )
+
+
+def subhalo_truth_config(
+    full_config: Dict[str, Any],
+    mass_msun: float,
+    position_yx_arcsec: Tuple[float, float],
+    *,
+    enabled: bool = True,
+) -> Dict[str, Any]:
+    """Copy ``full_config`` with its subhalo truth pointed at one declared point.
+
+    Every producer that renders a Fisher-map truth, the validation arms and
+    the bracket materializer alike, must place the same subhalo, so the
+    declared mass and direct position are written here and nowhere else.
+
+    Parameters
+    ----------
+    full_config : `dict`
+        Staged configuration; it is not mutated.
+    mass_msun : `float`
+        Declared subhalo mass in solar masses.
+    position_yx_arcsec : `tuple` [`float`, `float`]
+        Declared (y, x) position in arcseconds.
+    enabled : `bool`, optional
+        Whether the subhalo is present in the rendered truth.
+
+    Returns
+    -------
+    config : `dict`
+        Deep copy whose ``lensing.subhalo`` block carries the declared truth.
+    """
+    config = copy.deepcopy(dict(full_config))
+    subhalo = config["lensing"]["subhalo"]
+    subhalo["enabled"] = bool(enabled)
+    subhalo["mass"] = float(mass_msun)
+    subhalo["position"] = {
+        "type": "direct",
+        "centre": [float(position_yx_arcsec[0]), float(position_yx_arcsec[1])],
+    }
+    return config
 
 
 def trial_from_fisher_map_position(

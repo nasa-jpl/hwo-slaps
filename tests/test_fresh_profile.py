@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import yaml
 
 try:
     from hwoslaps.modeling.nonlinear.fresh_profile import (
@@ -902,3 +904,124 @@ def test_retention_is_applied_restored_and_raw_state_is_recorded(
     else:
         assert summary.search_internal_retained is False
         assert payload["missing_required"] == ["search_internal.dill"]
+
+
+def _bracket_inputs(tmp_path):
+    """Write a ladder-shaped staged config (no subhalo) and its frozen top rung."""
+    with open("configs/scenes/scene1_smooth_ring.yaml", encoding="utf-8") as stream:
+        staged = yaml.safe_load(stream)
+    staged["lensing"]["subhalo"] = {
+        "enabled": False,
+        "mass": "1.0e7",
+        "model": "NFW",
+        "concentration": {"model": "moline2017_eq7", "x_sub": 1.0, "h": None},
+        "position": {"type": "angle", "angle": 90.0, "offset_pixels": 0},
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(staged, sort_keys=False), encoding="utf-8")
+    positions_path = tmp_path / "positions.json"
+    positions_path.write_text(
+        json.dumps(
+            {
+                "rungs": {
+                    "top": {
+                        "logm": 7.2,
+                        "mass_msun": 10.0**7.2,
+                        "position_yx_arcsec": [0.8, 0.05],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config_path, positions_path
+
+
+def _rendering_generator(observed):
+    """Mimic the generator contract: a disabled subhalo renders as None."""
+
+    def generate_lensing_system(lensing_config, full_config):
+        observed.append(deepcopy(full_config))
+        subhalo = lensing_config["subhalo"]
+        present = bool(subhalo["enabled"])
+        return SimpleNamespace(
+            lens_redshift=lensing_config["lens_galaxy"]["redshift"],
+            source_redshift=lensing_config["source_galaxy"]["redshift"],
+            subhalo_model=subhalo["model"] if present else None,
+            subhalo_mass=float(subhalo["mass"]) if present else None,
+            subhalo_position=(
+                tuple(subhalo["position"]["centre"]) if present else None
+            ),
+            subhalo_einstein_radius=None,
+            subhalo_kappa_s=0.01 if present else None,
+            subhalo_scale_radius_arcsec=0.2 if present else None,
+            subhalo_concentration=20.0 if present else None,
+            subhalo_concentration_model=(
+                subhalo["concentration"]["model"] if present else None
+            ),
+        )
+
+    return generate_lensing_system
+
+
+def _materialize(tmp_path, target_mass_msun=10.0**7.3):
+    from hwoslaps.modeling.nonlinear.fresh_profile import (
+        materialize_bracket_case_from_files,
+    )
+
+    config_path, positions_path = _bracket_inputs(tmp_path)
+    return materialize_bracket_case_from_files(
+        config_path=config_path,
+        positions_path=positions_path,
+        output_dir=tmp_path / "generated",
+        case_id="selected12_bracket:sys0043:plus_0.1dex",
+        bracket_rung="plus_0.1dex",
+        target_log10_m200=7.3,
+        target_mass_msun=target_mass_msun,
+        position_yx_arcsec=(0.8, 0.05),
+    )
+
+
+def test_bracket_materializer_renders_the_declared_target_subhalo(tmp_path, monkeypatch):
+    import hwoslaps.lensing.generator as generator
+
+    observed = []
+    monkeypatch.setattr(generator, "generate_lensing_system", _rendering_generator(observed))
+    target = 10.0**7.3
+
+    generated = _materialize(tmp_path, target)
+
+    assert len(observed) == 1
+    rendered = observed[0]["lensing"]["subhalo"]
+    assert rendered["enabled"] is True
+    assert rendered["mass"] == pytest.approx(target)
+    assert rendered["position"] == {"type": "direct", "centre": [0.8, 0.05]}
+    assert generated["status"] == "MATERIALIZED_NOT_FIT"
+    written = yaml.safe_load(Path(generated["config"]).read_text(encoding="utf-8"))
+    assert written["lensing"]["subhalo"]["enabled"] is False
+    rungs = json.loads(Path(generated["positions"]).read_text(encoding="utf-8"))["rungs"]
+    assert rungs["plus_0.1dex"]["mass_msun"] == pytest.approx(target)
+    assert rungs["plus_0.1dex"]["position_yx_arcsec"] == [0.8, 0.05]
+    anchor = json.loads(Path(generated["h1_anchor"]).read_text(encoding="utf-8"))
+    assert anchor["target_mass_msun"] == pytest.approx(target)
+    assert anchor["evidence_claim"] is False and anchor["sampler_executed"] is False
+    assert len(anchor["vector"]) == len(anchor["parameter_names"]) > 0
+    assert np.all(np.isfinite(anchor["vector"]))
+
+
+def test_bracket_materializer_rejects_a_reference_without_the_target(tmp_path, monkeypatch):
+    import hwoslaps.lensing.generator as generator
+
+    def without_subhalo(lensing_config, full_config):
+        return SimpleNamespace(
+            lens_redshift=0.2,
+            source_redshift=0.6,
+            subhalo_model=None,
+            subhalo_mass=None,
+            subhalo_position=None,
+        )
+
+    monkeypatch.setattr(generator, "generate_lensing_system", without_subhalo)
+    with pytest.raises(RuntimeError, match="declared target subhalo"):
+        _materialize(tmp_path)
+    assert not (tmp_path / "generated").exists()

@@ -1154,3 +1154,22 @@ class TestClopperPearson:
         lower, upper = clopper_pearson(590, 590)
         assert lower == pytest.approx(0.025**(1.0/590.0), abs=1e-9)
         assert upper == 1.0
+
+
+def test_bracket_materializer_injects_exactly_the_arm_truth():
+    """The anchor and the fit must render one and the same subhalo."""
+    from hwoslaps.modeling.nonlinear.trial import subhalo_truth_config
+    from run_nonlinear_validation import bracket_arm_declaration
+
+    rung = _rung_payload()
+    rung["mass_msun"] *= 10**0.1
+    arm = build_arm_config(
+        _staged_config(),
+        bracket_arm_declaration("plus_0.1dex", 24),
+        rung,
+        FIT_BLOCK_FIXTURE,
+    )
+    injected = subhalo_truth_config(
+        _staged_config(), rung["mass_msun"], rung["position_yx_arcsec"]
+    )
+    assert injected["lensing"]["subhalo"] == arm["lensing"]["subhalo"]

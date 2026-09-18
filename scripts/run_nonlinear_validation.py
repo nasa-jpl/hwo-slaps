@@ -380,17 +380,14 @@ def build_arm_config(
         "mode": "delta",
         "delta": dict(fit_block["fit_psf"]),
     }
-    subhalo = config["lensing"]["subhalo"]
-    subhalo["enabled"] = bool(arm_declaration["subhalo_in_truth"])
-    subhalo["mass"] = float(rung_payload["mass_msun"])
-    subhalo["position"] = {
-        "type": "direct",
-        "centre": [
-            float(rung_payload["position_yx_arcsec"][0]),
-            float(rung_payload["position_yx_arcsec"][1]),
-        ],
-    }
-    return config
+    from hwoslaps.modeling.nonlinear.trial import subhalo_truth_config
+
+    return subhalo_truth_config(
+        config,
+        float(rung_payload["mass_msun"]),
+        rung_payload["position_yx_arcsec"],
+        enabled=bool(arm_declaration["subhalo_in_truth"]),
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
