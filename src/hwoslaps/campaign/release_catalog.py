@@ -11,7 +11,6 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
-import re
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +18,7 @@ import numpy as np
 import yaml
 
 from .design_freeze import load_release_freeze
+from .system_ids import SystemIdError, bare_system_id
 
 STANDARD_ARMS = (
     "asimov_injected",
@@ -139,10 +139,10 @@ def _verify_inventory_input_records(jobs: list[dict[str, Any]]) -> dict[str, Any
 
 
 def _bare_system_id(value: str) -> str:
-    matches = re.findall(r"sys\d{4}", str(value))
-    if not matches:
-        raise ReleaseCatalogError(f"No sysNNNN identifier in {value!r}")
-    return matches[-1]
+    try:
+        return bare_system_id(value)
+    except SystemIdError as error:
+        raise ReleaseCatalogError(str(error)) from error
 
 
 def _system_index(system_id: str) -> int:

@@ -186,7 +186,10 @@ def fixture(
             "views": {"test": ["case-1"]},
         },
     )
-    config = dump(tmp_path / "config.json", {"test": True})
+    config = dump(
+        tmp_path / "config.json",
+        {"test": True, "run_name": f"ladder_selected_{case['system_id']}"},
+    )
     positions = dump(tmp_path / "positions.json", {"position": [0, 1]})
     output = tmp_path / "attempt"
     child = output / "case"
@@ -245,6 +248,7 @@ def fixture(
             "release_freeze_sha256",
         )
     }
+    payload["system_id"] = f"ladder_selected_{case['system_id']}"
     payload.update(
         positions_artifact_sha256=sha256_file(positions),
         sampler_seed=100,
@@ -695,6 +699,7 @@ def _actual_materialization_fixture(tmp_path, bracket=False):
     )
     source = tmp_path / "source.yaml"
     source.write_text(
+        f"run_name: ladder_selected_{case['system_id']}\n"
         "stage0:\n  code_revision:\n    git_hash: old\n    git_dirty: false\n    sha256: old\nscience_fixture: unchanged\n"
     )
     positions = tmp_path / "positions.json"
@@ -810,6 +815,7 @@ def _emit_synthetic_completion(spec_path, case):
             "release_freeze_sha256",
         )
     }
+    payload["system_id"] = f"ladder_selected_{case['system_id']}"
     payload.update(
         positions_artifact_sha256=bindings["positions_sha256"],
         sampler_seed=case["sampler_seed"],
@@ -892,6 +898,8 @@ def test_actual_bracket_resolve_materialize_validate_and_harvest(tmp_path, tampe
             },
             "bracket_fixture": True,
         }
+        if role == "config":
+            data["run_name"] = f"ladder_selected_{case['system_id']}"
         if role == "h1_anchor":
             data = {
                 "case_id": case["case_id"],

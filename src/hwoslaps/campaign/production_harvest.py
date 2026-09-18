@@ -17,6 +17,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import yaml
+
+from .system_ids import SystemIdError, bare_system_id
+
 
 class ProductionHarvestError(ValueError):
     """The supplied catalog or attempt inventory is ambiguous."""
@@ -75,6 +79,15 @@ def _read(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ProductionHarvestError(f"JSON object required: {path}")
     return value
+
+
+def _config_run_name(config_path: Path) -> str:
+    """Return the run name the route stamps into its payload as ``system_id``."""
+    with Path(config_path).open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    if not isinstance(config, Mapping) or not isinstance(config.get("run_name"), str):
+        raise ProductionHarvestError(f"case config declares no run_name: {config_path}")
+    return config["run_name"]
 
 
 def _same(actual: Any, expected: Any, label: str) -> None:
@@ -368,13 +381,21 @@ def _verify_complete(
         raise ProductionHarvestError("canonical nonlinear payload is not receipt-bound")
     payload = _read(payload_path)
     for key in (
-        "system_id",
         "arm",
         "objective_version",
         "procedure_version",
         "release_freeze_sha256",
     ):
         _same(payload.get(key), spec.get(key), f"nonlinear payload {key}")
+    # The route identifies a system by its configuration's run name, the
+    # catalog by the bare sysNNNN identifier that run name carries.
+    run_name = _config_run_name(paths(Path(spec["config"])))
+    _same(payload.get("system_id"), run_name, "nonlinear payload run name")
+    try:
+        run_system = bare_system_id(run_name)
+    except SystemIdError as error:
+        raise ProductionHarvestError(str(error)) from error
+    _same(run_system, spec.get("system_id"), "config run name system")
     _same(
         payload.get("positions_artifact_sha256"),
         expected["positions_sha256"],
