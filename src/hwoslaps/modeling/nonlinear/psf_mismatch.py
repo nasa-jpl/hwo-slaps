@@ -206,6 +206,21 @@ def _quality_flags(case: Any) -> list:
     return flags
 
 
+def generation_sub_size_for(full_config, objective_version):
+    """Return the subpixel sampling the truth was generated with, or None.
+
+    The consistent-sampling objective fits at exactly the generation
+    sampling, so the size is resolved with the generator's own rule: the
+    declared ``lensing.grid.over_sample_size`` when present, else the
+    historical default. The legacy objective keeps its own ring sampling.
+    """
+    if objective_version != "consistent_sampling_v2":
+        return None
+    from ...lensing.sampling import configured_sub_size
+
+    return configured_sub_size(full_config["lensing"]["grid"])
+
+
 def run_psf_mismatch_case(
     validator: Any,
     observation: Any,
@@ -330,9 +345,7 @@ def run_psf_mismatch_case(
     if set(rendering) - {"objective_version"}:
         raise ValueError("Unsupported nonlinear_rendering fields")
     objective_version = rendering.get("objective_version", "legacy_ring1_v1")
-    generation_sub_size = None
-    if objective_version == "consistent_sampling_v2":
-        generation_sub_size = full_config["lensing"]["grid"]["over_sample_size"]
+    generation_sub_size = generation_sub_size_for(full_config, objective_version)
     dataset, metadata = imaging_from_observation(
         observation,
         psf_for_fit=wrapped,

@@ -193,3 +193,20 @@ def test_generated_asimov_truth_matches_corrected_fit(size):
     assert metadata.generation_sub_size == actual_sub_size(lensing.grid) == size
     fit = al.FitImaging(dataset=dataset, tracer=lensing.tracer)
     assert float(fit.chi_squared) < 1e-16
+
+
+def test_corrected_fit_samples_exactly_as_the_generator_did():
+    """Staged campaign configs declare no sampling; fit and truth share one rule."""
+    from hwoslaps.lensing.sampling import LEGACY_SUB_SIZE
+    from hwoslaps.modeling.nonlinear.psf_mismatch import generation_sub_size_for
+
+    undeclared = {"lensing": {"grid": {"pixel_scale": 0.00716, "shape": [508, 508]}}}
+    assert generation_sub_size_for(undeclared, "consistent_sampling_v2") == LEGACY_SUB_SIZE
+    assert generation_sub_size_for(undeclared, "consistent_sampling_v2") == configured_sub_size(
+        undeclared["lensing"]["grid"]
+    )
+    explicit = {"lensing": {"grid": {"over_sample_size": 2}}}
+    assert generation_sub_size_for(explicit, "consistent_sampling_v2") == 2
+    assert generation_sub_size_for(undeclared, "legacy_ring1_v1") is None
+    with pytest.raises(ValueError, match="over_sample_size"):
+        generation_sub_size_for({"lensing": {"grid": {"over_sample_size": 0}}}, "consistent_sampling_v2")
