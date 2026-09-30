@@ -1,0 +1,38 @@
+{
+  "editable_dependencies": {
+    "autolens": {
+      "direct_url_available": true,
+      "editable": true,
+      "git_commit": "10bfea51ea95fb02087147190da562e186535d7f",
+      "installed_version": "1.0.dev0",
+      "repository": "https://github.com/PyAutoLabs/PyAutoLens",
+      "tracked_dirty": false
+    },
+    "hcipy": {
+      "direct_url_available": true,
+      "editable": true,
+      "git_commit": "cc853b392463c33f02db6d20ce16dce0f7d10e2e",
+      "installed_version": "0.7.1.dev73+gcc853b392",
+      "repository": "https://github.com/ehpor/hcipy",
+      "tracked_dirty": false
+    }
+  },
+  "observed_at_utc": "2026-09-30T17:09:17.736741+00:00",
+  "packages": {
+    "autoarray": "2026.5.14.2",
+    "autoconf": "2026.5.14.2",
+    "autofit": "2026.5.14.2",
+    "autogalaxy": "2026.5.14.2",
+    "autolens": "1.0.dev0",
+    "hcipy": "0.7.1.dev73+gcc853b392",
+    "jax": "0.4.38",
+    "jaxlib": "0.4.38",
+    "matplotlib": "3.9.4",
+    "nautilus-sampler": "1.0.5",
+    "numpy": "1.26.4",
+    "pytest": "9.0.3",
+    "scipy": "1.17.1"
+  },
+  "python": "3.11.15 (main, Mar 11 2026, 17:20:07) [GCC 14.3.0]",
+  "scope": "Execution environment inspected on the original campaign host on 2026-09-30; this is not a contemporaneous lockfile or a complete dependency environment."
+}

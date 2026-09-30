@@ -1,0 +1,131 @@
+{
+  "common_protocol": {
+    "acceptance": {
+      "diagnostic_tolerance": 0.01,
+      "distinct_original_starts": 2,
+      "retain_best_observed_evaluation": true,
+      "support_log_likelihood_tolerance": 0.1,
+      "tighter_repeat_tolerance": 0.1,
+      "unresolved_policy": "retain_and_report"
+    },
+    "archived_case_policy": "Archived aggregate artifacts bind the original case identity, input paths and historical scalar context.  They are not fit starts, posterior inputs, evidence inputs or optimizer checkpoints for v7.",
+    "bracket_fisher_q": {
+      "enabled_views": [
+        "selected12_brackets"
+      ],
+      "kernel_shape_native": [
+        999,
+        999
+      ],
+      "mass": "current_shifted_mass",
+      "other_cases": false,
+      "position": "unchanged_upper_rung"
+    },
+    "fallback_solver": false,
+    "fresh_searches": true,
+    "identity": {
+      "fisher_kernel_shape_native": [
+        999,
+        999
+      ],
+      "fit_kernel_shape_native": [
+        51,
+        51
+      ],
+      "generation_sub_size": 4,
+      "objective_version": "consistent_sampling_v2",
+      "original_noise_and_seed_pairing": "preserved_from_v5_inputs",
+      "source_basis": "preserved_from_v5_inputs"
+    },
+    "optimizer": {
+      "current_search_optimization": {
+        "ftol": 0.0,
+        "gtol": 1e-10,
+        "maxiter": 500,
+        "maxls": 50,
+        "original_start_count": 8,
+        "scalar_residual_tolerance": 0.0001,
+        "start_separation_normalized_l2": 0.05,
+        "start_separation_posterior_sigma": 1.0
+      },
+      "fresh_promising_vectors_only": true,
+      "no_fallback_solver": true,
+      "old_vectors_allowed": false,
+      "solver": "L-BFGS-B",
+      "tighter_repeat": {
+        "ftol": 0.0,
+        "gtol": 1e-12,
+        "maxiter": 1000
+      }
+    },
+    "reuse_archived_fit_state": false,
+    "sampler_common": {
+      "discard_exploration": false,
+      "f_live": 0.01,
+      "n_shell": 1,
+      "retain_sampler_internals": true
+    },
+    "tangent_comparator": {
+      "enabled_views": [
+        "selected12_standard",
+        "selected12_brackets"
+      ],
+      "other_cases": false
+    }
+  },
+  "description": "Scientific settings extracted from the adopted payloads and frozen panel; a provenance record, not a launch configuration.",
+  "original_protocol_hash_to_variant": {
+    "06327f75fbdceeb8f80951ef1fdf8a07073fab36ac79ccf0b1f03e62f75ea240": "slam1",
+    "063c700c50988856d71b351a1dee457656d8da4277b030a6866f17fcc9e7365b": "slam1_retry",
+    "43f9690b23affa480dcd8b970b9192910249906530c48917b7ccd3ef21c12569": "slam1",
+    "855e146cf9e71b995b073ae5121226676878a27d604ef61baf1986797c508fe7": "slam1",
+    "948b9ca19a684b3bedd1fccef4dd80f849b65a40f16dbdc07b3cf6064e6f0d92": "slam1",
+    "f2e1566099a706013a1777d3ca889fa78e437d9c95403198f0321363f184e1b4": "slam1_retry"
+  },
+  "prior_variants": {
+    "slam1": {
+      "log10_m200_range": [
+        6.0,
+        11.0
+      ],
+      "sampler": {
+        "maxcall": 2000000,
+        "n_eff": 2000,
+        "n_live_smooth": 300,
+        "n_live_subhalo_fixed": 300,
+        "n_live_subhalo_search": 600
+      },
+      "widths": {
+        "einstein_radius_frac": 0.25,
+        "image_flux_scale_frac": 0.5,
+        "image_size_scale_frac": 0.5,
+        "lens_centre_arcsec": 0.05,
+        "lens_ell_comps": 0.2,
+        "source_centre_arcsec": 0.05
+      }
+    },
+    "slam1_retry": {
+      "log10_m200_range": [
+        6.0,
+        11.0
+      ],
+      "sampler": {
+        "maxcall": 4000000,
+        "n_eff": 4000,
+        "n_live_smooth": 600,
+        "n_live_subhalo_fixed": 600,
+        "n_live_subhalo_search": 1200
+      },
+      "widths": {
+        "einstein_radius_frac": 0.25,
+        "image_flux_scale_frac": 0.5,
+        "image_size_scale_frac": 0.5,
+        "lens_centre_arcsec": 0.05,
+        "lens_ell_comps": 0.2,
+        "source_centre_arcsec": 0.05
+      }
+    }
+  },
+  "sampler_seed_rule": "little-endian integer from the first four SHA256 bytes of UTF-8 wide_priors_20260926_v1|{variant}|{case_id}",
+  "subhalo_position_half_width_arcsec": 0.15
+}

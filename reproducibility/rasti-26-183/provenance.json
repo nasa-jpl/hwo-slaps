@@ -1,0 +1,80 @@
+{
+  "adopted_variant_counts": {
+    "slam1": 1166,
+    "slam1_retry": 13
+  },
+  "archived_helper_sha256": {
+    "build_wide_tables.py": "ead8b38b7459b46a63a28adfe43ceea3e14ac6f5ac896285365df9511c647828",
+    "extract_payload_scalars.py": "40564cc90a1453db74f3d25579c7f1d5ffea54f0e10881dcd7962078c9e83784",
+    "null500_worker.py": "87b13e02200602d98c2232a1a7cc75dc767543a1cb221a3f306158b07c804876",
+    "wide_worker.py": "3d7c78d5fb3c32a7dedc3057fd1c8adc7d1ae3fb694b011079b8c63be8a3ff19"
+  },
+  "branch": "rasti",
+  "case_count": 1179,
+  "derived_table_sha256": {
+    "02_CANONICAL_CASES_part01_of_05.txt": "27f52e6bbfd72a2358291790df8cde8d4f959ff0a1e8905f0aae3382935e9dde",
+    "02_CANONICAL_CASES_part02_of_05.txt": "eecd2c70f6d85488dca0cf7dfe4635ca49d6d95848bf2ba17b0e34a2c4f4039f",
+    "02_CANONICAL_CASES_part03_of_05.txt": "2245be8e9abb18c384e62a09c164fe5c278a5d74f3e18f451242044769e435f8",
+    "02_CANONICAL_CASES_part04_of_05.txt": "7607998c82ba2a9aa33309d039b80e83d20d68bec98e7c4e7fba0f698ebad693",
+    "02_CANONICAL_CASES_part05_of_05.txt": "84626719c94905f84d3b799ea6e7e59dd9cdb7f812fb264475d747677ef89131",
+    "TOP50_REPEATED_VIEW.csv": "0cc70ae1bae8450755cedc866eb0b58440de98bd9b4f93834af11b292e6e3253"
+  },
+  "final_status_counts": {
+    "accepted": 1174,
+    "unresolved": 5
+  },
+  "fisher_production_revision": "47590a3e63cbe3ed01eaa7e2b468c044dadf49ea",
+  "fresh_profile_path": "src/hwoslaps/modeling/nonlinear/fresh_profile.py",
+  "fresh_profile_sha256": "d4089c3f71a0665061fcd8496e35381938c62188aaf259fc9b62eeffb66a5f65",
+  "manuscript_commit": "4b25e975705d6de3dbe174be9965a2dbddc56da0",
+  "manuscript_id": "RASTI-26-183",
+  "nonlinear_adopted_revision_counts": {
+    "5ddc87f528878e567577ba9010d68f10cf1d521d": 1177,
+    "c9631605a1651d3fd7edae2aee8079411291d073": 2
+  },
+  "original_artifacts": {
+    "PANEL_FREEZE_redo3.json": {
+      "bytes": 326461,
+      "sha256": "02b7b7f7646a4208e99e6a8401130191f936dd5d274de8e6511b79eff1f5bcbc"
+    },
+    "SELECTION_redo3.json": {
+      "bytes": 7781944,
+      "sha256": "1cc01c967cd93a2c8f78998c75f10753a0a81e9fb9a8bf65dd0ecd4dc136c7e2"
+    },
+    "WIDE_TABLES_SUMMARY.json": {
+      "bytes": 1035,
+      "sha256": "b23ec48df9d171593e9d6071a81289ec2d0a6b0a9d5658898e17616b4e19010e"
+    }
+  },
+  "repository": "https://github.com/nasa-jpl/hwo-slaps",
+  "submission_date": "2026-09-30",
+  "verification": {
+    "adopted_payload_hashes_checked": 1179,
+    "cpu_contract_tests": {
+      "date": "2026-09-30",
+      "elapsed_seconds": 2.32,
+      "environment": {
+        "CUDA_VISIBLE_DEVICES": "",
+        "JAX_PLATFORMS": "cpu",
+        "MKL_NUM_THREADS": "2",
+        "OMP_NUM_THREADS": "2",
+        "OPENBLAS_NUM_THREADS": "2",
+        "PYTHONPATH": "src"
+      },
+      "host": "original Linux campaign host",
+      "passed": 56,
+      "revision": "5ddc87f528878e567577ba9010d68f10cf1d521d",
+      "tests": [
+        "tests/test_fresh_profile.py",
+        "tests/test_nonlinear_sampling_contract.py",
+        "tests/test_production_cli.py"
+      ],
+      "warnings": 18
+    },
+    "final_sampler_seeds_checked_against_panel": 1179,
+    "fresh_profile_identical_across_recorded_revisions": true,
+    "job_spec_hashes_checked": 1179,
+    "verified_at_utc": "2026-09-30T17:09:17.736741+00:00",
+    "worker_bindings_checked": 1179
+  }
+}
