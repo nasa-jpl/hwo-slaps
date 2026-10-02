@@ -8,7 +8,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CORE_PATH = PROJECT_ROOT / "src" / "hwoslaps" / "modeling" / "fisher_core.py"
@@ -24,20 +23,6 @@ sys.modules[core_spec.name] = core_module
 core_spec.loader.exec_module(core_module)
 compute_asimov_detectability = core_module.compute_asimov_detectability
 evaluate_signal_bank = core_module.evaluate_signal_bank
-
-
-def _load_master_config() -> dict:
-    config_path = PROJECT_ROOT / "configs" / "master_config.yaml"
-    with config_path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
-def test_master_config_uses_scdd_baseline_redshifts():
-    """Pin the SCDD baseline lens and source redshifts in the config."""
-    config = _load_master_config()
-
-    assert config["lensing"]["lens_galaxy"]["redshift"] == pytest.approx(0.2)
-    assert config["lensing"]["source_galaxy"]["redshift"] == pytest.approx(0.6)
 
 
 def test_scdd_threshold_maps_to_fisher_q_and_local_z():
@@ -91,14 +76,3 @@ def test_detectable_ring_fraction_uses_scdd_q_threshold():
     np.testing.assert_allclose(bank.q_asimov_local, bank.fisher_profiled)
     np.testing.assert_allclose(bank.z_asimov_local, np.sqrt(bank.q_asimov_local))
     assert detectable_ring_fraction == pytest.approx(0.5)
-
-
-def test_sparse_nonlinear_calibration_qfit_definition_matches_scdd_threshold():
-    """Define q_fit as twice the log-likelihood gap, as SCDD does."""
-    log_l_smooth = -105.0
-    log_l_subhalo = -100.0
-
-    q_fit = 2.0 * (log_l_subhalo - log_l_smooth)
-
-    assert q_fit == pytest.approx(SCDD_Q_THRESHOLD)
-    assert q_fit / 2.0 == pytest.approx(SCDD_DELTA_LOG_L_THRESHOLD)

@@ -1,91 +1,7 @@
-"""Frozen D-F4 selection statistics, score, ranking and rank stability.
+"""Image statistics, explicit selection policies and deterministic ranking.
 
-The pre-registered rule that turns a Stage 0 pool of no-subhalo
-observations into the selected follow-up tier. The signed definition is
-``scratch/q1_observing_conditions/selection_rule.md`` (v2, 2026-08-23);
-this module is its executable form and the two must agree exactly.
-
-Every function here is pure over declared array inputs. Nothing imports
-or touches an active Fisher object, an engine dataset or a
-configuration: the caller supplies the electron maps, the noise scalars
-and the grid, and the statistics follow.
-
-Definitions
------------
-Signal and noise are electrons and electrons squared. The blank-pixel
-variance is ``B = (sky + dark) * t + read_noise ** 2`` in ``e^2``, the
-source-free limit of the engine noise map, and the expected per-pixel
-variance of a source map is ``sigma_i^2 = s_i + B``. Both match
-``scripts/derive_hwo_eac1_hri_reference.py``.
-
-============================  ================================
-Quantity                      Unit
-============================  ================================
-``s`` (signal)                ``e-`` in the exposure
-``sigma^2``, ``B``            ``e-^2``
-``S`` (arc S/N)               dimensionless
-``|grad s|``                  ``e- arcsec^-1``
-``G`` (gradient power)        ``arcsec^-2``
-``theta_res``, angles         arcsec
-``C`` (complexity)            dimensionless
-============================  ================================
-
-The arc signal-to-noise follows the engine convention exactly,
-
-``S = sqrt( sum_i s_i^2 / sigma_i^2 )``,
-
-which recovers 303.94 for the committed reference. The gradient power
-is
-
-``G = sum_i |grad s|_i^2 / sigma_i^2``,
-
-with central-difference gradients divided by the pixel scale, so the
-gradient is an angular derivative in ``e- arcsec^-1`` rather than a bare
-neighbouring-pixel difference and ``G`` carries ``arcsec^-2``. Both sums
-run over the same declared aperture.
-
-The complexity statistic is
-
-``C = theta_res^2 * G / S^2``,   ``theta_res = lambda / D``,
-
-which is dimensionless and, in the background-dominated limit where
-``sigma`` does not follow the source, invariant under a uniform flux
-rescaling of the arc: ``S`` scales linearly and ``G`` quadratically, so
-the brightness cancels. That is the whole point of the statistic. It
-removes the brightness double-counting the earlier ``z(log S) +
-z(log G)`` score carried, because ``G`` scales approximately as ``S^2``
-under flux scaling.
-
-The frozen score is
-
-``score = z(log S) + z(log C)``,
-
-with ``z`` standardizing over the post-floor-cut Stage 0 pool that is
-actually being ranked (population standard deviation, ``ddof=0``). The
-pre-registered comparison also evaluates the ``s_only`` score
-``z(log S)`` and, post-campaign only, the oracle ranking by measured
-sensitivity.
-
-Notes
------
-Deterministic rules, each covered by a unit test:
-
-- Floor cuts are strict: ``theta_E > 0.5`` arcsec and ``S > 20``. A
-  member exactly on a floor fails it.
-- Standardization is the population z-score, accumulated exactly, so
-  any permutation of one pool standardizes to bitwise identical
-  z-scores and therefore ranks identically. A pool with exactly zero
-  spread standardizes to all zeros rather than dividing by zero.
-- ``log S`` and ``log C`` require strictly positive finite inputs. A
-  ranked member with zero or non-finite ``S`` or ``C`` raises: a flat
-  arc carries no complexity and the score is undefined there, so the
-  pool is rejected loudly instead of being silently reordered.
-- Ranking ties break on the ascending sha256 hex digest of the system
-  id, which is independent of pool membership, pool order and floating
-  point.
-- Rank stability compares two rankings by Spearman correlation of their
-  positions, top-K Jaccard, and the recovered fraction of an oracle
-  top-K.
+Electron/variance maps and angular grids are supplied by callers. No telescope,
+population, aperture, score weight, or selected-tier default is inferred.
 """
 
 from __future__ import annotations
@@ -98,101 +14,28 @@ from typing import Iterable, Sequence
 import numpy as np
 
 
-__all__ = [
-    "APERTURE_THETA_E_MULTIPLE",
-    "FLOOR_ARC_SNR",
-    "FLOOR_THETA_E_ARCSEC",
-    "GOLDEN_TIER_SIZE",
-    "RADIAN_TO_ARCSEC",
-    "SCORE_VARIANTS",
-    "SELECTED_TIER_SIZE",
-    "SelectionResult",
-    "aperture_mask",
-    "apply_floor_cuts",
-    "arc_snr",
-    "blank_variance_e2",
-    "complexity",
-    "diffraction_scale_arcsec",
-    "expected_variance_e2",
-    "gradient_power",
-    "oracle_recovered_fraction",
-    "rank_by_score",
-    "rank_by_sensitivity",
-    "rank_pool",
-    "ranking_positions",
-    "selection_scores",
-    "spearman_rank_correlation",
-    "standardize",
-    "top_k_jaccard",
-]
+__all__ = ['RADIAN_TO_ARCSEC', 'SelectionResult', 'aperture_mask', 'apply_floor_cuts', 'arc_snr', 'blank_variance_e2', 'complexity', 'diffraction_scale_arcsec', 'expected_variance_e2', 'gradient_power', 'oracle_recovered_fraction', 'rank_by_score', 'rank_by_sensitivity', 'rank_pool', 'ranking_positions', 'selection_scores', 'spearman_rank_correlation', 'standardize', 'top_k_jaccard']
 
 
-FLOOR_THETA_E_ARCSEC = 0.5
-"""Einstein-radius floor cut in arcseconds (`float`).
 
-Collett 2015 as imposed by O'Riordan et al. 2023: ``theta_E > 0.5``.
-"""
 
-FLOOR_ARC_SNR = 20.0
-"""Integrated arc signal-to-noise floor cut (`float`).
 
-Collett 2015 as imposed by O'Riordan et al. 2023: ``S/N > 20``.
-"""
 
-APERTURE_THETA_E_MULTIPLE = 2.0
-"""Aperture radius in units of ``theta_E`` (`float`), the D-F7 ruling."""
-
-SELECTED_TIER_SIZE = 12
-"""Size of the selected follow-up tier (`int`)."""
-
-GOLDEN_TIER_SIZE = 5
-"""Size of the golden subset drawn from the selected tier (`int`)."""
 
 RADIAN_TO_ARCSEC = 180.0 * 3600.0 / math.pi
 """Arcseconds in one radian (`float`)."""
 
-SCORE_VARIANTS = ("s_only", "s_plus_c")
-"""Pre-registered operational score variants (`tuple` of `str`).
-
-``s_only`` is ``z(log S)`` and ``s_plus_c`` is the frozen
-``z(log S) + z(log C)``. The third pre-registered curve, the oracle
-ranking by measured sensitivity, is not a score: see
-`rank_by_sensitivity`.
-"""
 
 
 @dataclass(frozen=True)
 class SelectionResult:
-    """One pool ranked under one score variant.
-
-    Attributes
-    ----------
-    variant : `str`
-        Score variant, a member of `SCORE_VARIANTS`.
-    system_ids : `tuple` [`str`]
-        Every input system id, in input order.
-    passed_floor : `tuple` [`bool`]
-        Floor-cut outcome aligned with ``system_ids``.
-    survivor_ids : `tuple` [`str`]
-        Post-cut ids in input order, the standardization pool.
-    scores : `tuple` [`float`]
-        Scores aligned with ``survivor_ids``.
-    ranking : `tuple` [`str`]
-        Survivor ids best first, ties broken by id digest.
-    selected_ids : `tuple` [`str`]
-        Leading ``selected_size`` entries of ``ranking``.
-    golden_ids : `tuple` [`str`]
-        Leading ``golden_size`` entries of ``ranking``.
-    """
-
-    variant: str
+    """Explicit-policy cuts, scores and top-k selection for one input pool."""
     system_ids: tuple[str, ...]
     passed_floor: tuple[bool, ...]
     survivor_ids: tuple[str, ...]
     scores: tuple[float, ...]
     ranking: tuple[str, ...]
     selected_ids: tuple[str, ...]
-    golden_ids: tuple[str, ...]
 
 
 def _require_finite_array(values, name: str, ndim: int | None = None) -> np.ndarray:
@@ -344,8 +187,7 @@ def arc_snr(signal_e, variance_e2, mask=None):
     The engine reports a per-pixel source signal-to-noise of
     ``s_p / sigma_p``, so the integrated value over the aperture is
     ``S = sqrt( sum_p s_p^2 / sigma_p^2 )``. Passing the noiseless source
-    map with its expected variance reproduces the committed reference
-    value of 303.94; passing a background-subtracted realization with an
+    map with its expected variance gives the noiseless statistic; passing a background-subtracted realization with an
     observed-side variance map gives the noisy estimator of the same
     statistic.
 
@@ -555,8 +397,8 @@ def apply_floor_cuts(
     theta_e_arcsec,
     arc_snr_values,
     *,
-    theta_e_min_arcsec=FLOOR_THETA_E_ARCSEC,
-    arc_snr_min=FLOOR_ARC_SNR,
+    theta_e_min_arcsec,
+    arc_snr_min,
 ):
     """Apply explicit strict floor cuts to one pool.
 
@@ -570,8 +412,7 @@ def apply_floor_cuts(
     arc_snr_values : array-like
         Integrated arc signal-to-noise, one per pool member.
     theta_e_min_arcsec, arc_snr_min : `float`, optional
-        Finite, nonnegative thresholds. Historical defaults reproduce the
-        RASTI Collett cuts; other surveys supply their selection policy here.
+        Finite, nonnegative thresholds. Both thresholds are required; callers supply their survey policy.
 
     Returns
     -------
@@ -660,48 +501,27 @@ def _require_log_ready(values, name: str) -> np.ndarray:
     return array
 
 
-def selection_scores(arc_snr_values, complexity_values, variant="s_plus_c"):
-    """Score one post-cut pool under a pre-registered variant.
+def selection_scores(arc_snr_values, complexity_values, *, weights):
+    """Combine standardized log SNR and morphology with explicit weights.
 
-    ``s_plus_c`` is the frozen score ``z(log S) + z(log C)`` and
-    ``s_only`` is the ``z(log S)`` comparison curve. Standardization runs
-    over exactly the pool passed in, which is the post-floor-cut pool
-    being ranked.
-
-    Parameters
-    ----------
-    arc_snr_values : array-like
-        Integrated arc signal-to-noise per pool member.
-    complexity_values : array-like
-        Complexity statistic per pool member. Read but unused under
-        ``s_only``, and validated either way so the two curves share one
-        admissible pool.
-    variant : `str`, optional
-        Member of `SCORE_VARIANTS`.
-
-    Returns
-    -------
-    scores : `numpy.ndarray`
-        Score per pool member, higher ranking first.
-
-    Raises
-    ------
-    ValueError
-        Raised for an unknown variant, a length mismatch, or a member
-        whose ``S`` or ``C`` is zero, negative or non-finite.
+    ``weights`` names ``snr`` and ``complexity``; both are finite nonnegative
+    numbers, with at least one positive. Both features must describe the same
+    positive finite pool, including when one weight is zero.
     """
-    if variant not in SCORE_VARIANTS:
-        raise ValueError(f"variant must be one of {SCORE_VARIANTS}, got {variant!r}.")
-    snr = _require_log_ready(arc_snr_values, "arc_snr_values")
-    complexity_array = _require_log_ready(complexity_values, "complexity_values")
-    if snr.shape != complexity_array.shape:
-        raise ValueError(
-            f"arc_snr_values holds {snr.size} entries and complexity_values holds "
-            f"{complexity_array.size}."
-        )
-    score = standardize(np.log(snr))
-    if variant == "s_plus_c":
-        score = score + standardize(np.log(complexity_array))
+    from collections.abc import Mapping
+    if not isinstance(weights, Mapping) or set(weights) != {'snr', 'complexity'}:
+        raise ValueError("weights must name exactly snr and complexity")
+    snr_weight = _require_non_negative(weights['snr'], 'weights.snr')
+    complexity_weight = _require_non_negative(weights['complexity'], 'weights.complexity')
+    if snr_weight + complexity_weight <= 0:
+        raise ValueError('at least one score weight must be positive')
+    snr = _require_log_ready(arc_snr_values, 'arc_snr_values')
+    morphology = _require_log_ready(complexity_values, 'complexity_values')
+    if snr.shape != morphology.shape:
+        raise ValueError('arc_snr_values and complexity_values must have the same shape')
+    score = snr_weight * standardize(np.log(snr))
+    if complexity_weight:
+        score = score + complexity_weight * standardize(np.log(morphology))
     return score
 
 
@@ -747,11 +567,11 @@ def rank_by_score(system_ids, scores):
 def rank_by_sensitivity(system_ids, m_lim_log10_msun):
     """Rank one pool by measured sensitivity, best first.
 
-    The oracle curve of the pre-registered comparison. A lower detectable
+    A lower detectable
     subhalo mass is a more sensitive system, so the ranking is ascending
     in ``log10(M_lim)``. This ranking may only be formed after the
     injected-subhalo ladders are measured; the operational score is
-    frozen before any of these values exist.
+    declared before any of these values exist.
 
     Parameters
     ----------
@@ -776,90 +596,29 @@ def rank_by_sensitivity(system_ids, m_lim_log10_msun):
     return _rank(system_ids, keys, descending=False)
 
 
-def rank_pool(
-    system_ids,
-    theta_e_arcsec,
-    arc_snr_values,
-    complexity_values,
-    variant="s_plus_c",
-    selected_size=SELECTED_TIER_SIZE,
-    golden_size=GOLDEN_TIER_SIZE,
-    *,
-    theta_e_min_arcsec=FLOOR_THETA_E_ARCSEC,
-    arc_snr_min=FLOOR_ARC_SNR,
-):
-    """Run the whole frozen rule over one Stage 0 pool.
-
-    Floor cuts, then standardization over the survivors, then the score,
-    then the ranking and its tiers.
-
-    Parameters
-    ----------
-    system_ids : sequence of `str`
-        Unique non-empty system identifiers.
-    theta_e_arcsec : array-like
-        Einstein radii in arcseconds.
-    arc_snr_values : array-like
-        Integrated arc signal-to-noise.
-    complexity_values : array-like
-        Complexity statistic.
-    variant : `str`, optional
-        Member of `SCORE_VARIANTS`.
-    selected_size : `int`, optional
-        Selected-tier size, the frozen `SELECTED_TIER_SIZE`.
-    golden_size : `int`, optional
-        Golden-tier size, the frozen `GOLDEN_TIER_SIZE`.
-    theta_e_min_arcsec, arc_snr_min : `float`, optional
-        Survey-specific strict floor thresholds. Defaults preserve RASTI.
-
-    Returns
-    -------
-    result : `SelectionResult`
-        Cuts, scores, ranking and tiers.
-
-    Raises
-    ------
-    ValueError
-        Raised when the inputs disagree in length, when a survivor has an
-        inadmissible statistic, when the tier sizes are not ordered
-        positive integers, or when too few members survive the cuts to
-        fill the selected tier.
-    """
-    ids = _require_ids(system_ids, "system_ids")
-    passed = apply_floor_cuts(
-        theta_e_arcsec, arc_snr_values,
-        theta_e_min_arcsec=theta_e_min_arcsec, arc_snr_min=arc_snr_min,
-    )
+def rank_pool(system_ids, theta_e_arcsec, arc_snr_values, complexity_values, *,
+              weights, selected_size, theta_e_min_arcsec, arc_snr_min):
+    """Apply declared cuts, feature weights and top-k to one population."""
+    ids = _require_ids(system_ids, 'system_ids')
+    passed = apply_floor_cuts(theta_e_arcsec, arc_snr_values,
+                             theta_e_min_arcsec=theta_e_min_arcsec, arc_snr_min=arc_snr_min)
     if passed.size != len(ids):
-        raise ValueError(f"system_ids holds {len(ids)} entries and the statistics hold {passed.size}.")
-    for name, size in (("selected_size", selected_size), ("golden_size", golden_size)):
-        if isinstance(size, bool) or not isinstance(size, (int, np.integer)) or int(size) < 1:
-            raise ValueError(f"{name} must be a positive integer, got {size!r}.")
-    if int(golden_size) > int(selected_size):
-        raise ValueError(
-            f"golden_size {int(golden_size)} exceeds selected_size {int(selected_size)}."
-        )
+        raise ValueError('system_ids and the statistics must have the same entries')
+    if isinstance(selected_size, bool) or not isinstance(selected_size, (int, np.integer)) or selected_size < 1:
+        raise ValueError('selected_size must be a positive integer')
     survivors = np.flatnonzero(passed)
-    if survivors.size < int(selected_size):
-        raise ValueError(
-            f"{survivors.size} of {len(ids)} pool members survive the floor cuts, too few to "
-            f"fill a selected tier of {int(selected_size)}."
-        )
+    if survivors.size < selected_size:
+        raise ValueError('too few survivors to fill the selected size')
     survivor_ids = tuple(ids[index] for index in survivors)
     snr = np.asarray(arc_snr_values, dtype=float)[survivors]
-    complexity_array = np.asarray(complexity_values, dtype=float)[survivors]
-    scores = selection_scores(snr, complexity_array, variant=variant)
+    morphology = np.asarray(complexity_values, dtype=float)
+    if morphology.shape != passed.shape:
+        raise ValueError('complexity_values and the statistics must have the same entries')
+    scores = selection_scores(snr, morphology[survivors], weights=weights)
     ranking = rank_by_score(survivor_ids, scores)
-    return SelectionResult(
-        variant=variant,
-        system_ids=ids,
-        passed_floor=tuple(bool(entry) for entry in passed),
-        survivor_ids=survivor_ids,
-        scores=tuple(float(entry) for entry in scores),
-        ranking=ranking,
-        selected_ids=ranking[: int(selected_size)],
-        golden_ids=ranking[: int(golden_size)],
-    )
+    return SelectionResult(system_ids=ids, passed_floor=tuple(bool(x) for x in passed),
+                           survivor_ids=survivor_ids, scores=tuple(float(x) for x in scores),
+                           ranking=ranking, selected_ids=ranking[:int(selected_size)])
 
 
 def ranking_positions(ranking):
@@ -959,7 +718,7 @@ def top_k_jaccard(ranking_a, ranking_b, k):
     ranking_a, ranking_b : sequence of `str`
         System ids, best first.
     k : `int`
-        Tier size, normally `SELECTED_TIER_SIZE`.
+        Tier size, declared by the caller.
 
     Returns
     -------
@@ -987,7 +746,7 @@ def oracle_recovered_fraction(ranking, oracle_ranking, k):
     oracle_ranking : sequence of `str`
         Ranking by measured sensitivity, best first.
     k : `int`
-        Tier size, normally `SELECTED_TIER_SIZE`.
+        Tier size, declared by the caller.
 
     Returns
     -------

@@ -1,57 +1,18 @@
-"""Pytest configuration for lensing test compatibility."""
+"""Collection policy without global backend configuration or JIT mutation."""
 
-from __future__ import annotations
-
-import importlib.util
-import os
-from pathlib import Path
 import pytest
 
 
-# Study reproductions are intentionally excluded from installed distributions.
-import sys
-_TEST_REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(_TEST_REPO_ROOT), str(_TEST_REPO_ROOT / "src"),
-                str(_TEST_REPO_ROOT / "scripts"),
-                str(_TEST_REPO_ROOT / "studies/rasti/scripts")]
-
-
-def pytest_configure() -> None:
-    """Preload `autoarray` config and disable numba JIT for stable imports."""
-    os.environ.setdefault("NUMBA_DISABLE_JIT", "1")
-
-    try:
-        from autoconf import conf as autoconf_conf
-    except Exception:
-        return
-
-    autoarray_spec = importlib.util.find_spec("autoarray")
-    if autoarray_spec is None or autoarray_spec.origin is None:
-        return
-
-    config_path = Path(autoarray_spec.origin).resolve().parent / "config"
-    if not config_path.exists():
-        return
-
-    autoconf_conf.instance.push(str(config_path), keep_first=True)
-
-
 def pytest_collection_modifyitems(config, items):
-    """Skip xtx_gpu tests when JAX or a GPU runtime is unavailable."""
-    for item in items:
-        if not item.get_closest_marker("xtx_gpu"):
-            continue
-
-        reason = None
-        try:
-            import jax
-        except Exception as exc:
-            reason = f"requires jax for xtx_gpu tests: {type(exc).__name__}"
-        else:
-            try:
-                if not jax.devices("gpu"):
-                    reason = "requires a JAX GPU device"
-            except RuntimeError as exc:
-                reason = f"jax.devices('gpu') failed: {type(exc).__name__}"
-        if reason:
-            item.add_marker(pytest.mark.skip(reason=reason))
+    """Skip explicitly GPU-owned contracts when the backend is unavailable."""
+    gpu_tests = [item for item in items if item.get_closest_marker("xtx_gpu")]
+    if not gpu_tests:
+        return
+    try:
+        import jax
+        available = bool(jax.devices("gpu"))
+    except (ImportError, RuntimeError):
+        available = False
+    if not available:
+        for item in gpu_tests:
+            item.add_marker(pytest.mark.skip(reason="requires a JAX GPU backend"))

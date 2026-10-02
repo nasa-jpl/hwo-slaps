@@ -1,34 +1,37 @@
-# Test Notes
+# Scientific contract tests
 
-Run the full suite:
+The default test harness does not configure optional backends, alter Numba JIT,
+or add study/script directories. Core tests use the package through ordinary
+imports. CI routing is defined in `.github/workflows/tests.yml`.
 
-```bash
-python -m pytest -q
-```
-
-Run the fast physics/config tier:
+A focused dependency-light check is:
 
 ```bash
-python -m pytest -q \
-  tests/test_lensing_physics.py \
-  tests/test_lensing_concentration.py \
-  tests/test_config_validation_redshift_order.py \
-  tests/test_config_validation_nfw_concentration.py \
-  tests/test_config_validation_subhalo_angle_offset.py \
-  tests/test_fisher_core.py \
-  tests/test_fisher_adapter.py
+python -m pytest -q tests/test_config_loading.py tests/test_population.py \
+  tests/test_forecast_artifacts.py tests/test_cli.py tests/test_package_boundaries.py
 ```
 
-Run the AutoLens integration tier:
+The package-boundary keeper builds a wheel in a temporary project, imports it
+outside the checkout, blocks optional backend imports, and invokes the actual
+console entry point from wheel metadata. It needs the standard build tools
+(setuptools, wheel, pip) but installs no wheel or optional backend.
+
+Use the supported backend environment for the complete scientific suite:
 
 ```bash
-python -m pytest -q \
-  tests/test_lensing_physics_integration.py \
-  tests/test_lensing_nfw_provenance.py \
-  tests/test_lensing_rng_isolation.py \
-  tests/test_observation_module.py \
-  tests/test_pipeline_fisher_routing.py \
-  tests/test_fisher_detector_runtime.py
+python tools/run_backend_tests.py tests -q -m 'not xtx_gpu'
 ```
 
-The Fisher / Asimov path is the maintained modeling path for study work.
+That explicit launcher prepares AutoArray configuration and isolates generated
+logs in a temporary working directory. Its default Numba policy matches the
+validated reference test lane. Compiled backend checks opt in explicitly:
+
+```bash
+python tools/run_backend_tests.py --numba-jit enabled tests -q
+python tools/run_backend_tests.py --require-gpu --numba-jit enabled tests -q -m xtx_gpu
+```
+
+GPU CI requires a manually dispatched job on a configured GPU runner. The
+launcher fails if CUDA is unavailable rather than reporting a passing skipped
+GPU lane. Test results belong to their captured source snapshot; keep source
+immutable during each run.

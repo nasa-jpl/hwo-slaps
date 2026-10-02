@@ -1,14 +1,14 @@
 """Reusable bounded profile-optimization settings.
 
-Procedure identifiers retain their historical values for result provenance;
-settings do not depend on a particular release or observing campaign.
+Settings and optimizer provenance identify the numerical procedure, without
+depending on a particular release or observing campaign.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-PROCEDURE_VERSION = "fresh_nonlinear_v7_lbfgsb_v2"
+PROCEDURE_VERSION = "normalized_lbfgsb_v2"
 OBJECTIVE_VERSION = "consistent_sampling_v2"
 
 

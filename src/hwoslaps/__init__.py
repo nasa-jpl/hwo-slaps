@@ -1,26 +1,24 @@
-"""Configurable strong-lensing simulations and sensitivity forecasts.
-
-Public entry points load lazily, so importing the package does not initialize
-optics, plotting, inference backends, or accelerator runtimes.
-"""
+"""Reusable strong-lensing observations and subhalo sensitivity forecasts."""
 from __future__ import annotations
-
 from importlib import import_module
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
 _PUBLIC_API = {
-    "run_pipeline": ("pipeline", "run_pipeline"),
-    "run_enhanced_pipeline": ("pipeline", "run_enhanced_pipeline"),
-    "run_with_artifacts": ("cli", "run_with_artifacts"),
+    "PreparedForecast": ("forecasting", "PreparedForecast"),
+    "prepare_forecast": ("forecasting", "prepare_forecast"),
+    "forecast": ("forecasting", "forecast"),
+    "simulate": ("forecasting", "simulate"),
+    "ForecastResult": ("modeling.forecast_results", "ForecastResult"),
+    "summarize_forecast": ("modeling.forecast_results", "summarize_forecast"),
+    "mass_reach": ("modeling.mass_reach", "mass_reach"),
+    "adaptive_mass_reach": ("modeling.mass_reach", "adaptive_mass_reach"),
+    "validate_nonlinear": ("modeling.nonlinear.api", "validate_nonlinear"),
     "sample_population": ("population", "sample_population"),
     "iter_population_configs": ("population", "iter_population_configs"),
+    "save_forecast_result": ("forecast_artifacts", "save_forecast_result"),
+    "load_forecast_result": ("forecast_artifacts", "load_forecast_result"),
 }
 __all__ = list(_PUBLIC_API)
-
-if TYPE_CHECKING:
-    from .cli import run_with_artifacts
-    from .pipeline import run_enhanced_pipeline, run_pipeline
-    from .population import iter_population_configs, sample_population
 
 
 def __getattr__(name: str) -> Any:

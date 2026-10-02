@@ -10,7 +10,7 @@ import autofit as af
 import autolens as al
 import numpy as np
 import pytest
-import yaml
+from nonlinear_fixtures import scene_config
 from astropy import constants as const
 
 from hwoslaps.constants import ARCSEC_PER_RAD, KPC_TO_M, MPC_TO_M
@@ -34,10 +34,8 @@ from hwoslaps.modeling.nonlinear.mass_mapping import (
 )
 
 
-def _scene_config(name="scene1_smooth_ring.yaml"):
-    """Load one canonical scene configuration."""
-    with open(f"configs/scenes/{name}", encoding="utf-8") as stream:
-        return yaml.safe_load(stream)
+def _scene_config():
+    return scene_config()
 
 
 def _old_nfw_formula(mass, concentration, z_lens, z_source, cosmology):

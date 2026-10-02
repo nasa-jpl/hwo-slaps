@@ -42,7 +42,6 @@ def master_config() -> dict:
 def _compact_full_config(config: dict) -> dict:
     """Return a small full config that still exercises the real PSF path."""
     cfg = copy.deepcopy(config)
-    cfg["plotting"]["enabled"] = False
     cfg["psf"]["hres_psf"]["num_pix"] = 64
     cfg["psf"]["hres_psf"]["num_airy"] = 4
     cfg["psf"]["hres_psf"]["save_highres_psf_npy"] = False
@@ -252,3 +251,20 @@ def test_psfdata_wavefront_is_not_the_same_object_as_focal_plane_psf(compact_con
 
     assert psf_data.wavefront is not psf_data.psf
     assert psf_data.wavefront.electric_field.grid is psf_data.telescope_data["pupil_grid"]
+
+
+def test_segment_hexike_api_rejects_zero_based_mode_indices(compact_telescope):
+    with pytest.raises(ValueError, match='1-based Noll'):
+        apply_segment_zernikes({0: {0: 40.0, 1: 10.0}}, compact_telescope, compact_telescope['wavelength'])
+
+
+@pytest.mark.parametrize('mode,accepted', [(0, False), (1, True)])
+def test_config_validation_enforces_one_based_segment_hexike_modes(compact_config, mode, accepted):
+    config = copy.deepcopy(compact_config)
+    config['psf']['aberrations']['enable_segment_hexikes'] = True
+    config['psf']['aberrations']['segment_hexikes'] = {0: {mode: 100.0}}
+    if accepted:
+        validate_or_raise(config)
+    else:
+        with pytest.raises(ValueError, match='1-based Noll'):
+            validate_or_raise(config)

@@ -33,13 +33,11 @@ ensembles and must not change silently:
   keeping it would overstate the stated amplitude relative to the
   piston-removed pupil RMS that the PSF generator measures.
 - A zero target RMS returns an empty dictionary, meaning no perturbation.
-- Combined-family draws are composed at the ensemble level by splitting the
-  RMS budget across families (the SPIE convention is equal variance,
-  ``target/sqrt(2)`` per family) and drawing each family at its budget.
+- Combined-family draws split the RMS budget across families and draw each
+  family at its declared budget; equal variance uses ``target/sqrt(2)``.
 - Coefficient-space normalization is exact for segment families but not for
   global Zernikes, whose disk-normalized modes lose mode-dependent RMS when
-  restricted to the segmented aperture (SPIE ensembles measured 0.87 +/- 0.05
-  of nominal). RASTI ensembles must therefore realize draws through
+  restricted to a segmented aperture. Aperture-normalized ensembles use
   `renormalize_to_aperture_rms`, which rescales the drawn coefficients so
   the measured piston-removed aperture RMS equals the target exactly for
   every family and for joint (combined) draws.

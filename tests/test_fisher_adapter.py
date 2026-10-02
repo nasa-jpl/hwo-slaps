@@ -82,11 +82,11 @@ def test_stack_masked_images_builds_design_matrix():
 
 
 def test_compute_asimov_from_images_matches_manual_vector_call():
-    """Match the image adapter against a manual vector call."""
+    """Profile independently specified selected pixels with nonuniform noise."""
     smooth = np.array([[1.0, 1.0], [1.0, 1.0]])
-    subhalo = np.array([[2.0, 1.0], [1.0, 1.0]])
-    sigma = np.ones_like(smooth)
-    nuisance = [np.array([[0.0, 1.0], [0.0, 0.0]])]
+    subhalo = np.array([[2.0, 1.0], [1.0, 3.0]])
+    sigma = np.array([[2.0, 0.5], [1.0, 3.0]])
+    nuisance = [np.array([[1.0, 2.0], [0.0, 1.0]])]
     mask = np.array([[True, True], [False, True]])
 
     image_result = compute_asimov_from_images(
@@ -97,16 +97,18 @@ def test_compute_asimov_from_images_matches_manual_vector_call():
         mask=mask,
     )
 
-    signal = flatten_masked_image(subhalo - smooth, mask=mask)
-    nuisance_vec = stack_masked_images(nuisance, mask=mask)
-    manual_result = core_module.compute_asimov_detectability(
-        signal=signal,
-        nuisance_jacobian=nuisance_vec,
-        sigma=np.ones(signal.size),
-    )
-
-    assert image_result.fisher_profiled == pytest.approx(manual_result.fisher_profiled)
-    assert image_result.z_asimov_local == pytest.approx(manual_result.z_asimov_local)
+    # Selected pixels are (0,0), (0,1), (1,1); neither adapter helper is
+    # used to produce these independent vectors or their weighted projection.
+    signal = np.array([1., 0., 2.])
+    direction = np.array([1., 2., 1.])
+    precision = np.array([.25, 4., 1. / 9.])
+    raw = float(np.sum(signal * signal * precision))
+    cross = float(np.sum(signal * direction * precision))
+    gram = float(np.sum(direction * direction * precision))
+    profiled = raw - cross * cross / gram
+    assert image_result.fisher_raw == pytest.approx(raw)
+    assert image_result.fisher_profiled == pytest.approx(profiled)
+    assert image_result.z_asimov_local == pytest.approx(np.sqrt(profiled))
 
 
 def test_signal_bank_from_images_is_vectorized_over_templates():

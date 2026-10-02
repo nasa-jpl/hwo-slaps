@@ -47,6 +47,21 @@ def _sie_galaxy(einstein_radius=1.0, ell_comps=(0.0, 0.0), centre=(0.0, 0.0)):
     )
 
 
+@pytest.mark.parametrize('axis_ratio', [0.5, 0.75])
+def test_elliptical_isothermal_critical_area_matches_analytic_factor(axis_ratio):
+    """Measured critical area follows 2 sqrt(q)/(1+q), independently of study policy."""
+    import autogalaxy as ag
+
+    ell_comps = ag.convert.ell_comps_from(axis_ratio=axis_ratio, angle=30.0)
+    extraction = cc.extract_theta_e(
+        _sie_galaxy(ell_comps=ell_comps),
+        lens_centre_arcsec=(0.0, 0.0),
+        grid=cc.CriticalCurveGrid(requested_half_width_arcsec=4.0, pixel_scale_arcsec=0.005),
+    )
+    expected = 2 * math.sqrt(axis_ratio) / (1 + axis_ratio)
+    assert extraction.theta_e_eff_arcsec == pytest.approx(expected, abs=2e-4)
+
+
 def test_polygon_area_is_hand_calculable():
     """Shoelace areas match hand values for squares and a circle."""
     assert cc.polygon_area(UNIT_SQUARE) == pytest.approx(1.0)
@@ -381,4 +396,3 @@ def test_massless_model_raises_missing_curve_error():
                 requested_half_width_arcsec=4.0, pixel_scale_arcsec=0.05
             ),
         )
-

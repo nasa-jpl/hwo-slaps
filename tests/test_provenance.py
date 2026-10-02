@@ -26,6 +26,9 @@ def test_config_hash_is_stable_and_key_order_insensitive():
     assert digest == config_hash(config_b)
     assert len(digest) == 16
     assert digest != config_hash({"run_name": "other"})
+    assert config_hash({"n": True}) != config_hash({"n": 1})
+    sequence = {"axis": (1, 2)}
+    assert config_hash(sequence) == config_hash(yaml.safe_load(yaml.safe_dump(sequence)))
 
 
 def test_capture_provenance_records_expected_fields():

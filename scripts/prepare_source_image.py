@@ -19,12 +19,6 @@ SCRIPT_VERSION = 2
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
-OBSERVING_REFERENCE_RELPATH = 'configs/observing/hwo_eac1_hri_reference_v1.yaml'
-"""Committed physical observing reference carrying the detected source rate."""
-
-PRODUCTION_SCENE_RELPATH = 'configs/scenes/scene4_cosmos.yaml'
-"""Production Image-source scene supplying the contract render geometry."""
-
 PIXEL_SCALE_ABS_TOLERANCE = 1.0e-12
 """Accepted departure between the scene and reference pixel scales."""
 
@@ -423,7 +417,7 @@ def detected_rate_reference(reference_path):
 
     The rate is the physical photometry of the observing reference, in
     detected electrons per second for the unlensed intrinsic source. It
-    is never the qualification profile angular integral.
+    is kept separate from a profile surface-brightness normalization.
 
     Parameters
     ----------
@@ -651,10 +645,6 @@ def solve_detected_rate_normalization(asset_path, reference, grid_config,
             'surface brightness at ray-traced source-plane positions; no '
             'magnification factor multiplies the normalization anywhere.'
         ),
-        'qualification_convention_note': (
-            'The 0.289151264 qualification value is a profile angular '
-            'integral in profile units and is never a detected electron rate.'
-        ),
         'observing_reference': {
             'path': reference['reference_path'],
             'sha256': reference['reference_sha256'],
@@ -747,8 +737,7 @@ def _verify_contract_input(contract, key, path, description):
         )
 
 
-def verify_asset_rate_contract(asset_path, scene_path=None,
-                               reference_path=None):
+def verify_asset_rate_contract(asset_path, scene_path, reference_path):
     """Re-render one written asset and check its stored rate contract.
 
     The stored observing-reference and production-scene digests are
@@ -759,14 +748,12 @@ def verify_asset_rate_contract(asset_path, scene_path=None,
     ----------
     asset_path : `str` or `pathlib.Path`
         Prepared asset carrying ``provenance.rate_contract``.
-    scene_path : `str` or `pathlib.Path`, optional
-        Production scene to render on. Defaults to the committed
-        production Image scene. It must be the byte-identical file the
+    scene_path : `str` or `pathlib.Path`
+        Scene to render on. It must be the byte-identical file the
         contract was solved against.
-    reference_path : `str` or `pathlib.Path`, optional
+    reference_path : `str` or `pathlib.Path`
         Observing reference the stored target rate must still match.
-        Defaults to the committed observing reference. It must be the
-        byte-identical file the contract was solved against.
+        It must be the byte-identical file the contract was solved against.
 
     Returns
     -------
@@ -776,16 +763,8 @@ def verify_asset_rate_contract(asset_path, scene_path=None,
     from hwoslaps.lensing import load_source_image_asset
 
     asset_path = Path(asset_path).expanduser().resolve()
-    scene_path = Path(
-        scene_path
-        if scene_path is not None
-        else PROJECT_ROOT / PRODUCTION_SCENE_RELPATH
-    ).expanduser().resolve()
-    reference_path = Path(
-        reference_path
-        if reference_path is not None
-        else PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH
-    ).expanduser().resolve()
+    scene_path = Path(scene_path).expanduser().resolve()
+    reference_path = Path(reference_path).expanduser().resolve()
 
     _clear_asset_loader_cache()
     asset = load_source_image_asset(asset_path)
@@ -934,13 +913,11 @@ def _argument_parser():
     )
     parser.add_argument(
         '--rate-contract-reference',
-        default=str(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH),
-        help='observing reference supplying the target detected rate',
+        help='explicit observing reference supplying the target detected rate',
     )
     parser.add_argument(
         '--rate-contract-scene',
-        default=str(PROJECT_ROOT / PRODUCTION_SCENE_RELPATH),
-        help='production Image-source scene supplying the contract render',
+        help='explicit Image-source scene supplying the contract render',
     )
     return parser
 
@@ -958,7 +935,10 @@ def main(argv=None):
     status : `int`
         Zero on success.
     """
-    args = _argument_parser().parse_args(argv)
+    parser = _argument_parser()
+    args = parser.parse_args(argv)
+    if args.rate_contract and (args.rate_contract_reference is None or args.rate_contract_scene is None):
+        parser.error('--rate-contract requires --rate-contract-reference and --rate-contract-scene')
     input_path = Path(args.input).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
     image = load_input_image(input_path)

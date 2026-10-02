@@ -9,13 +9,12 @@ from importlib import import_module
 from typing import Any
 
 _EXPORT_MODULES = {
+    'validate_nonlinear': 'api',
     'AutoLensFitRunner': 'autolens_runner',
     'CalibrationPair': 'calibration',
     'FisherNonlinearCalibration': 'calibration',
     'FreshProfileSettings': 'profile_settings',
     'LikelihoodRatioMetric': 'likelihood_metrics',
-    'LocalFitAttempt': 'local_profile',
-    'LocalProfileFitResult': 'local_profile',
     'MassMappingContext': 'mass_mapping',
     'NFWMCRSubhaloSph': 'mass_mapping',
     'NonlinearCaseResult': 'output_schema',
@@ -39,12 +38,10 @@ _EXPORT_MODULES = {
     'delta_log_l_from_q': 'likelihood_metrics',
     'evaluate_mass_mapping': 'mass_mapping',
     'extract_subhalo_recovery': 'output_schema',
-    'fit_local_least_squares_profile': 'local_profile',
     'fit_q_calibration': 'calibration',
     'fixed_point_model_spec_from_trial': 'autolens_model_builder',
     'linked': 'model_specs',
     'pair_fisher_and_nonlinear': 'calibration',
-    'profile_likelihood_q': 'local_profile',
     'profile_likelihood_ratio': 'likelihood_metrics',
     'q_from_delta_log_l': 'likelihood_metrics',
     'run_psf_mismatch_case': 'psf_mismatch',

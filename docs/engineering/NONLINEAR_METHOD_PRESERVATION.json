@@ -1,0 +1,244 @@
+{
+  "baseline": "bf73e2c",
+  "method": "SHA256 of AST including annotations/defaults, excluding docstrings/location/comments",
+  "modules": {
+    "src/hwoslaps/modeling/nonlinear/fresh_profile.py": {
+      "preserved": [
+        "_residual_array",
+        "CurrentSearchStart.from_physical",
+        "CurrentSearchStart.to_dict",
+        "prior_box",
+        "normalize_physical_vector",
+        "denormalize_vector",
+        "_finite_vector",
+        "_summary_ml",
+        "posterior_sigma_normalized",
+        "select_current_search_starts",
+        "record_best_finite",
+        "projected_gradient",
+        "support_summary",
+        "make_jax_objective",
+        "_run_one_start",
+        "_incumbent_record",
+        "optimize_current_search_profile",
+        "FreshProfileRunner.__init__",
+        "FreshProfileRunner.run_model",
+        "FreshProfileValidator.__init__",
+        "FreshProfileValidator.validate_case"
+      ],
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/autolens_model_builder.py": {
+      "preserved": [
+        "_widths",
+        "_uniform_around",
+        "_uniform_fraction",
+        "_clipped_uniform",
+        "_ell_prior",
+        "_pin_local_prior",
+        "_guard_supported_config",
+        "_macro_components",
+        "_analytic_source_profile",
+        "_source_components",
+        "smooth_model_spec_from_config",
+        "_validate_freed_context",
+        "_freed_mass_prior",
+        "_prior_support_bounds",
+        "subhalo_model_spec_from_trial",
+        "fixed_point_model_spec_from_trial",
+        "_prior_to_autofit",
+        "_profile_class",
+        "_assign_profile_value",
+        "_assign_profile_parameter",
+        "_profile_parameter_value",
+        "_profile_model_from_spec",
+        "autofit_model_from_spec"
+      ],
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/mass_mapping.py": {
+      "preserved": [
+        "_as_float",
+        "_xp_for",
+        "_cosmology_from_name",
+        "_infer_reduced_h",
+        "_canonical_context_hash",
+        "_validate_geometry",
+        "_validate_context_inputs",
+        "_build_context",
+        "build_mass_mapping_context",
+        "build_mass_mapping_context_explicit",
+        "evaluate_mass_mapping",
+        "_build_profile_classes",
+        "__getattr__"
+      ],
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/likelihood_metrics.py": {
+      "preserved": [
+        "LikelihoodRatioMetric.to_dict",
+        "_require_finite",
+        "q_from_delta_log_l",
+        "delta_log_l_from_q",
+        "z_from_q",
+        "profile_likelihood_ratio"
+      ],
+      "changed": [],
+      "removed": [],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/dataset_builder.py": {
+      "preserved": [
+        "NonlinearDatasetMetadata.to_dict",
+        "_validate_choice",
+        "known_sky_dark_background_adu",
+        "source_only_data_electron_rate",
+        "source_only_data_adu",
+        "data_array_from_observation",
+        "noise_rate_from_observation",
+        "mask_from_fisher_use_mask",
+        "_exclude_psf_edge_pixels",
+        "_kernel_from_any",
+        "_set_consistent_blurring",
+        "_sampling_metadata",
+        "_grid_geometry_identity",
+        "fitted_kernel_sha256"
+      ],
+      "changed": [
+        "imaging_from_observation",
+        "rendering_identity"
+      ],
+      "removed": [
+        "consistent_sampling_copy"
+      ],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/profile_calibration.py": {
+      "preserved": [
+        "_instance_value",
+        "_native_residual",
+        "ZeroResidualAnchorRunner.__init__",
+        "ZeroResidualAnchorRunner.make_analysis",
+        "ZeroResidualAnchorRunner.preflight_anchor",
+        "ZeroResidualAnchorRunner._evaluate_anchor",
+        "ZeroResidualAnchorRunner.run_model"
+      ],
+      "changed": [
+        "likelihood_matched_tangent"
+      ],
+      "removed": [],
+      "added": [
+        "linearized_comparator"
+      ]
+    },
+    "src/hwoslaps/modeling/nonlinear/autolens_runner.py": {
+      "preserved": [
+        "NonlinearSearchSettings.__post_init__",
+        "ensure_jax_x64",
+        "_installed_version",
+        "_accepts_keyword",
+        "ensure_target_jax_backend",
+        "_metadata_value",
+        "_native_array",
+        "_array_hash",
+        "_mask_hash",
+        "_pixel_scales",
+        "_get_nested_attr",
+        "_coerce_log_likelihood",
+        "extract_max_log_likelihood_with_method",
+        "extract_max_log_likelihood",
+        "_extract_log_evidence",
+        "_extract_result_path",
+        "_model_parameter_count",
+        "_n_like_max_reached",
+        "_search_setting",
+        "_effective_sampler_settings",
+        "_effective_f_live",
+        "validate_effective_sampler_settings",
+        "_apply_search_internal_retention",
+        "_restore_search_internal_retention",
+        "_sha256_bytes",
+        "_sha256_path",
+        "inspect_search_internal_payload",
+        "_search_internal_artifact_exists",
+        "_filter_kwargs",
+        "_patch_analysis_imaging_adapt_images_compat",
+        "_NetworkTrainingPool.__init__",
+        "_NetworkTrainingPool.map",
+        "_NetworkTrainingPool.close",
+        "_NetworkTrainingPool.join",
+        "_NetworkTrainingPool.terminate",
+        "_training_worker_count",
+        "_training_pool_for_current_env",
+        "_close_training_pools",
+        "_training_runtime_provenance",
+        "_nautilus_training_pool_scope",
+        "AutoLensFitRunner.__init__",
+        "AutoLensFitRunner.make_analysis",
+        "AutoLensFitRunner._make_search",
+        "AutoLensFitRunner._effective_jax_provenance",
+        "AutoLensFitRunner.run_model"
+      ],
+      "changed": [
+        "analysis_key_from"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/validator.py": {
+      "preserved": [
+        "_metadata_field",
+        "NonlinearMetricValidator.__init__",
+        "NonlinearMetricValidator.validate_case",
+        "NonlinearMetricValidator.validate_fixed_template"
+      ],
+      "changed": [
+        "_validate_fit_psf_dataset",
+        "_validate_fit_psf_dataset_identity"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/profile_settings.py": {
+      "preserved": [
+        "FreshProfileSettings.__post_init__",
+        "FreshProfileSettings.from_mapping"
+      ],
+      "changed": [
+        "FreshProfileSettings.to_dict"
+      ],
+      "removed": [],
+      "added": []
+    },
+    "src/hwoslaps/modeling/nonlinear/trial.py": {
+      "preserved": [
+        "SubhaloTrial.to_dict",
+        "_case_id_from_trial",
+        "_profile_class_from_model",
+        "trial_from_lensing_truth",
+        "subhalo_truth_config",
+        "_profile_scales_for_mass"
+      ],
+      "changed": [
+        "trial_from_fisher_map_position"
+      ],
+      "removed": [],
+      "added": []
+    }
+  },
+  "intentional_changes": [
+    "analysis_key_from historical schema argument retired",
+    "imaging_from_observation and rendering_identity current objective only",
+    "kernel identity guard branches",
+    "FreshProfileSettings.to_dict includes missing posterior sigma",
+    "optimizer provenance constant generic name",
+    "trial_from_fisher_map_position handles actual smooth-scene null truth fields; separate baseline-red control requested"
+  ],
+  "extracted_comparator_ast_identical": true
+}

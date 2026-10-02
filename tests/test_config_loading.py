@@ -9,7 +9,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from hwoslaps.config import load_config, merge_configs, resolve_config_paths, run_directory
+from hwoslaps.config import load_config, merge_configs, resolve_config_paths
 
 
 def _write(path, document):
@@ -104,13 +104,46 @@ def test_resolver_changes_only_schema_paths_and_preserves_null(tmp_path):
     assert original["plotting"]["output_dir"] == Path("results")
 
 
-@pytest.mark.parametrize("name", ["", " ", ".", "..", "../escape", "a/b", "a\\b"])
-def test_artifact_run_name_is_one_directory_component(name):
-    with pytest.raises(ValueError, match="run_name"):
-        run_directory({"run_name": name, "plotting": {"output_dir": "/tmp/results"}})
 
 
-def test_repository_master_config_validates_without_science_imports():
+def test_scientific_configuration_has_no_application_output_requirements(tmp_path):
     root = Path(__file__).resolve().parents[1]
-    config = load_config(root / "configs/master_config.yaml")
-    assert Path(config["plotting"]["output_dir"]).is_absolute()
+    config = yaml.safe_load((root / "configs/master_config.yaml").read_text())
+    config.pop("run_name", None)
+    config.pop("plotting", None)
+    config.pop("modeling", None)
+    path = _write(tmp_path / "science.yaml", config)
+    loaded = load_config(path)
+    assert "run_name" not in loaded and "plotting" not in loaded and "modeling" not in loaded
+    assert loaded["observation"]["exposure_time"] == config["observation"]["exposure_time"]
+
+
+def test_truth_and_fit_kernel_paths_belong_to_their_declaring_files(tmp_path):
+    import numpy as np
+
+    root = Path(__file__).resolve().parents[1]
+    config = yaml.safe_load((root / "configs/master_config.yaml").read_text())
+    config.pop("plotting", None)
+    config.pop("run_name", None)
+    config.pop("modeling", None)
+    scale = config["lensing"]["grid"]["pixel_scale"]
+    truth_dir, fit_dir = tmp_path / "truth", tmp_path / "fit"
+    truth_dir.mkdir()
+    fit_dir.mkdir()
+    np.save(truth_dir / "kernel.npy", np.ones((3, 3)) / 9)
+    np.save(fit_dir / "kernel.npy", np.ones((5, 5)) / 25)
+    config["psf"] = {
+        "provider": "kernel", "kernel": {"path": "kernel.npy", "pixel_scale_arcsec": scale},
+    }
+    truth = _write(truth_dir / "scene.yaml", config)
+    fit = _write(fit_dir / "model.yaml", {
+        "psf": {"fit_kernel": {"path": "kernel.npy", "pixel_scale_arcsec": scale}},
+    })
+    loaded = load_config([truth, fit])
+    assert loaded["psf"]["kernel"]["path"] == str(truth_dir / "kernel.npy")
+    assert loaded["psf"]["fit_kernel"]["path"] == str(fit_dir / "kernel.npy")
+    fit_config = yaml.safe_load(fit.read_text())
+    fit_config["psf"]["fit_kernel"]["pixel_scale_arcsec"] *= 2
+    _write(fit, fit_config)
+    with pytest.raises(ValueError, match="must match lensing.grid.pixel_scale"):
+        load_config([truth, fit])

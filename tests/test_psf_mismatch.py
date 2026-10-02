@@ -23,7 +23,6 @@ pytest.importorskip("hcipy")
 from hwoslaps.config.validation import validate_or_raise
 from hwoslaps.lensing import generate_lensing_system
 from hwoslaps.modeling.fisher_detector import FisherDetector
-from hwoslaps.modeling.generator_fisher import perform_fisher_detection
 from hwoslaps.modeling.nonlinear.autolens_runner import (
     _array_hash,
     analysis_key_from,
@@ -37,7 +36,6 @@ from hwoslaps.modeling.nonlinear.psf_mismatch import (
     run_psf_mismatch_case,
 )
 from hwoslaps.modeling.nonlinear.validator import NonlinearMetricValidator
-from hwoslaps.modeling.utils_fisher import print_fisher_summary
 from hwoslaps.observation import generate_observation
 from hwoslaps.psf.aberration_models import (
     apply_global_zernikes,
@@ -1437,28 +1435,29 @@ def test_fisher_delta_rejects_altered_observation_scalars(compact_config):
         )
 
 
-def test_fisher_detection_transports_delta_provenance(
+def test_fisher_forecast_npz_preserves_delta_provenance(
     compact_config,
-    capsys,
+    tmp_path,
 ):
-    """Transport detector delta state into FisherDetectionData."""
+    """Preserve actual delta identity through the public forecast artifact."""
     psf_data, baseline, test, observation_baseline, observation_test = (
         _fisher_products(compact_config)
     )
-    result = _quiet_call(
-        perform_fisher_detection,
-        observation_baseline,
-        observation_test,
-        baseline,
-        test,
-        psf_data,
-        detection_config=compact_config["modeling"],
+    detector = _quiet_call(
+        FisherDetector,
+        observation_baseline=observation_baseline,
+        lensing_baseline=baseline,
+        psf_data=psf_data,
         full_config=compact_config,
+        fisher_config=compact_config["modeling"]["fisher"],
     )
-
-    assert result.fit_psf_mode == "delta"
+    result = _quiet_call(detector.evaluate_positions, detector.candidate_positions())
+    from hwoslaps.modeling.forecast_results import ForecastResult
+    path = result.save_npz(tmp_path / "delta-forecast.npz")
+    result = ForecastResult.load_npz(path)
+    assert result.runtime_provenance["fit_psf_mode"] == "delta"
     spec = _build(compact_config)
-    delta = result.fit_psf_delta
+    delta = result.runtime_provenance["fit_psf_delta"]
     assert delta["delta_id"] == spec.delta_id
     assert {
         "draw_aberrations",
@@ -1490,13 +1489,6 @@ def test_fisher_detection_transports_delta_provenance(
         pyauto_kernel_native(psf_data.kernel)
     )
     assert len(delta["fit_kernel_sha256"]) == 64
-    print_fisher_summary(result)
-    output = capsys.readouterr().out
-    assert (
-        "fit_psf mode: delta "
-        f"(delta_id={result.fit_psf_delta['delta_id']}, "
-        "amplitude=5.0 nm, family=combined)"
-    ) in output
 
 
 def test_executor_wraps_kernel_bytes_and_records_truth_binding(compact_config):

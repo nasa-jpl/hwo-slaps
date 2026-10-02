@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from typing import Any
+from .forecast_results import ForecastResult, ForecastSummary, summarize_forecast
+from .mass_reach import MassReach, adaptive_mass_reach, mass_reach
 
 from .fisher_core import (
     AsimovAmplitudeResult,
@@ -35,7 +37,12 @@ from .utils_fisher import (
 )
 
 __all__ = [
-    "perform_fisher_detection",
+    "ForecastResult",
+    "ForecastSummary",
+    "summarize_forecast",
+    "MassReach",
+    "mass_reach",
+    "adaptive_mass_reach",
     "FisherDetector",
     "FisherDetectionData",
     "FisherGridMapData",
@@ -67,10 +74,6 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     """Resolve PyAutoLens-backed Fisher entry points only when requested."""
-    if name == "perform_fisher_detection":
-        from .generator_fisher import perform_fisher_detection
-
-        return perform_fisher_detection
     if name == "FisherDetector":
         from .fisher_detector import FisherDetector
 

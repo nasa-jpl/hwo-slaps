@@ -4,12 +4,9 @@ This module validates that all required configuration values are present and
 well-typed, enforcing a fail-fast policy. It centralizes schema checks used by
 the pipeline before any module code executes.
 
-Policy enforced (per user requirements):
-- Plotting: a global `plotting.enabled` boolean must be present (no defaults).
-- Aberrations: `psf.aberrations` must be present; if no aberrations are
-  desired, all `enable_*` flags must be set to False explicitly.
-- Random seed: a global `global_seed` must be present and is used everywhere.
-- Cosmology: `lensing.cosmology` must be explicitly defined.
+Scientific inputs remain explicit: global random seed, lensing/cosmology,
+observation/detector settings, and an optical or detector-kernel PSF provider.
+Output directories, plotting, run labels, and operation routing belong to callers.
 """
 
 import math
@@ -160,47 +157,27 @@ def _validate_lens_mass(mass: Dict[str, Any], key_path: str) -> None:
 
 
 def validate_top_level(config: Dict[str, Any]) -> None:
-    """Validate the required top-level configuration sections.
-
-    Parameters
-    ----------
-    config : `dict`
-        Full pipeline configuration dictionary.
-
-    Raises
-    ------
-    ValueError
-        Raised if a required top-level key is missing or mistyped.
-    """
-    # Top-level required keys
-    run_name = _require(config, 'run_name', 'top-level')
-    _require_type(run_name, str, 'run_name')
-
-    global_seed = _require(config, 'global_seed', 'top-level')
-    if isinstance(global_seed, bool) or not isinstance(global_seed, int):
-        raise ValueError("global_seed must be an int")
-
-    lensing = _require(config, 'lensing', 'top-level')
-    _require_type(lensing, dict, 'lensing')
-
-    psf = _require(config, 'psf', 'top-level')
-    _require_type(psf, dict, 'psf')
-
-    observation = _require(config, 'observation', 'top-level')
-    _require_type(observation, dict, 'observation')
-
-    plotting = _require(config, 'plotting', 'top-level')
-    _require_type(plotting, dict, 'plotting')
-    enabled = _require(plotting, 'enabled', 'plotting')
-    _require_type(enabled, bool, 'plotting.enabled')
-    # Always require output_dir to be explicit even if enabled is False
-    output_dir = _require(plotting, 'output_dir', 'plotting')
-    _require_type(output_dir, (str,), 'plotting.output_dir')
-
-    modeling = _require(config, 'modeling', 'top-level')
-    _require_type(modeling, dict, 'modeling')
-    modeling_enabled = _require(modeling, 'enabled', 'modeling')
-    _require_type(modeling_enabled, bool, 'modeling.enabled')
+    """Validate scientific inputs without requiring application output state."""
+    _require_type(config, dict, "config")
+    global_seed = _require(config, "global_seed", "top-level")
+    if isinstance(global_seed, bool) or not isinstance(global_seed, int) or global_seed < 0:
+        raise ValueError("global_seed must be a non-negative int")
+    for section in ("lensing", "psf", "observation"):
+        _require_type(_require(config, section, "top-level"), dict, section)
+    if "modeling" in config:
+        _require_type(config["modeling"], dict, "modeling")
+    if "run_name" in config:
+        name = config["run_name"]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("run_name must be a non-empty string when supplied")
+    if "plotting" in config:
+        plotting = _require_type(config["plotting"], dict, "plotting")
+        if "enabled" in plotting:
+            _require_type(plotting["enabled"], bool, "plotting.enabled")
+        if "output_dir" in plotting:
+            value = plotting["output_dir"]
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError("plotting.output_dir must be a non-empty path string")
 
 
 def validate_lensing_config(lensing: Dict[str, Any]) -> None:
@@ -564,6 +541,40 @@ def _validate_psf_aberrations(
             )
 
 
+def _validate_detector_psf_spec(kernel: Dict[str, Any], key_path: str) -> None:
+    """Validate an externally supplied detector-kernel file specification."""
+    _require_type(kernel, dict, key_path)
+    _reject_unknown_keys(kernel, {"path", "pixel_scale_arcsec", "array_key", "normalize", "kernel_sha256", "shape_native"}, key_path)
+    path = _require(kernel, "path", key_path)
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError(f"{key_path}.path must be a non-empty filesystem path")
+    if not os.path.isfile(path):
+        raise ValueError(f"{key_path}.path does not exist: {path}")
+    if os.path.splitext(path)[1].lower() not in {".npy", ".npz"}:
+        raise ValueError(f"{key_path}.path must be a .npy or .npz detector kernel")
+    _require_positive_finite_number(
+        _require(kernel, "pixel_scale_arcsec", key_path),
+        f"{key_path}.pixel_scale_arcsec",
+    )
+    if "normalize" in kernel:
+        _require_type(kernel["normalize"], bool, f"{key_path}.normalize")
+    if "kernel_sha256" in kernel:
+        digest = kernel["kernel_sha256"]
+        if not isinstance(digest, str) or len(digest) != 64 or any(
+            char not in "0123456789abcdef" for char in digest
+        ):
+            raise ValueError(f"{key_path}.kernel_sha256 must be a lowercase SHA-256 digest")
+    if "shape_native" in kernel:
+        shape = _require_list_length(kernel["shape_native"], 2, f"{key_path}.shape_native")
+        for index, size in enumerate(shape):
+            _require_positive_int(size, f"{key_path}.shape_native[{index}]")
+            if size % 2 == 0:
+                raise ValueError(f"{key_path}.shape_native dimensions must be odd")
+    if "array_key" in kernel:
+        if not isinstance(kernel["array_key"], str) or not kernel["array_key"]:
+            raise ValueError(f"{key_path}.array_key must be a non-empty string")
+
+
 def validate_psf_config(psf: Dict[str, Any]) -> None:
     """Validate the ``psf`` configuration section.
 
@@ -578,6 +589,16 @@ def validate_psf_config(psf: Dict[str, Any]) -> None:
         Raised if the high-resolution PSF, telescope, aberration, or kernel
         block is missing, mistyped, or out of range.
     """
+    _require_type(psf, dict, "psf")
+    provider = psf.get("provider", "optical")
+    _require_type(provider, str, "psf.provider")
+    if provider not in {"optical", "kernel"}:
+        raise ValueError("psf.provider must be 'optical' or 'kernel'")
+    if "fit_kernel" in psf:
+        _validate_detector_psf_spec(psf["fit_kernel"], "psf.fit_kernel")
+    if provider == "kernel":
+        _validate_detector_psf_spec(_require(psf, "kernel", "psf"), "psf.kernel")
+        return
     hres = _require(psf, 'hres_psf', 'psf')
     _require_type(hres, dict, 'psf.hres_psf')
     for k in ('wavelength', 'num_pix', 'num_airy', 'sampling'):
@@ -636,8 +657,8 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
     Parameters
     ----------
     modeling : `dict`
-        The ``modeling`` section of the pipeline configuration. Validation is
-        skipped when ``modeling.enabled`` is False.
+        Fisher forecasting settings. Operation routing belongs to the public
+        simulate/forecast entry points; legacy enable flags do not skip checks.
 
     Raises
     ------
@@ -645,15 +666,16 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         Raised if the detection method or the nested ``fisher`` block is
         missing, mistyped, or out of range.
     """
-    # modeling.enabled already checked at top-level
-    if not modeling['enabled']:
-        return
+    if "enabled" in modeling:
+        _require_type(modeling["enabled"], bool, "modeling.enabled")
+    # Public simulate/forecast entry points choose the operation. A legacy
+    # enabled flag is validated when present but never suppresses science checks.
 
     if 'fit_psf' in modeling:
         fit_psf = modeling['fit_psf']
         _require_type(fit_psf, dict, 'modeling.fit_psf')
         unsupported_fit_psf_keys = sorted(
-            set(fit_psf) - {'mode', 'psf', 'delta'}
+            set(fit_psf) - {'mode', 'psf', 'delta', 'kernel_sha256', 'pixel_scale_arcsec', 'shape_native'}
         )
         if unsupported_fit_psf_keys:
             raise ValueError(
@@ -663,10 +685,10 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         fit_psf_mode = _require(fit_psf, 'mode', 'modeling.fit_psf')
         _require_type(fit_psf_mode, str, 'modeling.fit_psf.mode')
         fit_psf_mode = fit_psf_mode.lower()
-        if fit_psf_mode not in {'matched', 'explicit', 'delta'}:
+        if fit_psf_mode not in {'matched', 'explicit', 'delta', 'kernel'}:
             raise ValueError(
                 "modeling.fit_psf.mode must be one of: "
-                "'matched', 'explicit', 'delta'"
+                "'matched', 'explicit', 'delta', 'kernel'"
             )
         if fit_psf_mode == 'matched':
             for key in ('psf', 'delta'):
@@ -675,6 +697,29 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                         f"modeling.fit_psf.{key} must not be present when "
                         "modeling.fit_psf.mode is 'matched'"
                     )
+            _reject_unknown_keys(fit_psf, {'mode'}, 'modeling.fit_psf')
+        elif fit_psf_mode == 'kernel':
+            _reject_unknown_keys(
+                fit_psf, {"mode", "kernel_sha256", "pixel_scale_arcsec", "shape_native"},
+                "modeling.fit_psf",
+            )
+            digest = _require(fit_psf, "kernel_sha256", "modeling.fit_psf")
+            if not isinstance(digest, str) or len(digest) != 64 or any(
+                char not in "0123456789abcdef" for char in digest
+            ):
+                raise ValueError("modeling.fit_psf.kernel_sha256 must be a lowercase SHA-256 digest")
+            _require_positive_finite_number(
+                _require(fit_psf, "pixel_scale_arcsec", "modeling.fit_psf"),
+                "modeling.fit_psf.pixel_scale_arcsec",
+            )
+            shape = _require_list_length(
+                _require(fit_psf, "shape_native", "modeling.fit_psf"), 2,
+                "modeling.fit_psf.shape_native",
+            )
+            for index, size in enumerate(shape):
+                _require_positive_int(size, f"modeling.fit_psf.shape_native[{index}]")
+                if size % 2 == 0:
+                    raise ValueError("modeling.fit_psf.shape_native dimensions must be odd")
         elif fit_psf_mode == 'explicit':
             for key in ('delta',):
                 if key in fit_psf:
@@ -682,6 +727,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                         f"modeling.fit_psf.{key} must not be present when "
                         "modeling.fit_psf.mode is 'explicit'"
                     )
+            _reject_unknown_keys(fit_psf, {'mode', 'psf'}, 'modeling.fit_psf')
             explicit_psf = _require(fit_psf, 'psf', 'modeling.fit_psf')
             _require_type(explicit_psf, dict, 'modeling.fit_psf.psf')
             try:
@@ -695,6 +741,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                         f"modeling.fit_psf.{key} must not be present when "
                         "modeling.fit_psf.mode is 'delta'"
                     )
+            _reject_unknown_keys(fit_psf, {'mode', 'delta'}, 'modeling.fit_psf')
             delta = _require(fit_psf, 'delta', 'modeling.fit_psf')
             _require_type(delta, dict, 'modeling.fit_psf.delta')
             _reject_unknown_keys(
@@ -738,7 +785,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
                     "'combined', 'global', 'segment'"
                 )
 
-    detection = _require(modeling, 'detection', 'modeling')
+    detection = modeling.get('detection', 'fisher')
     _require_type(detection, str, 'modeling.detection')
     detection = detection.lower()
     if detection != 'fisher':
@@ -746,7 +793,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
 
     fisher = _require(modeling, 'fisher', 'modeling')
     _require_type(fisher, dict, 'modeling.fisher')
-    mode = _require(fisher, 'mode', 'modeling.fisher')
+    mode = fisher.get('mode', 'map')
     _require_type(mode, str, 'modeling.fisher.mode')
     if mode.lower() not in {'local', 'map', 'both'}:
         raise ValueError("modeling.fisher.mode must be one of: 'local', 'map', 'both'")
@@ -761,14 +808,15 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
 
     finite_diff = _require(fisher, 'finite_diff', 'modeling.fisher')
     _require_type(finite_diff, dict, 'modeling.fisher.finite_diff')
+    _reject_unknown_keys(
+        finite_diff,
+        {'centre_arcsec', 'einstein_radius_arcsec', 'ell_comp', 'source_intensity_frac', 'source_reff_frac'},
+        'modeling.fisher.finite_diff',
+    )
     for key in (
         'centre_arcsec',
         'einstein_radius_arcsec',
         'ell_comp',
-        # Legacy lens steps are accepted for campaign config compatibility.
-        'slope',
-        'multipole_comp',
-        'shear_comp',
         'source_intensity_frac',
         'source_reff_frac',
     ):
@@ -788,6 +836,7 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
         'detection_q_threshold',
         'num_workers',
         'engine',
+        'batch_size',
     }
     unsupported_map_keys = sorted(set(map_cfg) - supported_map_keys)
     if unsupported_map_keys:
@@ -795,6 +844,9 @@ def validate_modeling_config(modeling: Dict[str, Any]) -> None:
             "modeling.fisher.map contains unsupported keys: "
             + ", ".join(unsupported_map_keys)
         )
+
+    if 'batch_size' in map_cfg:
+        _require_positive_int(map_cfg['batch_size'], 'modeling.fisher.map.batch_size')
 
     map_type = _require(map_cfg, 'type', 'modeling.fisher.map')
     _require_type(map_type, str, 'modeling.fisher.map.type')
@@ -1248,4 +1300,14 @@ def validate_or_raise(config: Dict[str, Any]) -> None:
     validate_nonlinear_rendering_config(config)
     validate_psf_config(config['psf'])
     validate_observation_config(config['observation'])
-    validate_modeling_config(config['modeling'])
+    scene_scale = float(config["lensing"]["grid"]["pixel_scale"])
+    external = []
+    if config["psf"].get("provider", "optical") == "kernel":
+        external.append((config["psf"]["kernel"], "psf.kernel"))
+    if "fit_kernel" in config["psf"]:
+        external.append((config["psf"]["fit_kernel"], "psf.fit_kernel"))
+    for kernel, name in external:
+        if not math.isclose(float(kernel["pixel_scale_arcsec"]), scene_scale, rel_tol=0.0, abs_tol=1e-12):
+            raise ValueError(f"{name}.pixel_scale_arcsec must match lensing.grid.pixel_scale")
+    if 'modeling' in config:
+        validate_modeling_config(config['modeling'])

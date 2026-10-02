@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence, TYPE_CHECKING
 
 import numpy as np
+from scipy.optimize import lsq_linear
 
 from .output_schema import NonlinearFitSummary
 from .profile_settings import OBJECTIVE_VERSION, PROCEDURE_VERSION
@@ -14,6 +15,66 @@ from .profile_settings import OBJECTIVE_VERSION, PROCEDURE_VERSION
 if TYPE_CHECKING:
     from .fresh_profile import FreshProfileRunner
 
+
+def linearized_comparator(
+    residual, smooth_truth, injected_residual, lower, upper, step_fraction=1.0e-5, background_column=None
+):
+    """Profile a finite injected signal over the common smooth-model tangent.
+
+    Derivatives use central differences at a declared truth expansion point.
+    Return unrestricted and finite-box linearized predictions separately.
+    """
+    smooth_truth = np.asarray(smooth_truth)
+    r0 = np.asarray(residual(smooth_truth))
+    signal = r0 - np.asarray(injected_residual)
+    columns = []
+    steps = []
+    for j, width in enumerate(upper - lower):
+        h = min(
+            step_fraction * width, 0.25 * (smooth_truth[j] - lower[j]), 0.25 * (upper[j] - smooth_truth[j])
+        )
+        if h <= 0:
+            raise ValueError("Comparator expansion point must be inside its finite box")
+        plus, minus = smooth_truth.copy(), smooth_truth.copy()
+        plus[j] += h
+        minus[j] -= h
+        columns.append(-(np.asarray(residual(plus)) - np.asarray(residual(minus))) / (2 * h))
+        steps.append(float(h))
+    jac = np.column_stack(columns)
+    scale = np.linalg.norm(jac, axis=0)
+    if np.any(scale == 0):
+        raise ValueError("Zero comparator nuisance derivative")
+    normalized = jac / scale
+    coeff, _, rank, singular = np.linalg.lstsq(normalized, signal, rcond=1.0e-12)
+    projected = signal - normalized @ coeff
+    bounded = lsq_linear(
+        normalized,
+        signal,
+        bounds=((lower - smooth_truth) * scale, (upper - smooth_truth) * scale),
+        tol=1.0e-10,
+        max_iter=100,
+    )
+    answer = {
+        "q": float(projected @ projected),
+        "q_with_finite_prior_box": float(np.linalg.norm(signal - normalized @ bounded.x) ** 2),
+        "bounded_solver_success": bool(bounded.success),
+        "rank": int(rank),
+        "singular_values": singular.tolist(),
+        "derivative_steps": steps,
+        "n_pixels": len(signal),
+        "n_shared_nuisance": len(smooth_truth),
+        "unbounded_nuisance_delta": (coeff / scale).tolist(),
+        "bounds_active": np.asarray(bounded.active_mask).tolist(),
+        "position_policy": "fixed injected position; H1 profile searches its declared box",
+        "background": "known subtracted, no free offset",
+        "regularization": None,
+    }
+    if background_column is not None:
+        bg = np.asarray(background_column)
+        augmented = np.column_stack([normalized, bg / np.linalg.norm(bg)])
+        delta = np.linalg.lstsq(augmented, signal, rcond=1.0e-12)[0]
+        answer["q_with_free_background_only"] = float(np.linalg.norm(signal - augmented @ delta) ** 2)
+    return answer
 
 def _instance_value(instance: Any, path: Sequence[str]) -> float:
     """Read one dotted/tuple AutoFit path from an instance."""
@@ -53,7 +114,6 @@ def likelihood_matched_tangent(
         smooth_model_spec_from_config,
         subhalo_model_spec_from_trial,
     )
-    from .profile_replay import linearized_comparator
 
     fixed_model = autofit_model_from_spec(
         fixed_point_model_spec_from_trial(full_config, trial)

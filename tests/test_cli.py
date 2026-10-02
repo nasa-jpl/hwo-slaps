@@ -1,136 +1,143 @@
-"""CLI isolation and consistent artifact capture without scientific runtime."""
+"""Public command routing and real command-owned output artifacts."""
 
-from copy import deepcopy
 from pathlib import Path
+import json
 import subprocess
 import sys
-from types import ModuleType
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
 from hwoslaps import cli
+from hwoslaps.modeling.forecast_results import ForecastResult
 from hwoslaps.provenance import config_hash
 
-
-def _master_config():
-    return yaml.safe_load((ROOT / "configs/master_config.yaml").read_text())
+ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_validation_only_does_not_import_scientific_runtime_or_create_outputs(tmp_path):
-    config = _master_config()
-    config["plotting"]["output_dir"] = str(tmp_path / "outputs")
-    path = tmp_path / "config.yaml"
-    path.write_text(yaml.safe_dump(config))
+def _config():
+    config = yaml.safe_load((ROOT / "configs/master_config.yaml").read_text())
+    config.pop("run_name", None)
+    config.pop("plotting", None)
+    config["modeling"].pop("enabled", None)
+    config["modeling"].pop("detection", None)
+    config["modeling"]["fisher"].pop("mode", None)
+    return config
+
+
+def _write_config(path, config=None):
+    path.write_text(yaml.safe_dump(_config() if config is None else config))
+    return path
+
+
+def test_validate_is_backend_free_and_creates_no_outputs(tmp_path):
+    path = _write_config(tmp_path / "config.yaml")
     code = (
-        "import sys; "
-        f"sys.path.insert(0, {str(ROOT / 'src')!r}); "
-        "from hwoslaps.cli import main; "
-        f"assert main(['-c', {str(path)!r}, '--validate-only']) == 0; "
-        "assert 'autolens' not in sys.modules; "
-        "assert 'hwoslaps.pipeline' not in sys.modules"
+        "import sys; from hwoslaps.cli import main; "
+        f"assert main(['validate', '-c', {str(path)!r}]) == 0; "
+        "assert not {'autolens', 'hcipy', 'jax', 'hwoslaps.pipeline'} & sys.modules.keys()"
     )
     result = subprocess.run([sys.executable, "-B", "-c", code], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
     assert "Configuration valid" in result.stdout
-    assert not (tmp_path / "outputs").exists()
+    assert {p.name for p in tmp_path.iterdir()} == {"config.yaml"}
 
 
-def test_cli_overrides_and_composition_use_one_resolved_config(tmp_path, monkeypatch):
-    base = tmp_path / "base.yaml"
-    base.write_text(yaml.safe_dump(_master_config()))
-    overlay = tmp_path / "overlay.yaml"
-    overlay.write_text("modeling:\n  enabled: false\n")
-    monkeypatch.chdir(tmp_path)
-    calls = []
-    monkeypatch.setattr(cli, "run_with_artifacts", lambda config, **kwargs: calls.append((config, kwargs)))
+def test_forecast_routes_explicit_arrays_and_persists_real_result(tmp_path, monkeypatch):
+    import hwoslaps
 
-    assert cli.main([
-        "-c", str(base), "-c", str(overlay), "--output-dir", "results", "--run-name", "new", "-q",
-    ]) == 0
-
-    config, kwargs = calls[0]
-    assert config["modeling"]["enabled"] is False
-    assert config["run_name"] == "new"
-    assert config["plotting"]["output_dir"] == str(tmp_path / "results")
-    assert kwargs["verbose"] is False
-
-
-def test_snapshot_provenance_and_pipeline_share_resolved_configuration(tmp_path, monkeypatch, capsys):
-    config = _master_config()
-    config["run_name"] = "unit"
-    config["plotting"]["output_dir"] = "outputs"
-    original = deepcopy(config)
+    path = _write_config(tmp_path / "config.yaml")
+    positions = [[0.1, -0.2], [0.3, 0.4]]
+    positions_path = tmp_path / "positions.json"
+    positions_path.write_text("[[0.1,-0.2],[0.3,0.4]]")
+    effective = _config()
+    effective["run_name"] = "forecast"
+    prepared = SimpleNamespace(config=effective)
     received = []
-    result = object()
-    pipeline_module = ModuleType("hwoslaps.pipeline")
-
-    class StubPipeline:
-        def __init__(self, verbose):
-            assert verbose is False
-
-        def run(self, resolved):
-            received.append(resolved)
-            print("scientific output")
-            return result
-
-    pipeline_module.Pipeline = StubPipeline
-    monkeypatch.setitem(sys.modules, "hwoslaps.pipeline", pipeline_module)
-    import hwoslaps.provenance as provenance
-
-    def write_provenance(path, config, command):
-        path.write_text(yaml.safe_dump({"config_hash": config_hash(config), "command": command}))
-
-    monkeypatch.setattr(provenance, "write_provenance", write_provenance)
-
-    assert cli.run_with_artifacts(config, verbose=False, base_dir=tmp_path, command=["demo"]) is result
-
-    run_dir = tmp_path / "outputs/unit"
-    snapshot = yaml.safe_load((run_dir / "config_used.yaml").read_text())
-    recorded = yaml.safe_load((run_dir / "provenance.yaml").read_text())
-    assert snapshot == received[0]
-    assert recorded["config_hash"] == config_hash(snapshot)
-    assert "scientific output" in (run_dir / "run.log").read_text()
-    assert "scientific output" in capsys.readouterr().out
-    assert config == original
-
-
-def test_invalid_configuration_does_not_create_artifacts(tmp_path):
-    config = {"run_name": "bad", "plotting": {"output_dir": str(tmp_path / "outputs")}}
-    with pytest.raises(ValueError):
-        cli.run_with_artifacts(config)
-    assert not (tmp_path / "outputs").exists()
-
-
-def test_existing_run_directory_preserves_all_previous_artifacts(tmp_path):
-    config = _master_config()
-    config["run_name"] = "previous"
-    config["plotting"]["output_dir"] = str(tmp_path)
-    run_dir = tmp_path / "previous"
-    run_dir.mkdir()
-    originals = {
-        "config_used.yaml": b"previous resolved config",
-        "run.log": b"previous log",
-        "provenance.yaml": b"previous provenance",
-        "science.npz": b"previous numerical arrays",
-    }
-    for name, content in originals.items():
-        (run_dir / name).write_bytes(content)
-
-    with pytest.raises(FileExistsError, match="Choose a new run_name"):
-        cli.run_with_artifacts(config)
-
-    assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == originals
-
-
-def test_source_checkout_runner_uses_installed_cli_options():
-    result = subprocess.run(
-        [sys.executable, "-B", str(ROOT / "runner.py"), "--help"],
-        text=True, capture_output=True,
+    result = ForecastResult(
+        masses_msun=np.array([1e7, 1e8]), positions_yx=np.array(positions),
+        q_asimov=np.array([[1.0, 3.0], [10.0, 30.0]]),
+        fisher_raw=np.ones((2, 2)), fisher_profiled=np.ones((2, 2)),
+        sigma_amplitude=np.ones((2, 2)), degradation=np.ones((2, 2)),
+        runtime_provenance={"backend": "reference"},
     )
-    assert result.returncode == 0, result.stderr
-    assert "--validate-only" in result.stdout
-    assert "--base-dir" in result.stdout
+
+    def prepare(config):
+        received.append(config)
+        return prepared
+
+    def evaluate(value, *, masses, positions):
+        assert value is prepared
+        np.testing.assert_array_equal(masses, [1e7, 1e8])
+        np.testing.assert_array_equal(positions, result.positions_yx)
+        print("forecast evaluated")
+        return result
+
+    monkeypatch.setattr(hwoslaps, "prepare_forecast", prepare)
+    monkeypatch.setattr(hwoslaps, "forecast", evaluate)
+    output = tmp_path / "forecast"
+    assert cli.main([
+        "forecast", "-c", str(path), "--output-dir", str(output),
+        "--masses", "1e7", "1e8", "--positions", str(positions_path),
+    ]) == 0
+    loaded = ForecastResult.load_npz(output / "forecast.npz")
+    np.testing.assert_array_equal(loaded.q_asimov, result.q_asimov)
+    snapshot = yaml.safe_load((output / "config_used.yaml").read_text())
+    provenance = yaml.safe_load((output / "provenance.yaml").read_text())
+    assert snapshot == prepared.config
+    assert snapshot["run_name"] == "forecast"
+    assert "run_name" not in received[0]
+    assert provenance["config_hash"] == config_hash(snapshot)
+    assert "forecast evaluated" in (output / "run.log").read_text()
+
+
+def test_simulate_uses_public_operation_and_writes_observation_arrays(tmp_path, monkeypatch):
+    import hwoslaps
+
+    config = _config()
+    config.pop("modeling")
+    path = _write_config(tmp_path / "config.yaml", config)
+    observation = SimpleNamespace(
+        data=SimpleNamespace(native=np.array([[3.0, 4.0]])),
+        noise_map=SimpleNamespace(native=np.array([[0.5, 0.6]])),
+        noiseless_source_eps=np.array([[1.0, 2.0]]), pixel_scale=0.05,
+        psf=SimpleNamespace(native=np.array([[0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]])),
+        metadata={"noise_seed": 17, "truth_kernel": {"kernel_sha256": "abc"}, "shape": np.array([1, 2])},
+    )
+    monkeypatch.setattr(hwoslaps, "simulate", lambda config: observation)
+    output = tmp_path / "observation"
+    assert cli.main(["simulate", "-c", str(path), "--output-dir", str(output)]) == 0
+    with np.load(output / "observation.npz", allow_pickle=False) as stored:
+        np.testing.assert_array_equal(stored["data_adu"], [[3.0, 4.0]])
+        np.testing.assert_array_equal(stored["noise_adu"], [[0.5, 0.6]])
+        np.testing.assert_array_equal(stored["noiseless_source_eps"], [[1.0, 2.0]])
+        assert stored["pixel_scale_arcsec"] == 0.05
+        np.testing.assert_array_equal(stored["imaging_psf_kernel"], observation.psf.native)
+        assert json.loads(str(stored["metadata_json"])) == {
+            "noise_seed": 17, "truth_kernel": {"kernel_sha256": "abc"}, "shape": [1, 2],
+        }
+
+
+@pytest.mark.parametrize("operation", ["simulate", "forecast"])
+def test_invalid_configuration_creates_no_output(tmp_path, operation):
+    path = _write_config(tmp_path / "invalid.yaml", {"global_seed": 1})
+    output = tmp_path / "output"
+    with pytest.raises(SystemExit) as error:
+        cli.main([operation, "-c", str(path), "--output-dir", str(output)])
+    assert error.value.code == 2
+    assert not output.exists()
+
+
+def test_existing_output_directory_preserves_all_previous_bytes(tmp_path):
+    path = _write_config(tmp_path / "config.yaml")
+    output = tmp_path / "previous"
+    output.mkdir()
+    original = {"forecast.npz": b"previous arrays", "config_used.yaml": b"previous config"}
+    for name, content in original.items():
+        (output / name).write_bytes(content)
+    with pytest.raises(SystemExit) as error:
+        cli.main(["forecast", "-c", str(path), "--output-dir", str(output)])
+    assert error.value.code == 2
+    assert {p.name: p.read_bytes() for p in output.iterdir()} == original

@@ -16,6 +16,8 @@ def _validate_noise_inputs(
     source_eps: np.ndarray,
     exposure_time: float,
     detector_config: Dict[str, float],
+    *,
+    allow_roundoff_negatives: bool = False,
 ) -> Tuple[np.ndarray, float, Dict[str, float]]:
     """Validate common detector-noise inputs.
 
@@ -46,7 +48,8 @@ def _validate_noise_inputs(
     source_array = np.asarray(source_eps, dtype=float)
     if not np.all(np.isfinite(source_array)):
         raise ValueError("source_eps must be finite")
-    if np.any(source_array < 0.0):
+    tolerance = 1.0e-10 * float(np.max(np.abs(source_array), initial=0.0)) if allow_roundoff_negatives else 0.0
+    if np.any(source_array < -tolerance):
         raise ValueError("source_eps must be non-negative")
 
     exposure = _validate_scalar(
@@ -116,6 +119,24 @@ class DetectorMoments:
     def variance_e2(self) -> np.ndarray:
         """Compute uncertainty only when needed; a noise draw needs no extra map."""
         return self.expected_e + self.read_noise_e**2
+
+    @property
+    def mean_adu(self) -> np.ndarray:
+        """Deterministic mean, preserving the forecasting addition order."""
+        return (self.source_e + self.sky_e + self.dark_e) / self.gain
+
+
+def detector_mean_adu(source_eps, exposure_time, detector_config) -> np.ndarray:
+    """Expected detector image without sampling noise.
+
+    Epsilon-scale negative rates from FFT convolution are retained in this
+    linear mean. Rates negative beyond roundoff remain invalid. Simulated
+    Poisson counts and uncertainty maps use nonnegative rates instead.
+    """
+    source_eps, exposure_time, detector = _validate_noise_inputs(
+        source_eps, exposure_time, detector_config, allow_roundoff_negatives=True
+    )
+    return _detector_moments(source_eps, exposure_time, detector).mean_adu
 
 
 def detector_moments(source_eps, exposure_time, detector_config) -> DetectorMoments:

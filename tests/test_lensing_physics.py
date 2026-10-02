@@ -20,16 +20,12 @@ if str(TESTS_ROOT) not in sys.path:
 
 from _lensing_physics_helpers import (
     Planck15CosmologyAdapter,
-    load_constants_module,
     load_lensing_anchor_fixture,
-    load_lensing_utils_module,
-    load_mass_models_module,
 )
 
 COSMOLOGY = Planck15CosmologyAdapter()
-CONSTANTS = load_constants_module()
-MASS_MODELS = load_mass_models_module()
-LENSING_UTILS = load_lensing_utils_module()
+from hwoslaps import constants as CONSTANTS
+from hwoslaps.lensing import mass_models as MASS_MODELS, utils as LENSING_UTILS
 
 
 def _nfw_lensing_terms(mass_msun: float, concentration: float, z_lens: float, z_source: float):

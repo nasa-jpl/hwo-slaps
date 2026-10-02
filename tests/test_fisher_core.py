@@ -139,15 +139,16 @@ def test_dense_covariance_matches_explicit_whitening():
 
     direct = compute_asimov_detectability(signal, nuisance_jacobian=nuisance, covariance=covariance)
 
-    whitener = Whitener.from_covariance(covariance)
-    signal_w = whitener.apply(signal)
-    nuisance_w = whitener.apply(nuisance)
-    workspace = ProfileLikelihoodWorkspace(nuisance_whitened=nuisance_w)
-    whitened = workspace.evaluate_signal(signal_w)
+    precision_signal = np.linalg.solve(covariance, signal)
+    precision_nuisance = np.linalg.solve(covariance, nuisance)
+    raw = float(signal @ precision_signal)
+    cross = nuisance.T @ precision_signal
+    gram = nuisance.T @ precision_nuisance
+    profiled = raw - float(cross @ np.linalg.solve(gram, cross))
 
-    assert direct.fisher_profiled == pytest.approx(whitened.fisher_profiled, rel=1e-12, abs=1e-12)
-    assert direct.fisher_raw == pytest.approx(whitened.fisher_raw, rel=1e-12, abs=1e-12)
-    assert direct.z_asimov_local == pytest.approx(whitened.z_asimov_local, rel=1e-12, abs=1e-12)
+    assert direct.fisher_profiled == pytest.approx(profiled, rel=1e-12, abs=1e-12)
+    assert direct.fisher_raw == pytest.approx(raw, rel=1e-12, abs=1e-12)
+    assert direct.z_asimov_local == pytest.approx(np.sqrt(profiled), rel=1e-12, abs=1e-12)
 
 
 def test_signal_bank_matches_individual_calls():

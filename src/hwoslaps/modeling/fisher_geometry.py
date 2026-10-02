@@ -31,11 +31,11 @@ class FisherGridLayout:
 
 
 @dataclass(frozen=True)
-class FisherLadderGridSelection:
+class SpatialSelection:
     """Reusable aperture-plus-perimeter selection on a full square lattice.
 
-    ``selected_mask_2d`` describes exactly the nodes evaluated by the ladder
-    path.  Values outside it are absent from the corresponding rung result;
+    ``selected_mask_2d`` describes exactly the nodes evaluated by the sparse
+    path.  Values outside it are absent from the corresponding compact result;
     they are not represented as zero or as a partially populated grid map.
     The full coordinate arrays remain available so the selection is tied to
     the original square geometry used to construct the JAX radial engine.
@@ -68,32 +68,6 @@ class FisherLadderGridSelection:
     @property
     def selected_node_count(self) -> int:
         return len(self.positions_yx)
-
-
-@dataclass(frozen=True)
-class FisherLadderRungData:
-    """Compact Fisher result for nodes consumed by one ladder rung.
-
-    The one-dimensional arrays share row-major position order.  They contain
-    only aperture or original-square-perimeter nodes, making the incomplete
-    full-grid coverage explicit while retaining every value used by the
-    ladder estimands and clipping diagnostic.
-    """
-
-    selection: FisherLadderGridSelection
-    positions_yx: np.ndarray
-    node_indices: np.ndarray
-    q_asimov_by_position: np.ndarray
-    detectable_by_position: np.ndarray
-    detection_q_threshold: float
-    q_max: float
-    detectable_area_arcsec2: float
-    aperture_fraction: float
-    perimeter_clipped: bool
-
-    @property
-    def num_positions_evaluated(self) -> int:
-        return int(self.q_asimov_by_position.size)
 
 
 def build_grid_layout(
@@ -167,7 +141,7 @@ def select_aperture_and_perimeter(
     layout: FisherGridLayout,
     centre_arcsec: Tuple[float, float],
     radius_arcsec: float,
-) -> FisherLadderGridSelection:
+) -> SpatialSelection:
     """Select a closed aperture and all four edges of the original square.
 
     The full lattice is retained for radial interpolation bounds and clipping
@@ -180,11 +154,11 @@ def select_aperture_and_perimeter(
     centre = np.asarray(centre_arcsec, dtype=float)
     if centre.shape != (2,) or not np.all(np.isfinite(centre)):
         raise ValueError(
-            "The ladder aperture centre must contain two finite coordinates."
+            "The aperture centre must contain two finite coordinates."
         )
     radius = float(radius_arcsec)
     if not np.isfinite(radius) or radius <= 0.0:
-        raise ValueError("The ladder aperture radius must be positive and finite.")
+        raise ValueError("The aperture radius must be positive and finite.")
 
     offsets_y = layout.y_coords[:, None] - centre[0]
     offsets_x = layout.x_coords[None, :] - centre[1]
@@ -214,7 +188,7 @@ def select_aperture_and_perimeter(
             contiguous.shape
         )
 
-    selection = FisherLadderGridSelection(
+    selection = SpatialSelection(
         y_coords=_readonly_copy(layout.y_coords),
         x_coords=_readonly_copy(layout.x_coords),
         spacing_arcsec=layout.spacing_arcsec,

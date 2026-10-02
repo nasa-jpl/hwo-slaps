@@ -15,10 +15,9 @@ if str(TESTS_ROOT) not in sys.path:
 
 from _lensing_physics_helpers import (  # noqa: E402
     load_master_config,
-    load_validation_module,
 )
 
-VALIDATION = load_validation_module()
+from hwoslaps.config import validation as VALIDATION
 
 
 def _base_config():

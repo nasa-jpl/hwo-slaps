@@ -1,4 +1,4 @@
-"""Package the reusable engine; study archives remain source-only."""
+"""Package the reusable strong-lensing forecasting engine."""
 from setuptools import find_packages, setup
 
 setup(

@@ -73,7 +73,7 @@ class NonlinearSearchSettings:
         value is recorded in the fit summary.
     f_live : `float`, optional
         Live-point fraction used by Nautilus. ``None`` delegates to the
-        installed backend default; an explicit v7 declaration pins 0.01.
+        installed backend default.
     discard_exploration : `bool`, optional
         Whether the sampler discards exploration-phase points when
         estimating the posterior and evidence. None delegates to the
@@ -94,7 +94,7 @@ class NonlinearSearchSettings:
         ``discard_exploration`` values that must be observed on the
         constructed search before fitting. It may also carry a
         ``n_live_by_fit_mode`` mapping for role-specific live-point checks.
-        ``None`` preserves the legacy backend-default behavior.
+        ``None`` delegates to the backend defaults.
 
     Notes
     -----
@@ -297,8 +297,6 @@ def analysis_key_from(
     dataset: Any,
     dataset_metadata: Any,
     model_metadata: Dict[str, Any],
-    *,
-    legacy_clumpy_null: bool = False,
 ) -> str:
     """Return a deterministic 16-hex analysis identity key.
 
@@ -314,10 +312,6 @@ def analysis_key_from(
         Dataset provenance fields.
     model_metadata : `dict`
         Resolved fit mode, custom-context hashes, and prior widths.
-
-    legacy_clumpy_null : `bool`, optional
-        Reproduce the pre-removal identity schema with its unused null field.
-        This changes only hash serialization, never data, models, or priors.
 
     Returns
     -------
@@ -372,14 +366,10 @@ def analysis_key_from(
             prior_repr.encode("utf-8")
         ).hexdigest(),
     }
-    if legacy_clumpy_null:
-        payload["clumpy_fit_parameterization"] = None
     from .dataset_builder import rendering_identity
 
     rendering = rendering_identity(dataset, dataset_metadata)
     if rendering is not None:
-        if legacy_clumpy_null:
-            raise ValueError("Historical identity schema cannot label a corrected objective")
         payload["rendering_contract"] = rendering
     canonical = json.dumps(
         payload,
@@ -595,7 +585,7 @@ def validate_effective_sampler_settings(
 
     The constructed Nautilus object is authoritative: passing a keyword to
     the constructor does not prove that the installed backend applied it.
-    Legacy callers omit ``sampler_contract`` and retain the historical
+    Callers omitting ``sampler_contract`` retain the configured backend
     backend-default behavior.
     """
     if not isinstance(contract, dict):
@@ -902,7 +892,7 @@ class _NetworkTrainingPool:
 
 
 def _training_worker_count(requested: Optional[int] = None) -> int:
-    """Resolve explicit emulator workers before the legacy environment."""
+    """Resolve explicit emulator workers before the environment default."""
     if requested is not None:
         return requested
     raw = os.environ.get(_TRAINING_WORKERS_ENV, "").strip()
@@ -966,7 +956,7 @@ def _nautilus_training_pool_scope(
     Nautilus rebuilds its likelihood emulator at every bound update and
     trains ``n_networks`` independent ``MLPRegressor`` networks per bound,
     one after another; on the freed nonlinear refit path that serial
-    training is the single largest cost (29 percent of a B6 cell). The
+    training can be a substantial fitting cost. The
     upstream ``NeuralNetworkEmulator.train`` already dispatches each network
     through ``pool.map``, and each dispatched ``train_network`` call is a
     pure function of the training arrays, the network keyword arguments and

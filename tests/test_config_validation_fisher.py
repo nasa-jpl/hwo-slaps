@@ -41,9 +41,6 @@ def _with_valid_fisher_block(config: dict) -> dict:
             "centre_arcsec": 1.0e-3,
             "einstein_radius_arcsec": 1.0e-3,
             "ell_comp": 1.0e-3,
-            "slope": 1.0e-3,
-            "multipole_comp": 1.0e-3,
-            "shear_comp": 1.0e-3,
             "source_intensity_frac": 1.0e-2,
             "source_reff_frac": 1.0e-2,
         },
@@ -95,23 +92,42 @@ def test_fisher_rejects_invalid_mode():
         validation.validate_or_raise(config)
 
 
-def test_fisher_requires_all_finite_diff_fields():
-    """Reject a finite_diff block missing a required step field."""
+@pytest.mark.parametrize("key", [
+    "centre_arcsec", "einstein_radius_arcsec", "ell_comp", "source_intensity_frac", "source_reff_frac",
+])
+def test_fisher_requires_all_finite_diff_fields(key):
+    """Reject each missing finite-difference control actually consumed."""
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["finite_diff"].pop("centre_arcsec")
+    config["modeling"]["fisher"]["finite_diff"].pop(key)
 
-    with pytest.raises(ValueError, match="Missing required key 'centre_arcsec'"):
+    with pytest.raises(ValueError, match=f"Missing required key '{key}'"):
         validation.validate_or_raise(config)
 
 
-@pytest.mark.parametrize("bad_step", [0.0, -1.0, float("nan"), True])
-def test_fisher_rejects_invalid_finite_diff_values(bad_step):
-    """Reject non-positive or non-finite finite_diff step sizes."""
+@pytest.mark.parametrize("key", [
+    "centre_arcsec", "einstein_radius_arcsec", "ell_comp", "source_intensity_frac", "source_reff_frac",
+])
+@pytest.mark.parametrize("bad_step", [0.0, -1.0, float("nan"), float("inf"), True])
+def test_fisher_rejects_invalid_finite_diff_values(key, bad_step):
+    """Reject every invalid scalar category for each consumed step."""
     config = _with_valid_fisher_block(_load_master_config())
-    config["modeling"]["fisher"]["finite_diff"]["ell_comp"] = bad_step
+    config["modeling"]["fisher"]["finite_diff"][key] = bad_step
 
-    with pytest.raises(ValueError, match="modeling.fisher.finite_diff.ell_comp"):
+    with pytest.raises(ValueError, match=f"modeling.fisher.finite_diff.{key}"):
         validation.validate_or_raise(config)
+
+
+@pytest.mark.parametrize("key", ["slope", "multipole_comp", "shear_comp"])
+def test_fisher_rejects_unconsumed_finite_diff_controls(key):
+    """Reject valid-valued controls with no supported nuisance direction."""
+    config = _with_valid_fisher_block(_load_master_config())
+    validation.validate_or_raise(config)
+    config["modeling"]["fisher"]["finite_diff"][key] = 1.0e-3
+    with pytest.raises(ValueError) as error:
+        validation.validate_or_raise(config)
+    assert "modeling.fisher.finite_diff" in str(error.value)
+    assert "unsupported keys" in str(error.value)
+    assert key in str(error.value)
 
 
 @pytest.mark.parametrize("bad_num_angles", [0, -4, 2.5, True])

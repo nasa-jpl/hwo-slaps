@@ -17,10 +17,8 @@ if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
 from _lensing_physics_helpers import (
-    bootstrap_hwoslaps_namespace,
     load_lensing_anchor_fixture,
     load_master_config,
-    load_module,
 )
 
 INTEGRATION_ANCHOR_MASSES = {
@@ -30,12 +28,7 @@ INTEGRATION_ANCHOR_MASSES = {
 }
 
 
-def _load_lensing_generator_module():
-    bootstrap_hwoslaps_namespace()
-    load_module("constants.py", "hwoslaps.constants")
-    load_module("lensing/mass_models.py", "hwoslaps.lensing.mass_models")
-    load_module("lensing/utils.py", "hwoslaps.lensing.utils")
-    return load_module("lensing/generator.py", "hwoslaps.lensing.generator")
+from hwoslaps.lensing import generator as generator_module
 
 
 def _build_lensing_config_for_model(model_name: str):
@@ -59,7 +52,6 @@ def _build_lensing_config_for_model(model_name: str):
 @pytest.mark.parametrize("model_name", ["PointMass", "SIS", "NFW"])
 def test_env_02_smoke_generate_lensing_system_by_model(model_name: str):
     """Generate a finite scene for each supported subhalo model."""
-    generator_module = _load_lensing_generator_module()
     cfg = _build_lensing_config_for_model(model_name)
 
     lensing_data = generator_module.generate_lensing_system(cfg["lensing"], full_config=cfg)
@@ -85,7 +77,6 @@ def test_reg_04_optional_image_summary_anchors(model_name: str):
     if expected_summary is None:
         pytest.skip("No integration image summary anchor set for this model.")
 
-    generator_module = _load_lensing_generator_module()
     cfg = _build_lensing_config_for_model(model_name)
     lensing_data = generator_module.generate_lensing_system(cfg["lensing"], full_config=cfg)
     observed = {

@@ -5,13 +5,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 _SELECTION_NAMES = (
-    "APERTURE_THETA_E_MULTIPLE",
-    "FLOOR_ARC_SNR",
-    "FLOOR_THETA_E_ARCSEC",
-    "GOLDEN_TIER_SIZE",
     "RADIAN_TO_ARCSEC",
-    "SCORE_VARIANTS",
-    "SELECTED_TIER_SIZE",
     "SelectionResult",
     "aperture_mask",
     "apply_floor_cuts",
@@ -36,13 +30,7 @@ __all__ = sorted(_SELECTION_NAMES)
 
 if TYPE_CHECKING:
     from .selection_score import (
-        APERTURE_THETA_E_MULTIPLE,
-        FLOOR_ARC_SNR,
-        FLOOR_THETA_E_ARCSEC,
-        GOLDEN_TIER_SIZE,
         RADIAN_TO_ARCSEC,
-        SCORE_VARIANTS,
-        SELECTED_TIER_SIZE,
         SelectionResult,
         aperture_mask,
         apply_floor_cuts,

@@ -9,6 +9,8 @@ from importlib import import_module
 __all__ = [
     'generate_observation', 'ObservationData', 'print_observation_summary',
     'DetectorMoments', 'detector_moments', 'apply_detector_noise', 'create_noise_map',
+    'detector_mean_adu', 'ObservationPrediction', 'predict_observation',
+    'convolve_source_rate', 'mean_adu_images_from_lensing_arrays',
 ]
 
 _EXPORT_MODULES = {
@@ -19,6 +21,11 @@ _EXPORT_MODULES = {
     'detector_moments': '.noise_models',
     'apply_detector_noise': '.noise_models',
     'create_noise_map': '.noise_models',
+    'detector_mean_adu': '.noise_models',
+    'ObservationPrediction': '.forward',
+    'predict_observation': '.forward',
+    'convolve_source_rate': '.forward',
+    'mean_adu_images_from_lensing_arrays': '.forward',
 }
 
 

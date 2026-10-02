@@ -38,8 +38,6 @@ def _load_master_config() -> dict:
 def _build_runtime_config(tmp_dir: Path) -> dict:
     config = _load_master_config()
     config["run_name"] = "fisher_runtime_test"
-    config["plotting"]["enabled"] = False
-    config["plotting"]["output_dir"] = str(tmp_dir)
 
     config["lensing"]["grid"] = {"shape": [31, 31], "pixel_scale": 0.1}
     config["lensing"]["lens_galaxy"]["mass"]["einstein_radius"] = 0.5

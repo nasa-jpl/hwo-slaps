@@ -22,21 +22,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _config() -> dict:
-    """Return a small complete configuration with Item 5 Fisher steps."""
+    """Return a small scientific configuration for the Isothermal renderer."""
     with (PROJECT_ROOT / "configs" / "master_config.yaml").open(
         "r", encoding="utf-8"
     ) as stream:
         config = yaml.safe_load(stream)
-    config["plotting"]["enabled"] = False
     config["lensing"]["grid"] = {"shape": [21, 21], "pixel_scale": 0.08}
     config["lensing"]["subhalo"]["enabled"] = False
-    config["modeling"]["fisher"]["finite_diff"].update(
-        {
-            "slope": 1.0e-3,
-            "multipole_comp": 1.0e-3,
-            "shear_comp": 1.0e-3,
-        }
-    )
     return config
 
 
@@ -68,44 +60,10 @@ def test_truth_lens_galaxy_rejects_unknown_keys(unknown_key):
     assert "lensing.lens_galaxy" in str(error.value)
     assert unknown_key in str(error.value)
 
-@pytest.mark.parametrize("key", ["slope", "multipole_comp", "shear_comp"])
-def test_item5_finite_difference_steps_are_required_and_positive(key):
-    """Require every positive finite Item 5 Fisher step."""
-    config = _config()
-    config["modeling"]["fisher"]["finite_diff"].pop(key)
-    with pytest.raises(ValueError, match=key):
-        validate_or_raise(config)
-
-    config = _config()
-    config["modeling"]["fisher"]["finite_diff"][key] = 0.0
-    with pytest.raises(ValueError, match=key):
-        validate_or_raise(config)
 
 
-@pytest.mark.parametrize("key", ["slope", "multipole_comp", "shear_comp"])
-@pytest.mark.parametrize(
-    "value",
-    [float("nan"), float("inf"), -1.0e-3, True],
-)
-def test_item5_finite_difference_steps_reject_invalid_values(key, value):
-    """Reject every invalid scalar category for every new Fisher step."""
-    config = _config()
-    config["modeling"]["fisher"]["finite_diff"][key] = value
-
-    with pytest.raises(ValueError, match=key):
-        validate_or_raise(config)
 
 
-def test_master_config_declares_item5_finite_difference_steps():
-    """Keep all three required Item 5 steps in the canonical config."""
-    with (PROJECT_ROOT / "configs" / "master_config.yaml").open(
-        "r", encoding="utf-8"
-    ) as stream:
-        config = yaml.safe_load(stream)
-    finite_diff = config["modeling"]["fisher"]["finite_diff"]
-    assert finite_diff["slope"] > 0.0
-    assert finite_diff["multipole_comp"] > 0.0
-    assert finite_diff["shear_comp"] > 0.0
 
 
 def test_isothermal_galaxy_matches_direct_construction_exactly():

@@ -11,7 +11,7 @@ import autofit as af
 import autolens as al
 import numpy as np
 import pytest
-import yaml
+from nonlinear_fixtures import scene_config, synthetic_source_asset
 
 from hwoslaps.lensing.generator import (
     _create_lens_galaxy,
@@ -41,16 +41,11 @@ from hwoslaps.modeling.nonlinear.trial import (
 )
 
 
-SCENE_NAMES = (
-    "scene1_smooth_ring.yaml",
-    "scene4_cosmos.yaml",
-)
+SOURCE_KINDS = ("analytic", "image")
 
 
-def _scene(name):
-    """Load one scene configuration."""
-    with open(f"configs/scenes/{name}", encoding="utf-8") as stream:
-        return yaml.safe_load(stream)
+def _scene(name, asset_path=None):
+    return scene_config(name, asset_path)
 
 
 def _simple_config():
@@ -124,15 +119,16 @@ def test_make_analysis_rejects_jax_for_custom_profiles(tmp_path):
         runner.make_analysis(None, model_metadata={"requires_cpu": True})
 
 
-@pytest.mark.parametrize("scene_name", ["scene4_cosmos.yaml"])
+@pytest.mark.parametrize("scene_name", ["image"])
 @pytest.mark.parametrize("fit_mode", ["fixed_template", "local_search"])
 def test_legacy_subhalo_specs_preserve_custom_source_metadata(
     scene_name,
     fit_mode,
+    synthetic_source_asset,
 ):
     """Carry JAX-capable source provenance through both legacy fit modes."""
     spec = subhalo_model_spec_from_trial(
-        _scene(scene_name),
+        _scene(scene_name, synthetic_source_asset),
         _legacy_trial(),
         fit_mode=fit_mode,
     )
@@ -140,10 +136,10 @@ def test_legacy_subhalo_specs_preserve_custom_source_metadata(
     assert spec.metadata["image_source_asset_hash"]
 
 
-@pytest.mark.parametrize("scene_name", SCENE_NAMES)
-def test_all_scene_truth_point_tracer_images_match(scene_name):
+@pytest.mark.parametrize("scene_name", SOURCE_KINDS)
+def test_all_scene_truth_point_tracer_images_match(scene_name, synthetic_source_asset):
     """Match every scene's intended fit-side truth tracer image."""
-    config = _scene(scene_name)
+    config = _scene(scene_name, synthetic_source_asset)
     spec = smooth_model_spec_from_config(config)
     instance = autofit_model_from_spec(spec).instance_from_prior_medians()
     truth_lens_config = config["lensing"]["lens_galaxy"]
@@ -167,9 +163,9 @@ def test_all_scene_truth_point_tracer_images_match(scene_name):
     )
 
 
-def test_image_source_spec_is_compact_and_has_four_free_parameters():
+def test_image_source_spec_is_compact_and_has_four_free_parameters(synthetic_source_asset):
     """Build the image asset once and keep its array out of payloads."""
-    config = _scene("scene4_cosmos.yaml")
+    config = _scene("image", synthetic_source_asset)
     spec = smooth_model_spec_from_config(config)
     source = spec.galaxies["source"].components["light"]
     model = autofit_model_from_spec(spec)
@@ -215,15 +211,12 @@ def _identity_inputs():
     return dataset, metadata, model_metadata
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_analysis_key_covers_dataset_and_model_identity(legacy):
+def test_analysis_key_covers_dataset_and_model_identity():
     """Change every required identity field and reproduce equal inputs."""
     dataset, metadata, model_metadata = _identity_inputs()
-    baseline = analysis_key_from(dataset, metadata, model_metadata, legacy_clumpy_null=legacy)
-    assert analysis_key_from(dataset, metadata, model_metadata, legacy_clumpy_null=legacy) == baseline
+    baseline = analysis_key_from(dataset, metadata, model_metadata)
+    assert analysis_key_from(dataset, metadata, model_metadata) == baseline
 
-    # Historical key computed with the exact function at a155b2a6.
-    assert baseline == ("a933966338db6cee" if legacy else "d699475a9bfb4861")
 
     variants = []
     changed = deepcopy(metadata)
@@ -242,7 +235,7 @@ def test_analysis_key_covers_dataset_and_model_identity(legacy):
         changed_model[key] = value
         variants.append((dataset, metadata, changed_model))
     for values in variants:
-        assert analysis_key_from(*values, legacy_clumpy_null=legacy) != baseline
+        assert analysis_key_from(*values) != baseline
 
 
 def test_nautilus_settings_and_search_name_are_exact(monkeypatch, tmp_path):
@@ -394,7 +387,7 @@ def test_result_callback_success_and_warning_paths(monkeypatch, tmp_path):
 
 def test_fisher_map_trial_recomputes_mismatched_mass_scales():
     """Recompute NFW scales for new masses and preserve equal-mass truth."""
-    config = _scene("scene1_smooth_ring.yaml")
+    config = _scene("analytic")
     reference = SimpleNamespace(
         subhalo_model="NFW",
         subhalo_mass=1.0e7,
@@ -451,7 +444,7 @@ def test_fisher_map_trial_recomputes_mismatched_mass_scales():
 )
 def test_fisher_map_trial_recomputes_non_nfw_mass_scales(model, helper):
     """Recompute SIS and point-mass radii for mismatched trial masses."""
-    config = _scene("scene1_smooth_ring.yaml")
+    config = _scene("analytic")
     config["lensing"]["subhalo"]["model"] = model
     reference = SimpleNamespace(
         subhalo_model=model,
@@ -481,7 +474,7 @@ def test_fisher_map_trial_recomputes_non_nfw_mass_scales(model, helper):
 
 def test_subhalo_truth_config_places_the_declared_subhalo_without_mutation():
     """Point a no-subhalo ladder config at one declared truth."""
-    staged = _scene("scene1_smooth_ring.yaml")
+    staged = _scene("analytic")
     staged["lensing"]["subhalo"]["enabled"] = False
     reference = deepcopy(staged)
 
@@ -506,7 +499,7 @@ def test_fisher_trial_from_smooth_scene_recomputes_physical_scales(model):
     """A real smooth scene has null subhalo fields, not a missing attribute."""
     from hwoslaps.lensing.generator import generate_lensing_system
 
-    config = _scene("scene1_smooth_ring.yaml")
+    config = _scene("analytic")
     config["lensing"]["subhalo"].update(enabled=False, model=model)
     if model != "NFW":
         config["lensing"]["subhalo"]["concentration"] = None

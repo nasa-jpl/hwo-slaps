@@ -25,6 +25,7 @@ from .noise_models import (
     apply_detector_noise,
     create_noise_map,
 )
+from .forward import convolve_source_rate, predict_observation
 from .utils import ObservationData
 
 
@@ -36,6 +37,7 @@ def generate_observation(
     *,
     noise_seed: Optional[int] = None,
     run_name: Optional[str] = None,
+    sample_noise: bool = True,
 ) -> ObservationData:
     """Generate a realistic observation from lensing and PSF data.
 
@@ -58,6 +60,9 @@ def generate_observation(
         not provide ``global_seed``; explicit values take precedence.
     run_name : `str`, optional
         Provenance label. Required when not supplied by ``full_config``.
+    sample_noise : `bool`, optional
+        If false, use the deterministic expected detector image and noise map.
+        This makes no random draws and does not require a noise seed.
 
     Returns
     -------
@@ -80,7 +85,11 @@ def generate_observation(
     # Strict: observation_config must be provided by pipeline validation
     if observation_config is None:
         raise ValueError("observation_config must be provided explicitly (no defaults)")
-    noise_seed, run_name = _resolve_observation_context(full_config, noise_seed, run_name)
+    if not isinstance(sample_noise, bool):
+        raise ValueError("sample_noise must be boolean")
+    noise_seed, run_name = _resolve_observation_context(
+        full_config, noise_seed, run_name, require_seed=sample_noise,
+    )
 
     # Extract parameters
     exposure_time = observation_config['exposure_time']
@@ -89,7 +98,6 @@ def generate_observation(
 
     # Ensure PSF kernel has odd dimensions (required by PyAutoLens)
     psf_kernel = _ensure_odd_kernel(psf_data.kernel)
-    psf_convolver = make_pyauto_convolver(psf_kernel)
 
     # Assert pixel scale consistency between PSF kernel and lensing image
     # Keep convolution physically meaningful without implicit resampling.
@@ -105,58 +113,28 @@ def generate_observation(
         shape_native=lensing_data.image.shape,
         pixel_scales=lensing_data.pixel_scale
     )
-    lensed_image = al.Array2D(
-        values=lensing_data.image,
-        mask=mask
-    )
-
-    # Step 1: Generate the noiseless PSF-convolved image by direct
-    # convolution. SimulatorImaging is not used here because it evaluates
-    # Poisson noise internally even with noise disabled, which rejects the
-    # roundoff-negative pixels clamped below.
-    # The convolved image is in electrons-per-second. The end-to-end system
-    # throughput scales the source flux only; sky background and dark
-    # current are configured as detected rates already.
-    convolved_eps = psf_convolver.convolved_image_from(
-        image=lensed_image,
-        blurring_image=None,
-    )
-    source_only_eps = np.asarray(convolved_eps.native) * throughput  # e-/s
-
-    # Convolution of the non-negative image with the non-negative kernel is
-    # non-negative, but FFT evaluation leaves epsilon-scale negatives where
-    # a compactly supported source is exactly zero. Anything beyond
-    # roundoff scale is a genuine input error and stays loud. The stored
-    # noiseless rate keeps the raw convolution output (bit-identical to
-    # downstream re-convolutions of the same scene); only the noise draw
-    # and noise map below use the clamped copy, since Poisson rates must
-    # be non-negative.
-    roundoff_tol = 1.0e-10 * float(np.max(np.abs(source_only_eps), initial=0.0))
-    min_eps = float(np.min(source_only_eps, initial=0.0))
-    if min_eps < -roundoff_tol:
-        raise ValueError(
-            "PSF-convolved source image has negative values beyond FFT "
-            f"roundoff scale: min {min_eps} e-/s against tolerance "
-            f"{roundoff_tol} e-/s"
+    if sample_noise:
+        source_only_eps = convolve_source_rate(lensing_data, psf_kernel, throughput=throughput)
+        source_eps_for_noise = np.maximum(source_only_eps, 0.0)
+        final_image_adu, components = apply_detector_noise(
+            source_eps=source_eps_for_noise,
+            exposure_time=exposure_time,
+            detector_config=detector_config,
+            seed=noise_seed,
         )
-    source_eps_for_noise = np.maximum(source_only_eps, 0.0)
-
-    # Step 2: Apply realistic detector noise
-    # This includes Poisson noise, read noise, dark current, and sky background
-    final_image_adu, components = apply_detector_noise(
-        source_eps=source_eps_for_noise,
-        exposure_time=exposure_time,
-        detector_config=detector_config,
-        seed=noise_seed
-    )
-
-    # Step 3: Create proper noise map
-    # The noise map represents total uncertainty in each pixel
-    noise_map_adu = create_noise_map(
-        source_eps=source_eps_for_noise,
-        exposure_time=exposure_time,
-        detector_config=detector_config
-    )
+        noise_map_adu = create_noise_map(source_eps_for_noise, exposure_time, detector_config)
+    else:
+        prediction = predict_observation(lensing_data, psf_data, observation_config)
+        source_only_eps = prediction.source_eps
+        noise_map_adu = prediction.noise_map_adu
+        final_image_adu = prediction.mean_adu
+        moments = prediction.moments
+        components = {
+            'source_e': moments.source_e,
+            'sky_e': moments.sky_e,
+            'dark_e': moments.dark_e,
+            'expected_e': moments.expected_e,
+        }
 
     # Create PyAutoLens arrays for the final data
     data = al.Array2D(values=final_image_adu, mask=mask)
@@ -187,6 +165,7 @@ def generate_observation(
         'throughput': throughput,
         'detector': deepcopy(detector_config),
         'noise_seed': noise_seed,
+        'sample_noise': sample_noise,
         'pixel_scale': lensing_data.pixel_scale,
         'field_of_view': lensing_data.field_of_view_arcsec
     }
@@ -208,16 +187,16 @@ def generate_observation(
     )
 
 
-def _resolve_observation_context(full_config, noise_seed, run_name):
+def _resolve_observation_context(full_config, noise_seed, run_name, *, require_seed=True):
     """Bind randomness and provenance independently of the pipeline container."""
     if full_config is not None and not isinstance(full_config, dict):
         raise ValueError("full_config must be a dict for generate_observation")
     config = full_config if full_config is not None else {}
-    if noise_seed is None:
+    if noise_seed is None and require_seed:
         if 'global_seed' not in config:
             raise ValueError("Provide noise_seed or 'global_seed' in full_config")
         noise_seed = config['global_seed']
-    if isinstance(noise_seed, bool) or not isinstance(noise_seed, int):
+    if noise_seed is not None and (isinstance(noise_seed, bool) or not isinstance(noise_seed, int)):
         raise ValueError("noise_seed / full_config.global_seed must be an int")
     if run_name is None:
         if 'run_name' not in config:

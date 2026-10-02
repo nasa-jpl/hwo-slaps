@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import yaml
 
 from hwoslaps.lensing import generate_lensing_system, load_source_image_asset
 
@@ -17,8 +18,6 @@ if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from prepare_source_image import (  # noqa: E402
-    OBSERVING_REFERENCE_RELPATH,
-    PRODUCTION_SCENE_RELPATH,
     SCRIPT_VERSION,
     bin_image,
     centre_on_centroid,
@@ -403,6 +402,21 @@ def test_prepare_cli_bin_two_records_crop_and_bins(tmp_path):
     assert provenance["output_path"] == str(output_path.resolve())
 
 
+def _synthetic_contract_inputs(tmp_path):
+    reference_path = tmp_path / 'reference.yaml'
+    scene_path = tmp_path / 'scene.yaml'
+    reference = {'metadata': {'source_photometry': {'detected_rate_e_per_s': 5.0}, 'detector': {'pixel_scale_arcsec': 0.00716}}}
+    scene = {'lensing': {'grid': {'shape': [128, 128], 'pixel_scale': 0.00716}, 'source_galaxy': {'redshift': 0.6, 'light': {'type': 'Image', 'asset_path': str(tmp_path / 'asset.npz'), 'centre': [0.0, 0.0], 'rotation_deg': 0.0, 'total_flux': 1.0, 'flux_scale': 1.0, 'size_scale': 1.0}}}}
+    reference_path.write_text(yaml.safe_dump(reference), encoding='utf-8')
+    scene_path.write_text(yaml.safe_dump(scene), encoding='utf-8')
+    return reference_path, scene_path
+
+
+@pytest.fixture
+def contract_inputs(tmp_path):
+    return _synthetic_contract_inputs(tmp_path)
+
+
 def _resolved_source(shape=(96, 96), background=2.0):
     """Return a background-plus-Gaussian source resolved over many pixels."""
     rows, cols = np.indices(shape, dtype=float)
@@ -430,21 +444,22 @@ def _unit_asset(tmp_path, target_half_light_arcsec=0.05):
     return output_path
 
 
-def test_detected_rate_reference_reads_the_committed_physical_rate():
+def test_detected_rate_reference_reads_the_committed_physical_rate(contract_inputs):
     """The target rate is the reference photometry, never the convention."""
-    reference = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)
+    reference_path, scene_path = contract_inputs
+    reference = detected_rate_reference(reference_path)
 
-    assert reference["target_rate_e_per_s"] > 0.0
-    assert reference["target_rate_e_per_s"] != pytest.approx(0.289151264)
+    assert reference["target_rate_e_per_s"] == 5.0
     assert reference["pixel_scale_arcsec"] > 0.0
     assert len(reference["reference_sha256"]) == 64
 
 
-def test_production_render_config_rejects_a_foreign_pixel_scale():
+def test_production_render_config_rejects_a_foreign_pixel_scale(contract_inputs):
     """A scene sampled off the reference pixel scale fails loudly."""
-    reference = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)
+    reference_path, scene_path = contract_inputs
+    reference = detected_rate_reference(reference_path)
     grid_config, source_config = production_render_config(
-        PROJECT_ROOT / PRODUCTION_SCENE_RELPATH, reference["pixel_scale_arcsec"]
+        scene_path, reference["pixel_scale_arcsec"]
     )
 
     assert source_config["light"]["type"] == "Image"
@@ -453,13 +468,14 @@ def test_production_render_config_rejects_a_foreign_pixel_scale():
     )
     with pytest.raises(ValueError, match="observing reference declares"):
         production_render_config(
-            PROJECT_ROOT / PRODUCTION_SCENE_RELPATH,
+            scene_path,
             2.0 * reference["pixel_scale_arcsec"],
         )
 
 
-def test_solve_detected_rate_normalization_hits_the_requested_rate(tmp_path):
+def test_solve_detected_rate_normalization_hits_the_requested_rate(tmp_path, contract_inputs):
     """The solved normalization makes the discrete pixel sum the target."""
+    reference_path, scene_path = contract_inputs
     asset_path = _unit_asset(tmp_path)
     grid_config = {"shape": [128, 128], "pixel_scale": 0.00716}
     source_config = {
@@ -489,7 +505,7 @@ def test_solve_detected_rate_normalization_hits_the_requested_rate(tmp_path):
         reference,
         grid_config,
         source_config,
-        PROJECT_ROOT / PRODUCTION_SCENE_RELPATH,
+        scene_path,
     )
 
     assert contract["target_rate_e_per_s"] == 5.0
@@ -501,8 +517,9 @@ def test_solve_detected_rate_normalization_hits_the_requested_rate(tmp_path):
     assert contract["units"].startswith("detected electrons per second")
 
 
-def test_prepare_cli_rate_contract_stores_target_and_realized_rates(tmp_path):
+def test_prepare_cli_rate_contract_stores_target_and_realized_rates(tmp_path, contract_inputs):
     """The CLI stores a verified contract against the committed reference."""
+    reference_path, scene_path = contract_inputs
     input_path = tmp_path / "resolved.npy"
     np.save(input_path, _resolved_source())
     output_path = tmp_path / "contracted.npz"
@@ -514,11 +531,13 @@ def test_prepare_cli_rate_contract_stores_target_and_realized_rates(tmp_path):
             "--target-half-light-arcsec",
             "0.11",
             "--rate-contract",
+            "--rate-contract-reference", str(reference_path),
+            "--rate-contract-scene", str(scene_path),
         ]
     )
 
     assert status == 0
-    reference = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)
+    reference = detected_rate_reference(reference_path)
     contract = load_source_image_asset(output_path).metadata["provenance"][
         "rate_contract"
     ]
@@ -526,7 +545,7 @@ def test_prepare_cli_rate_contract_stores_target_and_realized_rates(tmp_path):
     assert contract["realized_rate_e_per_s"] == pytest.approx(
         reference["target_rate_e_per_s"], rel=1.0e-12
     )
-    assert contract["grid_shape"] == [500, 500]
+    assert contract["grid_shape"] == [128, 128]
     assert contract["render_geometry"]["flux_scale"] == 1.0
 
 
@@ -534,6 +553,7 @@ def _contracted_asset(tmp_path, name="contracted.npz"):
     """Prepare one synthetic asset carrying a solved rate contract."""
     input_path = tmp_path / "resolved.npy"
     np.save(input_path, _resolved_source())
+    reference_path, scene_path = _synthetic_contract_inputs(tmp_path)
     output_path = tmp_path / name
     assert (
         main(
@@ -543,6 +563,8 @@ def _contracted_asset(tmp_path, name="contracted.npz"):
                 "--target-half-light-arcsec",
                 "0.11",
                 "--rate-contract",
+            "--rate-contract-reference", str(reference_path),
+            "--rate-contract-scene", str(scene_path),
             ]
         )
         == 0
@@ -557,10 +579,11 @@ def _copy_with_appended_comment(source_path, destination_path):
     return destination_path
 
 
-def test_verify_asset_rate_contract_rejects_an_edited_reference(tmp_path):
+def test_verify_asset_rate_contract_rejects_an_edited_reference(tmp_path, contract_inputs):
     """An edited observing reference fails even at the same target rate."""
+    reference_path, scene_path = contract_inputs
     asset_path = _contracted_asset(tmp_path)
-    reference_path = PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH
+    reference_path = reference_path
     edited_path = _copy_with_appended_comment(
         reference_path, tmp_path / "reference.yaml"
     )
@@ -571,16 +594,17 @@ def test_verify_asset_rate_contract_rejects_an_edited_reference(tmp_path):
 
     with pytest.raises(ValueError, match="observing reference.*now hashes to"):
         verify_asset_rate_contract(
-            asset_path, PROJECT_ROOT / PRODUCTION_SCENE_RELPATH, edited_path
+            asset_path, scene_path, edited_path
         )
 
 
-def test_verify_asset_rate_contract_rejects_an_edited_scene(tmp_path):
+def test_verify_asset_rate_contract_rejects_an_edited_scene(tmp_path, contract_inputs):
     """An edited production scene fails even at the same render geometry."""
+    reference_path, scene_path = contract_inputs
     asset_path = _contracted_asset(tmp_path)
-    scene_path = PROJECT_ROOT / PRODUCTION_SCENE_RELPATH
+    scene_path = scene_path
     edited_path = _copy_with_appended_comment(scene_path, tmp_path / "scene.yaml")
-    pixel_scale = detected_rate_reference(PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH)[
+    pixel_scale = detected_rate_reference(reference_path)[
         "pixel_scale_arcsec"
     ]
     assert production_render_config(
@@ -589,24 +613,26 @@ def test_verify_asset_rate_contract_rejects_an_edited_scene(tmp_path):
 
     with pytest.raises(ValueError, match="production scene.*now hashes to"):
         verify_asset_rate_contract(
-            asset_path, edited_path, PROJECT_ROOT / OBSERVING_REFERENCE_RELPATH
+            asset_path, edited_path, reference_path
         )
 
 
-def test_verify_asset_rate_contract_rejects_a_missing_contract_input(tmp_path):
+def test_verify_asset_rate_contract_rejects_a_missing_contract_input(tmp_path, contract_inputs):
     """A contract input that no longer exists fails instead of skipping."""
+    reference_path, scene_path = contract_inputs
     asset_path = _contracted_asset(tmp_path)
 
     with pytest.raises(ValueError, match="does not exist"):
         verify_asset_rate_contract(
             asset_path,
-            PROJECT_ROOT / PRODUCTION_SCENE_RELPATH,
+            scene_path,
             tmp_path / "absent_reference.yaml",
         )
 
 
-def test_verify_asset_rate_contract_rejects_a_contract_without_digests(tmp_path):
+def test_verify_asset_rate_contract_rejects_a_contract_without_digests(tmp_path, contract_inputs):
     """A contract recording no input digest cannot be verified at all."""
+    reference_path, scene_path = contract_inputs
     asset = load_source_image_asset(_contracted_asset(tmp_path))
     provenance = deepcopy(asset.metadata["provenance"])
     provenance["rate_contract"].pop("observing_reference")
@@ -618,4 +644,4 @@ def test_verify_asset_rate_contract_rejects_a_contract_without_digests(tmp_path)
     )
 
     with pytest.raises(ValueError, match="carries no sha256"):
-        verify_asset_rate_contract(stripped_path)
+        verify_asset_rate_contract(stripped_path, scene_path, reference_path)

@@ -27,6 +27,11 @@ _PATH_FIELDS = (
     ("plotting", "output_dir"),
     ("lensing", "source_galaxy", "light", "asset_path"),
     ("modeling", "fisher", "covariance_path"),
+    ("psf", "kernel", "path"),
+    ("psf", "fit_kernel", "path"),
+    ("modeling", "fit_psf", "psf", "kernel", "path"),
+    ("modeling", "fit_psf", "psf", "fit_kernel", "path"),
+    ("modeling", "fit_psf", "delta", "prior_table"),
 )
 
 
@@ -121,21 +126,6 @@ def load_config(
     return config
 
 
-def run_directory(config: Mapping[str, Any]) -> Path:
-    """Return the configured artifact directory for one named run.
-
-    A run name is one directory component; nesting belongs in output_dir.
-    This keeps snapshots, logs and scientific output on one shared contract.
-    """
-    name = config.get("run_name")
-    if not isinstance(name, str) or not name.strip():
-        raise ValueError("run_name must be a non-empty string")
-    if name in {".", ".."} or "/" in name or "\\" in name:
-        raise ValueError("run_name must be one directory name; put nesting in plotting.output_dir")
-    output_dir = config.get("plotting", {}).get("output_dir")
-    if not isinstance(output_dir, str) or not output_dir.strip():
-        raise ValueError("plotting.output_dir must be a non-empty path string")
-    return Path(output_dir).expanduser() / name
 
 
-__all__ = ["Config", "load_config", "merge_configs", "resolve_config_paths", "run_directory"]
+__all__ = ["Config", "load_config", "merge_configs", "resolve_config_paths"]

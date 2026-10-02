@@ -1,16 +1,14 @@
 """Deterministic tangential critical curve and effective Einstein radius.
 
-The D-F7 aperture ruling computes every production aperture estimand
-inside ``R <= 2 theta_E``, where ``theta_E`` for a non-isothermal or
-flexible truth macro is the area-equivalent Einstein radius
+For a non-isothermal or flexible macro model, the area-equivalent Einstein
+radius is
 
 ``theta_E_eff = sqrt(A_crit/pi)``
 
 with ``A_crit`` the image-plane area enclosed by the main tangential
 critical curve of the truth macro model.
 
-The extraction is deliberately frozen so that ``DesignFreeze`` can pin
-it:
+The extraction and its numerical grid are explicit and reproducible:
 
 - the tangential eigenvalue ``1 - kappa - |gamma|`` is evaluated by
   PyAutoLens ``LensCalc`` on a declared uniform grid whose half width
@@ -67,8 +65,9 @@ DEFAULT_GRID_HALF_WIDTH_FACTOR = 4.0
 parameter (`float`)."""
 
 DEFAULT_APERTURE_THETA_E_FACTOR = 2.0
-"""Aperture radius in units of ``theta_E_eff`` (`float`), fixed at 2 by
-the D-F7 ruling."""
+"""Default aperture radius in units of ``theta_E_eff`` (`float`).
+Callers can supply another aperture factor explicitly.
+"""
 
 DEFAULT_COMPUTATIONAL_MARGIN_FRACTION = 0.1
 """Fractional map extent required beyond the aperture radius
@@ -301,7 +300,7 @@ class ThetaEExtraction:
         return polyline_digest(self.contour_arcsec)
 
     def to_provenance_dict(self):
-        """Return the frozen record `DesignFreeze` pins.
+        """Return the extraction and aperture provenance record.
 
         Returns
         -------

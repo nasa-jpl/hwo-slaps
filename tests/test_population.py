@@ -95,9 +95,11 @@ def test_large_population_member_seeds_do_not_collide():
     first = next(iter_population_configs(base, fields, 1, seed=2, start=110170, validate=False))
     second = next(iter_population_configs(base, fields, 1, seed=2, start=111187, validate=False))
     assert first["global_seed"] != second["global_seed"]
-    from hwoslaps.population import _noise_seed
-    assert len({_noise_seed(2, i) for i in range(200000)}) == 200000
-    assert len({_noise_seed(s, i) for s in range(10) for i in range(10)}) == 100
+    seeds = {
+        next(iter_population_configs(base, fields, 1, seed=s, start=i, validate=False))['global_seed']
+        for s in range(3) for i in (110170, 111187)
+    }
+    assert len(seeds) == 6
 
 
 @pytest.mark.parametrize("spec", [

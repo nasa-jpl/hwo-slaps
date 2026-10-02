@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Optional, TYPE_CHECKING
 
+import numpy as np
+
 from .autolens_model_builder import (
     DEFAULT_PRIOR_WIDTHS,
     autofit_model_from_spec,
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
     from .dataset_builder import NonlinearDatasetMetadata
 
 
-_PSF_MISMATCH_PREFIXES = ("bank:", "delta:", "explicit:")
+_PSF_MISMATCH_PREFIXES = ("bank:", "delta:", "explicit:", "kernel:")
 
 
 def _metadata_field(metadata: Any, name: str, default: Any) -> Any:
@@ -67,7 +69,7 @@ def _validate_fit_psf_dataset(
         "",
     ))
     mismatch_label = label.startswith(_PSF_MISMATCH_PREFIXES)
-    mismatch_mode = mode in {"bank", "delta", "explicit"}
+    mismatch_mode = mode in {"bank", "delta", "explicit", "kernel"}
 
     if matched_control or mode == "matched":
         if expected_psf_fit_sha256 is not None:
@@ -101,6 +103,7 @@ def _validate_fit_psf_dataset(
         "bank": "bank:",
         "delta": "delta:",
         "explicit": "explicit:",
+        "kernel": "kernel:",
     }.get(mode)
     valid = (
         (mode == "matched" and not supplied and not mismatch_label)
@@ -166,6 +169,21 @@ def _validate_fit_psf_dataset_identity(
             f"{label!r}; the recorded PSF case must be the label that "
             "passed the guard"
         )
+    if mode == "kernel":
+        descriptor = full_config["modeling"]["fit_psf"]
+        if label != f"kernel:{descriptor['kernel_sha256']}":
+            raise ValueError("dataset label differs from declared fit-kernel identity")
+        if actual_psf_sha256 != descriptor["kernel_sha256"]:
+            raise ValueError("dataset kernel differs from declared fit-kernel identity")
+        from ...psf.utils import pyauto_kernel_native
+
+        kernel = pyauto_kernel_native(dataset_psf)
+        if list(kernel.shape) != list(descriptor["shape_native"]):
+            raise ValueError("dataset kernel shape differs from declared fit-kernel shape")
+        if not np.isclose(
+            float(dataset.pixel_scales[0]), float(descriptor["pixel_scale_arcsec"]), rtol=0.0, atol=1e-12,
+        ):
+            raise ValueError("dataset pixel scale differs from declared fit-kernel sampling")
     if mode in {"delta", "explicit"}:
         from ...psf.mismatch import build_psf_mismatch_spec
 

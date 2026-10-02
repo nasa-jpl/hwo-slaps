@@ -35,7 +35,6 @@ def compact_no_aberration_config() -> dict:
         cfg = yaml.safe_load(f)
 
     cfg = copy.deepcopy(cfg)
-    cfg["plotting"]["enabled"] = False
     cfg["psf"]["hres_psf"]["num_pix"] = 96
     cfg["psf"]["hres_psf"]["num_airy"] = 5
     cfg["psf"]["hres_psf"]["sampling"] = 5

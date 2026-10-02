@@ -5,7 +5,6 @@ from __future__ import annotations
 import builtins
 from copy import deepcopy
 from dataclasses import FrozenInstanceError, fields, replace
-import importlib.util
 import multiprocessing
 from pathlib import Path
 import pickle
@@ -17,6 +16,7 @@ from types import SimpleNamespace
 import autolens as al
 import numpy as np
 import pytest
+from nonlinear_fixtures import synthetic_source_asset
 from astropy import constants as const
 from astropy import units as u
 from scipy.interpolate import PchipInterpolator
@@ -835,16 +835,14 @@ def test_t6_requires_cpu_guard_remains_general_and_precedes_backend_import(
         )
 
 
-def _t10_source_config(source_family):
+def _t10_source_config(source_family, asset_path=None):
     """Return one complete config for a stock or image source."""
     config, _ = _freed_config_and_trial()
     if source_family == "stock":
         return config
     if source_family == "image":
-        asset_path = (
-            Path(__file__).resolve().parents[1]
-            / "configs/source_assets/cosmos_48849_hlr011.npz"
-        )
+        if asset_path is None:
+            raise ValueError("image model requires the synthetic source fixture")
         config["lensing"]["source_galaxy"]["light"] = {
             "type": "Image",
             "asset_path": str(asset_path),
@@ -878,7 +876,7 @@ def _t10_freed_trial(model):
     )
 
 
-def _t10_spec(family):
+def _t10_spec(family, asset_path=None):
     """Build the real repository ModelSpec for one T10 family."""
     if family == "smooth":
         return model_builder.smooth_model_spec_from_config(
@@ -901,7 +899,7 @@ def _t10_spec(family):
         )
     if family == "image_source":
         return model_builder.smooth_model_spec_from_config(
-            _t10_source_config("image")
+            _t10_source_config("image", asset_path)
         )
     raise AssertionError(f"unsupported T10 family: {family}")
 
@@ -915,10 +913,10 @@ T10_FAMILIES = (
 )
 
 
-def test_t6_all_intended_item7b_specs_have_no_requires_cpu_stamp():
+def test_t6_all_intended_item7b_specs_have_no_requires_cpu_stamp(synthetic_source_asset):
     """Catch retaining any CPU stamp after its complete T10 gate passes."""
     for family in T10_FAMILIES[1:]:
-        spec = _t10_spec(family)
+        spec = _t10_spec(family, synthetic_source_asset)
         assert "requires_cpu" not in spec.metadata, (
             f"{family} still carries requires_cpu="
             f"{spec.metadata['requires_cpu']!r}"
@@ -1343,69 +1341,8 @@ def test_t12_effective_provenance_serializes_and_old_payloads_default_null():
     assert set(row) == set(NONLINEAR_CASE_CSV_COLUMNS)
 
 
-def _load_two_gpu_launcher():
-    """Load the ignored-path V7 launcher as an importable test module."""
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "scratch/item7b_probes/run_two_gpu_smoke.py"
-    )
-    spec = importlib.util.spec_from_file_location("item7b_v7_launcher", path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec.loader is not None
-    spec.loader.exec_module(module)
-    return module
 
 
-def test_v7_launch_failure_terminates_reaps_and_closes_partial_children(
-    monkeypatch,
-    tmp_path,
-):
-    """Catch an orphaned first GPU fit when the second child cannot start."""
-    launcher = _load_two_gpu_launcher()
-    arguments = SimpleNamespace(
-        config=["first.yaml", "second.yaml"],
-        gpu=["0", "1"],
-        python="python",
-        runner="runner.py",
-        log_dir=str(tmp_path),
-    )
-    monkeypatch.setattr(launcher, "_arguments", lambda: arguments)
-
-    class PartialChild:
-        """Record cleanup calls for the one successfully started process."""
-
-        pid = 1234
-
-        def __init__(self):
-            self.terminated = False
-            self.waited = False
-
-        def poll(self):
-            return None
-
-        def terminate(self):
-            self.terminated = True
-
-        def wait(self):
-            self.waited = True
-            return -15
-
-    child = PartialChild()
-    handles = []
-
-    def popen(command, **kwargs):
-        handles.append(kwargs["stdout"])
-        if len(handles) == 1:
-            return child
-        raise OSError("synthetic second-child launch failure")
-
-    monkeypatch.setattr(launcher.subprocess, "Popen", popen)
-    with pytest.raises(OSError, match="second-child launch failure"):
-        launcher.main()
-    assert child.terminated is True
-    assert child.waited is True
-    assert len(handles) == 2
-    assert all(handle.closed for handle in handles)
 
 
 def test_t7_xp_selector_finds_nested_jax_arrays_and_tracers():
@@ -1737,10 +1674,11 @@ def _t10_numpy_values(fitness, physical_batch):
 def test_t10_each_real_model_family_matches_numpy_through_persistent_fitness(
     family,
     tmp_path,
+    synthetic_source_asset,
 ):
     """Catch traced model, decorator, precision, or persistent-cache breaks."""
     jax = _require_t10_target_gpu()
-    spec = _t10_spec(family)
+    spec = _t10_spec(family, synthetic_source_asset)
     model = model_builder.autofit_model_from_spec(spec)
     dataset = _t10_real_imaging(model)
     batch_a, batch_b = _t10_changed_physical_batches(model, family)

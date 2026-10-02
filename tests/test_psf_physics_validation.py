@@ -33,7 +33,6 @@ def compact_no_aberration_config() -> dict:
         cfg = yaml.safe_load(f)
 
     cfg = copy.deepcopy(cfg)
-    cfg["plotting"]["enabled"] = False
     cfg["psf"]["hres_psf"]["num_pix"] = 128
     cfg["psf"]["hres_psf"]["num_airy"] = 6
     cfg["psf"]["hres_psf"]["sampling"] = 5
@@ -109,6 +108,19 @@ def test_circular_airy_matches_analytic_fwhm_null_and_encircled_energy():
         / np.sum(intensity)
     )
     assert encircled_energy == pytest.approx(AIRY_ENCIRCLED_ENERGY_FIRST_NULL, abs=5e-3)
+
+
+def test_segmented_pupil_collecting_area_matches_analytic_hexagon():
+    """A single unobscured hexagon has area 3 sqrt(3) D_vertex^2 / 8."""
+    from hwoslaps.psf.telescope_models import create_hcipy_telescope
+
+    telescope = create_hcipy_telescope({
+        'telescope': {'gap_size': 0.0, 'segment_point_to_point': 1.0,
+                      'pupil_diameter': 2.0, 'num_rings': 0, 'supersampling_factor': 4},
+        'hres_psf': {'num_pix': 128, 'wavelength': 500e-9},
+    })
+    collecting_area = float(np.sum(np.asarray(telescope['aper']) * telescope['pupil_grid'].weights))
+    assert collecting_area == pytest.approx(3 * np.sqrt(3) / 8, rel=0.01)
 
 
 @pytest.mark.parametrize("aberration_nm", [5.0, 20.0])

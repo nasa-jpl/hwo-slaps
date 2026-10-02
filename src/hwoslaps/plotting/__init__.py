@@ -1,38 +1,31 @@
-"""
-Plotting module for HWO-SLAPS pipeline.
+"""Optional visualization consumers; graphics dependencies load on demand."""
 
-This module provides visualization functions for lensing, PSF, observation,
-and subhalo detection analysis.
-"""
+from importlib import import_module
 
-from .lensing_plots import plot_lensing_comparison, plot_lensing_baseline_scene
-from .psf_plots import (
-    plot_psf_comparison,
-    plot_psf_zoom,
-    plot_psf_system_overview,
-    plot_psf_complete_analysis
-)
-from .observation_plots import plot_observation_comparison
-from .detection_plots import (
-    plot_fisher_local_summary,
-    plot_fisher_psf_mode_scan,
-    plot_fisher_detection_map_summary,
-    plot_fisher_map_degradation,
-)
-from .registry import generate_all_plots, get_plot_registry
+_EXPORTS = {
+    'plot_lensing_comparison': '.lensing_plots',
+    'plot_lensing_baseline_scene': '.lensing_plots',
+    'plot_psf_comparison': '.psf_plots',
+    'plot_psf_zoom': '.psf_plots',
+    'plot_psf_system_overview': '.psf_plots',
+    'plot_psf_complete_analysis': '.psf_plots',
+    'plot_observation_comparison': '.observation_plots',
+    'plot_fisher_local_summary': '.detection_plots',
+    'plot_fisher_psf_mode_scan': '.detection_plots',
+    'plot_fisher_detection_map_summary': '.detection_plots',
+    'plot_fisher_map_degradation': '.detection_plots',
+    'generate_all_plots': '.registry',
+    'get_plot_registry': '.registry',
+}
+__all__ = list(_EXPORTS)
 
-__all__ = [
-    'plot_lensing_comparison',
-    'plot_lensing_baseline_scene',
-    'plot_psf_comparison',
-    'plot_psf_zoom',
-    'plot_psf_system_overview',
-    'plot_psf_complete_analysis',
-    'plot_observation_comparison',
-    'plot_fisher_local_summary',
-    'plot_fisher_psf_mode_scan',
-    'plot_fisher_detection_map_summary',
-    'plot_fisher_map_degradation',
-    'generate_all_plots',
-    'get_plot_registry'
-]
+
+def __getattr__(name):
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(name)
+    return getattr(import_module(module_name, __name__), name)
+
+
+def __dir__():
+    return sorted(__all__)

@@ -475,7 +475,6 @@ def compact_config():
     ) as stream:
         config = yaml.safe_load(stream)
     config = copy.deepcopy(config)
-    config['plotting']['enabled'] = False
     config['psf']['hres_psf']['num_pix'] = 128
     config['psf']['hres_psf']['num_airy'] = 6
     config['psf']['hres_psf']['sampling'] = 5

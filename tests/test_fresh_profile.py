@@ -11,25 +11,11 @@ import numpy as np
 import pytest
 import yaml
 
-try:
-    from hwoslaps.modeling.nonlinear.fresh_profile import (
-        AutoLensFitRunner,
-        CurrentSearchStart,
-        FreshProfileRunner,
-        FreshProfileSettings,
-        FreshProfileValidator,
-        NonlinearFitSummary,
-        ZeroResidualAnchorRunner,
-        optimize_current_search_profile,
-        select_current_search_starts,
-    )
-    from hwoslaps.modeling.nonlinear.output_schema import NonlinearCaseResult
-    from studies.rasti.campaign.profile_adapters import profile_settings_from_release_protocol
-except (AttributeError, ImportError) as exc:  # pragma: no cover - host-runtime guard
-    pytest.skip(
-        f"pinned AutoLens runtime is unavailable for package imports: {exc}",
-        allow_module_level=True,
-    )
+from hwoslaps.modeling.nonlinear.fresh_profile import (
+    AutoLensFitRunner, CurrentSearchStart, FreshProfileRunner, FreshProfileSettings,
+    FreshProfileValidator, NonlinearFitSummary, ZeroResidualAnchorRunner,
+    optimize_current_search_profile, select_current_search_starts,
+)
 
 
 def _starts(points, saved_log_likelihood=0.0, lower=None, upper=None):
@@ -425,65 +411,6 @@ def test_current_search_start_selection_requires_ml_plus_eight_or_declared_count
     assert offset_starts[1].normalized_vector == pytest.approx((0.45, 0.95))
 
 
-def test_profile_settings_reject_undeclared_flat_release_protocol():
-    release = {
-        "protocol": {
-            "optimizer": {
-                "original_start_count": 8,
-                "start_separation_normalized_l2": 0.05,
-                "start_separation_posterior_sigma": 1.0,
-                "maxiter": 500,
-                "ftol": 0.0,
-                "gtol": 1.0e-10,
-                "maxls": 50,
-                "tighter_repeat": {
-                    "maxiter": 1000,
-                    "ftol": 0.0,
-                    "gtol": 1.0e-12,
-                },
-                "scalar_residual_tolerance": 1.0e-4,
-            },
-            "acceptance": {
-                "distinct_original_starts": 2,
-                "support_log_likelihood_tolerance": 0.1,
-                "tighter_repeat_tolerance": 0.1,
-            },
-        }
-    }
-    with pytest.raises(ValueError, match="explicitly bind profile settings"):
-        profile_settings_from_release_protocol(release)
-
-
-def test_profile_settings_load_from_actual_v7_yaml_nested_schema():
-    import yaml
-
-    release_path = Path(__file__).parents[1] / "configs/design/design_freeze_v7.yaml"
-    release = yaml.safe_load(release_path.read_text())
-    settings = profile_settings_from_release_protocol(release)
-    assert settings.original_start_count == 8
-    assert settings.maxiter == 500
-    assert settings.repeat_maxiter == 1000
-    assert settings.scalar_residual_tolerance == pytest.approx(1.0e-4)
-
-
-def test_public_nonlinear_case_result_shape_is_retained():
-    fit = NonlinearFitSummary(model_role="smooth", fit_mode="freed", status="success")
-    result = NonlinearCaseResult(
-        case_id="case",
-        trial=object(),
-        dataset_metadata=object(),
-        fit_mode="freed",
-        psf_case="nominal",
-        smooth_fit=fit,
-        subhalo_fit=fit,
-        metric=None,
-        quality_flags=[],
-    )
-    assert result.smooth_fit is fit
-    assert result.subhalo_fit is fit
-    assert result.quality_flags == []
-
-
 def test_zero_residual_anchor_has_no_evidence_claim():
     model = SimpleNamespace(
         unique_prior_paths=(("galaxies", "lens", "subhalo", "x"),),
@@ -825,59 +752,6 @@ def test_bad_bracket_anchor_is_rejected_before_delegate_h0(monkeypatch):
     assert calls == []
 
 
-def test_established_fisher_q_adapter_binds_999_kernel_and_mass_point(monkeypatch):
-    import sys
-    from types import ModuleType
-
-    run_ladder = ModuleType("run_ladder")
-    observed = {}
-
-    def rung_config(config, ladder, aperture):
-        updated = dict(config)
-        updated["psf"] = {"kernel": {"shape_native": [999, 999]}}
-        return updated
-
-    class Detector:
-        def _evaluate_grid_positions(self, positions):
-            observed["positions"] = positions
-            return [SimpleNamespace(q_asimov_local=7.25)]
-
-    run_ladder._rung_config = rung_config
-    run_ladder._build_detector = lambda config, psf: Detector()
-    run_ladder._point_detector_at_rung = lambda detector, logm: observed.update(
-        logm=logm
-    )
-    monkeypatch.setitem(sys.modules, "studies.rasti.scripts.run_ladder", run_ladder)
-    config_validation = ModuleType("hwoslaps.config.validation")
-    config_validation.validate_or_raise = lambda config: observed.update(
-        kernel=config["psf"]["kernel"]["shape_native"]
-    )
-    config_package = ModuleType("hwoslaps.config")
-    config_package.__path__ = []
-    monkeypatch.setitem(sys.modules, "hwoslaps.config", config_package)
-    monkeypatch.setitem(sys.modules, "hwoslaps.config.validation", config_validation)
-    psf_generator = ModuleType("hwoslaps.psf.generator")
-    psf_generator.generate_psf_system = lambda config, full_config: object()
-    psf_package = ModuleType("hwoslaps.psf")
-    psf_package.__path__ = []
-    monkeypatch.setitem(sys.modules, "hwoslaps.psf", psf_package)
-    monkeypatch.setitem(sys.modules, "hwoslaps.psf.generator", psf_generator)
-
-    result = __import__(
-        "studies.rasti.campaign.profile_adapters",
-        fromlist=["evaluate_established_fisher_q"],
-    ).evaluate_established_fisher_q(
-        config={"ladder": {"aperture": {}}, "psf": {"kernel": {"shape_native": [51, 51]}}},
-        position_yx_arcsec=[0.2, -0.3],
-        log10_m200=7.4,
-    )
-    assert result["q_f_production_at_position"] == pytest.approx(7.25)
-    assert result["kernel_shape_native"] == [999, 999]
-    assert observed["kernel"] == [999, 999]
-    assert observed["logm"] == pytest.approx(7.4)
-    assert observed["positions"] == [(0.2, -0.3)]
-
-
 @pytest.mark.parametrize("retained_files", [("search_internal.dill", ".time"), (".time",)])
 def test_retention_is_applied_restored_and_raw_state_is_recorded(
     monkeypatch, tmp_path, retained_files
@@ -955,127 +829,6 @@ def test_retention_is_applied_restored_and_raw_state_is_recorded(
     else:
         assert summary.search_internal_retained is False
         assert payload["missing_required"] == ["search_internal.dill"]
-
-
-def _bracket_inputs(tmp_path):
-    """Write a ladder-shaped staged config (no subhalo) and its frozen top rung."""
-    with open("configs/scenes/scene1_smooth_ring.yaml", encoding="utf-8") as stream:
-        staged = yaml.safe_load(stream)
-    staged["lensing"]["subhalo"] = {
-        "enabled": False,
-        "mass": "1.0e7",
-        "model": "NFW",
-        "concentration": {"model": "moline2017_eq7", "x_sub": 1.0, "h": None},
-        "position": {"type": "angle", "angle": 90.0, "offset_pixels": 0},
-    }
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(yaml.safe_dump(staged, sort_keys=False), encoding="utf-8")
-    positions_path = tmp_path / "positions.json"
-    positions_path.write_text(
-        json.dumps(
-            {
-                "rungs": {
-                    "top": {
-                        "logm": 7.2,
-                        "mass_msun": 10.0**7.2,
-                        "position_yx_arcsec": [0.8, 0.05],
-                    }
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    return config_path, positions_path
-
-
-def _rendering_generator(observed):
-    """Mimic the generator contract: a disabled subhalo renders as None."""
-
-    def generate_lensing_system(lensing_config, full_config):
-        observed.append(deepcopy(full_config))
-        subhalo = lensing_config["subhalo"]
-        present = bool(subhalo["enabled"])
-        return SimpleNamespace(
-            lens_redshift=lensing_config["lens_galaxy"]["redshift"],
-            source_redshift=lensing_config["source_galaxy"]["redshift"],
-            subhalo_model=subhalo["model"] if present else None,
-            subhalo_mass=float(subhalo["mass"]) if present else None,
-            subhalo_position=(
-                tuple(subhalo["position"]["centre"]) if present else None
-            ),
-            subhalo_einstein_radius=None,
-            subhalo_kappa_s=0.01 if present else None,
-            subhalo_scale_radius_arcsec=0.2 if present else None,
-            subhalo_concentration=20.0 if present else None,
-            subhalo_concentration_model=(
-                subhalo["concentration"]["model"] if present else None
-            ),
-        )
-
-    return generate_lensing_system
-
-
-def _materialize(tmp_path, target_mass_msun=10.0**7.3):
-    from studies.rasti.campaign.profile_adapters import (
-        materialize_bracket_case_from_files,
-    )
-
-    config_path, positions_path = _bracket_inputs(tmp_path)
-    return materialize_bracket_case_from_files(
-        config_path=config_path,
-        positions_path=positions_path,
-        output_dir=tmp_path / "generated",
-        case_id="selected12_bracket:sys0043:plus_0.1dex",
-        bracket_rung="plus_0.1dex",
-        target_log10_m200=7.3,
-        target_mass_msun=target_mass_msun,
-        position_yx_arcsec=(0.8, 0.05),
-    )
-
-
-def test_bracket_materializer_renders_the_declared_target_subhalo(tmp_path, monkeypatch):
-    import hwoslaps.lensing.generator as generator
-
-    observed = []
-    monkeypatch.setattr(generator, "generate_lensing_system", _rendering_generator(observed))
-    target = 10.0**7.3
-
-    generated = _materialize(tmp_path, target)
-
-    assert len(observed) == 1
-    rendered = observed[0]["lensing"]["subhalo"]
-    assert rendered["enabled"] is True
-    assert rendered["mass"] == pytest.approx(target)
-    assert rendered["position"] == {"type": "direct", "centre": [0.8, 0.05]}
-    assert generated["status"] == "MATERIALIZED_NOT_FIT"
-    written = yaml.safe_load(Path(generated["config"]).read_text(encoding="utf-8"))
-    assert written["lensing"]["subhalo"]["enabled"] is False
-    rungs = json.loads(Path(generated["positions"]).read_text(encoding="utf-8"))["rungs"]
-    assert rungs["plus_0.1dex"]["mass_msun"] == pytest.approx(target)
-    assert rungs["plus_0.1dex"]["position_yx_arcsec"] == [0.8, 0.05]
-    anchor = json.loads(Path(generated["h1_anchor"]).read_text(encoding="utf-8"))
-    assert anchor["target_mass_msun"] == pytest.approx(target)
-    assert anchor["evidence_claim"] is False and anchor["sampler_executed"] is False
-    assert len(anchor["vector"]) == len(anchor["parameter_names"]) > 0
-    assert np.all(np.isfinite(anchor["vector"]))
-
-
-def test_bracket_materializer_rejects_a_reference_without_the_target(tmp_path, monkeypatch):
-    import hwoslaps.lensing.generator as generator
-
-    def without_subhalo(lensing_config, full_config):
-        return SimpleNamespace(
-            lens_redshift=0.2,
-            source_redshift=0.6,
-            subhalo_model=None,
-            subhalo_mass=None,
-            subhalo_position=None,
-        )
-
-    monkeypatch.setattr(generator, "generate_lensing_system", without_subhalo)
-    with pytest.raises(RuntimeError, match="declared target subhalo"):
-        _materialize(tmp_path)
-    assert not (tmp_path / "generated").exists()
 
 
 def test_sharp_posterior_supplies_eight_starts_at_its_own_sigma_scale(tmp_path):

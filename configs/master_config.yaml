@@ -1,13 +1,8 @@
-# HWO-SLAPS Configuration
+# Illustrative segmented-pupil strong-lensing configuration
 
 # Run identification
-run_name: fisher_paper_pilot_scan_loworder_global_segment
-global_seed: 11  # null=random, int=reproducible 
-
-# Output and plotting
-plotting:
-  enabled: true
-  output_dir: outputs
+run_name: segmented_example
+global_seed: 11  # explicit reproducible random stream
 
 # Lensing system generation
 lensing:
@@ -15,7 +10,7 @@ lensing:
   grid:
     shape: [500, 500]  # pixels
     pixel_scale: 0.00716  # arcsec/pixel
-    
+
   # Main lens galaxy
   lens_galaxy:
     redshift: 0.2
@@ -24,7 +19,7 @@ lensing:
       einstein_radius: 1  # arcsec
       centre: [0.0, 0.0]
       ell_comps: [0.1, 0.0]  # Ellipticity
-      
+
   # Background source galaxy
   source_galaxy:
     redshift: 0.6
@@ -43,7 +38,7 @@ lensing:
       #   total_flux: 0.29  # intensity units times arcsec^2
       #   flux_scale: 1.0  # required
       #   size_scale: 1.0  # required; fixed-SB similarity stretch
-      
+
   # Dark matter subhalo
   subhalo:
     enabled: true  # Set to false to create system with no subhalo
@@ -55,14 +50,14 @@ lensing:
       h: null                # null => infer from configured cosmology
     position:
       type: 'angle'         # 'random', 'angle', or 'direct'
-      # Deterministic first branch-validation run: place the subhalo on the Einstein ring.
+      # Example placement on the Einstein ring; direct coordinates are also supported.
       angle: 90.0           # degrees (0-360), measured from +x toward +y
       offset_pixels: 0      # optional radial offset in pixels (default 0)
       # For random placement:
       # scatter_pixels: 20  # Random scatter ±10 pixels around Einstein ring
       # For direct placement only:
       # centre: [0.12, 0.81]  # [y, x] in arcseconds
-    
+
   # Cosmology
   cosmology: Planck15
 
@@ -76,7 +71,7 @@ psf:
     num_rings: 2
     focal_length: 144.0  # m
     supersampling_factor: 4
-    
+
   # High-resolution PSF parameters (for metrics calculation)
   hres_psf:
     num_pix: 512
@@ -84,20 +79,20 @@ psf:
     num_airy: 12
     sampling: 5
     save_highres_psf_npy: false  # Save pre-downsampled PSF intensity as .npy
-    
+
   # Kernel parameters (for PyAutoLens)
   kernel:
     shape_native: [51, 51]  # Final kernel dimensions
-    
+
   # Aberrations
   aberrations:
     # Toggle flags to enable/disable each aberration type
-    enable_segment_pistons: false       
+    enable_segment_pistons: false
     enable_segment_tiptilts: false
     enable_segment_hexikes: true
     enable_global_zernikes: false
-    
-    # Segment piston errors in nm 
+
+    # Segment piston errors in nm
     segment_pistons:
       0: 0.012  # 12 pm piston on segment 0
       1: 0.015  # 15 pm piston on segment 1
@@ -140,7 +135,7 @@ psf:
       16: [0.000018, 0.000018]
       17: [0.000016, 0.000016]
       18: [0.000010, 0.000010]
-      
+
     # Segment-level hexike aberrations in nm RMS (noll indexing)
     segment_hexikes:
       0: {1: 100}   # Segment 0: hexike Noll mode 1 with 100 nm
@@ -162,7 +157,7 @@ psf:
       16: {17: 100} # Segment 16: hexike Noll mode 17 with 100 nm
       17: {18: 100} # Segment 17: hexike Noll mode 18 with 100 nm
       18: {19: 100} # Segment 18: hexike Noll mode 19 with 100 nm
-      
+
     # Global Zernike aberrations in nm RMS
     global_zernikes:
       4: 5    # Focus (Z4)
@@ -183,7 +178,7 @@ observation:
   # already detected per-pixel rates and are not scaled.
   throughput: 1.0
   output_format: "pyautolens_ready"
-  
+
   # Detector configuration
   detector:
     gain: 1.0           # e-/ADU
@@ -193,8 +188,6 @@ observation:
 
 # Module 4: Subhalo Detection
 modeling:
-  enabled: true  # Set to true to enable detection mode
-  detection: 'fisher'
   # Optional analysis-PSF treatment.
   # fit_psf:
   #   mode: matched               # matched | explicit | delta
@@ -205,16 +198,12 @@ modeling:
   #   #   seed: 20260814          # non-negative integer
   #   #   family: combined        # combined | global | segment
   fisher:
-    mode: both                    # local | map | both
     snr_threshold: 3.0
     include_background_offset: true
     finite_diff:
       centre_arcsec: 1.0e-3
       einstein_radius_arcsec: 1.0e-3
       ell_comp: 1.0e-3
-      slope: 1.0e-3
-      multipole_comp: 1.0e-3
-      shear_comp: 1.0e-3
       source_intensity_frac: 1.0e-2
       source_reff_frac: 1.0e-2
     mask_mode: source_snr         # source_snr | all_pixels | fixed_annulus
@@ -286,6 +275,6 @@ modeling:
         half_width_arcsec: 1.5    # square half-width; 1.5" covers the ring with margin
         annulus: null             # optional {r_min_arcsec, r_max_arcsec} restriction
       explicit_positions_yx: null
-      detection_q_threshold: 10.0 # SCDD threshold on q_F for the detectable-area product
+      detection_q_threshold: 10.0 # optional threshold for the low-level grid-area diagnostic
       num_workers: 1              # grid template-generation worker processes (CPU)
       engine: reference           # reference | jax (batched JAX templates; ignores num_workers)

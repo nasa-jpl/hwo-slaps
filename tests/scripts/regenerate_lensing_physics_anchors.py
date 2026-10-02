@@ -20,11 +20,7 @@ if str(TESTS_DIR) not in sys.path:
 
 from _lensing_physics_helpers import (  # noqa: E402
     Planck15CosmologyAdapter,
-    bootstrap_hwoslaps_namespace,
-    load_constants_module,
-    load_mass_models_module,
     load_master_config,
-    load_module,
 )
 
 
@@ -59,15 +55,6 @@ def _nfw_lensing_terms(
         "kappa_s": float(kappa_s),
         "scale_radius_arcsec": float(scale_radius_arcsec),
     }
-
-
-def _load_lensing_generator_module():
-    """Load the lensing generator module without package side effects."""
-    bootstrap_hwoslaps_namespace()
-    load_module("constants.py", "hwoslaps.constants")
-    load_module("lensing/mass_models.py", "hwoslaps.lensing.mass_models")
-    load_module("lensing/utils.py", "hwoslaps.lensing.utils")
-    return load_module("lensing/generator.py", "hwoslaps.lensing.generator")
 
 
 def _build_integration_config(model_name: str) -> dict:
@@ -110,8 +97,8 @@ def _build_integration_image_summary(generator_module) -> dict:
 
 def build_anchor_payload(include_integration: bool = False) -> dict:
     """Build frozen scalar anchors for PM/SIS/NFW physics."""
-    mass_models = load_mass_models_module()
-    constants_module = load_constants_module()
+    from hwoslaps.lensing import mass_models
+    from hwoslaps import constants as constants_module
     cosmology = Planck15CosmologyAdapter()
 
     inputs = {
@@ -179,7 +166,7 @@ def build_anchor_payload(include_integration: bool = False) -> dict:
                 "Install/use the full environment and rerun with --include-integration."
             ) from exc
 
-        generator_module = _load_lensing_generator_module()
+        from hwoslaps.lensing import generator as generator_module
         integration_image_summary = _build_integration_image_summary(generator_module)
         note = (
             "Integration image summary anchors were generated from deterministic "

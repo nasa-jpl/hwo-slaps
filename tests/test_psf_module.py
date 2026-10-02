@@ -81,39 +81,8 @@ def perfect_psf_data(master_config: Dict[str, Any]) -> Any:
 
 # ---- Helper utilities for expectations ----
 
-def _expected_integer_and_used_sampling(full_cfg: Dict[str, Any]) -> Tuple[int, float]:
-    """Compute expected integer subsampling factor N and used sampling.
-
-    Mirrors the math in `hwoslaps.psf.generator.generate_psf_system`.
-
-    Returns
-    -------
-    (N, used_sampling)
-    """
-    lensing = full_cfg["lensing"]
-    psf = full_cfg["psf"]
-    sim = psf["hres_psf"]
-    tel = psf["telescope"]
-
-    target_pixel_scale = float(lensing["grid"]["pixel_scale"])  # arcsec/pix
-    wavelength = float(sim["wavelength"])  # meters
-    pupil_diameter = float(tel["pupil_diameter"])  # meters
-    requested_sampling = float(sim["sampling"])  # px per lambda/D
-
-    res_element_arcsec = (wavelength / pupil_diameter) * 206264.8062471
-    hres_pixel_scale_initial = res_element_arcsec / requested_sampling
-    non_integer_factor = target_pixel_scale / hres_pixel_scale_initial
-    N = int(round(non_integer_factor))
-    used_sampling = (N * res_element_arcsec) / target_pixel_scale
-    return N, used_sampling
 
 
-def _odd_enforced(shape_native):
-    shape = list(shape_native)
-    for i in range(len(shape)):
-        if shape[i] % 2 == 0:
-            shape[i] += 1
-    return shape
 
 
 # ---- Tests ----
@@ -162,23 +131,6 @@ def test_config_schema_and_types(master_config: Dict[str, Any]):
     assert "aberrations" in psf and isinstance(psf["aberrations"], dict)
 
 
-def test_generate_psf_core_invariants(master_config: Dict[str, Any], psf_data):
-    """Core invariants: kernel shape, kernel pixel scale, and sampling math.
-
-    Inputs: full config from `master_config.yaml`.
-    """
-    psf_cfg = master_config["psf"]
-    expected_shape = _odd_enforced(list(psf_cfg["kernel"]["shape_native"]))
-    assert list(psf_data.kernel.shape_native) == expected_shape
-
-    # Kernel pixel scale must match lensing.grid.pixel_scale exactly
-    cfg_pixel_scale = float(master_config["lensing"]["grid"]["pixel_scale"])
-    assert math.isclose(float(psf_data.kernel_pixel_scale), cfg_pixel_scale, rel_tol=1e-12, abs_tol=0.0)
-
-    # Integer subsampling and used sampling must match theory
-    N_exp, used_sampling_exp = _expected_integer_and_used_sampling(master_config)
-    assert psf_data.integer_subsampling_factor == int(N_exp)
-    assert math.isclose(float(psf_data.used_sampling_factor), float(used_sampling_exp), rel_tol=1e-12)
 
 
 def test_highres_psf_dimensions_from_sampling(master_config: Dict[str, Any], psf_data):

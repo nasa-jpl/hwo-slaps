@@ -1,73 +1,64 @@
 # HWO-SLAPS
 
-HWO-SLAPS simulates strong-lensing observations and forecasts subhalo sensitivity.
-The engine separates scene construction, optical response, detector noise,
-Fisher profiling, nonlinear comparisons, and campaign execution. Instrument
-parameters, source assets, inference settings, and populations are explicit
-inputs rather than assumptions from one paper.
+A configurable strong-lensing pipeline for subhalo sensitivity forecasts,
+source-morphology comparisons, instrument/PSF experiments, and targeted nonlinear
+validation. The scientific path is explicit: prepare a scene and observation,
+evaluate masses and positions, reduce the result, and choose how to save it.
+
+```python
+from hwoslaps import prepare_forecast, forecast, summarize_forecast, mass_reach
+from hwoslaps.config import load_config
+
+prepared = prepare_forecast(load_config("configs/master_config.yaml"))
+result = forecast(prepared, masses=[1e7, 3e7, 1e8, 3e8, 1e9])
+summary = summarize_forecast(result, q_threshold=10)
+reach = mass_reach(result.masses_msun, summary.detectable_fraction, target=0.1)
+result.save_npz("forecast.npz")
+```
+
+Masses are solar masses; positions are `(y, x)` arcseconds. Thresholds, area
+fractions, population distributions, selection policy, PSFs and execution
+settings are explicit inputs. Source assets can be analytic or image based.
+The reference renderer and validated JAX acceleration share the same numerical
+contracts. External detector-sampled PSFs use the same public forecasting path.
+
+Run the small, explicitly synthetic example in the supported backend environment:
+
+```bash
+python examples/quickstart.py --output-dir new-example --backend jax
+```
+
+It creates a detector-integrated Gaussian kernel, computes a mass bank, reports
+sensitive fractions/censoring, and saves replayable inputs and results.
 
 ## Start here
 
-- [Engine API, configuration, and population recipes](docs/ENGINE_GUIDE.md)
-- [Migration from the submitted RASTI branch](docs/engineering/MIGRATION.md)
-- [Preserved RASTI study](studies/rasti/README.md)
-- [Paper-code checkpoint](reproducibility/rasti-26-183/README.md)
+- [Engine API and research workflows](docs/ENGINE_GUIDE.md)
+- [Scientific conventions and limits](docs/SCIENCE.md)
+- [Migration to the explicit API](docs/engineering/MIGRATION.md)
+- [Testing and ownership](tests/README.md)
 
-This branch is a first refactoring pass. It preserves the existing physical
-models and optimized kernels; the interfaces do not imply support for every
-telescope pupil or unrestricted source reconstruction. The submitted code
-remains at the `rasti-26-183-submitted` tag.
-
-## Run a configuration
-
-Use the existing science environment (see `install.sh`), then install this
-checkout with `python -m pip install -e . --no-deps`. The command is:
+The base package provides configuration, array-level statistics, populations,
+and result I/O. Scene rendering and nonlinear inference require the supported
+scientific backend; `install.sh` describes its pinned developer environment.
+In that environment, install this checkout with
+`python -m pip install -e . --no-deps`.
 
 ```bash
-hwoslaps -c configs/master_config.yaml --output-dir outputs
+hwoslaps validate -c configs/master_config.yaml
+hwoslaps forecast -c configs/master_config.yaml --output-dir new-results --masses 1e7 1e8 1e9
+hwoslaps simulate -c configs/master_config.yaml --output-dir new-observation
 ```
 
-For source checkouts, `python runner.py` accepts the same arguments. Repeat
-`-c` to compose instrument, scene, and forecast fragments in order. Later
-mappings merge recursively; lists and scalar values replace earlier values.
-Relative file paths belong to the YAML file declaring them. Use
-`--base-dir .` explicitly when replaying old repository-relative inputs.
+Output directories and files refuse overwrite. Python calculations create no
+plots or result artifacts automatically. Use `simulate` for injected/noisy/null
+observations, `prepare_forecast` for the smooth expectation, and
+`validate_nonlinear` for explicitly requested fitting.
 
-```bash
-hwoslaps -c configs/master_config.yaml -c configs/examples/observation_override.yaml --validate-only
-```
-
-Validation creates no outputs and initializes no scientific backend.
-
-## Python API
-
-```python
-from hwoslaps.config import load_config
-from hwoslaps import run_pipeline
-
-config = load_config("configs/master_config.yaml")
-result = run_pipeline(config)
-```
-
-Use `run_with_artifacts` when a resolved configuration snapshot, log, and
-provenance record are required. Individual lensing, PSF, and observation
-functions also accept explicit seeds and detector sampling without a complete
-pipeline configuration. The guide describes their supported contracts.
-
-## Development
-
-The reusable package is under `src/hwoslaps`. The source-only `studies/rasti`
-namespace contains frozen paper population contracts and execution recipes;
-it is excluded from the wheel and imported only by reproduction tools/tests.
-The core package must not import this study namespace.
-
-```bash
-python -m pytest -q tests/
-```
-
-GPU tests carry the `xtx_gpu` marker and require the existing pinned backend.
-See [validation](docs/engineering/validation.md) for this cleanup session's
-actual checks and remaining concerns.
+Study reproduction machinery, fixed cohorts, production asset banks, release
+controllers, and historical replay routes have been removed. Git history retains
+the submitted implementation; new studies use ordinary configurations and
+iterators over the same engine API.
 
 ## Copyright
 

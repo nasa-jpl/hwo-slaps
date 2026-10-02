@@ -1,0 +1,35 @@
+{
+  "host": "xtx",
+  "python": "/data/home/gvassilakis/Software/miniconda3/envs/hwo-slaps/bin/python",
+  "execution": "CPU-only; CUDA_VISIBLE_DEVICES empty; JAX_PLATFORMS=cpu; NUMBA_DISABLE_JIT=1; no sampler; no hwoslaps imports",
+  "dependency_versions": {
+    "AutoArray": "2026.5.14.2",
+    "AutoGalaxy": "2026.5.14.2",
+    "AutoLens": "1.0.dev0"
+  },
+  "owner_sources": [
+    "autoarray/dataset/grids.py:118",
+    "autogalaxy/operate/image.py:132",
+    "autoarray/operators/over_sampling/over_sampler.py:175"
+  ],
+  "scene": "Direct stock Isothermal mass and Exponential light, 9x9 data/noise and masked edge, over_sample_size_lp=2",
+  "cases": [
+    {
+      "kernel_shape": [
+        1,
+        1
+      ],
+      "blurring_grid_length": 0,
+      "result": "IndexError: index 0 is out of bounds for axis 0 with size 0"
+    },
+    {
+      "kernel_shape": [
+        3,
+        3
+      ],
+      "blurring_grid_length": 32,
+      "log_likelihood": -69.48989454823403
+    }
+  ],
+  "conclusion": "Upstream tested runtime cannot render an empty blurring grid. New API rejects 1x1 fit kernel; no dependency patch or likelihood change."
+}

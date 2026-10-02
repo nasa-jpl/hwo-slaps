@@ -12,9 +12,7 @@ TESTS_ROOT = Path(__file__).resolve().parent
 if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
-from _lensing_physics_helpers import load_mass_models_module  # noqa: E402
-
-mass_models = load_mass_models_module()
+from hwoslaps.lensing import mass_models
 
 
 def _moline_expected(mass_msun: float, x_sub: float, h: float) -> float:
@@ -118,4 +116,3 @@ def test_unsupported_concentration_model_is_rejected():
     """Reject a concentration model outside the supported dispatch set."""
     with pytest.raises(ValueError, match="Unsupported concentration model"):
         mass_models.concentration_mass_relation(1.0e9, model="nfw_generic")
-

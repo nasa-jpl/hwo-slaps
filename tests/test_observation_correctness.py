@@ -106,33 +106,6 @@ def _source_snr_from_formula(
     return source_e / np.sqrt(variance_e2)
 
 
-def test_create_noise_map_matches_ccd_variance_formula():
-    """Match the noise map against the CCD variance formula."""
-    source_eps = np.array([[0.0, 1.0], [2.0, 3.0]])
-    exposure_time = 7.0
-    detector = {
-        "gain": 2.0,
-        "read_noise": 3.0,
-        "dark_current": 0.1,
-        "sky_background": 0.5,
-    }
-
-    expected = (
-        np.sqrt(
-            source_eps * exposure_time
-            + detector["dark_current"] * exposure_time
-            + detector["sky_background"] * exposure_time
-            + detector["read_noise"] ** 2
-        )
-        / detector["gain"]
-    )
-
-    np.testing.assert_allclose(
-        create_noise_map(source_eps, exposure_time, detector),
-        expected,
-        rtol=0.0,
-        atol=0.0,
-    )
 
 
 @pytest.mark.parametrize(
@@ -580,3 +553,29 @@ def test_external_psf_without_normalization_requires_unit_flux():
 def test_external_psf_rejects_invalid_angular_sampling(pixel_scale):
     with pytest.raises(ValueError, match='pixel_scale_arcsec'):
         DetectorPSF.from_array([[1.0]], pixel_scale)
+
+
+def test_expected_observation_uses_ccd_mean_and_never_draws_noise(monkeypatch):
+    """Forecast preparation is deterministic and follows independent CCD units."""
+    def forbidden(*args, **kwargs):
+        raise AssertionError('expected observation attempted a random draw')
+
+    monkeypatch.setattr(np.random, 'default_rng', forbidden)
+    from hwoslaps.observation import predict_observation
+    import hwoslaps.observation.generator as generator
+    monkeypatch.setattr(generator, 'apply_detector_noise', forbidden)
+    source = np.array([[0.0, 1.0], [2.0, 3.0]])
+    lensing = _make_lensing_data(image=source)
+    psf = DetectorPSF.from_array([[1.0]], 0.1)
+    config = _observation_config(exposure_time=7.0, throughput=0.5, gain=2.0,
+                                 read_noise=3.0, dark_current=0.1, sky_background=0.5)
+    prediction = predict_observation(lensing, psf, config)
+    expected_e = source * 0.5 * 7.0 + 0.5 * 7.0 + 0.1 * 7.0
+    variance_e = source * 0.5 * 7.0 + 0.1 * 7.0 + 0.5 * 7.0 + 9.0
+    np.testing.assert_allclose(prediction.mean_adu, expected_e / 2.0, rtol=0, atol=1e-12)
+    result = generate_observation(lensing, psf, config, run_name='expectation', sample_noise=False)
+    np.testing.assert_array_equal(result.data.native, prediction.mean_adu)
+    np.testing.assert_allclose(result.noise_map.native, np.sqrt(variance_e) / 2.0, rtol=0, atol=1e-12)
+    assert result.metadata['sample_noise'] is False
+    assert result.metadata['noise_seed'] is None
+    assert 'detected_e' not in result.noise_components

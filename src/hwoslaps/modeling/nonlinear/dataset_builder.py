@@ -58,7 +58,7 @@ class NonlinearDatasetMetadata:
     psf_fit_label: str
     psf_fit_supplied: bool = False
     psf_fit_sha256: str = ""
-    objective_version: str = "legacy_ring1_v1"
+    objective_version: Optional[str] = None
     generation_sub_size: Optional[int] = None
     light_profile_sub_size: Optional[int] = None
     blurring_sub_size: Optional[int] = None
@@ -266,7 +266,7 @@ def imaging_from_observation(
     mask_bool_use: Optional[np.ndarray] = None,
     psf_truth_label: str = "observation",
     psf_fit_label: str = "fit",
-    objective_version: str = "legacy_ring1_v1",
+    objective_version: str = "consistent_sampling_v2",
     generation_sub_size: Optional[int] = None,
 ) -> Tuple[Any, NonlinearDatasetMetadata]:
     """Convert an HWO-SLAPS observation into a PyAutoLens dataset.
@@ -327,30 +327,21 @@ def imaging_from_observation(
 
     data_array = al.Array2D(values=data, mask=mask)
     noise_array = al.Array2D(values=noise_rate_from_observation(observation), mask=mask)
-    if objective_version not in ("legacy_ring1_v1", "consistent_sampling_v2"):
+    if objective_version != "consistent_sampling_v2":
         raise ValueError("Unsupported nonlinear objective_version")
-    if objective_version == "consistent_sampling_v2":
-        from ...lensing.sampling import positive_sub_size
+    from ...lensing.sampling import LEGACY_SUB_SIZE, positive_sub_size
 
-        generation_sub_size = positive_sub_size(generation_sub_size)
-        recorded_size = getattr(observation, "metadata", {}).get("generation_sub_size")
-        if recorded_size is None or positive_sub_size(recorded_size) != generation_sub_size:
-            raise ValueError("Declared sampling differs from actual generation sampling")
-        dataset = al.Imaging(
-            data=data_array, noise_map=noise_array, psf=psf,
-            over_sample_size_lp=generation_sub_size,
-        )
-        _set_consistent_blurring(dataset, generation_sub_size)
-    else:
-        if generation_sub_size is not None:
-            raise ValueError("Legacy reconstruction does not accept a sampling override")
-        recorded_size = getattr(observation, "metadata", {}).get("generation_sub_size")
-        if recorded_size is not None:
-            from ...lensing.sampling import positive_sub_size
-
-            if positive_sub_size(recorded_size) != 4:
-                raise ValueError("Legacy objective requires historical generation sampling of 4")
-        dataset = al.Imaging(data=data_array, noise_map=noise_array, psf=psf)
+    recorded_size = getattr(observation, "metadata", {}).get("generation_sub_size")
+    if generation_sub_size is None:
+        generation_sub_size = recorded_size if recorded_size is not None else LEGACY_SUB_SIZE
+    generation_sub_size = positive_sub_size(generation_sub_size)
+    if recorded_size is not None and positive_sub_size(recorded_size) != generation_sub_size:
+        raise ValueError("Declared sampling differs from actual generation sampling")
+    dataset = al.Imaging(
+        data=data_array, noise_map=noise_array, psf=psf,
+        over_sample_size_lp=generation_sub_size,
+    )
+    _set_consistent_blurring(dataset, generation_sub_size)
 
     # al.Imaging sum-normalizes the PSF at construction, so the recorded
     # digest must describe the kernel the fit actually consumes.
@@ -368,18 +359,9 @@ def imaging_from_observation(
         psf_fit_supplied=psf_fit_supplied,
         psf_fit_sha256=_kernel_sha256(fitted_psf_native),
         objective_version=objective_version,
-        generation_sub_size=(generation_sub_size if objective_version == "consistent_sampling_v2"
-                             else recorded_size),
+        generation_sub_size=generation_sub_size,
     )
-    if objective_version == "consistent_sampling_v2":
-        metadata = _sampling_metadata(dataset, metadata, generation_sub_size)
-    else:
-        from ...lensing.sampling import actual_sub_size
-
-        metadata = replace(
-            metadata, light_profile_sub_size=actual_sub_size(dataset.grids.lp),
-            blurring_sub_size=actual_sub_size(dataset.grids.blurring),
-        )
+    metadata = _sampling_metadata(dataset, metadata, generation_sub_size)
     return dataset, metadata
 
 
@@ -414,62 +396,6 @@ def _sampling_metadata(dataset, metadata, generation_sub_size):
     )
 
 
-def consistent_sampling_copy(dataset, metadata, generation_sub_size=4):
-    """Clone an archived dataset and apply an explicitly versioned ring rule.
-
-    Caller must first verify the historical scalar/model identity and bind the
-    actual generation sampling from its execution provenance. No old fit result
-    or convergence flag is returned as accepted output for the new objective.
-    """
-    import autolens as al
-    from ...lensing.sampling import actual_sub_size, positive_sub_size
-
-    size = positive_sub_size(generation_sub_size)
-    if actual_sub_size(dataset.grids.lp) != size:
-        raise ValueError("Cannot migrate a core/generation sampling mismatch")
-    if isinstance(metadata, dict):
-        try:
-            metadata = NonlinearDatasetMetadata(**metadata)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Historical dataset metadata cannot be reconstructed") from exc
-    if not isinstance(metadata, NonlinearDatasetMetadata):
-        raise ValueError("Historical metadata must be NonlinearDatasetMetadata or its dictionary")
-    if metadata.objective_version != "legacy_ring1_v1":
-        raise ValueError("Migration requires an explicitly historical baseline")
-    if metadata.generation_sub_size is None:
-        raise ValueError("Migration requires verified generation sampling metadata")
-    if positive_sub_size(metadata.generation_sub_size) != size:
-        raise ValueError("Historical generation metadata differs from migration sampling")
-    if actual_sub_size(dataset.grids.blurring) not in (None, 1):
-        raise ValueError("Historical migration requires ring1 or no external blurring pixels")
-    before = {
-        "data": np.array(dataset.data.native, copy=True),
-        "noise": np.array(dataset.noise_map.native, copy=True),
-        "psf": np.array(pyauto_kernel_native(dataset.psf), copy=True),
-    }
-    mask_copy = deepcopy(dataset.mask)
-    psf_kernel = dataset.psf.kernel if hasattr(dataset.psf, "kernel") else dataset.psf
-    psf = make_pyauto_convolver(make_pyauto_kernel(
-        values=before["psf"].copy(), pixel_scales=psf_kernel.pixel_scales, normalize=False,
-    ))
-    candidate = al.Imaging(
-        data=al.Array2D(values=before["data"].copy(), mask=mask_copy),
-        noise_map=al.Array2D(values=before["noise"].copy(), mask=mask_copy),
-        psf=psf, use_normalized_psf=False, over_sample_size_lp=size,
-    )
-    _set_consistent_blurring(candidate, size)
-    for name, actual in [("data", candidate.data.native), ("noise", candidate.noise_map.native),
-                         ("psf", pyauto_kernel_native(candidate.psf))]:
-        if np.asarray(actual).tobytes() != before[name].tobytes():
-            raise ValueError("Objective migration changed input bytes: " + name)
-    for old, new in [(dataset.grids.lp, candidate.grids.lp),
-                     (dataset.grids.blurring, candidate.grids.blurring)]:
-        if (old is None) != (new is None):
-            raise ValueError("Objective migration changed grid presence")
-        if old is not None:
-            if not np.array_equal(old.mask, new.mask) or not np.array_equal(old.array, new.array):
-                raise ValueError("Objective migration changed grid mask/coordinates")
-    return candidate, _sampling_metadata(candidate, metadata, size)
 
 
 def _grid_geometry_identity(grid):
@@ -501,10 +427,10 @@ def rendering_identity(dataset, metadata):
 
     get = (metadata.get if isinstance(metadata, dict)
            else lambda key, default=None: getattr(metadata, key, default))
-    version = get("objective_version", "legacy_ring1_v1")
-    if version == "legacy_ring1_v1":
+    version = get("objective_version")
+    if version is None:
         if getattr(dataset, "_hwoslaps_objective_version", None) is not None:
-            raise ValueError("Corrected dataset cannot use historical identity metadata")
+            raise ValueError("Bound rendering dataset requires sampling identity metadata")
         return None
     if version != "consistent_sampling_v2":
         raise ValueError("Unsupported rendering identity version")

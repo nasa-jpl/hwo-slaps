@@ -1,16 +1,19 @@
-"""
-Utility functions and data structures for lensing system generation.
+"""Utility functions and data structures for lensing system generation.
 
 This module provides the core data structures and helper functions used
 throughout the lensing module.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
-import autolens as al
 import numpy as np
+
+if TYPE_CHECKING:
+    import autolens as al
 
 
 @dataclass

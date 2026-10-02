@@ -204,7 +204,7 @@ def iter_population_configs(
     ``run_name`` and ``global_seed`` are generated from the member identity;
     they cannot be population parameters. Load/resolve file paths before using
     the resulting configurations, or supply a base directory to
-    ``run_pipeline``.
+    ``prepare_forecast``.
     Validation delegates to the engine's existing physical configuration
     checks.
     """

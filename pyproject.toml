@@ -1,3 +1,7 @@
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+markers = ["xtx_gpu: requires the supported JAX CUDA runtime and a GPU"]

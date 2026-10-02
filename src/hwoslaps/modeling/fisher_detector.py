@@ -67,11 +67,9 @@ from .fisher_adapter import (
 from .fisher_core import ProfileLikelihoodWorkspace, Whitener, detectable_area
 from .fisher_geometry import (
     FisherGridLayout as _GridLayout,
-    FisherLadderGridSelection,
-    FisherLadderRungData,
     build_grid_layout,
-    select_aperture_and_perimeter,
 )
+from .forecast_results import ForecastResult
 from .fisher_nuisance import (
     ScalarNuisanceSpec as _ScalarNuisanceSpec,
     build_scalar_nuisance_specs,
@@ -160,40 +158,8 @@ def _mean_adu_images_from_lensing_arrays(
     Ray tracing and construction of the AutoLens image are shared across all
     kernels.  The returned noiseless ADU images follow the kernel order.
     """
-    if not psf_kernels:
-        raise ValueError("psf_kernels must contain at least one kernel.")
-    exposure_time = float(observation_config["exposure_time"])
-    throughput = float(observation_config["throughput"])
-    detector = observation_config["detector"]
-    gain = float(detector["gain"])
-    sky_background = float(detector["sky_background"])
-    dark_current = float(detector["dark_current"])
-
-    mask = al.Mask2D.all_false(
-        shape_native=lensing_data.image.shape,
-        pixel_scales=lensing_data.pixel_scale,
-    )
-    lensed_image = al.Array2D(values=lensing_data.image, mask=mask)
-
-    sky_e = sky_background * exposure_time
-    dark_e = dark_current * exposure_time
-    images = []
-    for psf_kernel in psf_kernels:
-        # Direct noiseless convolution; SimulatorImaging is not used because
-        # it evaluates Poisson noise internally even with noise disabled,
-        # which rejects the epsilon-scale FFT-roundoff negatives produced
-        # where a compactly supported source is exactly zero. These mean
-        # images are deterministic and enter the Fisher algebra linearly,
-        # so the roundoff negatives are kept as-is (clamping them would
-        # break bit-level agreement with the truth-template convolutions).
-        convolved_eps = make_pyauto_convolver(psf_kernel).convolved_image_from(
-            image=lensed_image,
-            blurring_image=None,
-        )
-        source_only_eps = np.asarray(convolved_eps.native) * throughput
-        source_e = source_only_eps * exposure_time
-        images.append((source_e + sky_e + dark_e) / gain)
-    return tuple(images)
+    from ..observation.forward import mean_adu_images_from_lensing_arrays
+    return mean_adu_images_from_lensing_arrays(lensing_data, observation_config, psf_kernels)
 
 
 _GRID_WORKER_STATE: Dict[str, Any] = {}
@@ -305,6 +271,8 @@ class FisherDetector:
         psf_data: PSFData,
         full_config: Dict[str, Any],
         fisher_config: Dict[str, Any],
+        *,
+        fit_psf_data=None,
     ):
         self.observation_baseline = observation_baseline
         self.lensing_baseline = lensing_baseline
@@ -327,7 +295,16 @@ class FisherDetector:
         }
         self.mismatch_enabled = self.psf_mismatch_enabled
         self.fit_full_config = deepcopy(self.full_config)
-        if self.psf_mismatch_enabled:
+        if fit_psf_data is not None:
+            if self.fit_psf_mode == "delta":
+                raise ValueError("Delta PSF mode binds its own optical fit kernel; do not supply fit_psf_data")
+            self.fit_psf_mode = self.fit_psf_mode if self.fit_psf_mode in {"explicit", "kernel"} else "kernel"
+            self.psf_mismatch_enabled = self.mismatch_enabled = True
+            if fit_psf_config and "psf" in fit_psf_config:
+                self.fit_full_config["psf"] = deepcopy(fit_psf_config["psf"])
+            self.fit_psf_data = fit_psf_data
+            self.model_psf_data = fit_psf_data
+        elif self.psf_mismatch_enabled:
             assert fit_psf_config is not None
             if self.fit_psf_mode == "delta":
                 from ..provenance import (
@@ -461,6 +438,8 @@ class FisherDetector:
         self.compute_psf_mode_scan = bool(
             self.fisher_config.get("compute_psf_mode_scan", False)
         )
+        if not hasattr(self.psf_data, "num_segments") and (self.include_psf_nuisance or self.compute_psf_mode_scan):
+            raise ValueError("Optical PSF mode derivatives require an optical PSFData; external kernels support explicit truth/fit mismatch")
         z_tolerance = self.fisher_config.get("mode_scan_z_tolerance", 1.0)
         self.mode_scan_z_tolerance = None if z_tolerance is None else float(z_tolerance)
 
@@ -520,7 +499,7 @@ class FisherDetector:
         }
         self._candidate_positions_cache: Optional[List[Tuple[float, float]]] = None
         self._grid_layout_cache: Optional[_GridLayout] = None
-        self._ladder_grid_selections: Dict[int, FisherLadderGridSelection] = {}
+        self._forecast_domain_positions = None
         self._jax_grid_engine = None
 
         self.fit_psf_config_template = self._build_science_psf_config_template(
@@ -550,9 +529,12 @@ class FisherDetector:
         )
         self.n_scalar_nuisances = len(self.scalar_nuisance_specs)
 
-        self.instrument_psf_mode_specs = self._build_psf_mode_specs_from_selection(
-            self.psf_basis_config,
-            context="modeling.fisher.psf_basis",
+        self.instrument_psf_mode_specs = (
+            self._build_psf_mode_specs_from_selection(
+                self.psf_basis_config, context="modeling.fisher.psf_basis"
+            )
+            if self.include_psf_nuisance or self.compute_psf_mode_scan
+            else []
         )
         self.instrument_psf_mode_names = [spec.name for spec in self.instrument_psf_mode_specs]
         self._instrument_psf_mode_name_set = set(self.instrument_psf_mode_names)
@@ -969,151 +951,127 @@ class FisherDetector:
 
     _GRID_EVAL_BATCH = 256
 
-    def prepare_ladder_grid_selection(
-        self,
-        centre_arcsec: Tuple[float, float],
-        radius_arcsec: float,
-    ) -> FisherLadderGridSelection:
-        """Select the closed aperture plus the complete square perimeter.
+    def candidate_positions(self) -> np.ndarray:
+        """Sky positions declared by the configured grid, ring, or explicit plan."""
+        values = self._grid_layout().positions_yx if self.map_type == "grid" else self._candidate_positions()
+        return np.asarray(values, dtype=float).copy()
 
-        This is an explicit ladder-only operation.  It starts from the same
-        full square lattice as :meth:`compute_grid_map`, retains aperture
-        nodes using the ladder reducer's squared-distance convention, and
-        then adds every node on all four original edges.  The returned object
-        is intended to be built once and reused across mass rungs.
-        """
+    def domain_positions(self) -> np.ndarray:
+        """Full spatial domain used to fix accelerated interpolation bounds."""
         if self.map_type != "grid":
-            raise ValueError(
-                "prepare_ladder_grid_selection requires "
-                "modeling.fisher.map.type: 'grid'."
-            )
-        if self.map_config["grid"].get("annulus") is not None:
-            raise ValueError(
-                "The ladder selection requires the original full square "
-                "grid; annulus-restricted grid maps remain available through "
-                "compute_grid_map."
-            )
-
-        selection = select_aperture_and_perimeter(
-            self._grid_layout(), centre_arcsec, radius_arcsec
-        )
-        registry = getattr(self, "_ladder_grid_selections", None)
-        if registry is None:
-            registry = {}
-            self._ladder_grid_selections = registry
-        registry[id(selection)] = selection
-        return selection
-
-
-    def compute_ladder_summary(
-        self,
-        selection: FisherLadderGridSelection,
-    ) -> FisherLadderRungData:
-        """Evaluate and reduce only nodes consumed by a Fisher ladder rung.
-
-        The returned arrays are compact position lists, not partial 2D maps.
-        Skipped interior nodes outside the aperture are therefore neither
-        assigned fabricated values nor included in finite-value validation.
-        """
-        if self.map_type != "grid":
-            raise ValueError(
-                "compute_ladder_summary requires modeling.fisher.map.type: 'grid'."
-            )
-        if self.map_config["grid"].get("annulus") is not None:
-            raise ValueError(
-                "The ladder summary requires the original full square grid; "
-                "use compute_grid_map for annulus-restricted maps."
-            )
-        if self.mismatch_enabled:
-            raise ValueError(
-                "compute_ladder_summary supports matched fit and truth PSFs only; "
-                "use compute_grid_map for PSF-mismatch maps."
-            )
-        if not isinstance(selection, FisherLadderGridSelection):
-            raise TypeError(
-                "selection must be built by prepare_ladder_grid_selection."
-            )
-        registered = getattr(self, "_ladder_grid_selections", {}).get(
-            id(selection)
-        )
-        if registered is not selection:
-            raise ValueError(
-                "The ladder selection was not prepared by this detector or "
-                "has been replaced; prepare a fresh selection."
-            )
-
+            return self.candidate_positions()
         layout = self._grid_layout()
+        yy, xx = np.meshgrid(layout.y_coords, layout.x_coords, indexing="ij")
+        return np.column_stack((yy.ravel(), xx.ravel()))
+
+    def evaluate_positions(
+        self,
+        positions_yx,
+        *,
+        mass_msun=None,
+        domain_positions_yx=None,
+    ) -> ForecastResult:
+        """Evaluate arbitrary sky positions using the prepared nuisance model.
+
+        The complete domain fixes radial interpolation bounds even for sparse
+        evaluation. It defaults to the configured lattice for grids and to the
+        supplied positions otherwise. A requested mass retargets this detector
+        without recompiling its scene, convolution, or nuisance projection.
+        """
+        positions = np.asarray(positions_yx, dtype=float)
         if (
-            selection.spacing_arcsec != layout.spacing_arcsec
-            or selection.grid_centre_yx != layout.centre_yx
-            or not np.array_equal(selection.y_coords, layout.y_coords)
-            or not np.array_equal(selection.x_coords, layout.x_coords)
+            positions.ndim != 2
+            or positions.shape[1] != 2
+            or not positions.shape[0]
+            or not np.all(np.isfinite(positions))
         ):
-            raise ValueError(
-                "The ladder selection does not describe this detector's full "
-                "square grid geometry."
-            )
-        if selection.selected_node_count == 0:
-            raise ValueError("The ladder selection contains no evaluated nodes.")
-
-        # Radial interpolation bounds are part of the numerical model.  Build
-        # the JAX engine from the complete original square even though only
-        # the compact aperture-plus-perimeter position list is evaluated.
-        engine = str(self.map_config.get("engine", "reference")).lower()
-        if engine == "jax" and self._jax_grid_engine is None:
-            self._jax_grid_engine = self._build_jax_grid_engine(
-                list(layout.positions_yx)
-            )
-
-        results = self._evaluate_grid_positions(list(selection.positions_yx))
-        q_asimov = np.concatenate(
-            [np.atleast_1d(result.q_asimov_local) for result in results]
+            raise ValueError("positions_yx must be a non-empty finite (N, 2) array")
+        if domain_positions_yx is None:
+            domain = self.domain_positions() if self.map_type == "grid" else positions
+        else:
+            domain = np.asarray(domain_positions_yx, dtype=float)
+        if domain.ndim != 2 or domain.shape[1] != 2 or not domain.shape[0] or not np.all(np.isfinite(domain)):
+            raise ValueError("domain_positions_yx must be a non-empty finite (N, 2) array")
+        centre = np.asarray(self.full_config["lensing"]["lens_galaxy"]["mass"]["centre"], dtype=float)
+        if (
+            np.max(np.linalg.norm(positions - centre, axis=1))
+            > np.max(np.linalg.norm(domain - centre, axis=1)) + 1e-12
+        ):
+            raise ValueError("evaluated positions extend beyond the declared radial domain")
+        mass = float(
+            self.map_config_template["lensing"]["subhalo"]["mass"] if mass_msun is None else mass_msun
         )
-        if q_asimov.size != selection.selected_node_count:
-            raise RuntimeError(
-                "The ladder evaluator returned a different number of q_F "
-                "values than selected positions."
-            )
-        if not np.all(np.isfinite(q_asimov)):
-            raise ValueError(
-                "The ladder evaluator produced non-finite q_F at a consumed "
-                "aperture or perimeter node."
-            )
+        if not np.isfinite(mass) or mass <= 0:
+            raise ValueError("mass_msun must be positive and finite")
+        for config in (self.map_config_template, self.map_config_template_truth, self.full_config):
+            config["lensing"]["subhalo"]["mass"] = mass
+        if str(self.map_config.get("engine", "reference")).lower() == "jax":
+            previous = self._forecast_domain_positions
+            if self._jax_grid_engine is None or previous is None or not np.array_equal(previous, domain):
+                self._jax_grid_engine = self._build_jax_grid_engine(domain)
+                self._forecast_domain_positions = domain.copy()
+            else:
+                self.retarget_grid_engine()
+        batches = self._evaluate_grid_positions([tuple(position) for position in positions])
 
-        threshold = float(self.map_config.get("detection_q_threshold", 10.0))
-        detectable = q_asimov >= threshold
-        node_idx = np.asarray(selection.node_indices, dtype=int)
-        aperture_by_position = selection.aperture_mask_2d[
-            node_idx[:, 0], node_idx[:, 1]
-        ]
-        perimeter_by_position = selection.perimeter_mask_2d[
-            node_idx[:, 0], node_idx[:, 1]
-        ]
-        aperture_count = int(np.count_nonzero(aperture_by_position))
-        if aperture_count != selection.aperture_node_count or aperture_count == 0:
-            raise ValueError(
-                "The ladder selection does not contain its complete non-empty "
-                "aperture node set."
-            )
-        detected_inside = int(
-            np.count_nonzero(detectable & aperture_by_position)
+        def collect(name):
+            values = [getattr(batch, name) for batch in batches]
+            if values[0] is None:
+                return None
+            array = np.concatenate([np.atleast_1d(value) for value in values])
+            if array.size != len(positions):
+                raise RuntimeError("forecast evaluator returned a different number of position statistics")
+            return array[None, :]
+
+        return ForecastResult(
+            masses_msun=np.asarray([mass]),
+            positions_yx=positions,
+            q_asimov=collect("q_asimov_local"),
+            fisher_raw=collect("fisher_raw"),
+            fisher_profiled=collect("fisher_profiled"),
+            sigma_amplitude=collect("sigma_amplitude_profiled"),
+            degradation=collect("degradation"),
+            amplitude_hat=collect("amplitude_hat"),
+            q_mismatch=collect("q_mismatch"),
+            z_mismatch=collect("z_mismatch"),
+            amplitude_spurious=collect("amplitude_spurious"),
+            q_spurious=collect("q_spurious"),
+            z_spurious=collect("z_spurious"),
+            runtime_provenance=self._forecast_runtime_provenance(),
         )
 
-        return FisherLadderRungData(
-            selection=selection,
-            positions_yx=np.asarray(selection.positions_yx, dtype=float),
-            node_indices=node_idx,
-            q_asimov_by_position=q_asimov,
-            detectable_by_position=detectable,
-            detection_q_threshold=threshold,
-            q_max=float(np.max(q_asimov[aperture_by_position])),
-            detectable_area_arcsec2=(
-                detected_inside * selection.spacing_arcsec**2
-            ),
-            aperture_fraction=detected_inside / aperture_count,
-            perimeter_clipped=bool(
-                np.any(detectable & perimeter_by_position)
-            ),
+    def evaluate_masses(self, masses_msun, positions_yx, *, domain_positions_yx=None) -> ForecastResult:
+        """Evaluate a mass/position bank while reusing prepared scene products."""
+        masses = np.asarray(masses_msun, dtype=float)
+        if masses.ndim != 1 or not masses.size or not np.all(np.isfinite(masses)) or np.any(masses <= 0):
+            raise ValueError("masses_msun must be a non-empty positive finite vector")
+        rows = [
+            self.evaluate_positions(positions_yx, mass_msun=mass, domain_positions_yx=domain_positions_yx)
+            for mass in masses
+        ]
+        fields = {}
+        for name in (
+            "q_asimov",
+            "fisher_raw",
+            "fisher_profiled",
+            "sigma_amplitude",
+            "degradation",
+            "amplitude_hat",
+            "q_mismatch",
+            "z_mismatch",
+            "amplitude_spurious",
+            "q_spurious",
+            "z_spurious",
+        ):
+            value = getattr(rows[0], name)
+            fields[name] = (
+                None if value is None else np.concatenate([getattr(row, name) for row in rows], axis=0)
+            )
+        return ForecastResult(
+            masses_msun=masses,
+            positions_yx=rows[0].positions_yx,
+            runtime_provenance=rows[0].runtime_provenance,
+            **fields,
         )
 
     def compute_grid_map(self) -> FisherGridMapData:
@@ -1510,7 +1468,8 @@ class FisherDetector:
             mask_2d=self.mask_2d,
             truth_psf_kernel_native=truth_kernel_native,
             candidate_positions=positions,
-            truth_lens_centre_yx=self._grid_layout().centre_yx,
+            truth_lens_centre_yx=tuple(self.full_config["lensing"]["lens_galaxy"]["mass"]["centre"]),
+            batch_size=int(self.map_config.get("batch_size", 16)),
             sigma_masked=sigma_masked,
             nuisance_whitened=nuisance_whitened,
             bias_whitened=bias_whitened,
@@ -1595,6 +1554,27 @@ class FisherDetector:
             self.map_config,
             os.environ.get("HWOSLAPS_FISHER_GRID_WORKERS", ""),
         )
+
+    def _forecast_runtime_provenance(self) -> Dict[str, Any]:
+        """Record the actual truth/model kernels alongside execution policy."""
+        from ..psf.mismatch import _kernel_sha256
+
+        provenance = self._grid_runtime_provenance()
+        provenance.update(
+            fit_psf_mode=self.fit_psf_mode,
+            truth_kernel_sha256=_kernel_sha256(pyauto_kernel_native(self._truth_template_kernel())),
+            model_kernel_sha256=_kernel_sha256(pyauto_kernel_native(self.model_psf_data.kernel)),
+            nuisance_subset=self.nuisance_subset_label,
+            profiled_nuisance_names=list(self.nuisance_names),
+            nuisance_prior_precision=list(self.prior_precision_diagonal),
+        )
+        asset = self.lensing_baseline.source_image_asset or {}
+        if asset:
+            provenance["source_image_asset_path"] = asset.get("asset_path")
+            provenance["source_image_asset_sha256_16"] = asset.get("sha256_16")
+        if self.fit_psf_delta is not None:
+            provenance["fit_psf_delta"] = deepcopy(self.fit_psf_delta)
+        return provenance
 
     def _timed_call(
         self,
@@ -2333,7 +2313,9 @@ class FisherDetector:
         mask : `numpy.ndarray`
             Boolean native-shaped mask, true inside the border.
         """
-        shape_native = self.fit_full_config["psf"]["kernel"]["shape_native"]
+        shape_native = (pyauto_kernel_native(self.model_psf_data.kernel).shape
+                        if hasattr(self, "model_psf_data")
+                        else self.fit_full_config["psf"]["kernel"]["shape_native"])
         y_half = int(shape_native[0]) // 2
         x_half = int(shape_native[1]) // 2
         mask = np.ones_like(self.mu0_adu_2d, dtype=bool)

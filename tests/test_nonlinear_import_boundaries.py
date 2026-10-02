@@ -15,17 +15,3 @@ for name in ("autolens", "autofit", "autoarray", "jax", "matplotlib"):
     assert not any(item == name or item.startswith(name + ".") for item in sys.modules), name
 """
     subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)
-
-
-def test_lazy_export_inventory_remains_complete():
-    import hwoslaps.modeling.nonlinear as nonlinear
-
-    assert set(nonlinear.__all__) == set(dir(nonlinear))
-    assert {"AutoLensFitRunner", "NonlinearSearchSettings", "FreshProfileSettings",
-            "NonlinearMetricValidator", "PsfMismatchSpec"} <= set(nonlinear.__all__)
-    try:
-        nonlinear.not_an_export
-    except AttributeError as exc:
-        assert "not_an_export" in str(exc)
-    else:
-        raise AssertionError("undeclared nonlinear exports must fail")

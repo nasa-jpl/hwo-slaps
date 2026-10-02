@@ -1,68 +1,100 @@
-# Nonlinear engine cleanup
+# Nonlinear engine and test audit
 
-The nonlinear package now separates profile optimization, calibration diagnostics,
-and the submitted study's release protocol. Likelihoods, prior construction,
-optimizer defaults, acceptance gates, and custom acceleration remain unchanged.
+Nonlinear fitting is an optional backend of the reusable forecasting engine.
+The entry point is `validate_nonlinear(prepared, trial, settings, ...)`, exposed
+through the public engine. It consumes the prepared truth/fit PSFs and requires
+an explicit output directory because AutoFit writes search artifacts.
 
-## Module boundaries
+## Scientific behavior
 
-- `profile_settings.py` owns the immutable `FreshProfileSettings` schema. It can
-  be imported without AutoLens, AutoFit, AutoArray, JAX, or plotting libraries.
-- `fresh_profile.py` owns current-search start selection, normalized coordinates,
-  best-finite retention, local optimization, and paired-fit orchestration.
-- `profile_calibration.py` owns likelihood-matched tangents and verified
-  zero-residual anchors. These diagnostics do not change sampler or profile state.
-- `studies/rasti/campaign/profile_adapters.py` owns release-declaration parsing,
-  the fixed 999-pixel Fisher adapter, and stage-3 bracket materialization.
-- The bounded stage-3 supervisor moved to
-  `studies/rasti/campaign/profile_execution.py`. Its memory registry and execution
-  policy describe the RASTI/B200 campaign rather than a portable engine contract.
+With no observation argument, the engine simulates the declared subhalo trial.
+For a null control, pass `prepared.observation` explicitly. `dataset_kind` selects
+Asimov or noisy data. Pixel support defaults to the actual prepared Fisher mask,
+intersected with the fitted PSF safe border; an explicit `mask_bool_use` overrides
+the ROI and is identified as `custom_minus_psf_border` in result metadata.
+The generated and fitted light-profile and external
+blurring grids use the same declared sampling; `consistent_sampling_v2` is the
+sole supported builder objective. External AutoLens datasets may have no bound
+rendering metadata; datasets built by this package always record and check it.
 
-All existing nonlinear package exports resolve through an explicit lazy module
-map. Existing imports of `FreshProfileSettings`, `ZeroResidualAnchorRunner`, and
-`likelihood_matched_tangent` from `fresh_profile` continue to work.
+Freed fits require an explicit `MassMappingContext`, including the physical
+mass-prior support. The new public entry point chooses no mass range. Existing
+model priors, sampler defaults, x64 guards, emulator-pool ordering, normalized
+profile optimization, best-finite retention, and independent-start acceptance
+gates retain their numerical implementation. Providing `profile_settings`
+selects current-search local refinement after the sampler. Refinement requires
+explicit `NonlinearSearchSettings(use_jax=True)`; an incompatible analysis is
+rejected before rendering or starting an expensive sampler.
 
-## Deliberate migration
+A provided detector PSF uses the real `kernel` mode: its declared digest,
+shape, and sampling are checked before fitting. The validator binds the fitted
+kernel, metadata, and case label. AutoLens may normalize its kernel; the executor
+checks that normalization against the supplied kernel and records the digest
+of the kernel actually fitted. Neither optics regeneration nor a study launch
+protocol is required. Existing delta/explicit optical mismatch paths retain
+their own configuration identity guards.
 
-Release parsing changes from `FreshProfileSettings.from_release_protocol(release)`
-to `studies.rasti.campaign.profile_adapters.profile_settings_from_release_protocol(release)`.
-The study-specific `evaluate_established_fisher_q`, `materialize_bracket_case`, and
-`materialize_bracket_case_from_files` functions moved into that same adapter.
-New studies should configure profile settings directly rather than imitate a
-RASTI release declaration or its fixed PSF geometry.
+The tested AutoArray/AutoLens runtime cannot evaluate a nonlinear fit with a
+1x1 PSF: its empty blurring grid reaches `OverSampler.sub_is_uniform`, which
+indexes the nonexistent first sub-size. A direct dependency-only XTX control
+reproduces this with a 1x1 kernel and evaluates a 3x3 kernel successfully. The
+public nonlinear entry point rejects a 1x1 **fit** kernel before simulation or
+sampling. This does not restrict simulation/Fisher identity kernels, nor a 1x1
+truth kernel with a wider mismatched fit kernel. No dependency is monkeypatched,
+and the nonlinear likelihood is unchanged. Matched observation kernels retain
+an exact identity check: shapes must match and bytes must equal the supplied
+kernel or its exact AutoLens sum-normalization. The existing
+`fitted_kernel_sha256` contract implements that known transform; no approximate
+array comparison admits a different kernel.
 
-`NonlinearSearchSettings.nautilus_training_workers` now makes emulator-training
-parallelism explicit. A positive integer overrides
-`HWOSLAPS_NAUTILUS_TRAINING_WORKERS`; `None` preserves the previous environment
-resolution and serial default. The sampler's process pool and random streams are
-unchanged. Emulator training still runs serially when sampler cores exceed one.
-Requested and effective counts continue to appear in each fit summary.
+## Retired owners and retained tests
 
-The existing spawn pool, scoped Nautilus patch, compatibility patch, and optional
-persistent-preparation cache remain available. Their lifecycle should eventually
-be expressed through backend objects; this pass does not change their behavior.
+Archived-vector replay, historical revision allow-lists and identity schemas,
+study-specific single-GPU admission, globally patched persistent preparation
+caches, the replay-only least-squares runner, fixed study benchmark anchors,
+and their study/protocol tests are removed. They remain in Git history.
+`linearized_comparator` moved to `profile_calibration.py`; its independent
+nuisance projection, finite bounds and background-effect tests moved with it.
 
-## Validation evidence
+The fresh-profile test module now imports the engine directly. Removing study
+adapters therefore cannot silently skip the entire scientific regression suite.
+Reusable builder and JAX-family tests use small generic scenes and synthetic
+image assets created by tests rather than paper source-bank files.
 
-AST comparison confirmed unchanged bodies for 20 optimization, start-selection,
-runner, validator, and tangent units after extraction. New subprocess tests verify
-that the package and profile settings do not import execution backends. New pool
-contracts cover invalid worker counts, explicit precedence, environment changes,
-and forwarding the configured count into the actual fit scope.
+Low-value copied lazy-export inventory and dataclass identity assertions were
+removed in favor of actual fresh-interpreter import and JSON/CSV export owners.
+The unused `profile_likelihood_q` wrapper retired with its only tests; paired
+fits use the retained signed/clipped likelihood-ratio metric owner.
 
-The initial local focused run passed 74 tests; two bracket-rendering tests failed
-because the local AutoArray installation lacks `autoarray.decorators`. This is a
-runtime mismatch, so the pinned XTX validation receipts are the acceptance source
-for real rendering and GPU checks. The final focused local run passed 75 tests
-with those two rendering cases and the GPU parity case excluded. New module,
-adapter, and test lint checks passed.
+The per-declaration audit ledger records retention, repaired assertions,
+consolidation and retirement against the pinned pre-cutover source. Retired
+protocol tests were valid for their old owners; their retirement is not evidence
+that those tests were junk.
 
-## Correctness concern retained for separate work
+## Separate correctness repair and metadata break
 
-`FreshProfileSettings.to_dict()` omits
-`start_separation_posterior_sigma`. An explicit value of 2.0 reconstructs as the
-1.0 default through `from_mapping(to_dict())`. This can change start selection
-when settings are reused from serialized metadata. The omission predates this
-cleanup; no correction was included because it could change scientific execution.
-A separate change should define an authoritative round-trip schema and add a
-nondefault-value regression contract.
+`FreshProfileSettings.to_dict()` previously omitted
+`start_separation_posterior_sigma`. The actual-owner baseline control converts an
+explicit 2.0 to the 1.0 default on reload. The serialization repair adds the
+missing field; a nondefault round-trip regression protects the public settings
+contract. This does not change optimizer defaults or current in-memory settings.
+Control/candidate runtime proof is run on XTX, not locally.
+
+The existing physical-trial helper also assumed that an available
+`subhalo_mass` attribute was numeric. Real smooth `LensingData` carries that
+attribute as `None`. It now recomputes profile scales from the declared mass and
+configuration for a smooth reference; matching injected truth still reuses its
+scales. A real generated smooth-scene regression covers NFW, SIS and PointMass,
+with baseline-red/candidate-green control requested on XTX.
+
+The optimizer provenance identifier is now `normalized_lbfgsb_v2` rather than
+a RASTI release name. This intentionally changes metadata; objective arithmetic,
+optimizer tolerances and acceptance math are unchanged.
+
+## Validation
+
+The baseline gate records all test files at `bf73e2c` on the pinned XTX runtime.
+Focused and full candidate results, CPU/GPU parity, scientific-method preservation
+checks, and mutation/control receipts are recorded by the coordinated validation
+lane. No production fits are launched by this cleanup. Local work is limited to
+file edits and static inspection after the user's execution restriction.

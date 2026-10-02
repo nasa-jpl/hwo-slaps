@@ -10,9 +10,7 @@ from hwoslaps.modeling.fisher_geometry import (
 
 
 def test_translated_lattice_keeps_coordinates_and_row_major_positions():
-    layout = build_grid_layout(
-        {"spacing_arcsec": 0.5, "half_width_arcsec": 1.1}, (0.25, -0.25)
-    )
+    layout = build_grid_layout({"spacing_arcsec": 0.5, "half_width_arcsec": 1.1}, (0.25, -0.25))
     np.testing.assert_array_equal(layout.y_coords, [-0.75, -0.25, 0.25, 0.75, 1.25])
     np.testing.assert_array_equal(layout.x_coords, [-1.25, -0.75, -0.25, 0.25, 0.75])
     assert layout.node_indices[:6] == ((0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 0))
@@ -37,9 +35,7 @@ def test_annulus_uses_closed_boundaries_and_retains_position_indices():
 
 
 def test_compact_selection_contains_aperture_and_original_perimeter_once():
-    layout = build_grid_layout(
-        {"spacing_arcsec": 1.0, "half_width_arcsec": 2.0}, (0.0, 0.0)
-    )
+    layout = build_grid_layout({"spacing_arcsec": 1.0, "half_width_arcsec": 2.0}, (0.0, 0.0))
     selection = select_aperture_and_perimeter(layout, (0.0, 0.0), 1.0)
     assert selection.aperture_node_count == 5
     assert selection.perimeter_node_count == 16
@@ -63,9 +59,7 @@ def test_compact_selection_contains_aperture_and_original_perimeter_once():
 
 
 def test_aperture_boundary_uses_squared_distance_without_tolerance():
-    layout = build_grid_layout(
-        {"spacing_arcsec": 1.0, "half_width_arcsec": 1.0}, (0.0, 0.0)
-    )
+    layout = build_grid_layout({"spacing_arcsec": 1.0, "half_width_arcsec": 1.0}, (0.0, 0.0))
     below = select_aperture_and_perimeter(layout, (0.0, 0.0), np.nextafter(1.0, 0.0))
     exact = select_aperture_and_perimeter(layout, (0.0, 0.0), 1.0)
     assert below.aperture_node_count == 1
@@ -74,8 +68,22 @@ def test_aperture_boundary_uses_squared_distance_without_tolerance():
 
 @pytest.mark.parametrize("radius", [0.0, -1.0, np.inf, np.nan])
 def test_invalid_aperture_radius_is_rejected(radius):
-    layout = build_grid_layout(
-        {"spacing_arcsec": 1.0, "half_width_arcsec": 1.0}, (0.0, 0.0)
-    )
+    layout = build_grid_layout({"spacing_arcsec": 1.0, "half_width_arcsec": 1.0}, (0.0, 0.0))
     with pytest.raises(ValueError, match="positive and finite"):
         select_aperture_and_perimeter(layout, (0.0, 0.0), radius)
+
+
+def test_off_centre_aperture_uses_its_own_coordinates_on_translated_lattice():
+    layout = build_grid_layout({"spacing_arcsec": 0.5, "half_width_arcsec": 1.0}, (0.25, -0.25))
+    selection = select_aperture_and_perimeter(layout, (0.25, 0.25), 0.75)
+    expected = np.zeros((5, 5), dtype=bool)
+    expected[1:4, 2:5] = True
+    np.testing.assert_array_equal(selection.aperture_mask_2d, expected)
+    assert selection.aperture_node_count == 9
+    assert selection.selected_node_count == 22
+
+
+def test_aperture_without_any_lattice_node_is_rejected():
+    layout = build_grid_layout({"spacing_arcsec": 1.0, "half_width_arcsec": 2.0}, (0.0, 0.0))
+    with pytest.raises(ValueError, match="no node"):
+        select_aperture_and_perimeter(layout, (10.0, 10.0), 0.1)
