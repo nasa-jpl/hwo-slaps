@@ -33,13 +33,15 @@ def supervised_ordered_map(
     items_iter = iter(items)
     next_submit = 0
     next_yield = 0
+    inputs_exhausted = False
     max_pending = max(1, num_workers * 2)
     try:
-        while pending or next_submit == 0:
+        while pending or not inputs_exhausted:
             while len(pending) < max_pending:
                 try:
                     item = next(items_iter)
                 except StopIteration:
+                    inputs_exhausted = True
                     break
                 pending[executor.submit(func, item)] = next_submit
                 next_submit += 1

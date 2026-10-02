@@ -499,3 +499,24 @@ def test_subhalo_truth_config_places_the_declared_subhalo_without_mutation():
     assert control["lensing"]["subhalo"]["enabled"] is False
     assert control["lensing"]["subhalo"]["mass"] == pytest.approx(10.0**7.3)
     assert control["lensing"]["subhalo"]["position"]["centre"] == [0.8, 0.05]
+
+
+@pytest.mark.parametrize("model", ["NFW", "SIS", "PointMass"])
+def test_fisher_trial_from_smooth_scene_recomputes_physical_scales(model):
+    """A real smooth scene has null subhalo fields, not a missing attribute."""
+    from hwoslaps.lensing.generator import generate_lensing_system
+
+    config = _scene("scene1_smooth_ring.yaml")
+    config["lensing"]["subhalo"].update(enabled=False, model=model)
+    if model != "NFW":
+        config["lensing"]["subhalo"]["concentration"] = None
+    smooth = generate_lensing_system(config["lensing"], full_config=config)
+    assert smooth.subhalo_mass is None
+    trial = trial_from_fisher_map_position(
+        config, smooth, mass_msun=2.0e7, position_yx_arcsec=(0.1, -0.1),
+    )
+    assert trial.mass_msun == 2.0e7
+    assert trial.position_yx_arcsec == (0.1, -0.1)
+    assert trial.metadata["profile_scales_source"] == "recomputed"
+    scales = (trial.kappa_s, trial.scale_radius_arcsec) if model == "NFW" else (trial.einstein_radius_arcsec,)
+    assert all(np.isfinite(value) and value > 0 for value in scales)

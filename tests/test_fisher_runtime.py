@@ -51,13 +51,6 @@ class _ImmediateExecutor:
         pass
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known scheduling debt: an empty pending batch may hide unscheduled input; "
-        "deferred from numerical-preserving cleanup."
-    ),
-)
 def test_supervised_map_must_not_drop_inputs_when_entire_batch_finishes(monkeypatch):
     monkeypatch.setattr(fisher_runtime, "ProcessPoolExecutor", _ImmediateExecutor)
     values = list(range(10))

@@ -101,6 +101,7 @@ class FreshProfileSettings:
             "parameterization": "normalized_box_0_1",
             "original_start_count": self.original_start_count,
             "start_separation_normalized_l2": self.start_separation_normalized_l2,
+            "start_separation_posterior_sigma": self.start_separation_posterior_sigma,
             "maxiter": self.maxiter,
             "ftol": self.ftol,
             "gtol": self.gtol,

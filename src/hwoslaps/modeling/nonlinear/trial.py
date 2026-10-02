@@ -232,8 +232,8 @@ def trial_from_fisher_map_position(
     Returns
     -------
     trial : `SubhaloTrial`
-        Validation trial. NFW scale parameters are populated only if they
-        are available on ``lensing_reference``.
+        Validation trial. Physical scales are reused from matching truth
+        metadata or computed from the configured profile and declared mass.
     """
     subhalo_config = full_config.get("lensing", {}).get("subhalo", {})
     model = subhalo_config.get("model", getattr(lensing_reference, "subhalo_model", None))
@@ -250,12 +250,10 @@ def trial_from_fisher_map_position(
 
     lens_redshift = float(getattr(lensing_reference, "lens_redshift"))
     source_redshift = float(getattr(lensing_reference, "source_redshift"))
-    reference_mass = float(
-        getattr(lensing_reference, "subhalo_mass", mass_msun)
-    )
-    masses_match = math.isclose(
+    reference_mass = getattr(lensing_reference, "subhalo_mass", None)
+    masses_match = reference_mass is not None and math.isclose(
         mass_msun,
-        reference_mass,
+        float(reference_mass),
         rel_tol=1.0e-9,
         abs_tol=0.0,
     )
