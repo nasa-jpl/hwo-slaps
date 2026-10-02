@@ -1,3 +1,10 @@
-"""Configuration package for HWO-SLAPS."""
+"""Load, compose and validate portable forecasting configurations."""
 
+from .loading import load_config, merge_configs, resolve_config_paths, run_directory
+from .validation import validate_or_raise
+
+__all__ = [
+    "load_config", "merge_configs", "resolve_config_paths", "run_directory",
+    "validate_or_raise",
+]
 

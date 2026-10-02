@@ -5,14 +5,13 @@ strong lensing analysis pipeline, including both standard simulation
 mode and subhalo detection mode.
 """
 
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
-import os
-from pathlib import Path
-from typing import Dict, Union
+from os import PathLike
+from typing import Any, Dict, Union
 
-import yaml
-
-from .config.validation import validate_or_raise
+from .artifacts import write_fisher_grid_map
+from .config import load_config, merge_configs, resolve_config_paths, validate_or_raise
 from .lensing import generate_lensing_system
 from .lensing.utils import print_lensing_data_summary
 from .modeling.utils_fisher import FisherDetectionData, print_fisher_summary
@@ -23,16 +22,6 @@ from .psf import generate_psf_system
 from .psf.utils import print_psf_data_summary
 
 
-def _resolve_relative_output_dir(config: Dict) -> None:
-    plotting = config.get('plotting', {})
-    if not isinstance(plotting, dict) or 'output_dir' not in plotting:
-        return
-    output_dir = Path(plotting['output_dir']).expanduser()
-    if not output_dir.is_absolute():
-        output_dir = Path(__file__).resolve().parents[2] / output_dir
-    plotting['output_dir'] = str(output_dir)
-
-
 class Pipeline:
     """Enhanced HWO-SLAPS pipeline with detection mode support.
 
@@ -41,15 +30,19 @@ class Pipeline:
     - Detection mode: Paired observation generation + subhalo detection
     """
 
-    def __init__(self, verbose: bool = True):
+    def __init__(self, verbose: bool = True, *, save_grid_maps: bool = True):
         """Initialize pipeline.
 
         Parameters
         ----------
         verbose : bool, optional
             Whether to print progress information.
+        save_grid_maps : bool, optional
+            Persist Fisher grid-map arrays. Disable for in-memory forecasts;
+            plotting and PSF high-resolution exports have their own switches.
         """
         self.verbose = verbose
+        self.save_grid_maps = save_grid_maps
 
     def run(self, config: Dict) -> Union[ObservationData, FisherDetectionData]:
         """Run the pipeline, selecting the mode from the configuration.
@@ -172,57 +165,9 @@ class Pipeline:
             print("\n🎯 Fisher detectability analysis complete!")
             print_fisher_summary(detection_data)
 
-        # Grid maps are stage-two analysis inputs; persist the arrays even
-        # when plotting is disabled.
-        if detection_data.has_grid_map:
-            from .modeling.utils_fisher import save_fisher_grid_map_npz
-            from .provenance import config_hash, revision_provenance
-            grid_map_dir = (
-                Path(config['plotting']['output_dir']) / config['run_name'] / 'modeling'
-            )
-            snapshot_path = grid_map_dir.parent / 'config_used.yaml'
-            detection_data.grid_map.config_hash = None
-            if snapshot_path.is_file():
-                with snapshot_path.open('r', encoding='utf-8') as stream:
-                    snapshot_config = yaml.safe_load(stream)
-                resolved_snapshot = deepcopy(snapshot_config)
-                _resolve_relative_output_dir(resolved_snapshot)
-                expected = config_hash(config)
-                snapshot_hash = config_hash(snapshot_config)
-                if (
-                    snapshot_hash != expected
-                    and config_hash(resolved_snapshot) != expected
-                ):
-                    raise ValueError(
-                        f"Adjacent config snapshot {snapshot_path} does not "
-                        "describe this run; refusing to bind the grid map "
-                        "to it."
-                    )
-                detection_data.grid_map.config_hash = snapshot_hash
-            revision = revision_provenance(Path(__file__).resolve().parent)
-            detection_data.grid_map.git_hash = revision["git_hash"]
-            detection_data.grid_map.git_dirty = revision["git_dirty"]
-            detection_data.grid_map.worktree_diff_sha256 = revision[
-                "worktree_diff_sha256"
-            ]
-            detection_data.grid_map.runtime_provenance = {
-                **(detection_data.grid_map.runtime_provenance or {}),
-                "source_git_dirty": revision["git_dirty"],
-                "source_worktree_diff_sha256": revision[
-                    "worktree_diff_sha256"
-                ],
-            }
-            # S1-lite exports HWOSLAPS_CAMPAIGN_UUID to every campaign job;
-            # standalone runs stay unbound.
-            detection_data.grid_map.campaign_uuid = os.environ.get(
-                'HWOSLAPS_CAMPAIGN_UUID'
-            )
-            grid_map_dir.mkdir(parents=True, exist_ok=True)
-            grid_map_path = save_fisher_grid_map_npz(
-                detection_data.grid_map,
-                grid_map_dir / 'fisher_grid_map.npz',
-            )
-            if self.verbose:
+        if self.save_grid_maps:
+            grid_map_path = write_fisher_grid_map(detection_data, config)
+            if self.verbose and grid_map_path is not None:
                 print(f"Fisher grid map arrays saved: {grid_map_path}")
 
         # Generate plots if enabled
@@ -349,45 +294,38 @@ class Pipeline:
         return test_config
 
 
-def run_enhanced_pipeline(config_path: str,
-                          verbose: bool = True) -> Union[ObservationData, FisherDetectionData]:
-    """Run the enhanced HWO-SLAPS pipeline with detection mode support.
+def run_pipeline(
+    config: Mapping[str, Any] | str | PathLike[str] | Sequence[str | PathLike[str]],
+    *,
+    verbose: bool = True,
+    base_dir: str | PathLike[str] | None = None,
+    overrides: Mapping[str, Any] | None = None,
+    save_grid_maps: bool = True,
+) -> Union[ObservationData, FisherDetectionData]:
+    """Run a Python configuration or composed YAML files without CLI artifacts.
 
-    This function automatically detects whether to run in standard mode or
-    detection mode based on the configuration.
-
-    Parameters
-    ----------
-    config_path : str
-        Path to the master configuration file.
-    verbose : bool, optional
-        Whether to print progress information.
-
-    Returns
-    -------
-    result : ObservationData or FisherDetectionData
-        - ObservationData in standard mode
-        - FisherDetectionData in detection mode (when modeling.enabled: true)
-
-    Examples
-    --------
-    Standard observation simulation:
-
-    >>> obs_data = run_enhanced_pipeline('standard_config.yaml')
-    >>> print(f"Peak SNR: {obs_data.signal_to_noise_map.native.max():.2f}")
-
-    Fisher detection study:
-
-    >>> detection_data = run_enhanced_pipeline('detection_config.yaml')
-    >>> print(f"Mode: {detection_data.mode}")
-    >>> print(f"Pixels analyzed: {detection_data.pixels_unmasked}")
+    File-declared paths resolve against each declaring file's directory.
+    Python mappings use ``base_dir`` or the caller's working directory.
+    ``overrides`` merges recursively and never modifies the caller's data.
+    To retain historical repository-relative paths, pass the repository as
+    ``base_dir`` explicitly. Use ``cli.run_with_artifacts`` for snapshot, log
+    and provenance capture. Set ``save_grid_maps=False`` to retain grid-map
+    results in memory without exporting their NPZ artifact.
     """
-    # Load configuration
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    _resolve_relative_output_dir(config)
-    validate_or_raise(config)
+    if isinstance(config, Mapping):
+        resolved = resolve_config_paths(config, base_dir=base_dir)
+        if overrides is not None:
+            resolved = merge_configs(resolved, resolve_config_paths(overrides, base_dir=base_dir))
+    else:
+        resolved = load_config(config, overrides=overrides, base_dir=base_dir, validate=False)
+    return Pipeline(verbose=verbose, save_grid_maps=save_grid_maps).run(resolved)
 
-    # Create and run pipeline
-    pipeline = Pipeline(verbose=verbose)
-    return pipeline.run(config)
+
+def run_enhanced_pipeline(
+    config_path: str,
+    verbose: bool = True,
+    *,
+    base_dir: str | PathLike[str] | None = None,
+) -> Union[ObservationData, FisherDetectionData]:
+    """Compatibility entry point; new callers should use ``run_pipeline``."""
+    return run_pipeline(config_path, verbose=verbose, base_dir=base_dir)

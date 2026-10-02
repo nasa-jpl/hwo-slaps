@@ -32,7 +32,7 @@ def _coerce_positive_finite_redshift(value, key_path):
     return redshift
 
 
-def generate_lensing_system(config, full_config):
+def generate_lensing_system(config, full_config=None, *, seed=None, run_name=None):
     """Generate a complete lensing system from configuration.
 
     This function creates a strong lensing system including grid creation,
@@ -43,9 +43,14 @@ def generate_lensing_system(config, full_config):
     config : `dict`
         Lensing configuration dictionary containing grid, lens_galaxy,
         source_galaxy, subhalo, and cosmology parameters.
-    full_config : `dict`
-        Full top-level configuration dictionary. Must include
-        ``global_seed`` for deterministic subhalo placement and provenance.
+    full_config : `dict`, optional
+        Full top-level configuration stored for provenance. Its ``global_seed``
+        supplies deterministic subhalo placement when ``seed`` is omitted.
+    seed : `int`, optional
+        Standalone scene seed. The historical subhalo stream uses ``seed + 1``.
+        Supply this to generate a scene without a full pipeline configuration.
+    run_name : `str`, optional
+        Provenance label for standalone generation.
 
     Returns
     -------
@@ -70,13 +75,17 @@ def generate_lensing_system(config, full_config):
     >>> if lensing_data.has_subhalo:
     ...     print(f"Subhalo mass: {lensing_data.subhalo_mass:.1e} M_sun")
     """
-    if not isinstance(full_config, dict):
+    if full_config is not None and not isinstance(full_config, dict):
         raise ValueError("full_config must be a dict for generate_lensing_system")
-    if 'global_seed' not in full_config:
-        raise ValueError("Missing required key 'global_seed' in full_config")
-    global_seed = full_config['global_seed']
+    if seed is None:
+        if full_config is None or 'global_seed' not in full_config:
+            raise ValueError("Missing required key 'global_seed' in full_config; alternatively provide seed")
+        seed = full_config['global_seed']
+    global_seed = seed
     if isinstance(global_seed, bool) or not isinstance(global_seed, int):
-        raise ValueError("full_config.global_seed must be an int")
+        raise ValueError("seed / full_config.global_seed must be an int")
+    if run_name is not None and (not isinstance(run_name, str) or not run_name):
+        raise ValueError("run_name must be a non-empty string")
     # Create coordinate grid
     grid = _create_grid(config['grid'])
 
@@ -165,7 +174,12 @@ def generate_lensing_system(config, full_config):
     lensed_image = tracer.image_2d_from(grid=grid)
 
     # Extract parameters for unified structure
-    config_to_store = deepcopy(full_config)
+    config_to_store = deepcopy(full_config) if full_config is not None else {
+        'lensing': deepcopy(config),
+    }
+    config_to_store['global_seed'] = global_seed
+    if run_name is not None:
+        config_to_store['run_name'] = run_name
 
     source_light = source_config['light']
     if source_light_type == 'Image':

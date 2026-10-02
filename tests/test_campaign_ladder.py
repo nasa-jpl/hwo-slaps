@@ -25,8 +25,8 @@ SRC_ROOT = PROJECT_ROOT/"src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from hwoslaps.campaign import design_freeze as df
-from hwoslaps.campaign import ladder
+from studies.rasti.campaign import design_freeze as df
+from studies.rasti.campaign import ladder
 from hwoslaps.campaign import _common
 from hwoslaps.campaign import s1_lite
 from hwoslaps.lensing.critical_curve import ApertureDefinition
@@ -69,7 +69,7 @@ SELECTED_IDS = (
 )
 GOLDEN_IDS = SELECTED_IDS[:5]
 
-RUNNER_COMMAND = ["python", "scripts/run_ladder.py", "{config}"]
+RUNNER_COMMAND = ["python", "studies/rasti/scripts/run_ladder.py", "{config}"]
 
 
 @pytest.fixture(scope="module")
@@ -200,7 +200,7 @@ def _write_stage0_campaign(freeze, directory):
             "name": "stage0_pool",
             "output_root": str(root),
             "runner_command": [
-                "python", "scripts/run_stage0_observation.py", "{config}"
+                "python", "studies/rasti/scripts/run_stage0_observation.py", "{config}"
             ],
             "base_scene_configs": {SCENE_LABEL: str(scene_path)},
             "observing_reference": str(reference_path),

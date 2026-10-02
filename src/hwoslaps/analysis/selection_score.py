@@ -551,8 +551,14 @@ def aperture_mask(y_arcsec, x_arcsec, radius_arcsec, centre_arcsec=(0.0, 0.0)):
     return mask
 
 
-def apply_floor_cuts(theta_e_arcsec, arc_snr_values):
-    """Apply the Collett 2015 floor cuts to one pool.
+def apply_floor_cuts(
+    theta_e_arcsec,
+    arc_snr_values,
+    *,
+    theta_e_min_arcsec=FLOOR_THETA_E_ARCSEC,
+    arc_snr_min=FLOOR_ARC_SNR,
+):
+    """Apply explicit strict floor cuts to one pool.
 
     ``theta_E > 0.5`` arcsec and ``S > 20``, both strict, so a member
     exactly on a floor fails it.
@@ -563,6 +569,9 @@ def apply_floor_cuts(theta_e_arcsec, arc_snr_values):
         Einstein radii in arcseconds, one per pool member.
     arc_snr_values : array-like
         Integrated arc signal-to-noise, one per pool member.
+    theta_e_min_arcsec, arc_snr_min : `float`, optional
+        Finite, nonnegative thresholds. Historical defaults reproduce the
+        RASTI Collett cuts; other surveys supply their selection policy here.
 
     Returns
     -------
@@ -580,7 +589,9 @@ def apply_floor_cuts(theta_e_arcsec, arc_snr_values):
         raise ValueError(
             f"theta_e_arcsec holds {theta_e.size} entries and arc_snr_values holds {snr.size}."
         )
-    return (theta_e > FLOOR_THETA_E_ARCSEC) & (snr > FLOOR_ARC_SNR)
+    theta_floor = _require_non_negative(theta_e_min_arcsec, 'theta_e_min_arcsec')
+    snr_floor = _require_non_negative(arc_snr_min, 'arc_snr_min')
+    return (theta_e > theta_floor) & (snr > snr_floor)
 
 
 def _exact_mean(array: np.ndarray) -> float:
@@ -773,6 +784,9 @@ def rank_pool(
     variant="s_plus_c",
     selected_size=SELECTED_TIER_SIZE,
     golden_size=GOLDEN_TIER_SIZE,
+    *,
+    theta_e_min_arcsec=FLOOR_THETA_E_ARCSEC,
+    arc_snr_min=FLOOR_ARC_SNR,
 ):
     """Run the whole frozen rule over one Stage 0 pool.
 
@@ -795,6 +809,8 @@ def rank_pool(
         Selected-tier size, the frozen `SELECTED_TIER_SIZE`.
     golden_size : `int`, optional
         Golden-tier size, the frozen `GOLDEN_TIER_SIZE`.
+    theta_e_min_arcsec, arc_snr_min : `float`, optional
+        Survey-specific strict floor thresholds. Defaults preserve RASTI.
 
     Returns
     -------
@@ -810,7 +826,10 @@ def rank_pool(
         fill the selected tier.
     """
     ids = _require_ids(system_ids, "system_ids")
-    passed = apply_floor_cuts(theta_e_arcsec, arc_snr_values)
+    passed = apply_floor_cuts(
+        theta_e_arcsec, arc_snr_values,
+        theta_e_min_arcsec=theta_e_min_arcsec, arc_snr_min=arc_snr_min,
+    )
     if passed.size != len(ids):
         raise ValueError(f"system_ids holds {len(ids)} entries and the statistics hold {passed.size}.")
     for name, size in (("selected_size", selected_size), ("golden_size", golden_size)):

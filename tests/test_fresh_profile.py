@@ -24,6 +24,7 @@ try:
         select_current_search_starts,
     )
     from hwoslaps.modeling.nonlinear.output_schema import NonlinearCaseResult
+    from studies.rasti.campaign.profile_adapters import profile_settings_from_release_protocol
 except (AttributeError, ImportError) as exc:  # pragma: no cover - host-runtime guard
     pytest.skip(
         f"pinned AutoLens runtime is unavailable for package imports: {exc}",
@@ -450,7 +451,7 @@ def test_profile_settings_reject_undeclared_flat_release_protocol():
         }
     }
     with pytest.raises(ValueError, match="explicitly bind profile settings"):
-        FreshProfileSettings.from_release_protocol(release)
+        profile_settings_from_release_protocol(release)
 
 
 def test_profile_settings_load_from_actual_v7_yaml_nested_schema():
@@ -458,7 +459,7 @@ def test_profile_settings_load_from_actual_v7_yaml_nested_schema():
 
     release_path = Path(__file__).parents[1] / "configs/design/design_freeze_v7.yaml"
     release = yaml.safe_load(release_path.read_text())
-    settings = FreshProfileSettings.from_release_protocol(release)
+    settings = profile_settings_from_release_protocol(release)
     assert settings.original_start_count == 8
     assert settings.maxiter == 500
     assert settings.repeat_maxiter == 1000
@@ -846,7 +847,7 @@ def test_established_fisher_q_adapter_binds_999_kernel_and_mass_point(monkeypatc
     run_ladder._point_detector_at_rung = lambda detector, logm: observed.update(
         logm=logm
     )
-    monkeypatch.setitem(sys.modules, "run_ladder", run_ladder)
+    monkeypatch.setitem(sys.modules, "studies.rasti.scripts.run_ladder", run_ladder)
     config_validation = ModuleType("hwoslaps.config.validation")
     config_validation.validate_or_raise = lambda config: observed.update(
         kernel=config["psf"]["kernel"]["shape_native"]
@@ -863,7 +864,7 @@ def test_established_fisher_q_adapter_binds_999_kernel_and_mass_point(monkeypatc
     monkeypatch.setitem(sys.modules, "hwoslaps.psf.generator", psf_generator)
 
     result = __import__(
-        "hwoslaps.modeling.nonlinear.fresh_profile",
+        "studies.rasti.campaign.profile_adapters",
         fromlist=["evaluate_established_fisher_q"],
     ).evaluate_established_fisher_q(
         config={"ladder": {"aperture": {}}, "psf": {"kernel": {"shape_native": [51, 51]}}},
@@ -1015,7 +1016,7 @@ def _rendering_generator(observed):
 
 
 def _materialize(tmp_path, target_mass_msun=10.0**7.3):
-    from hwoslaps.modeling.nonlinear.fresh_profile import (
+    from studies.rasti.campaign.profile_adapters import (
         materialize_bracket_case_from_files,
     )
 

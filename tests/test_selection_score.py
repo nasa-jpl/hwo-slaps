@@ -324,6 +324,33 @@ def test_floor_cut_thresholds_are_the_collett_values():
     assert ss.FLOOR_ARC_SNR == 20.0
 
 
+def test_explicit_survey_floors_are_strict_and_do_not_change_defaults():
+    theta = [0.1, 0.2, 0.2]
+    snr = [10.0, 5.0, 10.0]
+    assert not np.any(ss.apply_floor_cuts(theta, snr))
+    result = ss.apply_floor_cuts(theta, snr, theta_e_min_arcsec=0.1, arc_snr_min=5.0)
+    assert result.tolist() == [False, False, True]
+    assert not np.any(ss.apply_floor_cuts(theta, snr))
+
+
+def test_rank_pool_uses_declared_survey_selection_policy():
+    result = ss.rank_pool(
+        ['a', 'b', 'c'], [0.1, 0.2, 0.3], [10.0, 20.0, 30.0], [1.0, 2.0, 3.0],
+        selected_size=2, golden_size=1,
+        theta_e_min_arcsec=0.1, arc_snr_min=5.0,
+    )
+    assert result.passed_floor == (False, True, True)
+    assert result.selected_ids == ('c', 'b')
+    assert result.golden_ids == ('c',)
+
+
+@pytest.mark.parametrize('value', [-1.0, np.nan, np.inf, True])
+@pytest.mark.parametrize('key', ['theta_e_min_arcsec', 'arc_snr_min'])
+def test_survey_floor_thresholds_reject_nonphysical_values(key, value):
+    with pytest.raises(ValueError, match=key):
+        ss.apply_floor_cuts([1.0], [100.0], **{key: value})
+
+
 def test_floor_cuts_reject_a_length_mismatch():
     """Both statistics must describe the same pool."""
     with pytest.raises(ValueError, match="entries"):

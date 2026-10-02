@@ -7,7 +7,7 @@ import sys
 from types import SimpleNamespace
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "studies/rasti/scripts"))
 import launch_nonlinear_bulk as bulk
 
 
@@ -24,10 +24,10 @@ def test_fresh_root_does_not_reuse_activation_or_any_old_state(tmp_path):
 
 def test_fresh_start_waits_for_ready_sweeper_and_finalizes_only_after_exit(tmp_path, monkeypatch):
     worktree = tmp_path / "worktree"
-    (worktree / "scripts").mkdir(parents=True)
-    sweeper = worktree / "scripts/sweep_completed_attempts.py"
+    (worktree / "studies/rasti/scripts").mkdir(parents=True)
+    sweeper = worktree / "studies/rasti/scripts/sweep_completed_attempts.py"
     shutil.copy2(Path(bulk.__file__).with_name("sweep_completed_attempts.py"), sweeper)
-    controller = worktree / "scripts/run_nonlinear_execution.py"
+    controller = worktree / "studies/rasti/scripts/run_nonlinear_execution.py"
     controller.write_text("""import fcntl, hashlib, json, pathlib, sys, time
 m=json.loads(pathlib.Path(sys.argv[1]).read_text()); root=pathlib.Path(m['task_root'])
 health=json.loads((root/'sweeper_health.json').read_text())
@@ -119,8 +119,8 @@ def test_preflight_requires_operator_fields_and_exact_bindings(tmp_path, monkeyp
     worktree = tmp_path / "worktree"
     worktree.mkdir()
     root, archive = tmp_path / "runtime", tmp_path / "archive"
-    sweeper = worktree / "scripts/sweep_completed_attempts.py"
-    sweeper.parent.mkdir()
+    sweeper = worktree / "studies/rasti/scripts/sweep_completed_attempts.py"
+    sweeper.parent.mkdir(parents=True)
     sweeper.write_text("fixture")
     manifest = dict(
         worktree=str(worktree),
@@ -152,10 +152,10 @@ def test_preflight_requires_operator_fields_and_exact_bindings(tmp_path, monkeyp
 
 def test_sweeper_failure_before_readiness_never_starts_controller(tmp_path, monkeypatch):
     worktree = tmp_path / "worktree"
-    (worktree / "scripts").mkdir(parents=True)
-    sweeper = worktree / "scripts/sweep_completed_attempts.py"
+    (worktree / "studies/rasti/scripts").mkdir(parents=True)
+    sweeper = worktree / "studies/rasti/scripts/sweep_completed_attempts.py"
     sweeper.write_text("raise SystemExit(2)\n")
-    controller = worktree / "scripts/run_nonlinear_execution.py"
+    controller = worktree / "studies/rasti/scripts/run_nonlinear_execution.py"
     marker = tmp_path / "DISPATCHED"
     controller.write_text(f"from pathlib import Path\nPath({str(marker)!r}).touch()\n")
     root, archive = tmp_path / "runtime", tmp_path / "archive"

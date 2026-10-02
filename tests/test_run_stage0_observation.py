@@ -21,7 +21,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = PROJECT_ROOT/"scripts"
+SCRIPTS_ROOT = PROJECT_ROOT/"studies/rasti/scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
@@ -38,7 +38,7 @@ from run_stage0_observation import (  # noqa: E402
 
 def test_artifact_name_matches_the_frozen_declaration():
     """The runner writes the artifact the design freeze declares."""
-    from hwoslaps.campaign.design_freeze import load_design_freeze
+    from studies.rasti.campaign.design_freeze import load_design_freeze
 
     freeze = load_design_freeze(
         PROJECT_ROOT/"configs"/"design"/"design_freeze_v1.yaml"
@@ -239,7 +239,7 @@ def test_a_runner_side_settings_mismatch_is_detected(changes, expected):
 
 def test_the_frozen_settings_match_the_committed_freeze():
     """The settings pinned in this test are the ones the freeze declares."""
-    from hwoslaps.campaign.design_freeze import load_design_freeze
+    from studies.rasti.campaign.design_freeze import load_design_freeze
 
     freeze = load_design_freeze(
         PROJECT_ROOT/"configs"/"design"/"design_freeze_v1.yaml"

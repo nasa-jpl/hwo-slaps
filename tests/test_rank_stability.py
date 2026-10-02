@@ -22,10 +22,10 @@ SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
-from hwoslaps.analysis import rank_stability as rst
+from studies.rasti.analysis import rank_stability as rst
 from hwoslaps.analysis import selection_score as ss
-from hwoslaps.campaign import design_freeze as df
-from hwoslaps.campaign import stage0
+from studies.rasti.campaign import design_freeze as df
+from studies.rasti.campaign import stage0
 
 
 FREEZE_PATH = PROJECT_ROOT / "configs" / "design" / "design_freeze_v1.yaml"
@@ -522,10 +522,10 @@ def test_noisy_observables_use_no_truth(pool_dir, small_freeze):
     assert first["arc_snr"] != other["arc_snr"]
 
 
-def test_analysis_package_exports_the_rank_stability_api():
-    """The lazy package attribute resolves the new module."""
+def test_frozen_rank_stability_is_outside_the_engine_package():
+    """The study harness is preserved without becoming a core engine API."""
     import hwoslaps.analysis as analysis
 
-    assert analysis.NOISE_STREAM == "rank_stability_noise"
-    assert analysis.run_rank_stability is rst.run_rank_stability
-    assert "replicate_noise_seed" in dir(analysis)
+    assert rst.NOISE_STREAM == "rank_stability_noise"
+    assert 'run_rank_stability' not in analysis.__all__
+    assert "replicate_noise_seed" not in dir(analysis)

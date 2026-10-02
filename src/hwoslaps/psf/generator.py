@@ -9,6 +9,7 @@ incoming optical state.
 
 import copy
 import os
+from numbers import Real
 
 import numpy as np
 from hcipy.field import (
@@ -86,7 +87,7 @@ def _total_aperture_rms_nm(telescope_data, phase_screens):
         ) from e
 
 
-def generate_psf_system(config, full_config=None):
+def generate_psf_system(config, full_config=None, *, target_pixel_scale=None):
     """Generate a PSF system with specified aberrations.
 
     This function is the canonical PSF runtime path for the project. It builds
@@ -101,9 +102,12 @@ def generate_psf_system(config, full_config=None):
         PSF configuration dictionary containing ``telescope``, ``hres_psf``,
         ``kernel``, and ``aberrations`` blocks.
     full_config : `dict`, optional
-        Full configuration dictionary. It must contain the lensing grid pixel
-        scale used to set the detector kernel scale. The complete dictionary is
-        stored on the returned `PSFData` object for provenance.
+        Full configuration dictionary, stored for provenance. Its lensing grid
+        supplies the detector pixel scale when ``target_pixel_scale`` is omitted.
+    target_pixel_scale : `float`, optional
+        Detector sampling in arcseconds per pixel. Supplying this explicitly
+        allows standalone PSF generation without a lensing or campaign config.
+        If both sources declare a pixel scale, they must agree.
 
     Returns
     -------
@@ -136,12 +140,7 @@ def generate_psf_system(config, full_config=None):
     """
     # Automatic sampling calculation and validation.
 
-    # Extract parameters from the config structure.
-    # Config is the PSF config section, full_config contains everything.
-    if full_config is not None and 'lensing' in full_config:
-        lensing_config = full_config['lensing']
-    else:
-        raise ValueError('full_config must be provided and contain a "lensing" key.')
+    target_pixel_scale = _resolve_target_pixel_scale(target_pixel_scale, full_config)
     psf_config = copy.deepcopy(config)
     # Use the hres_psf block from the new config structure
     if 'hres_psf' not in psf_config or 'telescope' not in psf_config:
@@ -149,7 +148,6 @@ def generate_psf_system(config, full_config=None):
     sim_config = psf_config['hres_psf']
     telescope_config = psf_config['telescope']
 
-    target_pixel_scale = lensing_config['grid']['pixel_scale']
     wavelength = sim_config['wavelength']
     pupil_diameter = telescope_config['pupil_diameter']
     focal_length = telescope_config['focal_length']
@@ -469,7 +467,46 @@ def generate_psf_system(config, full_config=None):
         # Complex data.
         phase_screens=phase_screens,
         aberrations=aberrations,
-        config=full_config
+        config=copy.deepcopy(full_config) if full_config is not None else {
+            'psf': copy.deepcopy(config),
+            'detector_pixel_scale_arcsec': target_pixel_scale,
+        }
     )
 
     return psf_data
+
+
+def _resolve_target_pixel_scale(target_pixel_scale, full_config):
+    """Resolve explicit detector sampling without depending on lens generation."""
+    configured_scale = None
+    if full_config is not None:
+        if not isinstance(full_config, dict):
+            raise ValueError("full_config must be a dict")
+        lensing_config = full_config.get('lensing', {})
+        if not isinstance(lensing_config, dict) or not isinstance(lensing_config.get('grid', {}), dict):
+            raise ValueError("full_config.lensing.grid must be a dict")
+        configured_scale = lensing_config.get('grid', {}).get('pixel_scale')
+    if target_pixel_scale is None:
+        target_pixel_scale = configured_scale
+    if target_pixel_scale is None:
+        raise ValueError(
+            "target_pixel_scale is required, or full_config must contain lensing.grid.pixel_scale"
+        )
+    if (
+        isinstance(target_pixel_scale, (bool, np.bool_))
+        or not isinstance(target_pixel_scale, Real)
+        or not np.isfinite(target_pixel_scale)
+        or target_pixel_scale <= 0
+    ):
+        raise ValueError("target_pixel_scale must be positive and finite")
+    if configured_scale is not None:
+        if (
+            isinstance(configured_scale, (bool, np.bool_))
+            or not isinstance(configured_scale, Real)
+            or not np.isfinite(configured_scale)
+            or configured_scale <= 0
+        ):
+            raise ValueError("full_config.lensing.grid.pixel_scale must be positive and finite")
+        if not np.isclose(target_pixel_scale, configured_scale, rtol=0.0, atol=1e-12):
+            raise ValueError("target_pixel_scale conflicts with full_config.lensing.grid.pixel_scale")
+    return float(target_pixel_scale)

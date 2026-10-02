@@ -29,9 +29,7 @@ making requirement-level claims.
 from __future__ import annotations
 
 import contextlib
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 import io
-import multiprocessing
 import os
 import sys
 from copy import deepcopy
@@ -67,6 +65,24 @@ from .fisher_adapter import (
     stack_masked_images,
 )
 from .fisher_core import ProfileLikelihoodWorkspace, Whitener, detectable_area
+from .fisher_geometry import (
+    FisherGridLayout as _GridLayout,
+    FisherLadderGridSelection,
+    FisherLadderRungData,
+    build_grid_layout,
+    select_aperture_and_perimeter,
+)
+from .fisher_nuisance import (
+    ScalarNuisanceSpec as _ScalarNuisanceSpec,
+    build_scalar_nuisance_specs,
+    lookup_prior_sigma,
+    select_scalar_nuisances,
+)
+from .fisher_runtime import (
+    grid_num_workers,
+    grid_runtime_provenance,
+    supervised_ordered_map as _supervised_ordered_map,
+)
 from .utils_fisher import (
     FisherGridMapData,
     FisherLocalData,
@@ -74,27 +90,6 @@ from .utils_fisher import (
     FisherModeCouplingData,
     FisherModeScanData,
 )
-
-
-# Reserved ``modeling.fisher.nuisance_subset`` words that select scalar
-# nuisance directions by name prefix.  ``all`` and ``none`` are handled
-# separately because they are not prefix selections.
-_NUISANCE_SUBSET_PREFIXES: Dict[str, Tuple[str, ...]] = {
-    "lens_only": ("lens.",),
-    "source_only": ("source.",),
-    "lens_and_source": ("lens.", "source."),
-}
-
-
-@dataclass(frozen=True)
-class _ScalarNuisanceSpec:
-    """Descriptor for one scalar nuisance parameter."""
-
-    name: str
-    path: Optional[Tuple[Any, ...]]
-    step_mode: str
-    step_key: Optional[str] = None
-    prior_sigma: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -107,89 +102,6 @@ class _PsfModeSpec:
     enable_flag_path: Tuple[Any, ...]
     step: float
     prior_sigma: Optional[float] = None
-
-
-@dataclass(frozen=True)
-class _GridLayout:
-    """Node layout for a 2D sensitivity grid map.
-
-    ``positions_yx`` lists only the evaluated nodes in row-major order and
-    ``node_indices`` gives each one's ``(i, j)`` into the 2D arrays.
-    """
-
-    y_coords: np.ndarray
-    x_coords: np.ndarray
-    spacing_arcsec: float
-    centre_yx: Tuple[float, float]
-    evaluated_mask: np.ndarray
-    positions_yx: Tuple[Tuple[float, float], ...]
-    node_indices: Tuple[Tuple[int, int], ...]
-
-
-@dataclass(frozen=True)
-class FisherLadderGridSelection:
-    """Reusable aperture-plus-perimeter selection on a full square lattice.
-
-    ``selected_mask_2d`` describes exactly the nodes evaluated by the ladder
-    path.  Values outside it are absent from the corresponding rung result;
-    they are not represented as zero or as a partially populated grid map.
-    The full coordinate arrays remain available so the selection is tied to
-    the original square geometry used to construct the JAX radial engine.
-    """
-
-    y_coords: np.ndarray
-    x_coords: np.ndarray
-    spacing_arcsec: float
-    grid_centre_yx: Tuple[float, float]
-    aperture_centre_yx: Tuple[float, float]
-    aperture_radius_arcsec: float
-    aperture_mask_2d: np.ndarray
-    perimeter_mask_2d: np.ndarray
-    selected_mask_2d: np.ndarray
-    positions_yx: Tuple[Tuple[float, float], ...]
-    node_indices: Tuple[Tuple[int, int], ...]
-
-    @property
-    def full_grid_node_count(self) -> int:
-        return int(self.y_coords.size * self.x_coords.size)
-
-    @property
-    def aperture_node_count(self) -> int:
-        return int(np.count_nonzero(self.aperture_mask_2d))
-
-    @property
-    def perimeter_node_count(self) -> int:
-        return int(np.count_nonzero(self.perimeter_mask_2d))
-
-    @property
-    def selected_node_count(self) -> int:
-        return len(self.positions_yx)
-
-
-@dataclass(frozen=True)
-class FisherLadderRungData:
-    """Compact Fisher result for nodes consumed by one ladder rung.
-
-    The one-dimensional arrays share row-major position order.  They contain
-    only aperture or original-square-perimeter nodes, making the incomplete
-    full-grid coverage explicit while retaining every value used by the
-    ladder estimands and clipping diagnostic.
-    """
-
-    selection: FisherLadderGridSelection
-    positions_yx: np.ndarray
-    node_indices: np.ndarray
-    q_asimov_by_position: np.ndarray
-    detectable_by_position: np.ndarray
-    detection_q_threshold: float
-    q_max: float
-    detectable_area_arcsec2: float
-    aperture_fraction: float
-    perimeter_clipped: bool
-
-    @property
-    def num_positions_evaluated(self) -> int:
-        return int(self.q_asimov_by_position.size)
 
 
 def _truth_kernel_accept_digests(regen_kernel) -> set:
@@ -296,51 +208,6 @@ _GRID_WORKER_ENV = {
     "MKL_NUM_THREADS": "1",
     "NUMEXPR_NUM_THREADS": "1",
 }
-
-
-def _supervised_ordered_map(
-    func,
-    items,
-    num_workers,
-    initializer=None,
-    initargs=(),
-):
-    """Yield ordered task results while supervising worker health."""
-    context = multiprocessing.get_context("spawn")
-    executor = ProcessPoolExecutor(
-        max_workers=num_workers,
-        mp_context=context,
-        initializer=initializer,
-        initargs=initargs,
-    )
-    pending = {}
-    buffered = {}
-    items_iter = iter(items)
-    next_submit = 0
-    next_yield = 0
-    max_pending = max(1, num_workers * 2)
-    try:
-        while pending or next_submit == 0:
-            while len(pending) < max_pending:
-                try:
-                    item = next(items_iter)
-                except StopIteration:
-                    break
-                pending[executor.submit(func, item)] = next_submit
-                next_submit += 1
-            if not pending:
-                break
-            done, _ = wait(pending, return_when=FIRST_COMPLETED)
-            for future in done:
-                index = pending.pop(future)
-                buffered[index] = future.result()
-            while next_yield in buffered:
-                yield buffered.pop(next_yield)
-                next_yield += 1
-        executor.shutdown(wait=True)
-    except BaseException:
-        executor.shutdown(wait=False, cancel_futures=True)
-        raise
 
 
 def _grid_worker_init(
@@ -1127,59 +994,8 @@ class FisherDetector:
                 "compute_grid_map."
             )
 
-        centre = np.asarray(centre_arcsec, dtype=float)
-        if centre.shape != (2,) or not np.all(np.isfinite(centre)):
-            raise ValueError(
-                "The ladder aperture centre must contain two finite coordinates."
-            )
-        radius = float(radius_arcsec)
-        if not np.isfinite(radius) or radius <= 0.0:
-            raise ValueError(
-                "The ladder aperture radius must be positive and finite."
-            )
-
-        layout = self._grid_layout()
-        offsets_y = layout.y_coords[:, None] - centre[0]
-        offsets_x = layout.x_coords[None, :] - centre[1]
-        aperture_mask = offsets_y**2 + offsets_x**2 <= radius**2
-        if not np.any(aperture_mask):
-            raise ValueError(
-                f"The grid map holds no node inside the D-F7 aperture of "
-                f"radius {radius} arcsec about {tuple(centre)}"
-            )
-
-        perimeter_mask = np.zeros(layout.evaluated_mask.shape, dtype=bool)
-        perimeter_mask[0, :] = True
-        perimeter_mask[-1, :] = True
-        perimeter_mask[:, 0] = True
-        perimeter_mask[:, -1] = True
-        selected_mask = aperture_mask | perimeter_mask
-
-        node_array = np.argwhere(selected_mask)
-        node_indices = tuple((int(i), int(j)) for i, j in node_array)
-        positions = tuple(
-            (float(layout.y_coords[i]), float(layout.x_coords[j]))
-            for i, j in node_indices
-        )
-
-        def _readonly_copy(values: np.ndarray) -> np.ndarray:
-            contiguous = np.ascontiguousarray(values)
-            return np.frombuffer(
-                contiguous.tobytes(), dtype=contiguous.dtype
-            ).reshape(contiguous.shape)
-
-        selection = FisherLadderGridSelection(
-            y_coords=_readonly_copy(layout.y_coords),
-            x_coords=_readonly_copy(layout.x_coords),
-            spacing_arcsec=layout.spacing_arcsec,
-            grid_centre_yx=layout.centre_yx,
-            aperture_centre_yx=(float(centre[0]), float(centre[1])),
-            aperture_radius_arcsec=radius,
-            aperture_mask_2d=_readonly_copy(aperture_mask),
-            perimeter_mask_2d=_readonly_copy(perimeter_mask),
-            selected_mask_2d=_readonly_copy(selected_mask),
-            positions_yx=positions,
-            node_indices=node_indices,
+        selection = select_aperture_and_perimeter(
+            self._grid_layout(), centre_arcsec, radius_arcsec
         )
         registry = getattr(self, "_ladder_grid_selections", None)
         if registry is None:
@@ -1187,6 +1003,7 @@ class FisherDetector:
             self._ladder_grid_selections = registry
         registry[id(selection)] = selection
         return selection
+
 
     def compute_ladder_summary(
         self,
@@ -1766,44 +1583,18 @@ class FisherDetector:
         return disable_env not in {"1", "true", "yes", "on"}
 
     def _grid_num_workers(self) -> int:
-        """Return the template-worker count for this grid map.
-
-        ``modeling.fisher.map.num_workers`` is part of the configuration
-        that provenance hashes, so widening the pool by editing it would
-        change the recorded identity of an otherwise identical map.
-        ``HWOSLAPS_FISHER_GRID_WORKERS`` widens it for one process
-        instead: every node is still produced by the same serial
-        template code, only in a different process.
-        """
-        engine = str(self.map_config.get("engine", "reference")).lower()
-        configured = int(self.map_config.get("num_workers", 1))
-        if engine == "jax":
-            return configured
-        raw = os.environ.get("HWOSLAPS_FISHER_GRID_WORKERS", "").strip()
-        if not raw:
-            return configured
-        workers = int(raw)
-        if workers <= 0:
-            raise ValueError(
-                "HWOSLAPS_FISHER_GRID_WORKERS must be a positive integer"
-            )
-        return workers
+        """Resolve the process override without mutating numerical config."""
+        return grid_num_workers(
+            self.map_config,
+            os.environ.get("HWOSLAPS_FISHER_GRID_WORKERS", ""),
+        )
 
     def _grid_runtime_provenance(self) -> Dict[str, Any]:
         """Return requested and effective grid parallelism metadata."""
-        requested = int(self.map_config.get("num_workers", 1))
-        engine = str(self.map_config.get("engine", "reference")).lower()
-        if engine == "jax":
-            effective = 1
-            start_method = "jax"
-        else:
-            effective = self._grid_num_workers()
-            start_method = "spawn" if effective > 1 else "serial"
-        return {
-            "fisher_grid_workers_requested": requested,
-            "fisher_grid_workers_effective": effective,
-            "fisher_grid_start_method": start_method,
-        }
+        return grid_runtime_provenance(
+            self.map_config,
+            os.environ.get("HWOSLAPS_FISHER_GRID_WORKERS", ""),
+        )
 
     def _timed_call(
         self,
@@ -1976,70 +1767,13 @@ class FisherDetector:
         return list(self._candidate_positions_cache)
 
     def _grid_layout(self) -> _GridLayout:
-        """Build the node layout for a 2D sensitivity grid map.
-
-        The grid is a square lattice centred on the configured lens mass
-        centre, optionally restricted to an annulus around that centre.
-        """
+        """Cache the configured truth-scene lattice for grid forecasts."""
         if self._grid_layout_cache is not None:
             return self._grid_layout_cache
         if self.map_type != "grid":
             raise ValueError("_grid_layout is only available when map.type is 'grid'.")
-
-        grid_config = self.map_config["grid"]
-        spacing = float(grid_config["spacing_arcsec"])
-        half_width = float(grid_config["half_width_arcsec"])
-        if spacing <= 0.0 or not np.isfinite(spacing):
-            raise ValueError("modeling.fisher.map.grid.spacing_arcsec must be positive and finite.")
-        if half_width < spacing or not np.isfinite(half_width):
-            raise ValueError(
-                "modeling.fisher.map.grid.half_width_arcsec must be finite and >= spacing_arcsec."
-            )
-
-        # Candidate geometry is defined by the truth/data lens centre.
-        lens_centre = self.full_config["lensing"]["lens_galaxy"]["mass"]["centre"]
-        centre_y = float(lens_centre[0])
-        centre_x = float(lens_centre[1])
-
-        n_half = int(np.floor(half_width / spacing + 1.0e-9))
-        offsets = spacing * np.arange(-n_half, n_half + 1, dtype=float)
-        y_coords = centre_y + offsets
-        x_coords = centre_x + offsets
-
-        yy = y_coords[:, None]
-        xx = x_coords[None, :]
-        radius = np.hypot(yy - centre_y, xx - centre_x)
-
-        annulus = grid_config.get("annulus")
-        if annulus is None:
-            evaluated_mask = np.ones((y_coords.size, x_coords.size), dtype=bool)
-        else:
-            r_min = float(annulus["r_min_arcsec"])
-            r_max = float(annulus["r_max_arcsec"])
-            evaluated_mask = (radius >= r_min) & (radius <= r_max)
-            if not np.any(evaluated_mask):
-                raise ValueError(
-                    "modeling.fisher.map.grid.annulus selects no grid nodes; "
-                    "widen the annulus or refine the spacing."
-                )
-
-        node_indices = []
-        positions = []
-        for i in range(y_coords.size):
-            for j in range(x_coords.size):
-                if evaluated_mask[i, j]:
-                    node_indices.append((i, j))
-                    positions.append((float(y_coords[i]), float(x_coords[j])))
-
-        self._grid_layout_cache = _GridLayout(
-            y_coords=y_coords,
-            x_coords=x_coords,
-            spacing_arcsec=spacing,
-            centre_yx=(centre_y, centre_x),
-            evaluated_mask=evaluated_mask,
-            positions_yx=tuple(positions),
-            node_indices=tuple(node_indices),
-        )
+        centre = self.full_config["lensing"]["lens_galaxy"]["mass"]["centre"]
+        self._grid_layout_cache = build_grid_layout(self.map_config["grid"], centre)
         return self._grid_layout_cache
 
     def _mean_adu_for_position(self, position_yx: Tuple[float, float]) -> np.ndarray:
@@ -2163,244 +1897,19 @@ class FisherDetector:
     # ------------------------------------------------------------------
 
     def _build_scalar_nuisance_specs(self) -> List[_ScalarNuisanceSpec]:
-        """Build scalar nuisance specifications for the source-light schema.
-
-        Image sources omit the two source ellipticity directions because the
-        profile has no ellipticity.  With the optional background direction,
-        Image scenes therefore have 10 scalar nuisances instead of 12.
-
-        Prior-sigma caveat: for Image the `source.intensity` and
-        `source.effective_radius` directions perturb the dimensionless
-        `flux_scale` / `size_scale`, so any configured prior sigmas for
-        these names are fractional there, while for Exponential
-        they are in the parameter's own units.
-        """
+        """Plan the scalar directions for the configured analysis scene."""
         analysis_config = getattr(self, "fit_full_config", self.full_config)
-        light_type = analysis_config["lensing"]["source_galaxy"]["light"]["type"]
-        light_root = ("lensing", "source_galaxy", "light")
-        centre_root = light_root + ("centre",)
-        ell_comps_root = light_root + ("ell_comps",)
-        if light_type == "Image":
-            intensity_path = light_root + ("flux_scale",)
-            effective_radius_path = light_root + ("size_scale",)
-        else:
-            intensity_path = light_root + ("intensity",)
-            effective_radius_path = light_root + ("effective_radius",)
-
-        specs = [
-            _ScalarNuisanceSpec(
-                name="lens.centre_y",
-                path=("lensing", "lens_galaxy", "mass", "centre", 0),
-                step_mode="additive",
-                step_key="centre_arcsec",
-                prior_sigma=self._lookup_prior_sigma("lens.centre_y"),
-            ),
-            _ScalarNuisanceSpec(
-                name="lens.centre_x",
-                path=("lensing", "lens_galaxy", "mass", "centre", 1),
-                step_mode="additive",
-                step_key="centre_arcsec",
-                prior_sigma=self._lookup_prior_sigma("lens.centre_x"),
-            ),
-            _ScalarNuisanceSpec(
-                name="lens.einstein_radius",
-                path=("lensing", "lens_galaxy", "mass", "einstein_radius"),
-                step_mode="additive",
-                step_key="einstein_radius_arcsec",
-                prior_sigma=self._lookup_prior_sigma("lens.einstein_radius"),
-            ),
-            _ScalarNuisanceSpec(
-                name="lens.ell_comp_1",
-                path=("lensing", "lens_galaxy", "mass", "ell_comps", 0),
-                step_mode="additive",
-                step_key="ell_comp",
-                prior_sigma=self._lookup_prior_sigma("lens.ell_comp_1"),
-            ),
-            _ScalarNuisanceSpec(
-                name="lens.ell_comp_2",
-                path=("lensing", "lens_galaxy", "mass", "ell_comps", 1),
-                step_mode="additive",
-                step_key="ell_comp",
-                prior_sigma=self._lookup_prior_sigma("lens.ell_comp_2"),
-            ),
-        ]
-        specs.extend(
-            [
-                _ScalarNuisanceSpec(
-                    name="source.centre_y",
-                    path=centre_root + (0,),
-                    step_mode="additive",
-                    step_key="centre_arcsec",
-                    prior_sigma=self._lookup_prior_sigma("source.centre_y"),
-                ),
-                _ScalarNuisanceSpec(
-                    name="source.centre_x",
-                    path=centre_root + (1,),
-                    step_mode="additive",
-                    step_key="centre_arcsec",
-                    prior_sigma=self._lookup_prior_sigma("source.centre_x"),
-                ),
-            ]
+        return build_scalar_nuisance_specs(
+            analysis_config["lensing"]["source_galaxy"]["light"],
+            self.prior_sigmas,
+            include_background_offset=self.include_background_offset,
         )
-        if light_type != "Image":
-            specs.extend(
-                [
-                    _ScalarNuisanceSpec(
-                        name="source.ell_comp_1",
-                        path=ell_comps_root + (0,),
-                        step_mode="additive",
-                        step_key="ell_comp",
-                        prior_sigma=self._lookup_prior_sigma(
-                            "source.ell_comp_1"
-                        ),
-                    ),
-                    _ScalarNuisanceSpec(
-                        name="source.ell_comp_2",
-                        path=ell_comps_root + (1,),
-                        step_mode="additive",
-                        step_key="ell_comp",
-                        prior_sigma=self._lookup_prior_sigma(
-                            "source.ell_comp_2"
-                        ),
-                    ),
-                ]
-            )
-        specs.extend(
-            [
-                _ScalarNuisanceSpec(
-                    name="source.intensity",
-                    path=intensity_path,
-                    step_mode="multiplicative",
-                    step_key="source_intensity_frac",
-                    prior_sigma=self._lookup_prior_sigma("source.intensity"),
-                ),
-                _ScalarNuisanceSpec(
-                    name="source.effective_radius",
-                    path=effective_radius_path,
-                    step_mode="multiplicative",
-                    step_key="source_reff_frac",
-                    prior_sigma=self._lookup_prior_sigma(
-                        "source.effective_radius"
-                    ),
-                ),
-            ]
-        )
-        if self.include_background_offset:
-            specs.append(
-                _ScalarNuisanceSpec(
-                    name="observation.background_offset_adu",
-                    path=None,
-                    step_mode="additive",
-                    step_key=None,
-                    prior_sigma=self._lookup_prior_sigma("observation.background_offset_adu"),
-                )
-            )
-        return specs
 
     def _select_nuisance_subset(
-        self,
-        specs: List[_ScalarNuisanceSpec],
+        self, specs: List[_ScalarNuisanceSpec]
     ) -> Tuple[List[_ScalarNuisanceSpec], str]:
-        """Restrict the scalar nuisance directions to the configured subset.
-
-        ``modeling.fisher.nuisance_subset`` is either a reserved word or an
-        explicit list of direction names.  ``all`` (the default, and the
-        behaviour when the key is absent) keeps every scalar direction built
-        for this scene and ``none`` keeps none of them, so the profiled
-        information equals the raw information.  ``lens_only``,
-        ``source_only`` and ``lens_and_source`` select by the ``lens.`` and
-        ``source.`` name prefixes and therefore never select
-        ``observation.background_offset_adu``; whether that direction exists
-        at all remains governed by
-        ``modeling.fisher.include_background_offset``.
-
-        PSF fit modes are appended after the selected scalar directions by
-        the caller and are not touched by this selection: they are governed
-        by ``modeling.fisher.include_psf_nuisance`` and
-        ``modeling.fisher.fit_psf_mode_selection``, so naming one here is an
-        error rather than a second way to switch them on.
-
-        Parameters
-        ----------
-        specs : `list` of `_ScalarNuisanceSpec`
-            Every scalar nuisance direction available for this scene.
-
-        Returns
-        -------
-        selected : `list` of `_ScalarNuisanceSpec`
-            Directions to profile, in the canonical order of ``specs``.
-        label : `str`
-            Resolved selector for provenance: the reserved word, or
-            ``'explicit'`` when a list of names was supplied.
-
-        Raises
-        ------
-        ValueError
-            Raised for an unknown reserved word, a selector that is neither a
-            string nor a list, an empty list, a duplicated name, a PSF mode
-            name, or a name that is not a direction of this scene.
-        """
-        selector = self.nuisance_subset
-        if selector is None:
-            return specs, "all"
-
-        reserved = sorted({"all", "none", *_NUISANCE_SUBSET_PREFIXES})
-        if isinstance(selector, str):
-            label = selector.strip().lower()
-            if label == "all":
-                return specs, label
-            if label == "none":
-                return [], label
-            prefixes = _NUISANCE_SUBSET_PREFIXES.get(label)
-            if prefixes is None:
-                raise ValueError(
-                    "modeling.fisher.nuisance_subset must be one of "
-                    f"{reserved}, or a list of nuisance direction names; "
-                    f"got {selector!r}"
-                )
-            return [spec for spec in specs if spec.name.startswith(prefixes)], label
-
-        if not isinstance(selector, (list, tuple)):
-            raise ValueError(
-                "modeling.fisher.nuisance_subset must be one of "
-                f"{reserved}, or a list of nuisance direction names; "
-                f"got {selector!r}"
-            )
-        if len(selector) == 0:
-            raise ValueError(
-                "modeling.fisher.nuisance_subset must be non-empty when given "
-                "as a list; use 'none' to profile no nuisance directions."
-            )
-
-        available = {spec.name for spec in specs}
-        requested = set()
-        for entry in selector:
-            if not isinstance(entry, str):
-                raise ValueError(
-                    "modeling.fisher.nuisance_subset entries must be nuisance "
-                    f"direction names; got {entry!r}"
-                )
-            name = entry.strip()
-            if name.startswith("psf."):
-                raise ValueError(
-                    "modeling.fisher.nuisance_subset must not name PSF modes "
-                    f"({name!r}); PSF nuisance directions are governed by "
-                    "modeling.fisher.include_psf_nuisance and "
-                    "modeling.fisher.fit_psf_mode_selection."
-                )
-            if name not in available:
-                raise ValueError(
-                    f"modeling.fisher.nuisance_subset names unknown direction "
-                    f"{name!r}. Valid directions for this scene are: "
-                    f"{sorted(available)}"
-                )
-            if name in requested:
-                raise ValueError(
-                    "modeling.fisher.nuisance_subset contains duplicate "
-                    f"direction {name!r}."
-                )
-            requested.add(name)
-        return [spec for spec in specs if spec.name in requested], "explicit"
+        """Select configured scalar directions in canonical scene order."""
+        return select_scalar_nuisances(specs, self.nuisance_subset)
 
     def _build_scalar_nuisance_images(self) -> List[np.ndarray]:
         images: List[np.ndarray] = []
@@ -2943,13 +2452,7 @@ class FisherDetector:
         return grid_native[..., 0], grid_native[..., 1]
 
     def _lookup_prior_sigma(self, name: str) -> Optional[float]:
-        value = self.prior_sigmas.get(name)
-        if value is None:
-            return None
-        sigma = float(value)
-        if sigma <= 0.0 or not np.isfinite(sigma):
-            raise ValueError(f"Invalid prior sigma for {name}: {sigma}")
-        return sigma
+        return lookup_prior_sigma(self.prior_sigmas, name)
 
     def _lookup_psf_step(self, family: str, name: str) -> float:
         value = self.psf_mode_steps.get(name, self.psf_mode_steps.get(family))

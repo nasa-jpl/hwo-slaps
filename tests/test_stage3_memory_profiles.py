@@ -2,7 +2,7 @@
 
 import pytest
 
-from hwoslaps.modeling.nonlinear.profile_execution import (
+from studies.rasti.campaign.profile_execution import (
     STAGE3_MEMORY_PROFILE_REGISTRY,
     memory_admissible,
     validate_stage3_job,

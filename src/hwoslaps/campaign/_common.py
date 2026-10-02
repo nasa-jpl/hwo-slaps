@@ -13,7 +13,6 @@ import yaml
 
 from hwoslaps.provenance import revision_digest, revision_provenance
 
-from .design_freeze import DEFAULT_DESIGN_FREEZE_PATH
 
 
 _SCHEMA_VERSION = 1
@@ -266,12 +265,6 @@ def load_frozen_manifest(output_root: Path) -> dict:
         )
     return campaign
 
-
-def _freeze_artifact_path(freeze_path) -> Path:
-    """Return the resolved freeze artifact one build consumes."""
-    return Path(
-        freeze_path if freeze_path is not None else DEFAULT_DESIGN_FREEZE_PATH
-    ).expanduser().resolve()
 
 
 def _code_revision_record() -> dict:

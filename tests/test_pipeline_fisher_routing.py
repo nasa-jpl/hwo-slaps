@@ -19,6 +19,26 @@ from hwoslaps.modeling.utils_fisher import FisherDetectionData, FisherLocalData
 from hwoslaps.pipeline import Pipeline
 
 
+def test_programmatic_entry_resolves_without_mutating_or_exporting_maps(tmp_path, monkeypatch):
+    import hwoslaps.pipeline as pipeline_module
+
+    received = []
+    result = object()
+
+    def run(self, config):
+        received.append((self.save_grid_maps, config))
+        return result
+
+    monkeypatch.setattr(Pipeline, "run", run)
+    config = {"run_name": "unit", "plotting": {"output_dir": "outputs"}}
+    returned = pipeline_module.run_pipeline(
+        config, base_dir=tmp_path, overrides={"run_name": "new"}, save_grid_maps=False,
+    )
+    assert returned is result
+    assert received == [(False, {"run_name": "new", "plotting": {"output_dir": str(tmp_path / "outputs")}})]
+    assert config == {"run_name": "unit", "plotting": {"output_dir": "outputs"}}
+
+
 def _make_fisher_config_with_required_fields() -> dict:
     return {
         "mode": "local",

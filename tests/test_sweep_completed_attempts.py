@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "studies/rasti/scripts"))
 import sweep_completed_attempts as sweep  # noqa: E402
 
 WORKTREE_SRC = Path(os.environ.get("HWO_WORKTREE", Path(__file__).resolve().parents[1])) / "src"
 sys.path.insert(0, str(WORKTREE_SRC))
-from hwoslaps.modeling.nonlinear.profile_execution import cached_task_bytes  # noqa: E402
+from studies.rasti.campaign.profile_execution import cached_task_bytes  # noqa: E402
 
 
 def sha(path: Path) -> str:
@@ -408,7 +408,7 @@ def test_actual_controller_scans_during_sweep_with_an_owned_worker(tmp_path, mon
     """Real supervise/ledger/disk guard and real sweeper; only worker/GPU are fixtures."""
     import threading
     from test_profile_replay import controller_fixture
-    from hwoslaps.modeling.nonlinear import profile_execution as execution
+    from studies.rasti.campaign import profile_execution as execution
 
     root, manifest = controller_fixture(
         tmp_path,

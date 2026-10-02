@@ -479,3 +479,31 @@ def test_search_internal_artifact_verified_from_zip(tmp_path):
     assert entry["container"] == f"{out}.zip"
     assert entry["member"] == "files/search_internal/search_internal.dill"
     assert entry["bytes"] == 1
+
+
+def test_runner_uses_explicit_training_workers_for_execution_and_provenance(monkeypatch, tmp_path):
+    """A configured worker count must control the actual fit scope."""
+    from contextlib import contextmanager
+    import autofit as af
+    from hwoslaps.modeling.nonlinear import autolens_runner
+
+    captured = []
+    scopes = []
+    monkeypatch.setenv("HWOSLAPS_NAUTILUS_TRAINING_WORKERS", "8")
+    monkeypatch.setattr(af, "Nautilus", _capturing_nautilus(captured))
+
+    @contextmanager
+    def training_scope(number_of_cores, training_workers=None):
+        scopes.append((number_of_cores, training_workers))
+        yield
+
+    monkeypatch.setattr(autolens_runner, "_nautilus_training_pool_scope", training_scope)
+    runner = AutoLensFitRunner(
+        NonlinearSearchSettings(nautilus_training_workers=2), output_dir=tmp_path,
+    )
+    summary = _run(runner)
+    assert summary.status == "success"
+    assert scopes == [(1, 2)]
+    assert summary.training_workers_requested == 2
+    assert summary.training_workers_effective == 2
+    assert summary.training_start_method == "spawn"

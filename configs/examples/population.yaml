@@ -1,0 +1,16 @@
+# Independent parameter recipe for hwoslaps.population, not a pipeline config.
+# Conditional astrophysical relationships require an explicit caller recipe.
+lensing.source_galaxy.light.effective_radius:
+  distribution: lognormal
+  median: 0.15
+  sigma_ln: 0.35
+lensing.source_galaxy.redshift:
+  distribution: truncated_normal
+  mean: 0.65
+  std: 0.22
+  low: 0.4
+  high: 1.2
+lensing.lens_galaxy.mass.einstein_radius:
+  distribution: uniform
+  low: 0.6
+  high: 1.8

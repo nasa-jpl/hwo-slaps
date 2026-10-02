@@ -39,7 +39,7 @@ def _install_detector_stubs():
     pkg = ensure_module(TEST_PACKAGE)
     pkg.__path__ = []
     modeling_pkg = ensure_module(f"{TEST_PACKAGE}.modeling")
-    modeling_pkg.__path__ = []
+    modeling_pkg.__path__ = [str(SRC_ROOT / "modeling")]
     lensing_pkg = ensure_module(f"{TEST_PACKAGE}.lensing")
     lensing_pkg.__path__ = []
     observation_pkg = ensure_module(f"{TEST_PACKAGE}.observation")

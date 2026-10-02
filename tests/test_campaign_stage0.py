@@ -17,8 +17,8 @@ import numpy as np
 import pytest
 import yaml
 
-from hwoslaps.campaign import design_freeze as df
-from hwoslaps.campaign import stage0
+from studies.rasti.campaign import design_freeze as df
+from studies.rasti.campaign import stage0
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,7 +62,7 @@ def pool(freeze):
 @pytest.fixture(scope="module")
 def runner_command():
     """Return a runner command carrying the mandatory placeholder."""
-    return ["python", "scripts/run_stage0_observation.py", "{config}"]
+    return ["python", "studies/rasti/scripts/run_stage0_observation.py", "{config}"]
 
 
 def test_system_ids_are_padded_and_unique(freeze, pool):

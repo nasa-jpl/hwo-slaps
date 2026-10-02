@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from hwoslaps.campaign.production_harvest import (
+from studies.rasti.campaign.production_harvest import (
     ProductionHarvestError,
     harvest_production,
     sha256_file,
@@ -596,7 +596,7 @@ def test_import_does_not_load_science_runtime():
         [
             sys.executable,
             "-c",
-            "import sys; from hwoslaps.campaign import production_harvest; assert not {'autolens', 'jax', 'numpy'} & sys.modules.keys()",
+            "import sys; from studies.rasti.campaign import production_harvest; assert not {'autolens', 'jax', 'numpy'} & sys.modules.keys()",
         ],
         check=True,
     )
@@ -686,7 +686,7 @@ def _actual_materialization_fixture(tmp_path, bracket=False):
     """Use actual catalog routing/materialization, only fake input file bytes."""
     import importlib.util
 
-    from hwoslaps.campaign.release_catalog import _runner_spec_template
+    from studies.rasti.campaign.release_catalog import _runner_spec_template
 
     catalog_path, _old_spec_path, _, _ = fixture(tmp_path, bracket=bracket)
     catalog = json.loads(catalog_path.read_text())
@@ -760,7 +760,7 @@ def _actual_materialization_fixture(tmp_path, bracket=False):
     approval_path = dump(tmp_path / "approval.json", approval)
     approval.update(path=str(approval_path), sha256=sha256_file(approval_path))
     location = (
-        Path(__file__).resolve().parents[1] / "scripts/run_nonlinear_production.py"
+        Path(__file__).resolve().parents[1] / "studies/rasti/scripts/run_nonlinear_production.py"
     )
     module_spec = importlib.util.spec_from_file_location(
         "production_contract_cli", location
@@ -858,7 +858,7 @@ def _emit_synthetic_completion(spec_path, case):
 
 
 def test_actual_archive_materialize_validate_and_harvest(tmp_path):
-    from hwoslaps.campaign.release_catalog import materialize_case_spec
+    from studies.rasti.campaign.release_catalog import materialize_case_spec
 
     catalog, case, approval, cli = _actual_materialization_fixture(tmp_path)
     result = materialize_case_spec(
@@ -879,8 +879,8 @@ def test_actual_archive_materialize_validate_and_harvest(tmp_path):
     "tamper", [None, "source_config", "target_mass", "target_position"]
 )
 def test_actual_bracket_resolve_materialize_validate_and_harvest(tmp_path, tamper):
-    from hwoslaps.campaign.release_catalog import materialize_case_spec
-    from hwoslaps.campaign.release_dependencies import resolve_bracket
+    from studies.rasti.campaign.release_catalog import materialize_case_spec
+    from studies.rasti.campaign.release_dependencies import resolve_bracket
 
     catalog, case, approval, cli = _actual_materialization_fixture(
         tmp_path, bracket=True

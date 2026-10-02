@@ -1,0 +1,211 @@
+#!/bin/bash
+# Flock-queue dispatcher for the nonlinear-validation campaign.
+#
+# usage: nonlinear_validation_dispatch.sh <campaign_dir> <phase> <gpu>[,<gpu>...]
+#   phase: positions | smokes | fits | maps | maps_smokes
+#
+# One worker per listed GPU pulls lines off the phase queue under an
+# exclusive flock. A job whose artifact already exists is skipped, so
+# re-running the dispatcher resumes the campaign. Every job writes a log
+# and a DONE/FAILED sentinel; the dispatcher exits nonzero if any job
+# failed or any queue line is left unaccounted for.
+set -u
+
+CAMPAIGN_DIR="$(cd "$1" && pwd)"; shift
+PHASE="$1"; shift
+IFS=',' read -r -a GPUS <<< "$1"; shift
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+PY=/data/home/gvassilakis/Software/miniconda3/envs/hwo-slaps/bin/python
+
+# Staged configurations carry repo-root-relative asset paths.
+cd "$REPO_ROOT" || exit 2
+
+case "$PHASE" in
+  positions) QUEUE="$CAMPAIGN_DIR/positions_queue.txt" ;;
+  smokes) QUEUE="$CAMPAIGN_DIR/smokes_queue.txt" ;;
+  fits) QUEUE="$CAMPAIGN_DIR/fits_queue.txt" ;;
+  maps) QUEUE="$CAMPAIGN_DIR/maps_queue.txt" ;;
+  maps_smokes) QUEUE="$CAMPAIGN_DIR/smokes_queue.txt" ;;
+  *) echo "unknown phase: $PHASE" >&2; exit 2 ;;
+esac
+[ -f "$QUEUE" ] || { echo "missing queue: $QUEUE" >&2; exit 2; }
+
+# The freeze's smoke gate: the fit fleet may not dispatch until the smoke
+# phase completed AND its artifacts were reviewed and approved.
+if [ "$PHASE" = fits ]; then
+  if [ ! -f "$CAMPAIGN_DIR/sentinels/smokes_PHASE_COMPLETE" ]; then
+    echo "smoke gate: smokes phase is not complete" >&2; exit 3
+  fi
+  if [ ! -f "$CAMPAIGN_DIR/SMOKES_APPROVED" ]; then
+    echo "smoke gate: SMOKES_APPROVED sentinel is missing" >&2; exit 3
+  fi
+fi
+
+LOGDIR="$CAMPAIGN_DIR/logs"
+SENTDIR="$CAMPAIGN_DIR/sentinels"
+mkdir -p "$LOGDIR" "$SENTDIR"
+CURSOR="$CAMPAIGN_DIR/.${PHASE}_cursor"
+LOCK="$CAMPAIGN_DIR/.${PHASE}_lock"
+[ -f "$CURSOR" ] || echo 0 > "$CURSOR"
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export PYAUTO_SKIP_WORKSPACE_VERSION_CHECK=1
+export HWOSLAPS_NAUTILUS_TRAINING_WORKERS=4
+export HWOSLAPS_CAMPAIGN_UUID="$("$PY" -c "
+import json,sys
+print(json.load(open('$CAMPAIGN_DIR/manifest.json'))['campaign_uuid'])")"
+
+TOTAL=$(grep -c . "$QUEUE")
+echo "[dispatch] phase=$PHASE jobs=$TOTAL gpus=${GPUS[*]} uuid=$HWOSLAPS_CAMPAIGN_UUID"
+
+# A map job is complete only when its summary exists AND every map artifact
+# the summary lists is still present; a summary alone is not completion.
+map_job_complete() {
+  [ -f "$1" ] || return 1
+  "$PY" - "$1" <<'PY'
+import json
+import os
+import sys
+
+summary = json.load(open(sys.argv[1], encoding="utf-8"))
+artifacts = summary.get("artifacts")
+ok = isinstance(artifacts, list) and bool(artifacts) and all(
+    os.path.isfile(path) for path in artifacts
+)
+sys.exit(0 if ok else 1)
+PY
+}
+
+next_line() {
+  flock 9 || return 1
+  local n
+  n=$(cat "$CURSOR")
+  if [ "$n" -ge "$TOTAL" ]; then return 1; fi
+  echo $((n + 1)) > "$CURSOR"
+  sed -n "$((n + 1))p" "$QUEUE"
+}
+
+worker() {
+  local gpu="$1"; local ordinal="$2"
+  local label="[gpu${gpu}.w${ordinal}]"
+  while true; do
+    local line
+    line=$(next_line 9>"$LOCK") || break
+    [ -n "$line" ] || continue
+    read -r -a FIELDS <<< "$line"
+    local out tag
+    if [ "$PHASE" = positions ]; then
+      out="${FIELDS[2]}"
+      tag="$(basename "$out")_positions"
+      if [ -f "$out/injection_position.json" ]; then
+        echo "$label skip $tag (artifact exists)"; continue
+      fi
+    elif [ "$PHASE" = maps ] || [ "$PHASE" = maps_smokes ]; then
+      if [ "${#FIELDS[@]}" -ne 5 ] || ! [[ "${FIELDS[2]}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        echo "$label invalid maps queue line: $line" >&2
+        continue
+      fi
+      out="${FIELDS[4]}"
+      tag="$(basename "$out")_delta${FIELDS[2]}_dir${FIELDS[3]}"
+      if map_job_complete "$out/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json"; then
+        echo "$label skip $tag (artifact exists)"; continue
+      fi
+    else
+      out="${FIELDS[3]}"
+      if [ "${#FIELDS[@]}" -ge 5 ]; then
+        tag="$(basename "$out")_${FIELDS[2]}_dir${FIELDS[4]}"
+        artifact="$out/nonlinear_validation_${FIELDS[2]}_dir${FIELDS[4]}.json"
+      else
+        tag="$(basename "$out")_${FIELDS[2]}"
+        artifact="$out/nonlinear_validation_${FIELDS[2]}.json"
+      fi
+      if [ -f "$artifact" ]; then
+        echo "$label skip $tag (artifact exists)"; continue
+      fi
+    fi
+    echo "$label start $tag"
+    local rc
+    if [ "$PHASE" = positions ]; then
+      CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
+        "$REPO_ROOT/studies/rasti/scripts/extract_injection_positions.py" \
+        "${FIELDS[0]}" "${FIELDS[1]}" "$out" \
+        > "$LOGDIR/$tag.log" 2>&1
+      rc=$?
+    elif [ "$PHASE" = maps ] || [ "$PHASE" = maps_smokes ]; then
+      CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
+        "$REPO_ROOT/studies/rasti/scripts/run_psf_knowledge_map.py" \
+        "${FIELDS[0]}" "${FIELDS[1]}" "${FIELDS[2]}" "${FIELDS[3]}" "$out" \
+        > "$LOGDIR/$tag.log" 2>&1
+      rc=$?
+    else
+      if [ "${#FIELDS[@]}" -ge 5 ]; then
+        CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
+          "$REPO_ROOT/studies/rasti/scripts/run_nonlinear_validation.py" \
+          "${FIELDS[0]}" "${FIELDS[1]}" "${FIELDS[2]}" "$out" \
+          --direction "${FIELDS[4]}" \
+          > "$LOGDIR/$tag.log" 2>&1
+      else
+        CUDA_VISIBLE_DEVICES="$gpu" "$PY" \
+          "$REPO_ROOT/studies/rasti/scripts/run_nonlinear_validation.py" \
+          "${FIELDS[0]}" "${FIELDS[1]}" "${FIELDS[2]}" "$out" \
+          > "$LOGDIR/$tag.log" 2>&1
+      fi
+      rc=$?
+    fi
+    if [ "$rc" -eq 0 ]; then
+      rm -f "$SENTDIR/$tag.FAILED"
+      touch "$SENTDIR/$tag.DONE"
+      echo "$label DONE $tag"
+    else
+      touch "$SENTDIR/$tag.FAILED"
+      echo "$label FAILED $tag rc=$rc (log: $LOGDIR/$tag.log)"
+    fi
+  done
+}
+
+PIDS=()
+declare -A WORKER_ORDINALS=()
+for gpu in "${GPUS[@]}"; do
+  if [[ ${WORKER_ORDINALS[$gpu]+set} ]]; then
+    WORKER_ORDINALS[$gpu]=$((WORKER_ORDINALS[$gpu] + 1))
+  else
+    WORKER_ORDINALS[$gpu]=1
+  fi
+  worker "$gpu" "${WORKER_ORDINALS[$gpu]}" &
+  PIDS+=($!)
+done
+for pid in "${PIDS[@]}"; do wait "$pid"; done
+
+# The exit status follows the artifacts alone: a stale FAILED sentinel
+# whose job later succeeded on resume must not fail a complete phase.
+MISSING=0
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  read -r -a FIELDS <<< "$line"
+  if [ "$PHASE" = positions ]; then
+    [ -f "${FIELDS[2]}/injection_position.json" ] || MISSING=$((MISSING + 1))
+  elif [ "$PHASE" = maps ] || [ "$PHASE" = maps_smokes ]; then
+    map_job_complete "${FIELDS[4]}/psf_knowledge_job_delta${FIELDS[2]}_dir${FIELDS[3]}.json" \
+      || MISSING=$((MISSING + 1))
+  else
+    if [ "${#FIELDS[@]}" -ge 5 ]; then
+      [ -f "${FIELDS[3]}/nonlinear_validation_${FIELDS[2]}_dir${FIELDS[4]}.json" ] \
+        || MISSING=$((MISSING + 1))
+    else
+      [ -f "${FIELDS[3]}/nonlinear_validation_${FIELDS[2]}.json" ] \
+        || MISSING=$((MISSING + 1))
+    fi
+  fi
+done < "$QUEUE"
+
+if [ "$MISSING" -eq 0 ]; then
+  touch "$SENTDIR/${PHASE}_PHASE_COMPLETE"
+  echo "[dispatch] ${PHASE}_PHASE_COMPLETE ($TOTAL jobs)"
+  exit 0
+fi
+echo "[dispatch] phase=$PHASE INCOMPLETE: missing=$MISSING"
+exit 1

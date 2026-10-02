@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from hwoslaps.campaign.design_freeze import load_release_freeze
-from hwoslaps.campaign.release_catalog import (
+from studies.rasti.campaign.design_freeze import load_release_freeze
+from studies.rasti.campaign.release_catalog import (
     ReleaseCatalogError,
     materialize_case_spec,
     runner_invocation,
@@ -88,7 +88,7 @@ def test_runner_route_requires_immutable_approval_receipt():
         approval_receipt=receipt,
         catalog_sha256="c" * 64,
     )
-    assert route["argv"] == ["scripts/run_nonlinear_production.py", "{case_spec_path}"]
+    assert route["argv"] == ["studies/rasti/scripts/run_nonlinear_production.py", "{case_spec_path}"]
     assert route["spec"]["output"] == str(Path("/tmp/output").resolve())
     assert route["spec"]["approval_receipt"] == "/remote/approval.json"
     assert route["spec"]["approval_receipt_sha256"] == "e" * 64
@@ -246,7 +246,7 @@ def test_materialize_case_spec_uses_the_execution_path_when_the_mirror_is_absent
 
 def test_restamp_preserves_yaml_integer_psf_keys(tmp_path):
     import yaml
-    from hwoslaps.campaign.release_catalog import _restamp_config
+    from studies.rasti.campaign.release_catalog import _restamp_config
 
     original = {
         "stage0": {"code_revision": {"git_hash": "old"}},
@@ -262,7 +262,7 @@ def test_restamp_preserves_yaml_integer_psf_keys(tmp_path):
 
 
 def test_psf_direction_survives_case_to_worker_routing():
-    from hwoslaps.campaign.release_catalog import _runner_spec_template
+    from studies.rasti.campaign.release_catalog import _runner_spec_template
 
     case = _ready_case()
     case.update(arm="noisy_control_d2", direction=1)
@@ -275,7 +275,7 @@ def test_psf_direction_survives_case_to_worker_routing():
 
 
 def test_primary_psf_noise_keeps_the_archived_seed():
-    from hwoslaps.campaign.release_catalog import _noise_seed
+    from studies.rasti.campaign.release_catalog import _noise_seed
 
     assert _noise_seed(20260823, "sys0043", 0) == 1703553965
     assert _noise_seed(20260823, "sys0043", 1) != 1703553965

@@ -9,14 +9,87 @@ structure for easy access and analysis.
 """
 
 import os
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
+from numbers import Real
 from typing import Any, Dict, List, Optional
 
 import autolens as al
 import numpy as np
 
 from ..constants import ARCSEC_PER_RAD
+
+
+@dataclass(frozen=True)
+class DetectorPSF:
+    """A detector-sampled PSF without assumptions about its telescope pupil.
+
+    Use ``from_array`` for empirical kernels or kernels from another optical
+    simulator. This contract is sufficient for observation convolution; it does
+    not invent wavefront metrics, aberration modes, or an optical provenance
+    model for Fisher PSF nuisance fitting.
+    """
+
+    kernel: Any
+    kernel_pixel_scale: float
+    config: Optional[Dict] = None
+
+    def __post_init__(self):
+        scale = self.kernel_pixel_scale
+        if (
+            isinstance(scale, (bool, np.bool_))
+            or not isinstance(scale, Real)
+            or not np.isfinite(scale)
+            or scale <= 0
+        ):
+            raise ValueError('kernel_pixel_scale must be positive and finite')
+        validate_detector_kernel(self.kernel)
+        if not np.allclose(pyauto_kernel_pixel_scales(self.kernel), scale, rtol=0.0, atol=1e-12):
+            raise ValueError('kernel_pixel_scale must match the kernel angular sampling')
+        if self.config is not None and not isinstance(self.config, dict):
+            raise ValueError('config must be a dict or None')
+        object.__setattr__(self, 'config', deepcopy(self.config))
+
+    @classmethod
+    def from_array(cls, values, pixel_scale_arcsec, *, normalize=True, config=None):
+        """Copy an odd, nonnegative 2D kernel with explicit angular sampling.
+
+        Values must already include integration over detector pixels at the
+        declared angular sampling, in arcseconds per pixel.
+        ``normalize=True`` sum-normalizes positive input flux. With
+        ``normalize=False``, the input must already sum to one. No resampling,
+        cropping, or optical interpretation is performed.
+        """
+        if (
+            isinstance(pixel_scale_arcsec, (bool, np.bool_))
+            or not isinstance(pixel_scale_arcsec, Real)
+            or not np.isfinite(pixel_scale_arcsec)
+            or pixel_scale_arcsec <= 0
+        ):
+            raise ValueError('pixel_scale_arcsec must be positive and finite')
+        if not isinstance(normalize, bool):
+            raise ValueError('normalize must be a bool')
+        if config is not None and not isinstance(config, dict):
+            raise ValueError('config must be a dict or None')
+        array = np.array(values, dtype=float, copy=True)
+        if array.ndim != 2 or any(size % 2 == 0 for size in array.shape):
+            raise ValueError('Detector PSF must be two-dimensional with odd dimensions')
+        if not np.all(np.isfinite(array)) or np.any(array < 0):
+            raise ValueError('Detector PSF values must be finite and non-negative')
+        flux = float(array.sum())
+        if not np.isfinite(flux) or flux <= 0:
+            raise ValueError('Detector PSF must have positive finite flux')
+        kernel = make_pyauto_kernel(array, pixel_scale_arcsec, normalize=normalize)
+        provenance = deepcopy(config) if config is not None else {}
+        provenance['detector_psf'] = {
+            'kind': 'external_detector_kernel',
+            'pixel_scale_arcsec': float(pixel_scale_arcsec),
+            'shape_native': list(array.shape),
+            'input_flux_sum': flux,
+            'normalization_applied': normalize,
+        }
+        return cls(kernel=kernel, kernel_pixel_scale=pixel_scale_arcsec, config=provenance)
 
 
 def make_pyauto_kernel(values, pixel_scales, normalize=True):
@@ -138,6 +211,22 @@ def pyauto_kernel_pixel_scales(kernel):
     if hasattr(kernel, "kernel"):
         kernel = kernel.kernel
     return kernel.pixel_scales
+
+
+def validate_detector_kernel(kernel):
+    """Validate odd support and unit positive flux without altering the kernel."""
+    array = pyauto_kernel_native(kernel)
+    if array.ndim != 2:
+        raise ValueError("PSF kernel must be a two-dimensional array")
+    if array.shape[0] % 2 == 0 or array.shape[1] % 2 == 0:
+        raise ValueError("PSF kernel must have odd dimensions")
+    if not np.all(np.isfinite(array)):
+        raise ValueError("PSF kernel values must be finite")
+    if np.any(array < 0.0):
+        raise ValueError("PSF kernel values must be non-negative")
+    if not np.isclose(float(np.sum(array)), 1.0, rtol=0.0, atol=1e-10):
+        raise ValueError("PSF kernel must be normalized to unit flux")
+    return kernel
 
 
 @dataclass

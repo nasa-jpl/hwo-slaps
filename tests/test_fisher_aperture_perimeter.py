@@ -23,7 +23,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
-SCRIPTS_ROOT = PROJECT_ROOT / "scripts"
+SCRIPTS_ROOT = PROJECT_ROOT / "studies/rasti/scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 TESTS_ROOT = PROJECT_ROOT / "tests"

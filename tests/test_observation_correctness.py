@@ -9,7 +9,7 @@ import pytest
 from hwoslaps.lensing.utils import LensingData
 from hwoslaps.observation import generate_observation
 from hwoslaps.observation.noise_models import apply_detector_noise, create_noise_map
-from hwoslaps.psf.utils import PSFData, make_pyauto_kernel
+from hwoslaps.psf.utils import DetectorPSF, PSFData, make_pyauto_kernel
 
 
 def _make_lensing_data(
@@ -507,3 +507,76 @@ def test_generate_observation_reports_missing_full_config_requirements(full_conf
             observation_config=_observation_config(),
             full_config=full_config,
         )
+
+
+def test_standalone_observation_preserves_legacy_seeded_image():
+    lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
+    psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
+    config = _observation_config()
+    legacy = generate_observation(
+        lensing, psf_data, config,
+        full_config={'global_seed': 123, 'run_name': 'standalone'},
+    )
+    standalone = generate_observation(
+        lensing, psf_data, config, noise_seed=123, run_name='standalone',
+    )
+    np.testing.assert_array_equal(legacy.imaging.data.native, standalone.imaging.data.native)
+    np.testing.assert_array_equal(legacy.imaging.noise_map.native, standalone.imaging.noise_map.native)
+    np.testing.assert_array_equal(legacy.noiseless_source_eps, standalone.noiseless_source_eps)
+    assert standalone.metadata['noise_seed'] == 123
+    assert standalone.metadata['run_name'] == 'standalone'
+
+
+def test_explicit_observation_seed_is_independent_of_scene_seed():
+    lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
+    psf_data = _make_psf_data(np.array([[1.0]]), pixel_scale=0.1)
+    full_config = {'global_seed': 7, 'run_name': 'scene'}
+    result = generate_observation(
+        lensing, psf_data, _observation_config(), full_config=full_config,
+        noise_seed=123, run_name='noise-replicate',
+    )
+    expected = generate_observation(
+        lensing, psf_data, _observation_config(), noise_seed=123,
+        run_name='noise-replicate',
+    )
+    np.testing.assert_array_equal(result.imaging.data.native, expected.imaging.data.native)
+    assert result.metadata['noise_seed'] == 123
+    assert result.metadata['run_name'] == 'noise-replicate'
+    assert full_config == {'global_seed': 7, 'run_name': 'scene'}
+
+
+def test_external_detector_psf_reproduces_optical_kernel_observation():
+    lensing = _make_lensing_data(shape=(9, 9), pixel_scale=0.1)
+    values = np.array([[0.0, 1.0, 0.0], [1.0, 4.0, 1.0], [0.0, 1.0, 0.0]])
+    provenance = {'run_name': 'external-psf', 'source': 'test-calibration'}
+    external = DetectorPSF.from_array(values, 0.1, config=provenance)
+    rich = _make_psf_data(values/values.sum(), pixel_scale=0.1)
+    config = _observation_config()
+    actual = generate_observation(lensing, external, config, noise_seed=123, run_name='external')
+    expected = generate_observation(lensing, rich, config, noise_seed=123, run_name='optical')
+    np.testing.assert_array_equal(actual.imaging.data.native, expected.imaging.data.native)
+    np.testing.assert_array_equal(actual.noiseless_source_eps, expected.noiseless_source_eps)
+    assert actual.metadata['psf_run'] == 'external-psf'
+    values[:] = 0.0
+    provenance['source'] = 'changed'
+    assert external.config['source'] == 'test-calibration'
+    assert external.config['detector_psf']['normalization_applied'] is True
+    assert external.config['detector_psf']['input_flux_sum'] == 8.0
+    assert external.kernel.native.sum() == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize('values', [np.ones((2, 3)), np.zeros((3, 3)), [[-1.0]], [[np.nan]]])
+def test_external_detector_psf_rejects_invalid_kernel(values):
+    with pytest.raises(ValueError, match='Detector PSF'):
+        DetectorPSF.from_array(values, 0.1)
+
+
+def test_external_psf_without_normalization_requires_unit_flux():
+    with pytest.raises(ValueError, match='normalized'):
+        DetectorPSF.from_array([[2.0]], 0.1, normalize=False)
+
+
+@pytest.mark.parametrize('pixel_scale', [0.0, -1.0, np.nan, np.inf, True, '0.1'])
+def test_external_psf_rejects_invalid_angular_sampling(pixel_scale):
+    with pytest.raises(ValueError, match='pixel_scale_arcsec'):
+        DetectorPSF.from_array([[1.0]], pixel_scale)

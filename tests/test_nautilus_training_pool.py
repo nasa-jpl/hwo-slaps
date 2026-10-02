@@ -103,3 +103,46 @@ def test_pooled_weights_match_serial(restored_training_seam):
     for expected, actual in zip(serial_weights, pooled_weights):
         assert np.array_equal(expected, actual)
     assert np.array_equal(serial.predict(x), pooled.predict(x))
+
+
+@pytest.mark.parametrize("invalid", [0, -1, True, 1.5, "2"])
+def test_training_worker_settings_reject_invalid_counts(invalid):
+    with pytest.raises(ValueError, match="nautilus_training_workers"):
+        autolens_runner.NonlinearSearchSettings(nautilus_training_workers=invalid)
+
+
+def test_explicit_training_workers_override_environment(restored_training_seam):
+    restored_training_seam.setenv(WORKERS_ENV, "8")
+    assert autolens_runner._training_runtime_provenance(1, 2) == {
+        "requested": 2, "effective": 2, "start_method": "spawn",
+    }
+    assert autolens_runner._training_runtime_provenance(2, 2) == {
+        "requested": 2, "effective": 1, "start_method": "serial",
+    }
+    before = NeuralNetworkEmulator.train.__func__
+    with autolens_runner._nautilus_training_pool_scope(1, 1):
+        assert NeuralNetworkEmulator.train.__func__ is before
+    assert autolens_runner._TRAINING_POOLS == {}
+
+
+def test_explicit_pool_workers_do_not_follow_environment_changes(restored_training_seam):
+    created = []
+
+    class Pool:
+        def __init__(self, workers):
+            created.append(workers)
+
+        def close(self):
+            pass
+
+        def join(self):
+            pass
+
+    restored_training_seam.setattr(autolens_runner, "_NetworkTrainingPool", Pool)
+    restored_training_seam.setenv(WORKERS_ENV, "8")
+    with autolens_runner._nautilus_training_pool_scope(1, 2):
+        first = autolens_runner._training_pool_for_current_env(2)
+        restored_training_seam.setenv(WORKERS_ENV, "3")
+        second = autolens_runner._training_pool_for_current_env(2)
+        assert first is second
+    assert created == [2]

@@ -11,7 +11,7 @@ import pytest
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = PROJECT_ROOT/"scripts"
+SCRIPTS_ROOT = PROJECT_ROOT/"studies/rasti/scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
@@ -752,7 +752,7 @@ def test_nonlinear_first_separating_delta_uses_cp_bounds():
 
 def test_dispatcher_contains_map_phases_and_direction_artifact_rules():
     """The dispatcher exposes maps, maps_smokes and optional fit directions."""
-    text = (PROJECT_ROOT/"scripts"/"nonlinear_validation_dispatch.sh").read_text()
+    text = (PROJECT_ROOT/"studies/rasti/scripts"/"nonlinear_validation_dispatch.sh").read_text()
     assert "maps) QUEUE" in text
     assert "maps_smokes) QUEUE" in text
     assert "run_psf_knowledge_map.py" in text

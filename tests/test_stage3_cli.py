@@ -13,7 +13,7 @@ import pytest
 def load_cli():
     import importlib.util
 
-    path = Path(__file__).parents[1] / "scripts/validate_stage3_manifest.py"
+    path = Path(__file__).parents[1] / "studies/rasti/scripts/validate_stage3_manifest.py"
     spec = importlib.util.spec_from_file_location("stage3_manifest_cli", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -39,7 +39,7 @@ def manifest_fixture(tmp_path):
         )
     )
     deadline = root / "deadline.json"
-    from hwoslaps.modeling.nonlinear.profile_execution import clock_epoch
+    from studies.rasti.campaign.profile_execution import clock_epoch
 
     epoch = clock_epoch()
     now = time.monotonic()

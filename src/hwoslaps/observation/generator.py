@@ -13,11 +13,13 @@ import numpy as np
 
 from ..lensing.utils import LensingData
 from ..psf.utils import (
+    DetectorPSF,
     PSFData,
     make_pyauto_convolver,
     make_pyauto_kernel,
     pyauto_kernel_native,
     pyauto_kernel_pixel_scales,
+    validate_detector_kernel,
 )
 from .noise_models import (
     apply_detector_noise,
@@ -28,9 +30,12 @@ from .utils import ObservationData
 
 def generate_observation(
     lensing_data: LensingData,
-    psf_data: PSFData,
+    psf_data: PSFData | DetectorPSF,
     observation_config: Optional[Dict] = None,
-    full_config: Optional[Dict] = None
+    full_config: Optional[Dict] = None,
+    *,
+    noise_seed: Optional[int] = None,
+    run_name: Optional[str] = None,
 ) -> ObservationData:
     """Generate a realistic observation from lensing and PSF data.
 
@@ -41,12 +46,18 @@ def generate_observation(
     ----------
     lensing_data : `LensingData`
         The lensing system data from Module 1.
-    psf_data : `PSFData`
-        The PSF system data from Module 2.
+    psf_data : `PSFData` or `DetectorPSF`
+        Generated optical PSF products or an externally supplied detector kernel.
     observation_config : `dict`, optional
-        Observation-specific configuration. If None, uses defaults.
+        Required observation configuration; no telescope defaults are inferred.
     full_config : `dict`, optional
-        Full configuration dictionary containing all module configs.
+        Full configuration dictionary. Supplies ``global_seed`` and ``run_name``
+        when their explicit counterparts are omitted.
+    noise_seed : `int`, optional
+        Independent seed for detector noise. Required when ``full_config`` does
+        not provide ``global_seed``; explicit values take precedence.
+    run_name : `str`, optional
+        Provenance label. Required when not supplied by ``full_config``.
 
     Returns
     -------
@@ -69,16 +80,12 @@ def generate_observation(
     # Strict: observation_config must be provided by pipeline validation
     if observation_config is None:
         raise ValueError("observation_config must be provided explicitly (no defaults)")
-    full_config = _validate_full_config(full_config)
+    noise_seed, run_name = _resolve_observation_context(full_config, noise_seed, run_name)
 
     # Extract parameters
     exposure_time = observation_config['exposure_time']
     throughput = float(observation_config['throughput'])
     detector_config = observation_config['detector']
-
-    # Extract global seed from full_config
-    global_seed = full_config['global_seed']
-    noise_seed = global_seed
 
     # Ensure PSF kernel has odd dimensions (required by PyAutoLens)
     psf_kernel = _ensure_odd_kernel(psf_data.kernel)
@@ -185,7 +192,7 @@ def generate_observation(
     }
 
     # Add run name if provided
-    metadata['run_name'] = full_config['run_name']
+    metadata['run_name'] = run_name
     from ..lensing.sampling import actual_sub_size
 
     generation_grid = getattr(lensing_data, 'grid', None)
@@ -201,37 +208,24 @@ def generate_observation(
     )
 
 
-def _validate_full_config(full_config: Optional[Dict]) -> Dict:
-    """Validate observation-level full configuration requirements.
-
-    Parameters
-    ----------
-    full_config : `dict`
-        Full pipeline configuration.
-
-    Returns
-    -------
-    full_config : `dict`
-        Validated full configuration.
-
-    Raises
-    ------
-    ValueError
-        Raised when required global provenance or seed values are missing.
-    """
-    if not isinstance(full_config, dict):
+def _resolve_observation_context(full_config, noise_seed, run_name):
+    """Bind randomness and provenance independently of the pipeline container."""
+    if full_config is not None and not isinstance(full_config, dict):
         raise ValueError("full_config must be a dict for generate_observation")
-    if 'global_seed' not in full_config:
-        raise ValueError("Missing required key 'global_seed' in full_config")
-    global_seed = full_config['global_seed']
-    if isinstance(global_seed, bool) or not isinstance(global_seed, int):
-        raise ValueError("full_config.global_seed must be an int")
-    if 'run_name' not in full_config:
-        raise ValueError("Missing required key 'run_name' in full_config")
-    run_name = full_config['run_name']
+    config = full_config if full_config is not None else {}
+    if noise_seed is None:
+        if 'global_seed' not in config:
+            raise ValueError("Provide noise_seed or 'global_seed' in full_config")
+        noise_seed = config['global_seed']
+    if isinstance(noise_seed, bool) or not isinstance(noise_seed, int):
+        raise ValueError("noise_seed / full_config.global_seed must be an int")
+    if run_name is None:
+        if 'run_name' not in config:
+            raise ValueError("Provide run_name explicitly or in full_config")
+        run_name = config['run_name']
     if not isinstance(run_name, str) or not run_name:
-        raise ValueError("full_config.run_name must be a non-empty string")
-    return full_config
+        raise ValueError("run_name / full_config.run_name must be a non-empty string")
+    return noise_seed, run_name
 
 
 def _ensure_odd_kernel(kernel):
@@ -252,18 +246,4 @@ def _ensure_odd_kernel(kernel):
     ValueError
         Raised when the kernel support or flux normalization is invalid.
     """
-    kernel_array = pyauto_kernel_native(kernel)
-    if kernel_array.ndim != 2:
-        raise ValueError("PSF kernel must be a two-dimensional array")
-    if kernel_array.shape[0] % 2 == 0 or kernel_array.shape[1] % 2 == 0:
-        raise ValueError("PSF kernel must have odd dimensions")
-    if not np.all(np.isfinite(kernel_array)):
-        raise ValueError("PSF kernel values must be finite")
-    if np.any(kernel_array < 0.0):
-        raise ValueError("PSF kernel values must be non-negative")
-
-    kernel_sum = float(np.sum(kernel_array))
-    if not np.isclose(kernel_sum, 1.0, rtol=0.0, atol=1e-10):
-        raise ValueError("PSF kernel must be normalized to unit flux")
-
-    return kernel
+    return validate_detector_kernel(kernel)

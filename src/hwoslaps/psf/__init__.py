@@ -9,6 +9,7 @@ from typing import Any
 __all__ = [
     "generate_psf_system",
     "PSFData",
+    "DetectorPSF",
     "measure_fwhm",
     "calculate_strehl_ratio",
     "analyze_psf_quality",
@@ -39,6 +40,7 @@ __all__ = [
 _EXPORT_MODULES = {
     "generate_psf_system": ".generator",
     "PSFData": ".utils",
+    "DetectorPSF": ".utils",
     "measure_fwhm": ".psf_metrics",
     "calculate_strehl_ratio": ".psf_metrics",
     "analyze_psf_quality": ".psf_metrics",

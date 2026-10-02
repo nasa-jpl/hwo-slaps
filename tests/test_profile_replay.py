@@ -8,7 +8,7 @@ import pytest
 
 from hwoslaps.modeling.nonlinear import local_profile
 from hwoslaps.modeling.nonlinear.profile_replay import archive_vectors, linearized_comparator, atomic_json
-from hwoslaps.modeling.nonlinear.profile_execution import (
+from studies.rasti.campaign.profile_execution import (
     BudgetLedger,
     memory_admissible,
     process_matches,
@@ -218,7 +218,7 @@ def test_delayed_gpu_visibility_reserves_expected_memory():
 
 
 def test_packing_admission_stays_within_frozen_limits(tmp_path):
-    from hwoslaps.modeling.nonlinear.profile_execution import concurrency_limits
+    from studies.rasti.campaign.profile_execution import concurrency_limits
 
     manifest = {"max_workers": 16, "max_workers_per_gpu": 4, "gpus": [0, 1, 2, 3]}
     assert concurrency_limits(manifest, tmp_path) == (16, 4)
@@ -232,7 +232,7 @@ def test_packing_admission_stays_within_frozen_limits(tmp_path):
 
 
 def test_stage3_v7_policy_allows_three_per_card_and_four_card_fallback():
-    from hwoslaps.modeling.nonlinear.profile_execution import stage3_policy
+    from studies.rasti.campaign.profile_execution import stage3_policy
 
     full = {
         "execution_policy_version": "stage3_v7",
@@ -262,7 +262,7 @@ def test_stage3_v7_policy_allows_three_per_card_and_four_card_fallback():
 
 
 def test_stage3_v7_memory_policy_requires_calibration_for_unknown_class():
-    from hwoslaps.modeling.nonlinear.profile_execution import stage3_policy, validate_stage3_job
+    from studies.rasti.campaign.profile_execution import stage3_policy, validate_stage3_job
 
     manifest = {
         "execution_policy_version": "stage3_v7",
@@ -331,7 +331,7 @@ def test_stage3_v7_memory_fraction_is_distinct_from_legacy_default():
 
 
 def test_stage3_card_memory_stop_is_local_and_persistent(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear import profile_execution as execution
+    from studies.rasti.campaign import profile_execution as execution
 
     stopped = []
     charged = []
@@ -365,7 +365,7 @@ def test_stage3_card_memory_stop_is_local_and_persistent(tmp_path, monkeypatch):
 
 
 def test_stage3_task_disk_accounting_is_periodically_cached(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear import profile_execution as execution
+    from studies.rasti.campaign import profile_execution as execution
 
     data = tmp_path / "artifact.bin"
     data.write_bytes(b"first")
@@ -426,8 +426,8 @@ def controller_fixture(tmp_path, monkeypatch, worker_body, timeout=10):
     root = tmp_path / "task"
     root.mkdir()
     work = tmp_path / "work"
-    (work / "scripts").mkdir(parents=True)
-    script = work / "scripts/run_nonlinear_profile.py"
+    (work / "studies/rasti/scripts").mkdir(parents=True)
+    script = work / "studies/rasti/scripts/run_nonlinear_profile.py"
     script.write_text(
         "import sys,json,time\nfrom pathlib import Path\n"
         'spec=json.loads(Path(sys.argv[1]).read_text())\nout=Path(spec["output"])\n' + worker_body
@@ -462,7 +462,7 @@ def controller_fixture(tmp_path, monkeypatch, worker_body, timeout=10):
 
 
 def test_controller_completes_and_restart_does_not_repeat(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(
         tmp_path,
@@ -478,7 +478,7 @@ def test_controller_completes_and_restart_does_not_repeat(tmp_path, monkeypatch)
 
 
 def test_controller_timeout_preserves_charge_and_stops_owned_process(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "time.sleep(30)\n", timeout=0.1)
     with pytest.raises(RuntimeError, match="Manifest failure"):
@@ -491,7 +491,7 @@ def test_controller_timeout_preserves_charge_and_stops_owned_process(tmp_path, m
 
 def test_controller_exclusive_ownership(tmp_path):
     import fcntl
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     state = tmp_path / "state"
     state.mkdir()
@@ -557,7 +557,7 @@ def test_best_mode_stability_keeps_worse_local_optima_visible():
 
 
 def test_controller_rejects_modified_completion_artifact(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     body = (
         'artifact=out/"science.json"\nartifact.write_text("changed")\n'
@@ -573,7 +573,7 @@ def test_controller_rejects_modified_completion_artifact(tmp_path, monkeypatch):
 
 def test_controller_excludes_foreign_gpu_process_with_small_allocation(tmp_path, monkeypatch):
     import subprocess
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     monkeypatch.setattr(
@@ -593,8 +593,8 @@ def test_stage3_independent_failure_preserves_unrelated_job(tmp_path, monkeypatc
     import shutil
     import subprocess
     import time
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
-    from hwoslaps.modeling.nonlinear.profile_execution import clock_epoch
+    from studies.rasti.campaign.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import clock_epoch
 
     body = (
         'if out.name == "attempt0":\n'
@@ -797,7 +797,7 @@ def test_completed_start_replay_checks_values_and_avoids_duplicate_solver_work()
 
 
 def test_live_budget_uses_monotonic_time_despite_wall_clock_jump(monkeypatch):
-    from hwoslaps.modeling.nonlinear import profile_execution as execution
+    from studies.rasti.campaign import profile_execution as execution
 
     monkeypatch.setattr(execution, "clock_epoch", lambda: "same_boot")
     monkeypatch.setattr(execution.time, "monotonic", lambda: 150.0)
@@ -817,7 +817,7 @@ def test_live_budget_uses_monotonic_time_despite_wall_clock_jump(monkeypatch):
     "limit,workers,gpus", [(4, 8, list(range(8))), (8, 9, list(range(8))), (8, 8, [0] * 8)]
 )
 def test_controller_rejects_excess_or_duplicate_allocation(tmp_path, monkeypatch, limit, workers, gpus):
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     data = json.loads(manifest.read_text())
@@ -831,7 +831,7 @@ def test_controller_rejects_excess_or_duplicate_allocation(tmp_path, monkeypatch
 @pytest.mark.parametrize("count,cards", [(8, 8), (16, 4), (32, 4)])
 def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch, count, cards):
     import subprocess
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     body = (
         '(out/"ready").write_text("ready")\n'
@@ -874,7 +874,7 @@ def test_controller_eight_concurrent_workers_and_restart(tmp_path, monkeypatch, 
 
 def test_controller_deadline_rejects_late_admission(tmp_path, monkeypatch):
     import time
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise, clock_epoch
+    from studies.rasti.campaign.profile_execution import supervise, clock_epoch
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     state = root / "state"
@@ -896,7 +896,7 @@ def test_controller_deadline_rejects_late_admission(tmp_path, monkeypatch):
 
 def test_controller_deadline_stops_owned_worker(tmp_path, monkeypatch):
     import time
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise, clock_epoch
+    from studies.rasti.campaign.profile_execution import supervise, clock_epoch
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "time.sleep(30)\n")
     state = root / "state"
@@ -934,7 +934,7 @@ def test_controller_deadline_stops_owned_worker(tmp_path, monkeypatch):
 
 def test_deadline_validation_rejects_nonfinite_and_reversed_windows():
     import math
-    from hwoslaps.modeling.nonlinear.profile_execution import validate_deadline
+    from studies.rasti.campaign.profile_execution import validate_deadline
 
     base = {
         "clock_epoch": "epoch",
@@ -954,7 +954,7 @@ def test_deadline_validation_rejects_nonfinite_and_reversed_windows():
 
 
 def test_stop_file_blocks_controller_without_deadline(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     state = root / "state"
@@ -967,8 +967,8 @@ def test_stop_file_blocks_controller_without_deadline(tmp_path, monkeypatch):
 
 
 def test_boot_mismatch_reconciles_running_attempt_before_refusing_dispatch(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear import profile_execution as execution
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign import profile_execution as execution
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     state = root / "state"
@@ -1021,8 +1021,8 @@ def test_boot_mismatch_reconciles_running_attempt_before_refusing_dispatch(tmp_p
 
 
 def test_hard_deadline_preserves_valid_exit_receipt(tmp_path, monkeypatch):
-    from hwoslaps.modeling.nonlinear import profile_execution as execution
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign import profile_execution as execution
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     state = root / "state"
@@ -1076,8 +1076,8 @@ def test_hard_deadline_preserves_valid_exit_receipt(tmp_path, monkeypatch):
 
 def test_admission_recheck_closes_reservation_before_launch(tmp_path, monkeypatch):
     import time
-    from hwoslaps.modeling.nonlinear import profile_execution as execution
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign import profile_execution as execution
+    from studies.rasti.campaign.profile_execution import supervise
 
     root, manifest = controller_fixture(tmp_path, monkeypatch, "raise RuntimeError('must not launch')\n")
     state = root / "state"
@@ -1105,7 +1105,7 @@ def test_admission_recheck_closes_reservation_before_launch(tmp_path, monkeypatc
 
 def test_nvml_stale_row_after_owned_exit_is_tolerated_but_pid_reuse_is_foreign():
     import psutil
-    from hwoslaps.modeling.nonlinear.profile_execution import classify_compute_apps
+    from studies.rasti.campaign.profile_execution import classify_compute_apps
 
     snapshot = {
         "a": {
@@ -1131,7 +1131,7 @@ def test_unreaped_owned_zombie_nvml_row_is_tolerated(tmp_path):
     import sys
     import time
     import psutil
-    from hwoslaps.modeling.nonlinear.profile_execution import (
+    from studies.rasti.campaign.profile_execution import (
         classify_compute_apps,
         ownership_snapshot,
     )
@@ -1182,7 +1182,7 @@ def test_unreaped_owned_zombie_nvml_row_is_tolerated(tmp_path):
 
 def test_foreign_gpu_failure_preserves_valid_completed_receipt(tmp_path, monkeypatch):
     import subprocess
-    from hwoslaps.modeling.nonlinear.profile_execution import supervise
+    from studies.rasti.campaign.profile_execution import supervise
 
     body = (
         '(out/"worker_exit.json").write_text(json.dumps({"status":"COMPLETE",'

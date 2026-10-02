@@ -1,142 +1,71 @@
-"""Nonlinear validation helpers for Fisher detectability metrics."""
+"""Public nonlinear forecasting interfaces, loaded only when requested.
 
+Importing this package or its settings does not initialize AutoLens, AutoFit,
+JAX, plotting, or a worker pool. Heavy backends remain execution-time choices.
+"""
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any
 
-from .autolens_model_builder import (
-    autofit_model_from_spec,
-    fixed_point_model_spec_from_trial,
-    smooth_model_spec_from_config,
-    subhalo_model_spec_from_trial,
-)
-from .autolens_runner import (
-    AutoLensFitRunner,
-    NonlinearSearchSettings,
-    analysis_key_from,
-)
-from .calibration import (
-    CalibrationPair,
-    FisherNonlinearCalibration,
-    fit_q_calibration,
-    pair_fisher_and_nonlinear,
-)
-from .likelihood_metrics import (
-    SCDD_DELTA_LOG_L_THRESHOLD,
-    SCDD_Q_THRESHOLD,
-    LikelihoodRatioMetric,
-    delta_log_l_from_q,
-    profile_likelihood_ratio,
-    q_from_delta_log_l,
-    z_from_q,
-)
-from .local_profile import (
-    LocalFitAttempt,
-    LocalProfileFitResult,
-    fit_local_least_squares_profile,
-    profile_likelihood_q,
-)
-from .output_schema import (
-    NonlinearCaseResult,
-    NonlinearDetectionData,
-    NonlinearFitSummary,
-    SubhaloRecovery,
-    extract_subhalo_recovery,
-)
-from .mass_mapping import (
-    MassMappingContext,
-    build_mass_mapping_context,
-    build_mass_mapping_context_explicit,
-    evaluate_mass_mapping,
-)
-from .model_specs import linked
-from .trial import (
-    SubhaloTrial,
-    trial_from_fisher_map_position,
-    trial_from_lensing_truth,
-)
-from .validator import NonlinearMetricValidator
+_EXPORT_MODULES = {
+    'AutoLensFitRunner': 'autolens_runner',
+    'CalibrationPair': 'calibration',
+    'FisherNonlinearCalibration': 'calibration',
+    'FreshProfileSettings': 'profile_settings',
+    'LikelihoodRatioMetric': 'likelihood_metrics',
+    'LocalFitAttempt': 'local_profile',
+    'LocalProfileFitResult': 'local_profile',
+    'MassMappingContext': 'mass_mapping',
+    'NFWMCRSubhaloSph': 'mass_mapping',
+    'NonlinearCaseResult': 'output_schema',
+    'NonlinearDetectionData': 'output_schema',
+    'NonlinearFitSummary': 'output_schema',
+    'NonlinearMetricValidator': 'validator',
+    'NonlinearSearchSettings': 'autolens_runner',
+    'PointMassMCRSubhalo': 'mass_mapping',
+    'PsfMismatchCaseResult': 'psf_mismatch',
+    'PsfMismatchSpec': 'psf_mismatch',
+    'SCDD_DELTA_LOG_L_THRESHOLD': 'likelihood_metrics',
+    'SCDD_Q_THRESHOLD': 'likelihood_metrics',
+    'SISMCRSubhalo': 'mass_mapping',
+    'SubhaloRecovery': 'output_schema',
+    'SubhaloTrial': 'trial',
+    'analysis_key_from': 'autolens_runner',
+    'autofit_model_from_spec': 'autolens_model_builder',
+    'build_mass_mapping_context': 'mass_mapping',
+    'build_mass_mapping_context_explicit': 'mass_mapping',
+    'build_psf_mismatch_spec': 'psf_mismatch',
+    'delta_log_l_from_q': 'likelihood_metrics',
+    'evaluate_mass_mapping': 'mass_mapping',
+    'extract_subhalo_recovery': 'output_schema',
+    'fit_local_least_squares_profile': 'local_profile',
+    'fit_q_calibration': 'calibration',
+    'fixed_point_model_spec_from_trial': 'autolens_model_builder',
+    'linked': 'model_specs',
+    'pair_fisher_and_nonlinear': 'calibration',
+    'profile_likelihood_q': 'local_profile',
+    'profile_likelihood_ratio': 'likelihood_metrics',
+    'q_from_delta_log_l': 'likelihood_metrics',
+    'run_psf_mismatch_case': 'psf_mismatch',
+    'smooth_model_spec_from_config': 'autolens_model_builder',
+    'subhalo_model_spec_from_trial': 'autolens_model_builder',
+    'trial_from_fisher_map_position': 'trial',
+    'trial_from_lensing_truth': 'trial',
+    'z_from_q': 'likelihood_metrics',
+}
 
-__all__ = [
-    "AutoLensFitRunner",
-    "CalibrationPair",
-    "FisherNonlinearCalibration",
-    "LikelihoodRatioMetric",
-    "LocalFitAttempt",
-    "LocalProfileFitResult",
-    "MassMappingContext",
-    "NFWMCRSubhaloSph",
-    "NonlinearCaseResult",
-    "NonlinearDetectionData",
-    "NonlinearFitSummary",
-    "NonlinearMetricValidator",
-    "NonlinearSearchSettings",
-    "PointMassMCRSubhalo",
-    "PsfMismatchCaseResult",
-    "PsfMismatchSpec",
-    "SCDD_DELTA_LOG_L_THRESHOLD",
-    "SCDD_Q_THRESHOLD",
-    "SISMCRSubhalo",
-    "SubhaloRecovery",
-    "SubhaloTrial",
-    "analysis_key_from",
-    "autofit_model_from_spec",
-    "build_mass_mapping_context",
-    "build_mass_mapping_context_explicit",
-    "delta_log_l_from_q",
-    "evaluate_mass_mapping",
-    "extract_subhalo_recovery",
-    "fixed_point_model_spec_from_trial",
-    "fit_q_calibration",
-    "fit_local_least_squares_profile",
-    "linked",
-    "pair_fisher_and_nonlinear",
-    "profile_likelihood_ratio",
-    "profile_likelihood_q",
-    "q_from_delta_log_l",
-    "build_psf_mismatch_spec",
-    "run_psf_mismatch_case",
-    "smooth_model_spec_from_config",
-    "subhalo_model_spec_from_trial",
-    "trial_from_fisher_map_position",
-    "trial_from_lensing_truth",
-    "z_from_q",
-]
+__all__ = list(_EXPORT_MODULES)
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve lazy custom profile exports.
-
-    Parameters
-    ----------
-    name : `str`
-        Requested export name.
-
-    Returns
-    -------
-    value : `object`
-        Requested custom profile or context class.
-    """
-    if name in {
-        "NFWMCRSubhaloSph",
-        "PointMassMCRSubhalo",
-        "SISMCRSubhalo",
-    }:
-        from . import mass_mapping
-
-        return getattr(mass_mapping, name)
-    if name in {
-        "PsfMismatchCaseResult",
-        "PsfMismatchSpec",
-        "build_psf_mismatch_spec",
-        "run_psf_mismatch_case",
-    }:
-        from . import psf_mismatch
-
-        return getattr(psf_mismatch, name)
-    raise AttributeError(name)
+    """Load the module implementing one explicitly declared public export."""
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(import_module(f".{module_name}", __name__), name)
 
 
 def __dir__() -> list[str]:
-    """Return package public names for IDE and star-import compatibility."""
+    """Expose declared exports to IDEs and interactive completion."""
     return sorted(__all__)

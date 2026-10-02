@@ -9,7 +9,7 @@ import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = PROJECT_ROOT/"scripts"
+SCRIPTS_ROOT = PROJECT_ROOT/"studies/rasti/scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 

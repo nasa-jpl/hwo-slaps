@@ -56,11 +56,36 @@ def test_subhalo_random_position_reproducible_for_same_seed():
     np.testing.assert_allclose(a.subhalo_position, b.subhalo_position, rtol=0.0, atol=0.0)
 
 
-def test_generate_lensing_system_requires_full_config_argument():
-    """Require full_config as an explicit argument."""
+def test_generate_lensing_system_requires_an_explicit_seed_source():
+    """Require deterministic randomness from a standalone seed or full config."""
     config = _make_lensing_config()
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="global_seed"):
         generate_lensing_system(copy.deepcopy(config))
+
+
+def test_standalone_lensing_seed_preserves_scene_and_random_placement():
+    """The standalone contract produces the exact legacy seeded image."""
+    config = _make_lensing_config()
+    config['grid']['shape'] = [48, 48]
+    full_config = {'global_seed': 123, 'run_name': 'standalone'}
+    legacy = generate_lensing_system(config, full_config=full_config)
+    standalone = generate_lensing_system(config, seed=123, run_name='standalone')
+    np.testing.assert_array_equal(legacy.image, standalone.image)
+    np.testing.assert_array_equal(legacy.subhalo_position, standalone.subhalo_position)
+    assert standalone.config['lensing'] == config
+    assert standalone.config['global_seed'] == 123
+    assert standalone.config['run_name'] == 'standalone'
+
+
+def test_explicit_lensing_seed_records_override_in_provenance():
+    config = _make_lensing_config()
+    config['grid']['shape'] = [48, 48]
+    full_config = {'global_seed': 7, 'run_name': 'original'}
+    result = generate_lensing_system(config, full_config=full_config, seed=123)
+    expected = generate_lensing_system(config, seed=123)
+    np.testing.assert_array_equal(result.image, expected.image)
+    assert result.config['global_seed'] == 123
+    assert full_config['global_seed'] == 7
 
 
 def test_generate_lensing_system_requires_global_seed_key():

@@ -11,7 +11,7 @@ import pytest
 
 
 def load_cli():
-    path = Path(__file__).parents[1] / "scripts/run_nonlinear_production.py"
+    path = Path(__file__).parents[1] / "studies/rasti/scripts/run_nonlinear_production.py"
     spec = importlib.util.spec_from_file_location("stage3_production_cli", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -20,7 +20,7 @@ def load_cli():
 
 
 def load_validation():
-    path = Path(__file__).parents[1] / "scripts/run_nonlinear_validation.py"
+    path = Path(__file__).parents[1] / "studies/rasti/scripts/run_nonlinear_validation.py"
     spec = importlib.util.spec_from_file_location("stage3_validation_route", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

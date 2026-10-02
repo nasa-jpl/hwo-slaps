@@ -1,60 +1,73 @@
 # HWO-SLAPS
 
-HWO-SLAPS is an end-to-end strong-lensing simulation and Fisher-forecast pipeline for connecting Habitable Worlds Observatory PSF stability to low-mass dark-matter subhalo detectability.
+HWO-SLAPS simulates strong-lensing observations and forecasts subhalo sensitivity.
+The engine separates scene construction, optical response, detector noise,
+Fisher profiling, nonlinear comparisons, and campaign execution. Instrument
+parameters, source assets, inference settings, and populations are explicit
+inputs rather than assumptions from one paper.
 
-The immediate study target is a controlled SPIE 2026 proceedings/poster analysis, followed by an expanded RASTI HWO Special Issue paper. See:
+## Start here
 
-- [Venue plan](docs/study/venue_plan.md)
-- [Study roadmap](docs/study/study_roadmap.md)
+- [Engine API, configuration, and population recipes](docs/ENGINE_GUIDE.md)
+- [Migration from the submitted RASTI branch](docs/engineering/MIGRATION.md)
+- [Preserved RASTI study](studies/rasti/README.md)
+- [Paper-code checkpoint](reproducibility/rasti-26-183/README.md)
 
-## Pipeline
+This branch is a first refactoring pass. It preserves the existing physical
+models and optimized kernels; the interfaces do not imply support for every
+telescope pupil or unrestricted source reconstruction. The submitted code
+remains at the `rasti-26-183-submitted` tag.
 
-The package has four active modules:
+## Run a configuration
 
-1. `lensing`: galaxy-galaxy strong-lensing scenes with optional subhalos.
-2. `psf`: segmented-aperture HWO-style PSFs with controlled aberrations.
-3. `observation`: PSF convolution and detector-noise simulation.
-4. `modeling`: Fisher / Asimov subhalo detectability.
-
-The missing study layer is intentional next work: canonical study configs, sweep manifests, aggregation, and publication figures.
-
-## Quick Start
-
-Create the conda environment and install the developer dependency checkouts:
-
-```bash
-bash install.sh
-```
-
-This clones or updates PyAutoLens and HCIPy as editable GitHub installs in the
-parent directory of this repo by default. Override the checkout location with
-`--checkout-root` or `HWOSLAPS_DEV_ROOT`.
-
-For an NVIDIA GPU machine such as a B200 node, install the same environment with
-CUDA-enabled JAX:
+Use the existing science environment (see `install.sh`), then install this
+checkout with `python -m pip install -e . --no-deps`. The command is:
 
 ```bash
-bash install.sh --gpu
+hwoslaps -c configs/master_config.yaml --output-dir outputs
 ```
 
-Run a config:
+For source checkouts, `python runner.py` accepts the same arguments. Repeat
+`-c` to compose instrument, scene, and forecast fragments in order. Later
+mappings merge recursively; lists and scalar values replace earlier values.
+Relative file paths belong to the YAML file declaring them. Use
+`--base-dir .` explicitly when replaying old repository-relative inputs.
 
 ```bash
-python runner.py --config configs/master_config.yaml
+hwoslaps -c configs/master_config.yaml -c configs/examples/observation_override.yaml --validate-only
 ```
 
-Run the core tests:
+Validation creates no outputs and initializes no scientific backend.
+
+## Python API
+
+```python
+from hwoslaps.config import load_config
+from hwoslaps import run_pipeline
+
+config = load_config("configs/master_config.yaml")
+result = run_pipeline(config)
+```
+
+Use `run_with_artifacts` when a resolved configuration snapshot, log, and
+provenance record are required. Individual lensing, PSF, and observation
+functions also accept explicit seeds and detector sampling without a complete
+pipeline configuration. The guide describes their supported contracts.
+
+## Development
+
+The reusable package is under `src/hwoslaps`. The source-only `studies/rasti`
+namespace contains frozen paper population contracts and execution recipes;
+it is excluded from the wheel and imported only by reproduction tools/tests.
+The core package must not import this study namespace.
 
 ```bash
-python -m pytest -q
+python -m pytest -q tests/
 ```
 
-## Repository Notes
-
-- `configs/master_config.yaml` is the current runnable example config.
-- `outputs/` is ignored and used for run artifacts.
-- `scratch/` is ignored and used for prototypes, archived runs, and local notes.
-- Planning docs that should persist live under `docs/`.
+GPU tests carry the `xtx_gpu` marker and require the existing pinned backend.
+See [validation](docs/engineering/validation.md) for this cleanup session's
+actual checks and remaining concerns.
 
 ## Copyright
 

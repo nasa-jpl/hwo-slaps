@@ -71,6 +71,7 @@ def _install_detector_stubs() -> None:
     pkg.__path__ = []
     for sub in ("modeling", "lensing", "observation", "psf"):
         ensure_module(f"{TEST_PACKAGE}.{sub}").__path__ = []
+    sys.modules[f"{TEST_PACKAGE}.modeling"].__path__ = [str(SRC_ROOT / "modeling")]
 
     fake_al = types.ModuleType("autolens")
 

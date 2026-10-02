@@ -77,6 +77,34 @@ def _quiet_generate(config: dict):
         return generate_psf_system(config["psf"], full_config=config)
 
 
+def test_standalone_detector_scale_preserves_psf_products(compact_config):
+    """Explicit detector sampling reproduces the existing lens-grid interface."""
+    legacy = _quiet_generate(compact_config)
+    standalone = generate_psf_system(
+        compact_config['psf'],
+        target_pixel_scale=compact_config['lensing']['grid']['pixel_scale'],
+    )
+    np.testing.assert_array_equal(legacy.kernel.native, standalone.kernel.native)
+    np.testing.assert_array_equal(legacy.psf.power, standalone.psf.power)
+    assert standalone.kernel_pixel_scale == legacy.kernel_pixel_scale
+    assert standalone.config['detector_pixel_scale_arcsec'] == legacy.kernel_pixel_scale
+    assert standalone.config['psf'] == compact_config['psf']
+
+
+def test_explicit_psf_scale_rejects_conflicting_scene_sampling(compact_config):
+    with pytest.raises(ValueError, match='conflicts'):
+        generate_psf_system(
+            compact_config['psf'], full_config=compact_config,
+            target_pixel_scale=2*compact_config['lensing']['grid']['pixel_scale'],
+        )
+
+
+@pytest.mark.parametrize('pixel_scale', [0.0, -1.0, np.nan, np.inf, True, '0.1'])
+def test_standalone_psf_scale_rejects_invalid_sampling_before_propagation(compact_config, pixel_scale):
+    with pytest.raises(ValueError, match='target_pixel_scale'):
+        generate_psf_system(compact_config['psf'], target_pixel_scale=pixel_scale)
+
+
 def test_raw_peak_ratio_rejects_zero_perfect_peak():
     """Raw peak diagnostics should fail clearly for invalid perfect PSFs."""
     aberrated = type("PSF", (), {"intensity": np.array([[1.0]])})()

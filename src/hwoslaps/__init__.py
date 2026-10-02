@@ -1,24 +1,36 @@
-"""Habitable Worlds Observatory Strong Lensing Analysis Pipeline System."""
+"""Configurable strong-lensing simulations and sensitivity forecasts.
 
+Public entry points load lazily, so importing the package does not initialize
+optics, plotting, inference backends, or accelerator runtimes.
+"""
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Any, TYPE_CHECKING
 
-__all__ = ["run_enhanced_pipeline"]
+_PUBLIC_API = {
+    "run_pipeline": ("pipeline", "run_pipeline"),
+    "run_enhanced_pipeline": ("pipeline", "run_enhanced_pipeline"),
+    "run_with_artifacts": ("cli", "run_with_artifacts"),
+    "sample_population": ("population", "sample_population"),
+    "iter_population_configs": ("population", "iter_population_configs"),
+}
+__all__ = list(_PUBLIC_API)
 
 if TYPE_CHECKING:
-    from .pipeline import run_enhanced_pipeline
+    from .cli import run_with_artifacts
+    from .pipeline import run_enhanced_pipeline, run_pipeline
+    from .population import iter_population_configs, sample_population
 
 
 def __getattr__(name: str) -> Any:
-    """Resolve the pipeline entry point without eager PyAutoLens imports."""
-    if name == "run_enhanced_pipeline":
-        from .pipeline import run_enhanced_pipeline
-
-        return run_enhanced_pipeline
-    raise AttributeError(name)
+    if name not in _PUBLIC_API:
+        raise AttributeError(name)
+    module, member = _PUBLIC_API[name]
+    value = getattr(import_module(f".{module}", __name__), member)
+    globals()[name] = value
+    return value
 
 
 def __dir__() -> list[str]:
-    """Return package public names for IDE and star-import compatibility."""
     return sorted(__all__)

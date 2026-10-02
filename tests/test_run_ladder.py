@@ -28,7 +28,7 @@ import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS_ROOT = PROJECT_ROOT/"scripts"
+SCRIPTS_ROOT = PROJECT_ROOT/"studies/rasti/scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
@@ -77,7 +77,7 @@ def _ascending(low, high, step=0.25):
 
 def _freeze():
     """Return the committed design freeze."""
-    from hwoslaps.campaign.design_freeze import load_design_freeze
+    from studies.rasti.campaign.design_freeze import load_design_freeze
 
     return load_design_freeze(FREEZE_PATH)
 

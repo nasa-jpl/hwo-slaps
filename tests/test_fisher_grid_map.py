@@ -1117,28 +1117,29 @@ def test_pipeline_snapshot_hash_accepts_yaml_sequence_roundtrip(
     assert loaded.config_hash == config_hash(snapshot)
 
 
-def test_resolve_relative_output_dir_expands_and_resolves_paths():
-    """Expand home paths, repo-resolve relatives, and preserve absolutes."""
-    import hwoslaps.pipeline as pipeline_module
+def test_resolve_config_paths_expands_and_resolves_paths(tmp_path):
+    """Expand home paths, resolve explicit bases, and preserve absolutes."""
+    from hwoslaps.config import resolve_config_paths
 
     home_config = {"plotting": {"output_dir": "~/item10-check"}}
-    pipeline_module._resolve_relative_output_dir(home_config)
-    home_output = Path(home_config["plotting"]["output_dir"])
+    resolved_home = resolve_config_paths(home_config)
+    home_output = Path(resolved_home["plotting"]["output_dir"])
     assert home_output == Path.home() / "item10-check"
     assert home_output.is_absolute()
     assert "~" not in home_output.parts
+    assert home_config["plotting"]["output_dir"] == "~/item10-check"
 
     relative_config = {"plotting": {"output_dir": "item10-relative"}}
-    pipeline_module._resolve_relative_output_dir(relative_config)
-    repo_root = Path(pipeline_module.__file__).resolve().parents[2]
-    assert Path(relative_config["plotting"]["output_dir"]) == (
-        repo_root / "item10-relative"
+    resolved_relative = resolve_config_paths(relative_config, base_dir=tmp_path)
+    assert Path(resolved_relative["plotting"]["output_dir"]) == (
+        tmp_path / "item10-relative"
     )
+    assert relative_config["plotting"]["output_dir"] == "item10-relative"
 
     absolute = Path("/tmp/item10-absolute")
     absolute_config = {"plotting": {"output_dir": str(absolute)}}
-    pipeline_module._resolve_relative_output_dir(absolute_config)
-    assert Path(absolute_config["plotting"]["output_dir"]) == absolute
+    resolved_absolute = resolve_config_paths(absolute_config, base_dir=tmp_path)
+    assert Path(resolved_absolute["plotting"]["output_dir"]) == absolute
 
 
 def test_pipeline_rejects_foreign_grid_map_snapshot(
@@ -1201,28 +1202,27 @@ def test_pipeline_rejects_foreign_grid_map_snapshot(
         Pipeline(verbose=False)._run_detection_pipeline(config)
 
 
-def test_pipeline_binds_snapshot_through_resolved_output_dir(
+def test_pipeline_binds_exact_resolved_snapshot(
     grid_setup,
     tmp_path,
     monkeypatch,
 ):
-    """Bind a raw tilde snapshot to its resolved in-memory configuration."""
+    """Require snapshot and pipeline to share a resolved configuration."""
+    from hwoslaps.config import resolve_config_paths
     import hwoslaps.modeling.generator_fisher as generator_fisher
     import hwoslaps.pipeline as pipeline_module
 
-    monkeypatch.setenv("HOME", str(tmp_path))
     raw_config = copy.deepcopy(grid_setup["config"])
     raw_config["run_name"] = "pipeline-resolved-snapshot"
     raw_config["plotting"]["enabled"] = False
-    raw_config["plotting"]["output_dir"] = "~/outputs"
-    snapshot = copy.deepcopy(raw_config)
-    config = copy.deepcopy(raw_config)
-    pipeline_module._resolve_relative_output_dir(config)
+    raw_config["plotting"]["output_dir"] = "outputs"
+    config = resolve_config_paths(raw_config, base_dir=tmp_path)
+    snapshot = copy.deepcopy(config)
     assert config["plotting"]["output_dir"] == str(tmp_path / "outputs")
     run_dir = tmp_path / "outputs" / raw_config["run_name"]
     run_dir.mkdir(parents=True)
     with (run_dir / "config_used.yaml").open("w", encoding="utf-8") as stream:
-        yaml.safe_dump(snapshot, stream, sort_keys=False)
+        yaml.safe_dump(raw_config, stream, sort_keys=False)
     grid_map = replace(
         grid_setup["grid_map"],
         config_hash=None,
@@ -1260,13 +1260,20 @@ def test_pipeline_binds_snapshot_through_resolved_output_dir(
         lambda **kwargs: result,
     )
 
+    with pytest.raises(ValueError, match="does not describe this run"):
+        Pipeline(verbose=False)._run_detection_pipeline(config)
+    assert not (run_dir / "modeling" / "fisher_grid_map.npz").exists()
+    with (run_dir / "config_used.yaml").open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(snapshot, stream, sort_keys=False)
+
     Pipeline(verbose=False)._run_detection_pipeline(config)
 
     loaded = load_fisher_grid_map_npz(
         run_dir / "modeling" / "fisher_grid_map.npz"
     )
     assert loaded.config_hash == config_hash(snapshot)
-    assert loaded.config_hash != config_hash(config)
+    assert loaded.config_hash == config_hash(config)
+    assert loaded.config_hash != config_hash(raw_config)
 
 
 def test_grid_map_npz_roundtrip_preserves_source_asset_identity(grid_setup, tmp_path):

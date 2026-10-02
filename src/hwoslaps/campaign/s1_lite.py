@@ -98,7 +98,7 @@ from ._common import (
     resolve_path,
     stage_job_config,
 )
-from .design_freeze import file_sha256
+from .artifacts import file_sha256
 
 
 _IDENTIFIER_PATTERN = re.compile(r"[a-z0-9_]+")

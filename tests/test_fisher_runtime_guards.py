@@ -6,9 +6,7 @@ import os
 
 import pytest
 
-pytest.importorskip("autolens")
-
-from hwoslaps.modeling.fisher_detector import _supervised_ordered_map
+from hwoslaps.modeling.fisher_runtime import supervised_ordered_map as _supervised_ordered_map
 
 
 def _return_index(index):

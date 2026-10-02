@@ -8,13 +8,13 @@ import numpy as np
 import pytest
 import yaml
 
-from hwoslaps.campaign.release_catalog import (
+from studies.rasti.campaign.release_catalog import (
     ReleaseCatalogError,
     _restamp_config,
     sha256_file,
     validate_case_approval,
 )
-from hwoslaps.campaign.release_dependencies import (
+from studies.rasti.campaign.release_dependencies import (
     position_input_identity,
     produce_position,
     resolve_position,
@@ -217,7 +217,7 @@ def test_resolver_requires_complete_catalog_bound_receipt(tmp_path):
 
 
 def test_bracket_resolver_rejects_shifted_target_and_emits_anchor_gate(tmp_path):
-    from hwoslaps.campaign.release_dependencies import resolve_bracket
+    from studies.rasti.campaign.release_dependencies import resolve_bracket
 
     case_id = "selected12_bracket:sys0001:plus_0.1dex"
     target = {
@@ -278,7 +278,7 @@ def test_bracket_resolver_rejects_shifted_target_and_emits_anchor_gate(tmp_path)
 
 
 def test_actual_freeze_defines_declared_sampler_and_brackets():
-    from hwoslaps.campaign.design_freeze import load_release_freeze
+    from studies.rasti.campaign.design_freeze import load_release_freeze
 
     freeze = load_release_freeze(
         Path(__file__).resolve().parents[1] / "configs/design/design_freeze_v7.yaml"
@@ -288,8 +288,8 @@ def test_actual_freeze_defines_declared_sampler_and_brackets():
 
 
 def test_real_freeze_tangent_policy_and_pending_template_identity(tmp_path):
-    from hwoslaps.campaign.design_freeze import load_release_freeze
-    from hwoslaps.campaign.release_catalog import _runner_spec_template, _sha256_json
+    from studies.rasti.campaign.design_freeze import load_release_freeze
+    from studies.rasti.campaign.release_catalog import _runner_spec_template, _sha256_json
 
     freeze = load_release_freeze(
         Path(__file__).resolve().parents[1] / "configs/design/design_freeze_v7.yaml"

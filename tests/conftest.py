@@ -8,6 +8,14 @@ from pathlib import Path
 import pytest
 
 
+# Study reproductions are intentionally excluded from installed distributions.
+import sys
+_TEST_REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(_TEST_REPO_ROOT), str(_TEST_REPO_ROOT / "src"),
+                str(_TEST_REPO_ROOT / "scripts"),
+                str(_TEST_REPO_ROOT / "studies/rasti/scripts")]
+
+
 def pytest_configure() -> None:
     """Preload `autoarray` config and disable numba JIT for stable imports."""
     os.environ.setdefault("NUMBA_DISABLE_JIT", "1")

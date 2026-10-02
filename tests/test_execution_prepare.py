@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from hwoslaps.campaign.execution_prepare import (
+from studies.rasti.campaign.execution_prepare import (
     activate,
     digest,
     prepare,
@@ -23,7 +23,7 @@ def dump(path, data):
 
 def setup_case(tmp_path, cards=4):
     work = tmp_path / "work"
-    worker = work / "scripts/run_nonlinear_production.py"
+    worker = work / "studies/rasti/scripts/run_nonlinear_production.py"
     worker.parent.mkdir(parents=True)
     worker.write_text(
         'def validate_spec(spec, path):\n    assert spec["prepared_only"] is False\n'
@@ -149,10 +149,10 @@ def test_approval_requires_exact_batch_and_resources(tmp_path, key, value):
 
 def test_approved_activation_and_restart_preserve_deadline(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        "hwoslaps.campaign.execution_prepare.clock_epoch", lambda: "synthetic-test-boot"
+        "studies.rasti.campaign.execution_prepare.clock_epoch", lambda: "synthetic-test-boot"
     )
     monkeypatch.setattr(
-        "hwoslaps.modeling.nonlinear.profile_execution.clock_epoch",
+        "studies.rasti.campaign.profile_execution.clock_epoch",
         lambda: "synthetic-test-boot",
     )
     manifest_path, _, kwargs, _ = setup_case(tmp_path)
@@ -193,7 +193,7 @@ def test_partial_activation_does_not_mint_new_time(tmp_path):
 def test_source_change_blocks_activation_before_state(tmp_path):
     manifest_path, _, kwargs, _ = setup_case(tmp_path)
     approval_path = approval_fixture(manifest_path)
-    (kwargs["worktree"] / "scripts/run_nonlinear_production.py").write_text(
+    (kwargs["worktree"] / "studies/rasti/scripts/run_nonlinear_production.py").write_text(
         "raise Exception('wrong source')"
     )
     with pytest.raises(ValueError, match="source hash mismatch"):
@@ -318,9 +318,9 @@ def test_preparation_activates_through_real_worker_validator_only(
     spec_path = data_root / "source_spec.json"
     dump(spec_path, spec)
     work = tmp_path / "code"
-    (work / "scripts").mkdir(parents=True)
-    worker = Path(__file__).parents[1] / "scripts/run_nonlinear_production.py"
-    (work / "scripts/run_nonlinear_production.py").write_bytes(worker.read_bytes())
+    (work / "studies/rasti/scripts").mkdir(parents=True)
+    worker = Path(__file__).parents[1] / "studies/rasti/scripts/run_nonlinear_production.py"
+    (work / "studies/rasti/scripts/run_nonlinear_production.py").write_bytes(worker.read_bytes())
     output = tmp_path / "review"
     prepare(
         [spec_path],
@@ -337,10 +337,10 @@ def test_preparation_activates_through_real_worker_validator_only(
     manifest_path = output / "manifest.json"
     approval_path = approval_fixture(manifest_path)
     monkeypatch.setattr(
-        "hwoslaps.campaign.execution_prepare.clock_epoch", lambda: "synthetic-test-boot"
+        "studies.rasti.campaign.execution_prepare.clock_epoch", lambda: "synthetic-test-boot"
     )
     monkeypatch.setattr(
-        "hwoslaps.modeling.nonlinear.profile_execution.clock_epoch",
+        "studies.rasti.campaign.profile_execution.clock_epoch",
         lambda: "synthetic-test-boot",
     )
     calls = []

@@ -5,6 +5,8 @@ Poisson noise, read noise, dark current, and sky background.
 """
 
 from numbers import Real
+from dataclasses import dataclass
+from collections.abc import Mapping
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -53,8 +55,8 @@ def _validate_noise_inputs(
         positive=True,
     )
 
-    if not isinstance(detector_config, dict):
-        raise ValueError("detector_config must be a dictionary")
+    if not isinstance(detector_config, Mapping):
+        raise ValueError("detector_config must be a mapping")
 
     detector = {
         "gain": _validate_scalar(
@@ -93,11 +95,66 @@ def _validate_scalar(value: object, key_path: str, positive: bool = False) -> fl
     return value_float
 
 
+@dataclass(frozen=True)
+class DetectorMoments:
+    """Expected signal and uncertainty for one detector exposure.
+
+    All count arrays are in electrons; ``variance_e2`` is in electrons squared.
+    Sky and dark rates are already detected rates per pixel, so throughput is
+    applied to the source before constructing these moments. ``gain`` converts
+    electrons to ADU. One read-noise contribution is included per exposure.
+    """
+
+    source_e: np.ndarray
+    sky_e: float
+    dark_e: float
+    expected_e: np.ndarray
+    gain: float
+    read_noise_e: float
+
+    @property
+    def variance_e2(self) -> np.ndarray:
+        """Compute uncertainty only when needed; a noise draw needs no extra map."""
+        return self.expected_e + self.read_noise_e**2
+
+
+def detector_moments(source_eps, exposure_time, detector_config) -> DetectorMoments:
+    """Return the shared detector expectation used by simulation and forecasting.
+
+    ``source_eps`` is a finite, nonnegative electron rate. ``exposure_time`` is
+    in seconds. The detector mapping supplies gain (e-/ADU), read_noise (e-),
+    dark_current (e-/s/pixel), and sky_background (e-/s/pixel). No telescope or
+    study defaults are inferred.
+    """
+    source_eps, exposure_time, detector = _validate_noise_inputs(
+        source_eps, exposure_time, detector_config
+    )
+    return _detector_moments(source_eps, exposure_time, detector)
+
+
+def _detector_moments(source_eps, exposure_time, detector):
+    """Evaluate already validated inputs, preserving the legacy operation order."""
+    source_e = source_eps * exposure_time
+    dark_e = detector['dark_current'] * exposure_time
+    sky_e = detector['sky_background'] * exposure_time
+    expected_e = source_e + dark_e + sky_e
+    return DetectorMoments(
+        source_e=source_e,
+        sky_e=sky_e,
+        dark_e=dark_e,
+        expected_e=expected_e,
+        gain=detector['gain'],
+        read_noise_e=detector['read_noise'],
+    )
+
+
 def apply_detector_noise(
     source_eps: np.ndarray,
     exposure_time: float,
     detector_config: Dict[str, float],
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    *,
+    rng: Optional[np.random.Generator] = None,
 ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     """Apply realistic detector noise to a source image.
 
@@ -118,6 +175,9 @@ def apply_detector_noise(
         dark_current, sky_background.
     seed : `int`, optional
         Random seed for reproducibility.
+    rng : `numpy.random.Generator`, optional
+        Caller-owned random stream, for example one spawned for a population
+        member. Mutually exclusive with ``seed``. Its state advances locally.
 
     Returns
     -------
@@ -146,39 +206,35 @@ def apply_detector_noise(
     )
 
     # Use a local random number generator to avoid global RNG side effects
-    rng = np.random.default_rng(seed) if seed is not None else np.random.default_rng()
+    if rng is not None:
+        if seed is not None:
+            raise ValueError("Pass either seed or rng, not both")
+        if not isinstance(rng, np.random.Generator):
+            raise ValueError("rng must be a numpy.random.Generator")
+    else:
+        rng = np.random.default_rng(seed)
 
     # Extract detector parameters
-    gain = detector_config['gain']
     read_noise = detector_config['read_noise']
-    dark_current = detector_config['dark_current']
-    sky_background = detector_config['sky_background']
-
-    # Convert to total electrons for each component
-    source_e = source_eps * exposure_time
-    dark_e = dark_current * exposure_time  # Per pixel
-    sky_e = sky_background * exposure_time  # Per pixel
-
-    # Total expected electrons per pixel
-    expected_e = source_e + dark_e + sky_e
+    moments = _detector_moments(source_eps, exposure_time, detector_config)
 
     # Apply Poisson noise to the total expected counts
-    detected_e = rng.poisson(expected_e).astype(float)
+    detected_e = rng.poisson(moments.expected_e).astype(float)
 
     # Add read noise (Gaussian)
     final_e = detected_e + rng.normal(0.0, read_noise, size=detected_e.shape)
 
     # Convert to ADU
-    final_image_adu = final_e / gain
+    final_image_adu = final_e / moments.gain
 
     # Store components for analysis
     components = {
-        'source_e': source_e,
-        'sky_e': sky_e,
-        'dark_e': dark_e,
+        'source_e': moments.source_e,
+        'sky_e': moments.sky_e,
+        'dark_e': moments.dark_e,
         'detected_e': detected_e,
         'final_e': final_e,
-        'expected_e': expected_e
+        'expected_e': moments.expected_e
     }
 
     return final_image_adu, components
@@ -216,32 +272,5 @@ def create_noise_map(
     Where expected_counts includes source, sky, and dark current.
     This follows from Poisson statistics where variance equals mean.
     """
-    source_eps, exposure_time, detector_config = _validate_noise_inputs(
-        source_eps,
-        exposure_time,
-        detector_config,
-    )
-
-    # Extract detector parameters
-    gain = detector_config['gain']
-    read_noise = detector_config['read_noise']
-    dark_current = detector_config['dark_current']
-    sky_background = detector_config['sky_background']
-
-    # Convert to electrons
-    source_e = source_eps * exposure_time
-    dark_e = dark_current * exposure_time
-    sky_e = sky_background * exposure_time
-
-    # Total expected counts
-    expected_e = source_e + dark_e + sky_e
-
-    # Variance components (in electrons²):
-    # - Poisson variance = expected counts
-    # - Read noise variance = read_noise²
-    total_variance_e2 = expected_e + read_noise**2
-
-    # Convert to noise in ADU
-    noise_map_adu = np.sqrt(total_variance_e2) / gain
-
-    return noise_map_adu
+    moments = detector_moments(source_eps, exposure_time, detector_config)
+    return np.sqrt(moments.variance_e2) / moments.gain

@@ -83,6 +83,12 @@ class NonlinearSearchSettings:
         Whether to keep the raw Nautilus search-internal state on disk
         after the fit instead of letting AutoFit post-fit cleanup
         remove it. Required for evidence-convergence audit cells.
+    nautilus_training_workers : `int`, optional
+        Workers used only for independent Nautilus emulator networks. Explicit
+        values take precedence over ``HWOSLAPS_NAUTILUS_TRAINING_WORKERS``;
+        ``None`` preserves environment resolution (default one worker). The
+        sampler's own pool and random streams are unchanged. Training remains
+        serial when ``number_of_cores`` is greater than one.
     sampler_contract : `dict`, optional
         Explicit effective ``n_eff``, ``n_shell`` and
         ``discard_exploration`` values that must be observed on the
@@ -116,6 +122,7 @@ class NonlinearSearchSettings:
     discard_exploration: Optional[bool] = None
     retain_search_internal: bool = False
     sampler_contract: Optional[Dict[str, Any]] = None
+    nautilus_training_workers: Optional[int] = None
 
     def __post_init__(self) -> None:
         """Validate execution settings before analysis or search setup."""
@@ -155,6 +162,12 @@ class NonlinearSearchSettings:
             raise ValueError("discard_exploration must be None or a boolean")
         if not isinstance(self.retain_search_internal, bool):
             raise ValueError("retain_search_internal must be a boolean")
+        if self.nautilus_training_workers is not None and (
+            isinstance(self.nautilus_training_workers, bool)
+            or not isinstance(self.nautilus_training_workers, int)
+            or self.nautilus_training_workers < 1
+        ):
+            raise ValueError("nautilus_training_workers must be None or a positive integer")
         if self.sampler_contract is not None:
             if not isinstance(self.sampler_contract, dict):
                 raise ValueError("sampler_contract must be a dictionary or None")
@@ -888,8 +901,10 @@ class _NetworkTrainingPool:
         self._pool.terminate()
 
 
-def _training_worker_count() -> int:
-    """Return the current requested emulator-training worker count."""
+def _training_worker_count(requested: Optional[int] = None) -> int:
+    """Resolve explicit emulator workers before the legacy environment."""
+    if requested is not None:
+        return requested
     raw = os.environ.get(_TRAINING_WORKERS_ENV, "").strip()
     if not raw:
         return 1
@@ -897,9 +912,9 @@ def _training_worker_count() -> int:
     return max(1, workers)
 
 
-def _training_pool_for_current_env():
+def _training_pool_for_current_env(training_workers: Optional[int] = None):
     """Return the current PID's pool, creating it for a new worker count."""
-    n_workers = _training_worker_count()
+    n_workers = _training_worker_count(training_workers)
     if n_workers <= 1:
         return None
     key = (n_workers, os.getpid())
@@ -929,9 +944,11 @@ def _close_training_pools() -> None:
 atexit.register(_close_training_pools)
 
 
-def _training_runtime_provenance(number_of_cores: int) -> Dict[str, Any]:
+def _training_runtime_provenance(
+    number_of_cores: int, training_workers: Optional[int] = None
+) -> Dict[str, Any]:
     """Return requested and effective emulator-training parallelism."""
-    requested = _training_worker_count()
+    requested = _training_worker_count(training_workers)
     effective = requested if number_of_cores == 1 else 1
     return {
         "requested": requested,
@@ -941,7 +958,9 @@ def _training_runtime_provenance(number_of_cores: int) -> Dict[str, Any]:
 
 
 @contextmanager
-def _nautilus_training_pool_scope(number_of_cores: int):
+def _nautilus_training_pool_scope(
+    number_of_cores: int, training_workers: Optional[int] = None
+):
     """Temporarily route eligible emulator training through a spawn pool.
 
     Nautilus rebuilds its likelihood emulator at every bound update and
@@ -962,7 +981,7 @@ def _nautilus_training_pool_scope(number_of_cores: int):
 
     The patch exists only for the duration of one sampler run.
     """
-    if number_of_cores != 1 or _training_worker_count() <= 1:
+    if number_of_cores != 1 or _training_worker_count(training_workers) <= 1:
         yield
         return
 
@@ -974,7 +993,7 @@ def _nautilus_training_pool_scope(number_of_cores: int):
 
     def train_via_pool(cls, *args, **kwargs):
         if kwargs.get("pool") is None:
-            pool = _training_pool_for_current_env()
+            pool = _training_pool_for_current_env(training_workers)
             if pool is not None:
                 kwargs["pool"] = pool
         return original_function(cls, *args, **kwargs)
@@ -1208,7 +1227,8 @@ class AutoLensFitRunner:
         training_runtime_provenance = None
         try:
             training_provenance = _training_runtime_provenance(
-                self.settings.number_of_cores
+                self.settings.number_of_cores,
+                self.settings.nautilus_training_workers,
             )
             training_workers_requested = training_provenance["requested"]
             training_workers_effective = training_provenance["effective"]
@@ -1265,7 +1285,8 @@ class AutoLensFitRunner:
                     retention_applied = True
                 try:
                     with _nautilus_training_pool_scope(
-                        self.settings.number_of_cores
+                        self.settings.number_of_cores,
+                        self.settings.nautilus_training_workers,
                     ):
                         result = search.fit(model=model, analysis=analysis)
                 finally:
