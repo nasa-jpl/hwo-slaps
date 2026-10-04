@@ -1,0 +1,75 @@
+# Paper-parity scene p1_optical_matched: segmented-pupil optical PSF, Exponential source, NFW subhalo, all-pixel mask, scalar and PSF-mode nuisance profiling.
+# Written by tests/scripts/generate_paper_parity.py; the paper-side
+# configuration used for the expected values is in manifest.json.
+run_name: paper_parity_p1
+global_seed: 11
+lensing:
+  grid:
+    shape: [100, 100]
+    pixel_scale: 0.03
+    over_sample_size: 4
+  lens_galaxy:
+    redshift: 0.2
+    mass:
+      type: Isothermal
+      einstein_radius: 1.0
+      centre: [0.0, 0.0]
+      ell_comps: [0.1, 0.0]
+  source_galaxy:
+    redshift: 0.6
+    light:
+      type: Exponential
+      centre: [-0.03, 0.08]
+      ell_comps: [0.14516129, 0.25142673]
+      intensity: 2.0
+      effective_radius: 0.11
+  subhalo:
+    enabled: true
+    mass: 100000000.0
+    model: NFW
+    concentration: {model: moline2017_eq7, x_sub: 1.0, h: null}
+    position: {type: angle, angle: 90.0, offset_pixels: 0}
+  cosmology: Planck15
+psf:
+  telescope: {gap_size: 0.006, segment_point_to_point: 1.65, pupil_diameter: 7.225765,
+    num_rings: 2, focal_length: 144.0, supersampling_factor: 2}
+  hres_psf: {num_pix: 128, wavelength: 5.0e-07, num_airy: 4, sampling: 5, save_highres_psf_npy: false}
+  kernel:
+    shape_native: [17, 17]
+  aberrations:
+    enable_segment_pistons: false
+    enable_segment_tiptilts: false
+    enable_segment_hexikes: true
+    enable_global_zernikes: true
+    segment_pistons: {}
+    segment_tiptilts: {}
+    segment_hexikes:
+      0: {4: 10.0}
+      3: {5: 8.0}
+      7: {6: 12.0}
+    global_zernikes: {4: 5.0, 5: 5.0, 8: 5.0}
+observation:
+  exposure_time: 900.0
+  throughput: 1.0
+  detector: {gain: 1.0, read_noise: 0.2, dark_current: 0.002, sky_background: 1.0}
+modeling:
+  fisher:
+    snr_threshold: 3.0
+    include_background_offset: true
+    finite_diff: {centre_arcsec: 0.001, einstein_radius_arcsec: 0.001, ell_comp: 0.001,
+      source_intensity_frac: 0.01, source_reff_frac: 0.01}
+    mask_mode: all_pixels
+    include_psf_nuisance: true
+    compute_psf_mode_scan: false
+    map:
+      type: grid
+      grid: {spacing_arcsec: 0.4, half_width_arcsec: 1.2, annulus: null}
+    psf_mode_steps: {segment_pistons: 1.0, segment_tiptilts: 0.1, segment_hexikes: 1.0,
+      global_zernikes: 1.0}
+    psf_mode_prior_sigmas: {segment_hexikes: 5.0, global_zernikes: 5.0}
+    psf_basis:
+      segment_hexikes:
+        segments: [0, 3]
+        mode_nolls: [1, 2]
+      global_zernikes:
+        mode_nolls: [4, 5]
