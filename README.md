@@ -2,10 +2,10 @@
 
 HWO-SLAPS is an end-to-end strong-lensing simulation and Fisher-forecast pipeline for connecting Habitable Worlds Observatory PSF stability to low-mass dark-matter subhalo detectability.
 
-The immediate study target is a controlled SPIE 2026 proceedings/poster analysis, followed by an expanded RASTI HWO Special Issue paper. See:
+The active study is the RASTI HWO Special Issue paper on subhalo mass reach and PSF knowledge requirements. The submitted SPIE study is archived separately. Start here:
 
-- [Venue plan](docs/study/venue_plan.md)
-- [Study roadmap](docs/study/study_roadmap.md)
+- [Current study, results status, and code map](docs/study/study_roadmap.md)
+- [Publication scope and manuscript plan](docs/study/venue_plan.md)
 
 ## Pipeline
 
@@ -14,9 +14,12 @@ The package has four active modules:
 1. `lensing`: galaxy-galaxy strong-lensing scenes with optional subhalos.
 2. `psf`: segmented-aperture HWO-style PSFs with controlled aberrations.
 3. `observation`: PSF convolution and detector-noise simulation.
-4. `modeling`: Fisher / Asimov subhalo detectability.
+4. `modeling`: profiled Fisher / Asimov forecasts and PyAutoLens/Nautilus nonlinear validation.
 
-The missing study layer is intentional next work: canonical study configs, sweep manifests, aggregation, and publication figures.
+`campaign` provides frozen designs, manifests, and adaptive mass ladders;
+`analysis` provides selection and ranking statistics. Campaign generation,
+execution, and harvest entry points live in `scripts/`. The study roadmap
+maps these components so a task can load only the relevant code.
 
 ## Quick Start
 
@@ -46,14 +49,15 @@ python runner.py --config configs/master_config.yaml
 Run the core tests:
 
 ```bash
-python -m pytest -q
+python -m pytest -q tests/
 ```
 
 ## Repository Notes
 
 - `configs/master_config.yaml` is the current runnable example config.
 - `outputs/` is ignored and used for run artifacts.
-- `scratch/` is ignored and used for prototypes, archived runs, and local notes.
+- `scratch/` is predominantly ignored and holds local study records. Its
+  `README.md` distinguishes current entry points from historical material.
 - Planning docs that should persist live under `docs/`.
 
 ## Copyright
