@@ -56,3 +56,41 @@ def test_macro_columns_equal_the_lens_source_chain_rule(name,minimal_mapping,tmp
         exposure=prepared.observation.exposure;expected*=exposure.exposure_time_s/exposure.detector.gain_e_per_adu
         actual=prepared.nuisances.images[prepared.nuisances.names.index(f"lens.mass.{component}.{name}")]
         assert np.linalg.norm(actual-expected)/np.linalg.norm(expected)<=1e-6
+
+
+@pytest.mark.parametrize("slope",[1.8,2.08])
+@pytest.mark.parametrize("constraint,accepted",[
+    ("bare_flat",True),("fixed_radius",False),("radius_prior",False),("radius_underflow_prior",False),
+    ("multipoles_flat_zero_fixed",True),("fixed_nonzero_coefficient",False),("nonzero_coefficient_prior",False),
+    ("ellipse_fixed",True),
+])
+def test_circular_powerlaw_tangents_require_semantic_flat_compensators(slope,constraint,accepted,minimal_mapping):
+    from hwoslaps.config.checks import ConfigError
+    from hwoslaps.fisher.api import prepare_forecast
+
+    mass=minimal_mapping["scene"]["lens"]["mass"]["mass"]
+    mass.update(type="PowerLaw",slope=slope,ell_comps=[0.,0.])
+    nuisance={"priors":{"lens.mass.mass.ell_comp_1":.03,"lens.mass.mass.ell_comp_2":.03}}
+    if constraint=="fixed_radius":nuisance["fixed"]=["lens.mass.mass.einstein_radius"]
+    if constraint in {"radius_prior","radius_underflow_prior"}:
+        nuisance["priors"]["lens.mass.mass.einstein_radius"]=.03 if constraint=="radius_prior" else 1.e300
+    if "coefficient" in constraint or constraint=="multipoles_flat_zero_fixed":
+        mass["multipoles"]={"m3":[.01,0.],"m4":[-.02,0.]}
+        nuisance["fixed"]=["lens.mass.mass.multipole_m3_2"]
+        if constraint=="fixed_nonzero_coefficient":nuisance["fixed"].append("lens.mass.mass.multipole_m4_1")
+        if constraint=="nonzero_coefficient_prior":nuisance["priors"]["lens.mass.mass.multipole_m4_1"]=.03
+    if constraint=="ellipse_fixed":
+        nuisance["fixed"]=["lens.mass.mass.ell_comp_*"]
+        nuisance["priors"]={"lens.mass.mass.einstein_radius":.03}
+    minimal_mapping["forecast"]["nuisances"]=nuisance
+    if accepted:
+        with prepare_forecast(minimal_mapping) as prepared:
+            assert np.all(np.isfinite(prepared.nuisances.images))
+            if constraint!="ellipse_fixed":
+                parameter=next(p for p in prepared.nuisances.parameters if p.name=="lens.mass.mass.einstein_radius")
+                assert parameter.prior_sigma is None
+    else:
+        with pytest.raises(ConfigError,match="flat/free compensation") as error:
+            prepare_forecast(minimal_mapping)
+        assert error.value.path=="forecast.nuisances"
+        assert "lens.mass.mass" in error.value.message
