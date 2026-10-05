@@ -58,7 +58,8 @@ def _publish(path, writer) -> Path:
 def _npz(path, members) -> Path:
     def write(stream):
         with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for name, value in members.items():
+            for name in sorted(members):
+                value = members[name]
                 array = np.ascontiguousarray(value) if np.ndim(value) else np.asarray(value)
                 if array.dtype.hasobject:
                     raise TypeError(f"artifact member {name!r} has object dtype")
