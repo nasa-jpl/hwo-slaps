@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import yaml
 
+from hwoslaps.config.checks import ConfigError
 from hwoslaps.optics.mode_priors import (
     ModeWeightPrior, ModeWeightPriorSpec, draw_combined_orthonormal, draw_global_orthonormal,
     draw_segment_orthonormal, load_prior, noll_radial_order, parse_prior, power_law_prior,
@@ -184,3 +185,15 @@ def test_draw_sample_variances_follow_the_squared_weights():
     # Exact-norm conditioning moves the variances away from the squared weights by up to 15%
     # (the carried tolerance); the 4000-draw sampling error is about 1.5%.
     np.testing.assert_allclose(np.var(draws, axis=0), expected, rtol=0.15, atol=0.0)
+
+
+def test_prior_files_never_resolve_through_the_working_directory_or_the_repository(tmp_path, monkeypatch):
+    relative = Path("configs/psf_priors/jwst_wss_drift_v1.yaml")
+    (tmp_path / relative).parent.mkdir(parents=True)
+    (tmp_path / relative).write_bytes(b"name: decoy\nsegment_variance_fraction: 0.5\nglobal_weights: {4: 1.0}\n")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="absolute Path"):
+        ModeWeightPriorSpec("path", None, relative, None)
+    with pytest.raises(ConfigError, match="not resolved") as caught:
+        parse_prior({"path": str(relative)}, "psf.model.draw.prior")
+    assert caught.value.path == "psf.model.draw.prior.path"
