@@ -55,18 +55,24 @@ PRIOR = ([[1.0], [2.0], [-1.0], [0.5]], [0.75],
          [[1.0, 0.0, 0.0, 0.0], [0.5, -1.0, 2.0, 1.0], [0.0, 2.0, 0.0, 0.0]],
          [1.0 - 1.0 / 7.0, 6.25 - 9.0 / 7.0, 4.0 - 16.0 / 7.0])
 NONE = (np.empty((3, 0)), None, [[1.0, -2.0, 0.5], [0.0, 3.0, 4.0]], [5.25, 25.0])
+BACKGROUND_KNOWN = ([[1.0], [-1.0], [0.0]], None, [[1.0, 1.0, 1.0]], [3.0])
+BACKGROUND_FREE = ([[1.0, 1.0], [-1.0, 1.0], [0.0, 1.0]], None, [[1.0, 1.0, 1.0]], [0.0])
 
 
-@pytest.mark.parametrize("design, precision, signals, expected", [ORTHOGONAL, IN_SPAN, PRIOR, NONE],
+@pytest.mark.parametrize("design, precision, signals, expected, max_zero_q", [
+    (*ORTHOGONAL, None), (*IN_SPAN, None), (*PRIOR, None), (*NONE, None),
+    (*BACKGROUND_KNOWN, None), (*BACKGROUND_FREE, 1e-20)],
                          ids=["orthogonal-nuisance", "signal-in-nuisance-span", "one-nuisance-with-prior",
-                              "no-nuisance"])
-def test_profiled_information_matches_closed_forms(design, precision, signals, expected):
+                              "no-nuisance", "constant-background-known", "constant-background-free"])
+def test_profiled_information_matches_closed_forms(design, precision, signals, expected, max_zero_q):
     signals = np.asarray(signals)
     bank = workspace(design, None if precision is None else np.asarray(precision)).evaluate_bank(signals)
     raw = np.sum(signals * signals, axis=1)
     np.testing.assert_allclose(bank.fisher_raw, raw, rtol=1e-15)
     np.testing.assert_allclose(bank.fisher_profiled, expected, rtol=1e-12, atol=1e-12)
     np.testing.assert_array_equal(bank.q_asimov, bank.fisher_profiled)
+    if max_zero_q is not None:
+        assert np.all(bank.q_asimov < max_zero_q), "free constant background must absorb the signal"
     positive = np.asarray(expected) > 1e-9
     np.testing.assert_allclose(bank.sigma_amplitude[positive], 1.0 / np.sqrt(np.asarray(expected)[positive]),
                                rtol=1e-12)

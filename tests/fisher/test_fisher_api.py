@@ -69,13 +69,19 @@ def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, i
         assert after.provenance["config_digest"] == before.provenance["config_digest"]
 
 
-@pytest.mark.parametrize("engine", ["reference", "jax"])
-def test_position_subsets_reproduce_full_map_rows_and_keep_domain(minimal_mapping, engine):
+@pytest.mark.parametrize("engine, batch_size", [("reference", 16), ("jax", 16), ("jax", 7), ("jax", 8)])
+def test_position_subsets_reproduce_full_map_rows_and_keep_domain(minimal_mapping, engine, batch_size):
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
     minimal_mapping["forecast"]["positions"] = {"kind": "grid", "spacing_arcsec": 0.3, "half_width_arcsec": 0.6}
-    with prepare_forecast(minimal_mapping, execution=Execution(engine=engine)) as prepared:
+    with prepare_forecast(minimal_mapping, execution=Execution(engine=engine, batch_size=batch_size)) as prepared:
         full = forecast(prepared, masses_msun=[1.0e8])
+        if batch_size != 16:
+            with prepare_forecast(minimal_mapping, execution=Execution(engine=engine, batch_size=16)) as default:
+                expected = forecast(default, masses_msun=[1.0e8])
+            for field in ("fisher_raw", "fisher_profiled"):
+                np.testing.assert_allclose(getattr(full, field), getattr(expected, field), rtol=1e-9, atol=1e-12,
+                                           err_msg=f"batch{batch_size} changes {field}")
         keep = np.arange(len(prepared.positions)) % 3 == 0
         subset = forecast(prepared, masses_msun=[1.0e8], positions=prepared.positions.select(keep))
         np.testing.assert_allclose(subset.fisher_profiled, full.fisher_profiled[:, keep], rtol=1.0e-12)

@@ -38,11 +38,25 @@ def assert_engines(mapping):
     for name in ("fisher_raw", "fisher_profiled", "amplitude_hat", "amplitude_spurious"):
         if getattr(expected, name) is not None:
             np.testing.assert_allclose(getattr(actual, name), getattr(expected, name), rtol=5.0e-6, atol=0.0)
+    return expected, actual
 
 
 @pytest.mark.parametrize("scenario", SCENES)
-def test_jax_engine_matches_reference(minimal_mapping, scenario, image_asset, tmp_path, tiny_gaussian_kernel):
-    assert_engines(scene_mapping(minimal_mapping, scenario, image_asset, tmp_path, tiny_gaussian_kernel))
+def test_jax_engine_matches_reference(minimal_mapping, scenario, image_asset, tmp_path, tiny_gaussian_kernel, monkeypatch):
+    if scenario == "kernel_mismatch":
+        from hwoslaps.optics import providers
+        from hwoslaps.optics.optical_psf import OpticalPSF
+
+        def unexpected_optical_construction(*args, **kwargs):
+            raise AssertionError("external detector kernels must not construct optical PSFs or pupils")
+
+        monkeypatch.setattr(OpticalPSF, "__init__", unexpected_optical_construction)
+        monkeypatch.setattr(providers, "build_pupil", unexpected_optical_construction)
+    results = assert_engines(scene_mapping(minimal_mapping, scenario, image_asset, tmp_path, tiny_gaussian_kernel))
+    if scenario == "kernel_mismatch":
+        for result in results:
+            assert np.all(np.isfinite(result.q_mismatch))
+            assert np.any(result.q_spurious > 0.), "external kernel mismatch must have a spurious response"
 
 
 @pytest.mark.xtx_gpu
