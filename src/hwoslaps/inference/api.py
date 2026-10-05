@@ -16,6 +16,7 @@ import numpy as np
 from ..identity import array_digest, mapping_digest
 from ..observation.observation import Observation
 from ..scene.halos import Halo
+from ..scene.image_source import frozen_value
 from .data import FitData, build_fit_data, support_half_widths
 from .fit_model import FitModel, autofit_model
 from .hypotheses import RoleModels, build_role_models
@@ -43,6 +44,9 @@ class PreparedCase:
     analysis: Any
     record: Mapping[str, Any]
     _objectives: dict[str, BoxObjective] = field(default_factory=dict, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "record", frozen_value(self.record))
 
     def model(self, role: str) -> FitModel:
         if role not in ("smooth", "subhalo"):
