@@ -408,3 +408,68 @@ def test_fixed_sersic_source_geometry_still_checks_moving_traced_rays(n):
         with pytest.raises(Exception,match="zero-radius source-centre sample for n >= 1"):error.throw()
     else:
         error.throw();np.testing.assert_array_equal(gradient,np.zeros(2))
+
+
+
+def _powerlaw_boundary_case(mapping, tmp_path, slope, *, free_slope=False, fixed_shape=False):
+    from hwoslaps.config.schema import parse_config
+    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.inference.api import prepare_case
+    from hwoslaps.simulation import simulate
+
+    kernel=np.array([[1.,2.,1.],[2.,4.,2.],[1.,2.,1.]])/16.
+    path=tmp_path/"boundary_kernel.npy";np.save(path,kernel)
+    mapping["psf"]["truth"].update(path=str(path))
+    mapping["scene"]["grid"]["shape"]=[20,20]
+    mapping["scene"]["lens"]["mass"]["mass"].update(type="PowerLaw",slope=slope,ell_comps=[0.,0.])
+    mapping["scene"]["source"]["light"]["light"]["ell_comps"]=[.14516129,.25142673]
+    fixed=["lens.mass.mass.centre_*","source.light.*"]
+    if not free_slope:fixed.append("lens.mass.mass.slope")
+    if not fixed_shape:fixed.append("lens.mass.mass.einstein_radius")
+    else:fixed.append("lens.mass.mass.ell_comp_*")
+    mapping["forecast"]["nuisances"]={"fixed":fixed,"background_offset":False}
+    prepared=prepare_forecast(parse_config(mapping))
+    try:
+        observation=simulate(prepared,subhalo=None,noise_seed=7)
+        case=prepare_case(prepared,prepared.hypothesis(1.e8,(.1,-.15)),observation,
+                          fit=FitSpec(mode="fixed_template"),use_jax=True)
+    except BaseException:
+        prepared.close();raise
+    return prepared,case
+
+
+@pytest.mark.parametrize("free_slope",[False,True],ids=["fixed_slope","actual_uniform_slope"])
+def test_circular_nonisothermal_powerlaw_refuses_only_gradient_at_actual_slope(free_slope,minimal_mapping,tmp_path):
+    prepared,case=_powerlaw_boundary_case(minimal_mapping,tmp_path,2. if free_slope else 2.08,free_slope=free_slope)
+    try:
+        model=case.model("smooth");objective=case.objective("smooth")
+        physical=model.truth.copy()
+        if free_slope:
+            index=next(i for i,name in enumerate(model.parameter_names) if name.endswith(".slope"))
+            physical[index]=2.02
+        z=(physical-model.lower)/(model.upper-model.lower)
+        assert math.isfinite(case.log_likelihood("smooth",physical))
+        assert np.all(np.isfinite(objective.residual(z)))
+        with pytest.raises(ValueError,match=r"PowerLaw.*normalization cusp"):
+            objective.value_and_gradient(z)
+        # The same supported vectors with a small noncircular shape still refine.
+        index=next(i for i,name in enumerate(model.parameter_names) if name.endswith("ell_comps_0"))
+        physical[index]=.005;z=(physical-model.lower)/(model.upper-model.lower)
+        value,gradient=objective.value_and_gradient(z)
+        assert math.isfinite(value) and np.all(np.isfinite(gradient))
+    finally:prepared.close()
+
+
+def test_circular_powerlaw_fixed_ellipse_keeps_other_parameter_gradients(minimal_mapping,tmp_path):
+    prepared,case=_powerlaw_boundary_case(minimal_mapping,tmp_path,2.08,fixed_shape=True)
+    try:
+        model=case.model("smooth");objective=case.objective("smooth")
+        assert len(model.parameter_names)==1 and model.parameter_names[0].endswith("einstein_radius")
+        z=(model.truth-model.lower)/(model.upper-model.lower)
+        value,gradient=objective.value_and_gradient(z)
+        assert math.isfinite(value) and np.all(np.isfinite(gradient))
+        step=np.ones_like(z)*1e-4
+        expected=-(case.log_likelihood("smooth",objective.to_physical(z+step))-
+                   case.log_likelihood("smooth",objective.to_physical(z-step)))/(2e-4)
+        assert gradient[0]==pytest.approx(expected,rel=1e-6,abs=0.)
+    finally:prepared.close()

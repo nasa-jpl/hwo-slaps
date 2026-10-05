@@ -120,7 +120,7 @@ def jax_objective(analysis: Any, model: Any, lower: Sequence[float], upper: Sequ
 
 
 def guard_circular_mass_gradient(objective: BoxObjective, model: FitModel) -> BoxObjective:
-    """Refuse only undefined free Isothermal shape gradients at exactly circular shape.
+    """Refuse singular free circular mass-shape gradients without changing values.
 
     Resolve each constructor element to its canonical physical-vector index (including
     linked priors) once. Unreachable and entirely fixed circular pairs need no guard.
