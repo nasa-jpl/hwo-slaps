@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Final, Literal, Mapping
 
 import numpy as np
 
-from ..config.checks import Integer, Key, Real, Table
+from ..config.checks import Integer, Key, Real, Sha256, Table
 from ..identity import array_digest
 from ..instrument import check_finite_number
 from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
@@ -109,10 +109,14 @@ class Observation:
     sampling: Mapping[str, float]
 
     def __post_init__(self) -> None:
-        if self.kind not in ("expected", "noisy"):
+        if not isinstance(self.kind, str) or self.kind not in ("expected", "noisy"):
             raise ValueError(f"kind must be 'expected' or 'noisy', got {self.kind!r}")
         if (self.kind == "expected") != (self.noise_seed is None):
             raise ValueError("an expected observation has no noise seed and a noisy one has its seed")
+        if self.kind == "noisy":
+            object.__setattr__(self, "noise_seed", Integer(min=0)(self.noise_seed, "noise_seed"))
+        if self.config_digest is not None:
+            object.__setattr__(self, "config_digest", Sha256()(self.config_digest, "config_digest"))
         if self.kind == "expected" and self.data_adu is not self.expected_adu:
             raise ValueError("the data of an expected observation is its expected image")
         planes = set(self.light_rate_by_plane_e_per_s)
