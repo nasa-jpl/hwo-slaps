@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 import pytest
-from scipy.integrate import quad
+from scipy.integrate import quad, trapezoid
 from scipy.special import gammainc, gammaincinv
 
 from hwoslaps.scene.profiles import PROFILE_TYPES, sersic_constant, sersic_unit_integral
@@ -37,7 +37,7 @@ def test_sersic_integral_is_invariant_to_axis_ratio():
     grid=al.Grid2DIrregular(values=np.column_stack((y.ravel(),x.ravel())))
     profile=al.lp.Sersic(ell_comps=(.145,.251),sersic_index=1.,effective_radius=.11,intensity=1.)
     image=np.asarray(profile.image_2d_from(grid=grid)).reshape(y.shape)
-    integral=np.trapezoid(np.trapezoid(image,x[0],axis=1),y[:,0])
+    integral=trapezoid(trapezoid(image,x[0],axis=1),y[:,0])
     assert integral == pytest.approx(sersic_unit_integral(.11,1.),rel=1e-4,abs=0.)
 
 
@@ -52,16 +52,16 @@ def test_multi_component_light_is_the_sum_of_its_components(minimal_mapping,imag
         "clumps":{"type":"Image","centre":[-.04,.09],"asset_path":str(image_asset),"rotation_deg":30.,"total_flux":.1}}
     values["lens"]["light"]={"light":{"type":"Sersic","centre":[0.,0.],"ell_comps":[.1,.0],"effective_radius":.3,"intensity":.05,"sersic_index":3.}}
     cosmology=Cosmology(parse_cosmology({"name":"Planck15"}))
-    full=build_scene(parse_scene(values),cosmology)
+    full=build_scene(parse_scene(values),cosmology,subhalo=None)
     parts=[]
     for name,component in values["source"]["light"].items():
         one=copy.deepcopy(values);one["source"]["light"]={name:component}
-        parts.append(np.asarray(build_scene(parse_scene(one),cosmology).light_images["source"]))
+        parts.append(np.asarray(build_scene(parse_scene(one),cosmology,subhalo=None).light_images["source"]))
     np.testing.assert_allclose(full.light_images["source"],sum(parts),rtol=1e-13,atol=0.)
     import autolens as al
     lens_profile=full.light_profiles["lens"][0]
     np.testing.assert_array_equal(full.light_images["lens"],np.asarray(lens_profile.image_2d_from(grid=full.grid).native))
     exp=copy.deepcopy(minimal_mapping["scene"])
     ser=copy.deepcopy(exp);ser["source"]["light"]["light"].update(type="Sersic",sersic_index=1.)
-    np.testing.assert_array_equal(build_scene(parse_scene(exp),cosmology).light_images["source"],
-                                  build_scene(parse_scene(ser),cosmology).light_images["source"])
+    np.testing.assert_array_equal(build_scene(parse_scene(exp),cosmology,subhalo=None).light_images["source"],
+                                  build_scene(parse_scene(ser),cosmology,subhalo=None).light_images["source"])

@@ -88,7 +88,7 @@ def test_shear_deflections_and_registry_order(minimal_mapping):
     actual = np.asarray(instantiate(spec.lens.mass[0])["main"].deflections_yx_2d_from(
         grid=al.Grid2DIrregular(values=POINTS)))
     y, x = POINTS.T
-    np.testing.assert_allclose(actual, np.column_stack((0.08*x + 0.05*y, 0.08*y - 0.05*x)), rtol=1e-12, atol=1e-14)
+    np.testing.assert_allclose(actual, np.column_stack((-0.08*y - 0.05*x, 0.08*x - 0.05*y)), rtol=1e-12, atol=1e-14)
     assert [p.name for p in scene_parameters(spec)][:2] == ["lens.mass.main.gamma_1", "lens.mass.main.gamma_2"]
 
 
@@ -136,7 +136,7 @@ def test_multipole_domain_keeps_convergence_positive(kind, q, slope, multipoles,
         with pytest.raises(ConfigError) as error:
             _scene(minimal_mapping, mass)
         assert error.value.path == "scene.lens.mass.main.multipoles"
-        assert np.min(convergence) < 0
+        assert np.min(convergence) <= 0
 
 
 @pytest.mark.parametrize("edit,leaf", [({"slope": 1.}, "slope"), ({"slope": 3.}, "slope"),

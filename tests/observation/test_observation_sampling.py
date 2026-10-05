@@ -201,6 +201,10 @@ def _unlensed_lights():
     lights = {f"Exponential r_e {radius} px": {"type": "Exponential", "ell_comps": P1_SOURCE_ELLIPTICITY,
                                                 "intensity": 1.0, "effective_radius": radius * PIXEL}
               for radius in EXPONENTIAL_RADII}
+    lights.update({f"Sersic n4 r_e {radius} px": {"type": "Sersic", "sersic_index": 4.0,
+                                                "ell_comps": P1_SOURCE_ELLIPTICITY,
+                                                "intensity": 1.0, "effective_radius": radius * PIXEL}
+                   for radius in EXPONENTIAL_RADII})
     lights["Image P3 asset"] = {"type": "Image", "asset_path": str(ASSET), "rotation_deg": 30.0,
                                 "total_flux": 0.29}
     return lights
@@ -237,7 +241,7 @@ def _print_table(cases):
 
 
 def test_reference_grid_resolves_the_most_compact_cases():
-    for name in ("Exponential r_e 0.5 px", "Image P3 asset"):
+    for name in ("Exponential r_e 0.5 px", "Sersic n4 r_e 0.5 px", "Image P3 asset"):
         light = _unlensed_lights()[name]
         (coarse,) = _unlensed_cases(name, light, PHASES[0], fwhms=(0.5,))
         (finer,) = _unlensed_cases(name, light, PHASES[0], fwhms=(0.5,), factor=2 * REFERENCE_FACTOR)
