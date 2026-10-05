@@ -200,6 +200,30 @@ def test_cross_section_rules(row, path, minimal_mapping):
 
 
 @pytest.mark.parametrize(("section", "value", "path"), (
+    pytest.param("positions", {"kind": "grid", "spacing_arcsec": 0.0, "half_width_arcsec": 0.2},
+                 "forecast.positions.spacing_arcsec", id="grid_spacing_zero"),
+    pytest.param("positions", {"kind": "grid", "spacing_arcsec": -0.1, "half_width_arcsec": 0.2},
+                 "forecast.positions.spacing_arcsec", id="grid_spacing_negative"),
+    pytest.param("positions", {"kind": "grid", "spacing_arcsec": float("nan"), "half_width_arcsec": 0.2},
+                 "forecast.positions.spacing_arcsec", id="grid_spacing_nan"),
+    pytest.param("positions", {"kind": "grid", "spacing_arcsec": True, "half_width_arcsec": 0.2},
+                 "forecast.positions.spacing_arcsec", id="grid_spacing_boolean"),
+    pytest.param("positions", {"kind": "explicit", "positions_yx": [[0.1]]},
+                 "forecast.positions.positions_yx[0]", id="explicit_shape"),
+    pytest.param("positions", {"kind": "explicit", "positions_yx": [[0.1, float("inf")]]},
+                 "forecast.positions.positions_yx[0][1]", id="explicit_nonfinite"),
+    pytest.param("positions", {"spacing_arcsec": 0.1, "half_width_arcsec": 0.2},
+                 "forecast.positions.kind", id="positions_missing_kind"),
+    pytest.param("positions", {"kind": "spiral"},
+                 "forecast.positions.kind", id="positions_unknown_kind"),
+    pytest.param("nuisances", {"wavefront": {
+        "modes": {"segment_hexikes": {"segments": [0], "nolls": [1]}},
+        "step_nm": {"segment_hexikes": 0.0}}},
+        "forecast.nuisances.wavefront.step_nm.segment_hexikes", id="wavefront_step_zero"),
+    pytest.param("nuisances", {"wavefront": {
+        "modes": {"segment_hexikes": {"segments": [0], "nolls": [1]}},
+        "prior_sigma_nm": {"segment_hexikes": 0.0}}},
+        "forecast.nuisances.wavefront.prior_sigma_nm.segment_hexikes", id="wavefront_prior_zero"),
     ("positions", {"kind": "grid", "spacing_arcsec": 0.2, "half_width_arcsec": 0.1}, "forecast.positions.half_width_arcsec"),
     ("positions", {"kind": "grid", "spacing_arcsec": 0.1, "half_width_arcsec": 0.2,
                    "annulus": {"inner_arcsec": 0.2, "outer_arcsec": 0.1}}, "forecast.positions.annulus"),
@@ -217,7 +241,15 @@ def test_cross_section_rules(row, path, minimal_mapping):
      "forecast.nuisances.wavefront.step_nm"),
 ))
 def test_forecast_inputs_reject_invalid_layout_mask_and_nuisance_values(section, value, path, minimal_mapping):
-    candidate = deepcopy(minimal_mapping)
+    candidate = (load_config(PARITY / "p1_optical_matched.yaml").to_mapping()
+                 if section == "nuisances" and "wavefront" in value else deepcopy(minimal_mapping))
+    if path in ("forecast.nuisances.wavefront.step_nm.segment_hexikes",
+                "forecast.nuisances.wavefront.prior_sigma_nm.segment_hexikes"):
+        control = deepcopy(candidate)
+        control["forecast"]["nuisances"] = deepcopy(value)
+        scale = "step_nm" if ".step_nm." in path else "prior_sigma_nm"
+        control["forecast"]["nuisances"]["wavefront"][scale] = {"segment_hexikes": 1.0}
+        parse_config(control)
     candidate["forecast"][section] = value
     with pytest.raises(ConfigError) as error:
         parse_config(candidate)
