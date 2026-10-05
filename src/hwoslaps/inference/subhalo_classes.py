@@ -107,7 +107,8 @@ class TruncatedNFWSph(al.mp.NFWTruncatedSph):
     def coord_func_g(self, grid_radius, xp=np):
         if xp is np:
             return super().coord_func_g(grid_radius=grid_radius, xp=xp)
-        radius = xp.array([grid_radius]) if isinstance(grid_radius, (float, complex)) else xp.asarray(grid_radius)
+        radius = (xp.array([grid_radius], dtype=xp.complex64) if isinstance(grid_radius, (float, complex))
+                  else xp.asarray(grid_radius))
         regular = radius == 1.0
         safe_radius = xp.where(regular, 2.0, radius)
         value = super().coord_func_g(grid_radius=safe_radius, xp=xp)

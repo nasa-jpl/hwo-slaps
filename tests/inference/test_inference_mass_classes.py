@@ -96,6 +96,13 @@ def test_truncated_nfw_class_traces_under_jax():
     for actual, parent in zip(derivative, expected, strict=True):
         np.testing.assert_allclose(actual, parent / 0.03, rtol=1e-13, atol=0.)
 
+    parent_profile = al.mp.NFWTruncatedSph(kappa_s=0.03, scale_radius=1., truncation_radius=10.)
+    adapter_profile = TruncatedNFWSph(kappa_s=0.03, scale_radius=1., truncation_radius=10.)
+    for name in ("coord_func_f", "coord_func_g"):
+        for radius in (0.8, 1., 1.2, np.array([0.8, 1., 1.2], dtype=complex)):
+            np.testing.assert_array_equal(getattr(adapter_profile, name)(radius, xp=jnp),
+                                          getattr(parent_profile, name)(radius, xp=jnp))
+
     def projected_density(x, kappa):
         def density(z):
             radius = np.hypot(x, z)
@@ -133,6 +140,9 @@ def test_truncated_nfw_class_traces_under_jax():
         actual_gradient = jax.jit(jax.jacfwd(lambda value: geometry_values(TruncatedNFWSph, value, jnp)))(arguments)
         np.testing.assert_allclose(actual_gradient, expected_gradient, rtol=1e-10, atol=1e-12,
                                    err_msg=f"TNFW scale/centre derivatives at radius/scale={radius}")
+        reverse_gradient = jax.jit(jax.jacrev(lambda value: geometry_values(TruncatedNFWSph, value, jnp)))(arguments)
+        np.testing.assert_allclose(reverse_gradient, expected_gradient, rtol=1e-10, atol=1e-12,
+                                   err_msg=f"TNFW reverse scale/centre derivatives at radius/scale={radius}")
         step = 1e-3
         finite_difference = np.column_stack([
             (geometry_values(al.mp.NFWTruncatedSph, arguments + step * direction, np) -
@@ -163,6 +173,8 @@ def test_truncated_nfw_class_traces_under_jax():
                                                            0., kappa - ratio * radial_derivative])
         np.testing.assert_allclose(jax.jit(jax.jacfwd(freed_values))(8.), expected_mass_gradient,
                                    rtol=1e-10, atol=1e-12, err_msg=f"TNFW log-mass derivative at radius/scale={ratio}")
+        np.testing.assert_allclose(jax.jit(jax.jacrev(freed_values))(8.), expected_mass_gradient,
+                                   rtol=1e-10, atol=1e-12, err_msg=f"TNFW reverse log-mass derivative at radius/scale={ratio}")
 
 
 @pytest.mark.parametrize("mode", ["fixed_template", "local_search", "freed"])
