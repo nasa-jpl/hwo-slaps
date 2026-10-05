@@ -59,7 +59,6 @@ def test_settings_mappings_reject_unknown_keys(read, mapping, path):
     (lambda: FitSpec(mode="local_search", anchor_chi2_tolerance=0.0), "anchor_chi2_tolerance"),
     (lambda: MassSupport(9.0, 9.0), "log10_mass_max"),
     (lambda: SamplerSettings(use_jax=True, number_of_cores=2), "number_of_cores"),
-    (lambda: RefineSettings(maxiter=0), "maxiter"),
     (lambda: BoxRule(0.02, clip=(0.9, -0.9)), "clip"),
     (lambda: FitSpec.from_mapping({"mode": "freed"}), "fit.mass_support"),
     (lambda: FitSpec.from_mapping({"mode": "freed", "mass_support": {"log10_mass_min": 9.7, "log10_mass_max": 6.0}}),
@@ -67,12 +66,43 @@ def test_settings_mappings_reject_unknown_keys(read, mapping, path):
     (lambda: FitSpec.from_mapping({"mode": "fixed_template", "mask": [[True, False]]}), "fit.mask"),
     (lambda: SamplerSettings.from_mapping({"use_jax": True, "number_of_cores": 4}), "sampler.number_of_cores"),
 ], ids=["freed-without-support", "fixed-with-support", "zero-anchor-tolerance", "empty-support",
-        "jax-with-cores", "zero-iterations", "reversed-clip", "mapping-freed-without-support",
+        "jax-with-cores", "reversed-clip", "mapping-freed-without-support",
         "mapping-reversed-support", "mapping-array-mask", "mapping-jax-with-cores"])
 def test_settings_reject_incoherent_combinations(build, path):
     with pytest.raises(ConfigError) as caught:
         build()
     assert caught.value.path == path
+
+
+@pytest.mark.parametrize(("cls", "field", "value"), [
+    (SamplerSettings, "n_eff", True), (SamplerSettings, "n_eff", 0.0), (SamplerSettings, "n_eff", -5.0),
+    (SamplerSettings, "n_eff", math.nan), (SamplerSettings, "n_eff", math.inf), (SamplerSettings, "n_shell", True),
+    (SamplerSettings, "n_shell", 0), (SamplerSettings, "n_shell", 1.5), (SamplerSettings, "f_live", 0.0),
+    (SamplerSettings, "f_live", 1.5), (SamplerSettings, "discard_exploration", 1),
+    (SamplerSettings, "discard_exploration", "yes"), (SamplerSettings, "retain_search_internal", None),
+    (SamplerSettings, "retain_search_internal", 1), (SamplerSettings, "jax_n_batch", 0),
+    (SamplerSettings, "jax_n_batch", -1), (SamplerSettings, "n_like_max", 0), (SamplerSettings, "number_of_cores", 0),
+    (SamplerSettings, "n_live_smooth", 0), (RefineSettings, "maxiter", 0), (RefineSettings, "ftol", -1.0e-3),
+    (RefineSettings, "start_separation_posterior_sigma", 0.0), (RefineSettings, "scalar_residual_tolerance", 0.0),
+    (RefineSettings, "original_start_count", 0),
+], ids=lambda value: value.__name__ if isinstance(value, type) else str(value))
+def test_settings_refuse_values_outside_their_domains(cls, field, value):
+    """Booleans are not numbers, counts are positive integers, tolerances finite and in range."""
+    with pytest.raises(ConfigError) as caught:
+        cls(**{field: value})
+    assert caught.value.path == field
+    with pytest.raises(ConfigError) as caught:
+        cls.from_mapping({field: value})
+    assert caught.value.path.endswith(f".{field}")
+
+
+def test_live_points_follow_the_role_and_mode():
+    """H0 always uses n_live_smooth; H1 the fixed-template or the search count (I-8)."""
+    settings = SamplerSettings(n_live_smooth=11, n_live_subhalo_fixed=22, n_live_subhalo_search=33)
+    assert [settings.n_live("smooth", mode) for mode in ("fixed_template", "local_search", "freed")] == [11] * 3
+    assert [settings.n_live("subhalo", mode) for mode in ("fixed_template", "local_search", "freed")] == [22, 33, 33]
+    with pytest.raises(ValueError, match="role must be one of"):
+        settings.n_live("lens", "freed")
 
 
 def test_box_rules_reproduce_paper_bounds():
@@ -138,5 +168,5 @@ def test_settings_round_trip_and_rule_overrides_merge_field_by_field():
                               jax_n_batch=50, retain_search_internal=True)
     assert SamplerSettings.from_mapping(sampler.to_mapping()) == sampler
     assert sampler.to_mapping()["n_eff"] == 200.0 and isinstance(sampler.to_mapping()["n_eff"], float)
-    refine = RefineSettings(original_start_count=2, maxiter=50)
+    refine = RefineSettings(original_start_count=2, maxiter=50, start_separation_posterior_sigma=2.0)
     assert RefineSettings.from_mapping(refine.to_mapping()) == refine

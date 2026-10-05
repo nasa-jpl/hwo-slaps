@@ -118,6 +118,30 @@ def test_session_pool_outlives_scopes_and_scopes_are_exclusive(monkeypatch):
     assert _process_state()[:2] == before_state[:2]
 
 
+def test_an_explicit_training_pool_is_kept():
+    """Inside a pooled scope a caller's own pool still trains the networks."""
+    from nautilus.neural import NeuralNetworkEmulator
+
+    used = []
+
+    class RecordingPool:
+        def map(self, function, iterable):
+            used.append(True)
+            return list(map(function, iterable))
+
+    rng = np.random.default_rng(3)
+    with BackendSession(training_workers=2) as session:
+        with session.search_scope(retain_search_internal=False, number_of_cores=1):
+            NeuralNetworkEmulator.train(rng.random((50, 3)), rng.random(50), n_networks=2, pool=RecordingPool())
+    assert used == [True]
+
+
+@pytest.mark.parametrize("workers", [0, -1, True, 1.5, "2"], ids=str)
+def test_session_refuses_invalid_training_worker_counts(workers):
+    with pytest.raises(ValueError, match="training_workers must be an integer >= 1"):
+        BackendSession(training_workers=workers)
+
+
 def test_make_analysis_uses_the_given_cosmology_and_writes_no_autolens_class(raw_imaging, light_model):
     import autogalaxy as ag
     import autolens as al
