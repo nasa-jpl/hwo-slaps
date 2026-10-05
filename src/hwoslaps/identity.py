@@ -28,7 +28,7 @@ from numpy.typing import ArrayLike
 
 __all__ = [
     "KernelIdentity", "array_digest", "canonical_json", "file_digest", "json_ready",
-    "mapping_digest", "read_file_snapshot", "text_digest",
+    "mapping_digest", "read_file_snapshot", "text_digest", "validate_file_manifest", "validate_loaded_file",
 ]
 
 _BLOCK_BYTES = 1 << 20
@@ -129,6 +129,20 @@ def read_file_snapshot(path: str | os.PathLike[str]) -> tuple[bytes, str]:
     with open(path, "rb") as stream:
         content = stream.read()
     return content, hashlib.sha256(content).hexdigest()
+
+
+def validate_loaded_file(path: str | os.PathLike[str], digest: str, manifest: Mapping[str, str]) -> None:
+    """Require the decoded file's digest to match its captured identity."""
+    location = os.fspath(path)
+    if manifest.get(location) != digest:
+        raise ValueError(f"referenced file {location} changed while being loaded; prepare the forecast again")
+
+
+def validate_file_manifest(manifest: Mapping[str, str]) -> None:
+    """Require every referenced file to retain its captured bytes."""
+    for path, digest in manifest.items():
+        if file_digest(path) != digest:
+            raise ValueError(f"referenced file {path} changed; prepare the forecast again")
 
 
 _KERNEL_IDENTITY_KEYS = ("sha256", "shape", "pixel_scale_arcsec")

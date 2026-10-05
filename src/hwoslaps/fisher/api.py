@@ -15,10 +15,9 @@ from numpy.typing import ArrayLike
 from .._version import __version__
 from ..config.checks import ConfigError
 from ..config.schema import ConfigSource, EngineConfig, resolve_config
-from ..identity import array_digest, file_digest, json_ready
+from ..identity import array_digest, json_ready, validate_file_manifest, validate_loaded_file
 from ..observation.normalization import resolve_observing
 from ..observation.observation import Observation, observe
-from ..optics.optical_psf import OpticalPSF
 from ..scene.builder import Scene, build_scene, native_sampling_variation
 from ..scene.cosmology import Cosmology
 from ..scene.critical_curve import effective_einstein_radius
@@ -31,7 +30,7 @@ from .data_space import (DataSpace, all_pixels_mask, annulus_mask, build_data_sp
 from .engines.base import EngineContext, TemplateEngine, make_engine
 from .nuisances import NuisanceDesign, build_nuisance_design, resolve_nuisances
 from .positions import PositionSet, explicit_positions, grid_positions, ring_positions
-from .psf_pair import PsfPair, bind_psfs, truth_provider
+from .psf_pair import PsfPair, bind_psfs, truth_provider, validate_loaded_psf_files
 from .renderer import SceneRenderer
 from .result import ForecastResult
 from .statistics import ProfileLikelihoodWorkspace
@@ -104,9 +103,7 @@ class PreparedForecast:
                 digest = array_digest(np.asarray(kernel.convolver().kernel.native))
                 if digest != self.record[side + "_convolver_digests"][index]:
                     raise ValueError(f"the {side} convolver kernel {index} changed; prepare the forecast again")
-        for path, digest in self.record["file_digests"].items():
-            if file_digest(path) != digest:
-                raise ValueError(f"referenced file {path} changed; prepare the forecast again")
+        validate_file_manifest(self.record["file_digests"])
 
     def close(self) -> None:
         self.engine.close()
@@ -163,24 +160,14 @@ def _constant(renderer: SceneRenderer, scene: Scene, binding: Any) -> float | np
 
 
 def _validate_loaded_files(manifest: Mapping[str, str], assets: Mapping[str, Any], psfs: PsfPair) -> None:
-    def check(path: str, digest: str) -> None:
-        if manifest.get(path) != digest:
-            raise ValueError(f"referenced file {path} changed while being loaded; prepare the forecast again")
-
     for path, asset in assets.items():
-        check(path, asset.digest)
-    for binding in (psfs.truth_kernels, psfs.model_kernels):
-        for kernel in binding.kernels:
-            if kernel.source["kind"] == "file":
-                check(kernel.source["path"], kernel.source["file_sha256"])
-    draws = []
-    if isinstance(psfs.truth, OpticalPSF) and psfs.truth.draw is not None:
-        draws.append(psfs.truth.draw)
+        validate_loaded_file(path, asset.digest, manifest)
+    validate_loaded_psf_files(psfs.truth, psfs.truth_kernels, manifest)
+    validate_loaded_psf_files(psfs.model.provider, psfs.model_kernels, manifest)
     if psfs.model.knowledge_error is not None:
-        draws.append(psfs.model.knowledge_error.draw)
-    for draw in draws:
+        draw = psfs.model.knowledge_error.draw
         if draw.spec.prior.kind == "path":
-            check(str(draw.spec.prior.path), draw.prior_digest)
+            validate_loaded_file(draw.spec.prior.path, draw.prior_digest, manifest)
 
 
 def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution(),

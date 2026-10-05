@@ -6,6 +6,7 @@ from os import PathLike
 from typing import TYPE_CHECKING
 
 from .config.schema import ConfigSource, resolve_config
+from .identity import validate_file_manifest, validate_loaded_file
 from .observation.normalization import resolve_observing
 from .observation.observation import Observation, observe
 from .scene.builder import build_scene, native_sampling_variation
@@ -13,7 +14,7 @@ from .scene.cosmology import Cosmology
 from .scene.halos import Halo
 from .scene.image_source import load_image_asset
 from .scene.perturbers import realize_perturbers
-from .fisher.psf_pair import bind_truth, truth_provider
+from .fisher.psf_pair import bind_truth, truth_provider, validate_loaded_psf_files
 
 if TYPE_CHECKING:
     from .fisher.api import PreparedForecast
@@ -50,7 +51,9 @@ def simulate(source: ConfigSource | PreparedForecast, *, subhalo: Halo | None, n
                                sampling=source.observation.sampling)
     else:
         config = resolve_config(source, base_dir=base_dir)
-        config_digest = config.digest()
+        identity = config.capture_identity()
+        config_digest = identity["config_digest"]
+        manifest = identity["file_digests"]
         cosmology = Cosmology(config.cosmology)
         provider = truth_provider(config)
         setup = resolve_observing(config.scene, config.instrument, config.observation, truth=provider)
@@ -60,10 +63,14 @@ def simulate(source: ConfigSource | PreparedForecast, *, subhalo: Halo | None, n
         paths = dict.fromkeys(str(component.values["asset_path"]) for galaxy in (setup.scene.lens, setup.scene.source)
                               for component in galaxy.light if component.type == "Image")
         assets = {path: load_image_asset(path) for path in paths}
+        for path, asset in assets.items():
+            validate_loaded_file(path, asset.digest, manifest)
+        validate_loaded_psf_files(provider, kernels, manifest)
         smooth = build_scene(setup.scene, cosmology, subhalo=None, perturbers=perturbers, assets=assets)
         sampling = native_sampling_variation(smooth)
         scene = smooth if subhalo is None else build_scene(setup.scene, cosmology, subhalo=subhalo,
                                                          perturbers=perturbers, assets=assets)
         expected = observe(scene, kernels, setup.exposure, config_digest=config_digest,
                            photometry=setup.photometry, sampling=sampling)
+        validate_file_manifest(manifest)
     return expected if noise_seed is None else expected.draw(noise_seed)

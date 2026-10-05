@@ -191,10 +191,12 @@ def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_map
 
 
 @pytest.mark.parametrize("publication", ["after_capture", "after_read"])
-def test_input_publication_during_preparation_is_refused(minimal_mapping, publication):
+@pytest.mark.parametrize("product", ["forecast", "simulation"])
+def test_input_publication_during_preparation_is_refused(minimal_mapping, publication, product):
     import sys
     from hwoslaps.fisher.api import prepare_forecast
     from hwoslaps.identity import file_digest
+    from hwoslaps.simulation import simulate
 
     path = Path(minimal_mapping["psf"]["truth"]["path"])
     original = path.read_bytes()
@@ -211,7 +213,10 @@ def test_input_publication_during_preparation_is_refused(minimal_mapping, public
     sys.setprofile(publish)
     try:
         with pytest.raises(ValueError, match=str(path)):
-            prepare_forecast(minimal_mapping)
+            if product == "forecast":
+                prepare_forecast(minimal_mapping)
+            else:
+                simulate(minimal_mapping, subhalo=None, noise_seed=None)
         assert published == [True]
     finally:
         sys.setprofile(previous_profile)
