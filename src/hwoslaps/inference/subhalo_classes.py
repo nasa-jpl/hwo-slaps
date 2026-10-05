@@ -94,6 +94,26 @@ def _scales(mapping: SubhaloMassMapping | None, kind: str, centre: Any, log10_m2
 class TruncatedNFWSph(al.mp.NFWTruncatedSph):
     """Pinned BMO profile with array-namespace propagation through its radial functions."""
 
+    def coord_func_f(self, grid_radius, xp=np):
+        if xp is np:
+            return super().coord_func_f(grid_radius=grid_radius, xp=xp)
+        radius = xp.array([grid_radius]) if isinstance(grid_radius, (float, complex)) else xp.asarray(grid_radius)
+        regular = radius == 1.0
+        safe_radius = xp.where(regular, 2.0, radius)
+        value = super().coord_func_f(grid_radius=safe_radius, xp=xp)
+        # F is smooth at one; the parent's equality branch loses F'(1)=-2/3.
+        return xp.where(regular, 1.0 - (2.0 / 3.0) * (radius - 1.0), value)
+
+    def coord_func_g(self, grid_radius, xp=np):
+        if xp is np:
+            return super().coord_func_g(grid_radius=grid_radius, xp=xp)
+        radius = xp.array([grid_radius]) if isinstance(grid_radius, (float, complex)) else xp.asarray(grid_radius)
+        regular = radius == 1.0
+        safe_radius = xp.where(regular, 2.0, radius)
+        value = super().coord_func_g(grid_radius=safe_radius, xp=xp)
+        # G=(1-F)/(r**2-1) has the regular limits G(1)=1/3 and G'(1)=-2/5.
+        return xp.where(regular, 1.0 / 3.0 - (2.0 / 5.0) * (radius - 1.0), value)
+
     @aa.decorators.to_vector_yx
     @aa.decorators.transform
     def deflections_yx_2d_from(self, grid, xp=np, **kwargs):
