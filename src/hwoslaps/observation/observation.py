@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import types
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Final, Literal, Mapping
 
 import numpy as np
 
@@ -28,9 +28,12 @@ if TYPE_CHECKING:
     from .normalization import PhotometryRecord
 
 __all__ = [
-    "OBSERVATION_TABLE", "Observation", "ObservationSpec", "SKY_TABLE", "SkySpec", "observe",
+    "MAX_NATIVE_SAMPLING_VARIATION", "OBSERVATION_TABLE", "Observation", "ObservationSpec", "SKY_TABLE", "SkySpec", "observe",
     "parse_observation",
 ]
+
+# Measured by the native-pixel oracle in test_observation_sampling.py.
+MAX_NATIVE_SAMPLING_VARIATION: Final[float] = 0.063
 
 SKY_TABLE = Table(
     keys=(Key("rate_e_per_s", Real(min=0.0), "detected sky rate of one pixel", unit="e-/s per pixel"),),

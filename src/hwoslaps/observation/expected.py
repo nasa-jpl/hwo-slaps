@@ -17,6 +17,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from ..instrument import Detector, check_finite_number
+from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
 
 if TYPE_CHECKING:
     from ..optics.kernels import DetectorPSF, KernelBinding
@@ -132,8 +133,6 @@ def convolve_light(light_images: Mapping[str, np.ndarray], groups: Mapping[str, 
     Round-off negatives of the FFT convolution are kept; a plane with a value below
     ``-1e-10`` times its largest magnitude, or a non-finite value, raises ValueError.
     """
-    from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
-
     keys, group_keys, bound_keys = set(light_images), set(groups), set(kernels.group_index)
     if not keys == group_keys == bound_keys:
         raise ValueError(f"light images {sorted(keys)}, light groups {sorted(group_keys)} and kernel "
