@@ -79,6 +79,23 @@ def test_adaptive_reach_is_bounded_finite_and_never_repeats_an_evaluation():
     np.testing.assert_array_equal(result.masses_msun, sorted(visited))
 
 
+def test_adaptive_reach_stops_when_the_bracket_reaches_float_resolution():
+    visited = []
+
+    def evaluate(mass):
+        visited.append(mass)
+        if len(visited) > 200:
+            raise RuntimeError("refinement keeps evaluating a mass it has already measured")
+        return np.log10(mass) - 7
+
+    result = adaptive_mass_reach(evaluate, lower_mass_msun=1e7, upper_mass_msun=1e9, target=0.35,
+                                 interpolation="linear", tolerance_dex=1e-300, max_evaluations=1000)
+    assert len(set(visited)) == len(visited)
+    lower, upper = result.reach.lower_mass_msun, result.reach.upper_mass_msun
+    assert not lower < np.sqrt(lower * upper) < upper
+    assert result.reach.mass_msun == pytest.approx(10**7.35, rel=1e-12)
+
+
 def test_power_law_q_crosses_at_the_analytic_mass_with_log_interpolation():
     masses = np.array([1e7, 1e8, 1e9])
     slope, target, analytic = 0.8, 10.0, 10**7.4

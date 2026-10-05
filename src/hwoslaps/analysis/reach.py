@@ -119,9 +119,11 @@ def adaptive_mass_reach(evaluate: Callable[[float], float], *, lower_mass_msun: 
                         tolerance_dex: float = 0.05, max_evaluations: int = 32) -> AdaptiveMassResult:
     """Refine the crossing of ``evaluate(mass)`` by bisection in log mass inside ``[lower, upper]``.
 
-    The bracket is never extended. Refinement stops when the bracket is within
-    ``tolerance_dex``, after ``max_evaluations`` evaluations, or when the samples
-    stop being bracketed (a bound or a non-monotonic curve is reported as found).
+    The bracket is never extended and no mass is evaluated twice. Refinement
+    stops when the bracket is within ``tolerance_dex``, after
+    ``max_evaluations`` evaluations, when the bracket is too narrow to split at
+    double precision, or when the samples stop being bracketed (a bound or a
+    non-monotonic curve is reported as found).
     """
     bounds = np.asarray([lower_mass_msun, upper_mass_msun], dtype=float)
     if not np.all(np.isfinite(bounds)) or bounds[0] <= 0 or bounds[1] <= bounds[0]:
@@ -140,5 +142,7 @@ def adaptive_mass_reach(evaluate: Callable[[float], float], *, lower_mass_msun: 
         if np.log10(found.upper_mass_msun / found.lower_mass_msun) <= tolerance_dex:
             break
         middle = float(np.sqrt(found.lower_mass_msun * found.upper_mass_msun))
+        if not found.lower_mass_msun < middle < found.upper_mass_msun:
+            break
         samples[middle] = float(evaluate(middle))
     return AdaptiveMassResult(masses, values, found)
