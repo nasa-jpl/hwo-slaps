@@ -85,11 +85,12 @@ def test_written_yaml_reads_back_identically(tmp_path):
     pytest.param("scene:\n  light:\n    intensity: 1.0\n    intensity: 2.0\n", ".yaml:4: duplicate key 'intensity'",
                  id="nested-duplicate-key"),
     pytest.param("a: 1\n---\nb: 2\n", "single document", id="two-documents"),
+    pytest.param(b"name: Molin\xe9\n", "not UTF-8 text", id="latin-1-bytes"),
 ])
 def test_read_yaml_errors_name_the_file(content, fragment, tmp_path):
     path = tmp_path / "broken.yaml"
     if content is not None:
-        path.write_text(content, encoding="utf-8")
+        path.write_bytes(content if isinstance(content, bytes) else content.encode("utf-8"))
     with pytest.raises(ConfigError) as caught:
         read_yaml(path)
     assert caught.value.path == ""

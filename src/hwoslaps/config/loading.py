@@ -220,6 +220,8 @@ def read_yaml(path: ConfigPath) -> dict[str, Any]:
             raise ConfigError("", f"{where}: {problem}") from exc
         except yaml.YAMLError as exc:
             raise ConfigError("", f"{location}: {exc}") from exc
+        except UnicodeDecodeError as exc:
+            raise ConfigError("", f"{location}: not UTF-8 text ({exc.reason})") from exc
     if not isinstance(document, dict):
         raise ConfigError("", f"{location}: the document must be a mapping, got {type(document).__name__}")
     return document
