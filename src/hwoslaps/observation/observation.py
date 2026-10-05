@@ -17,6 +17,7 @@ import numpy as np
 from ..config.checks import Integer, Key, Real, Table
 from ..identity import array_digest
 from ..instrument import check_finite_number
+from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
 from .expected import Exposure, Plane, convolve_light
 from .noise import draw_noisy_adu
 
@@ -125,6 +126,13 @@ class Observation:
         for name, array in arrays.items():
             if array.shape != shape:
                 raise ValueError(f"{name} has shape {array.shape}; the grid is {shape}")
+            if not np.all(np.isfinite(array)):
+                raise ValueError(f"{name} contains non-finite values")
+        if np.any(self.noise_map_adu <= 0.0):
+            raise ValueError("noise_map_adu must be strictly positive")
+        if any(abs(kernel.pixel_scale_arcsec - self.grid.pixel_scale_arcsec) > PIXEL_SCALE_ATOL_ARCSEC
+               for kernel in self.psfs.kernels):
+            raise ValueError("observation kernels and grid have different angular sampling")
         if set(self.sampling) != set(self.psfs.group_index):
             raise ValueError(f"sampling covers {sorted(self.sampling)}; the light groups are "
                              f"{sorted(self.psfs.group_index)}")
