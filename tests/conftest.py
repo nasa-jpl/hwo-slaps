@@ -79,3 +79,43 @@ def image_asset(tmp_path):
     np.savez(path, sb=asset.sb, pixel_scale_arcsec=np.asarray(asset.pixel_scale_arcsec, dtype=np.float64),
              metadata_json=np.asarray(json.dumps(json_ready(asset.metadata), sort_keys=True)))
     return path
+
+
+@pytest.fixture
+def minimal_mapping(tmp_path, tiny_gaussian_kernel):
+    """Fresh final-schema inputs for a small kernel-PSF forecast."""
+    path = tmp_path / "kernel.npy"
+    np.save(path, tiny_gaussian_kernel)
+    return {
+        "seed": 11,
+        "cosmology": {"name": "Planck15"},
+        "scene": {
+            "grid": {"shape": [41, 41], "pixel_scale_arcsec": 0.05, "over_sample_size": 2},
+            "lens": {"redshift": 0.2, "mass": {
+                "mass": {"type": "Isothermal", "centre": [0.0, 0.0], "einstein_radius": 0.8,
+                         "ell_comps": [0.05, 0.0]}}},
+            "source": {"redshift": 0.6, "light": {
+                "light": {"type": "Exponential", "centre": [-0.03, 0.08], "ell_comps": [0.0, 0.0],
+                          "intensity": 1.0, "effective_radius": 0.12}}},
+            "subhalo": {"type": "NFW", "concentration": {"kind": "moline2017_eq7", "x_sub": 1.0}},
+        },
+        "psf": {"truth": {"kind": "kernel", "path": str(path), "pixel_scale_arcsec": 0.05}},
+        "instrument": {"detector": {"gain_e_per_adu": 1.0, "read_noise_e": 0.2,
+                                     "dark_current_e_per_s": 0.002}},
+        "observation": {"exposure_time_s": 900.0, "sky": {"rate_e_per_s": 1.0}},
+        "forecast": {"positions": {"kind": "explicit", "positions_yx": [[0.0, 0.8], [0.4, -0.6]]},
+                     "mask": {"kind": "all_pixels"}},
+    }
+
+
+@pytest.fixture
+def write_config(tmp_path):
+    """Write a YAML mapping beside its assets and return its path."""
+    from hwoslaps.config.loading import dump_yaml
+
+    def write(mapping, name="config.yaml"):
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(dump_yaml(mapping), encoding="utf-8")
+        return path
+    return write
