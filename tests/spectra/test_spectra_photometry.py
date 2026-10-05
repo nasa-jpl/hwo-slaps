@@ -98,3 +98,20 @@ def test_bin_rates_partition_one_integrand_and_keep_narrow_line_photons(spectral
     line_total = detected_flux_per_m2(line_sed, 1.0, response) * 6.62607015e-34 / 1.0e-26
     np.testing.assert_array_equal(whole_line[[0, 1, 2, 4, 5, 6]], 0.0)
     assert whole_line[3] == pytest.approx(line_total, rel=1.0e-13)
+
+
+@pytest.mark.parametrize("normalization", [1.0, 1.0e296, 1.0e308, 1.0e-308])
+def test_finite_table_rescaling_preserves_detected_photometry_and_spectral_means(spectral_file, normalization):
+    from hwoslaps.spectra.photometry import band_mean_throughput
+
+    response = build_bandpass(parse_bandpass({"kind": "top_hat", "min_nm": 450.0, "max_nm": 550.0,
+                                              "throughput": 0.5}, "band"))
+    table = spectral_file([400.0, 600.0], [normalization, normalization], name="scaled_flat")
+    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": "fnu"}, "sed"), redshift=0.0)
+    expected = 33.6 * 0.5 * 3631.0 * 10.0**(-0.4*24.0) * 1.0e-26 / 6.62607015e-34 * math.log(550.0/450.0)
+    assert rate_from_ab(24.0, response, 33.6, sed=sed, reference_band=response) == pytest.approx(expected, rel=1.0e-12)
+    per_m2 = 0.5 * 1.0e-26 / 6.62607015e-34 * math.log(550.0/450.0)
+    assert detected_flux_per_m2(sed, 1.0/normalization, response) == pytest.approx(per_m2, rel=1.0e-12)
+    mean_wavelength = (550.0-450.0)/1.0e9/math.log(550.0/450.0)
+    assert effective_wavelength_m(sed, response) == pytest.approx(mean_wavelength, rel=1.0e-9)
+    assert band_mean_throughput(response, sed) == pytest.approx(0.5, rel=1.0e-12)

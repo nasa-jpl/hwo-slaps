@@ -48,19 +48,62 @@ def _positive_integral(sed: SED | None, band: Bandpass) -> float:
     return integral
 
 
+def _scaled_measure(sed: SED | None, band: Bandpass, *, response: bool = True) -> tuple[np.ndarray, np.ndarray, float]:
+    """One bounded integrand and its logarithmic scale, on the prescribed spectral grid."""
+    wavelengths, throughput = band.integration_grid(sed)
+    shape = np.ones_like(wavelengths) if sed is None else sed.fnu(wavelengths)
+    weights = throughput if response else np.ones_like(throughput)
+    positive = (shape > 0.0) & (weights > 0.0)
+    normalized = np.zeros_like(wavelengths)
+    if not np.any(positive):
+        return wavelengths, normalized, -math.inf
+    logarithms = np.log(shape[positive]) + np.log(weights[positive])
+    scale = float(np.max(logarithms))
+    normalized[positive] = np.exp(logarithms - scale)
+    return wavelengths, normalized, scale
+
+
+def _log_integral(sed: SED | None, band: Bandpass, *, response: bool = True) -> float:
+    wavelengths, normalized, scale = _scaled_measure(sed, band, response=response)
+    integral = integrate_dlnlambda(normalized, wavelengths)
+    return -math.inf if integral == 0.0 else scale + math.log(integral)
+
+
+def _positive_log_integral(sed: SED | None, band: Bandpass, *, response: bool = True) -> float:
+    integral = _log_integral(sed, band, response=response)
+    if not math.isfinite(integral):
+        raise ValueError("the spectrum has no photons through the bandpass")
+    return integral
+
+
+def _positive_from_log(value: float, name: str) -> float:
+    try:
+        result = math.exp(value)
+    except OverflowError as error:
+        raise ValueError(f"{name} has no finite representable value") from error
+    if not math.isfinite(result) or result <= 0.0:
+        raise ValueError(f"{name} has no positive finite representable value")
+    return result
+
+
 def detected_flux_per_m2(sed: SED, scale_jy: float, bandpass: Bandpass) -> float:
     scale = _number(scale_jy, "scale_jy", positive=True)
-    return scale * JANSKY_SI / PLANCK_J_S * _photon_integral(sed, bandpass)
+    integral = _log_integral(sed, bandpass)
+    if integral == -math.inf:
+        return 0.0
+    return _positive_from_log(math.log(scale) + math.log(JANSKY_SI) - math.log(PLANCK_J_S) + integral,
+                              "detected flux per square metre")
 
 
 def ab_scale_jy(sed: SED, magnitude: float, band: Bandpass) -> float:
-    return ab_to_fnu_jy(magnitude) * _positive_integral(None, band) / _positive_integral(sed, band)
+    scale = math.log(ab_to_fnu_jy(magnitude)) + _positive_log_integral(None, band) - _positive_log_integral(sed, band)
+    return _positive_from_log(scale, "SED scale_jy")
 
 
 def synthetic_ab_mag(sed: SED, scale_jy: float, band: Bandpass) -> float:
     scale = _number(scale_jy, "scale_jy", positive=True)
-    mean_fnu = scale * _positive_integral(sed, band) / _positive_integral(None, band)
-    return fnu_jy_to_ab(mean_fnu)
+    log_mean = math.log(scale) + _positive_log_integral(sed, band) - _positive_log_integral(None, band)
+    return -2.5 / math.log(10.0) * (log_mean - math.log(AB_ZERO_POINT_JY))
 
 
 def rate_from_ab(magnitude: float, bandpass: Bandpass, area_m2: float, *,
@@ -70,7 +113,13 @@ def rate_from_ab(magnitude: float, bandpass: Bandpass, area_m2: float, *,
         return area * ab_to_fnu_jy(magnitude) * JANSKY_SI / PLANCK_J_S * _positive_integral(None, bandpass)
     if sed is None:
         raise ValueError("a reference-band magnitude requires an SED")
-    return area * detected_flux_per_m2(sed, ab_scale_jy(sed, magnitude, reference_band), bandpass)
+    instrument = _log_integral(sed, bandpass)
+    if instrument == -math.inf:
+        return 0.0
+    reference = _positive_log_integral(sed, reference_band)
+    rate = (math.log(area) + math.log(ab_to_fnu_jy(magnitude)) + math.log(JANSKY_SI) - math.log(PLANCK_J_S)
+            + _positive_log_integral(None, reference_band) + instrument - reference)
+    return _positive_from_log(rate, "reference-band detected rate")
 
 
 def sky_rate_e_per_s_per_pixel(ab_mag_per_arcsec2: float, bandpass: Bandpass, area_m2: float,
@@ -81,18 +130,15 @@ def sky_rate_e_per_s_per_pixel(ab_mag_per_arcsec2: float, bandpass: Bandpass, ar
 
 
 def effective_wavelength_m(sed: SED, bandpass: Bandpass) -> float:
-    wavelengths, throughput = bandpass.integration_grid(sed)
-    photon_shape = throughput * sed.fnu(wavelengths)
+    wavelengths, photon_shape, _ = _scaled_measure(sed, bandpass)
     denominator = integrate_dlnlambda(photon_shape, wavelengths)
     if denominator <= 0.0:
         raise ValueError("the spectrum has no photons through the bandpass")
-    return integrate_dlnlambda(photon_shape * wavelengths, wavelengths) / denominator
+    maximum = float(wavelengths[-1])
+    return maximum * (integrate_dlnlambda(photon_shape * (wavelengths / maximum), wavelengths) / denominator)
 
 
 def band_mean_throughput(bandpass: Bandpass, sed: SED | None = None) -> float:
-    wavelengths, throughput = bandpass.integration_grid(sed)
-    shape = np.ones_like(wavelengths) if sed is None else sed.fnu(wavelengths)
-    denominator = integrate_dlnlambda(shape, wavelengths)
-    if denominator <= 0.0:
-        raise ValueError("the spectrum has no photons on the bandpass support")
-    return integrate_dlnlambda(shape * throughput, wavelengths) / denominator
+    numerator = _positive_log_integral(sed, bandpass)
+    denominator = _positive_log_integral(sed, bandpass, response=False)
+    return _positive_from_log(numerator - denominator, "band mean throughput")
