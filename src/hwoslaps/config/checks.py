@@ -433,11 +433,20 @@ def _is_container(check: Any) -> bool:
     return isinstance(_unwrap(check), _Container)
 
 
-def _path_check(check: Any) -> bool:
+def _walk_signature(check: Any) -> Any:
+    """What the path walk sees of a check: where the file paths are and which containers it enters."""
     check = _unwrap(check)
+    if isinstance(check, FilePath):
+        return "path"
+    if isinstance(check, _Container):
+        return ("container", id(check))
     if isinstance(check, Union):
-        return any(_path_check(member) for member in check.checks)
-    return isinstance(check, FilePath)
+        return ("union", tuple(_walk_signature(member) for member in check.checks))
+    if isinstance(check, (ListOf, Pair)):
+        return ("items", _walk_signature(check.item))
+    if isinstance(check, MapOf):
+        return ("values", _walk_signature(check.value))
+    return "value"
 
 
 def _normal_default(key: Key) -> Key:
@@ -554,9 +563,10 @@ class Table(_Container):
 class Variants(_Container):
     """A mapping whose discriminator (``type`` or ``kind``) selects the table of its other keys.
 
-    A key name declared by several variants has the same path-ness in all of them, and a
-    container under such a name is the same table object, so a fragment without its
-    discriminator merges and walks unambiguously through the union of the variant tables.
+    A key name declared by several variants has file paths at the same places in all of
+    them (inside lists, maps and unions too), and every container under such a name is the
+    same table object, so a fragment without its discriminator merges and walks
+    unambiguously through the union of the variant tables.
     """
 
     discriminator: str
@@ -575,10 +585,8 @@ class Variants(_Container):
             if self.discriminator in table._checks:
                 raise TypeError(f"variant {kind!r} declares the discriminator {self.discriminator!r} as a key")
             for name, check in table._checks.items():
-                first, other = _unwrap(shared.setdefault(name, check)), _unwrap(check)
-                if _path_check(first) != _path_check(other) or (
-                        (_is_container(first) or _is_container(other)) and first is not other):
-                    raise TypeError(f"key {name!r} must have the same path checks in every variant "
+                if _walk_signature(shared.setdefault(name, check)) != _walk_signature(check):
+                    raise TypeError(f"key {name!r} must have file paths at the same places in every variant "
                                     "(containers must be the same table object)")
         object.__setattr__(self, "tables", tables)
         object.__setattr__(self, "_checks", types.MappingProxyType(shared))

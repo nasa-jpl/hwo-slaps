@@ -314,12 +314,17 @@ def test_path_transform_touches_only_path_keys():
     assert repr(document) == before
     assert all(isinstance(check, FilePath) for check in seen) and len(seen) == 4
     assert PATHS.transform_paths({"psf": {"path": "k.npy"}}, resolve) == {"psf": {"path": "/root/k.npy"}}
-    with pytest.raises(TypeError):
-        Variants("kind", {"a": Table((Key("path", FilePath((".npy",)), ""),)),
-                          "b": Table((Key("path", Text(), ""),))})
-    with pytest.raises(TypeError):
-        Variants("kind", {"a": Table((Key("pupil", Table(()), "", {}),)),
-                          "b": Table((Key("pupil", Table(()), "", {}),))})
+    bandpass = Variants("kind", {"table": Table((Key("factors", ListOf(FACTOR), "", []),)),
+                                 "tophat": Table((Key("factors", ListOf(FACTOR), "", []),))})
+    assert bandpass.transform_paths({"factors": [{"path": "f.dat"}]}, resolve) == {"factors": [{"path": "/root/f.dat"}]}
+    for tables in (
+        {"a": Table((Key("files", ListOf(FilePath((".npy",))), "", []),)),
+         "b": Table((Key("files", ListOf(Text()), "", []),))},
+        {"a": Table((Key("path", FilePath((".npy",)), ""),)), "b": Table((Key("path", Text(), ""),))},
+        {"a": Table((Key("pupil", Table(()), "", {}),)), "b": Table((Key("pupil", Table(()), "", {}),))},
+    ):
+        with pytest.raises(TypeError, match="file paths at the same places"):
+            Variants("kind", tables)
 
 
 def test_named_components_keep_order_and_require_component_names():
