@@ -148,3 +148,52 @@ def test_text_writers_use_finite_canonical_values_and_refuse_duplicate_json_keys
     malformed.write_text('{"schema":"hwoslaps.case","version":1,"version":2,"result":{}}')
     with pytest.raises(ValueError, match="duplicate"):
         load_case(malformed)
+
+
+@pytest.mark.parametrize("defect,match", [
+    ("data_inf", "data_adu.*non-finite"), ("expected_nan", "expected_adu.*non-finite"),
+    ("rate_nan", "light_rate_e_per_s.*non-finite"), ("plane_nan", "light_rate_by_plane.*non-finite"),
+    ("sigma_zero", "strictly positive"), ("sigma_negative", "strictly positive"),
+    ("grid_scale", "pixel_scale_arcsec"), ("grid_oversampling", "over_sample_size"),
+    ("grid_shape_bool", "grid.shape"), ("kernel_sampling", "angular sampling"),
+    ("seed_text", "noise_seed"), ("seed_bool", "noise_seed"), ("digest_bool", "config_digest"),
+])
+def test_observation_loader_rejects_single_field_domain_defects(tmp_path, defect, match):
+    path = save_observation(observation_value(noisy=True), tmp_path / "valid.npz")
+    with np.load(path, allow_pickle=False) as stored:
+        members = {name: stored[name] for name in stored.files}
+    metadata = json.loads(str(members["metadata_json"]))
+    field = {"data_inf": "data_adu", "expected_nan": "expected_adu", "rate_nan": "light_rate_e_per_s",
+             "plane_nan": "light__source_e_per_s", "sigma_zero": "noise_map_adu", "sigma_negative": "noise_map_adu"}.get(defect)
+    if field is not None:
+        members[field] = members[field].copy()
+        members[field][0, 0] = {"data_inf": np.inf, "sigma_zero": 0.0, "sigma_negative": -1.0}.get(defect, np.nan)
+    elif defect == "grid_scale":
+        metadata["grid"]["pixel_scale_arcsec"] = -0.1
+    elif defect == "grid_oversampling":
+        metadata["grid"]["over_sample_size"] = 0
+    elif defect == "grid_shape_bool":
+        metadata["grid"]["shape"] = [True, 3]
+    elif defect == "kernel_sampling":
+        metadata["grid"]["pixel_scale_arcsec"] = 0.2
+    elif defect == "seed_text":
+        metadata["noise_seed"] = "eleven"
+    elif defect == "seed_bool":
+        metadata["noise_seed"] = True
+    else:
+        metadata["config_digest"] = False
+    members["metadata_json"] = np.asarray(json.dumps(metadata))
+    np.savez(tmp_path / "invalid.npz", **members)
+    with pytest.raises(ValueError, match=match):
+        load_observation(tmp_path / "invalid.npz")
+
+
+def test_observation_transport_keeps_valid_negative_noisy_data(tmp_path):
+    from dataclasses import replace
+    original = observation_value(noisy=True)
+    data = original.data_adu.copy()
+    data[0, 0] = -5.0
+    original = replace(original, data_adu=data)
+    loaded = load_observation(save_observation(original, tmp_path / "negative.npz"))
+    assert loaded.data_adu[0, 0] == -5.0
+    assert loaded.data_adu.tobytes() == original.data_adu.tobytes()
