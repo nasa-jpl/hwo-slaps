@@ -236,6 +236,61 @@ def test_off_plane_hypothesis_jax_likelihood_and_gradient(redshift, mode, prepar
         assert value == pytest.approx(0.5 * numpy_case.chi_squared("subhalo", vector), rel=1e-10, abs=1e-10)
 
 
+def test_round_exponential_gradient_matches_numpy_objective_differences(prepared_forecast_factory):
+    from hwoslaps.simulation import simulate
+
+    prepared = prepared_forecast_factory({"scene": {"source": {"light": {"light": {"ell_comps": [0.0, 0.0]}}}}})
+    trial = prepared.hypothesis(1e8, (0.4, -0.6))
+    observation = simulate(prepared, subhalo=trial, noise_seed=None)
+    fit = FitSpec(mode="fixed_template")
+    case = prepare_case(prepared, trial, observation, fit=fit, use_jax=True)
+    numpy_case = prepare_case(prepared, trial, observation, fit=fit, use_jax=False)
+    for role in ("smooth", "subhalo"):
+        model = case.model(role)
+        point = (model.truth - model.lower) / (model.upper - model.lower)
+        if role == "subhalo":
+            point[model.parameter_names.index("galaxies.source.light.intensity")] += 0.2
+        value, gradient = case.objective(role).value_and_gradient(point)
+        assert np.isfinite(value) and np.all(np.isfinite(gradient))
+        for index, name in enumerate(model.parameter_names):
+            if "source.light.ell_comps" not in name:
+                continue
+            plus, minus = point.copy(), point.copy()
+            plus[index] += 1e-4
+            minus[index] -= 1e-4
+            oracle = (numpy_case.chi_squared(role, model.lower + plus * (model.upper - model.lower))
+                      - numpy_case.chi_squared(role, model.lower + minus * (model.upper - model.lower))) / 4e-4
+            assert abs(oracle) > 0.1
+            assert gradient[index] == pytest.approx(oracle, rel=2e-6, abs=1e-6)
+    assert case.models.smooth.galaxies[-1].components[0][1].profile_class == "hwoslaps.inference.light_profiles:Exponential"
+    elliptical = prepared_forecast_factory()
+    original = prepare_case(elliptical, elliptical.hypothesis(1e8, (0.4, -0.6)), elliptical.observation,
+                            fit=fit, use_jax=True)
+    assert original.models.smooth.galaxies[-1].components[0][1].profile_class == "autolens:lp.Exponential"
+
+
+def test_coincident_light_cusp_is_recorded_by_refinement(prepared_forecast_factory):
+    from hwoslaps.inference.refine import refine
+    from hwoslaps.inference.starts import RefineStart
+
+    prepared = prepared_forecast_factory({"scene": {"grid": {"shape": [41, 41], "over_sample_size": 1},
+        "lens": {"light": {"bulge": {"type": "Exponential", "centre": [0.0, 0.0], "ell_comps": [0.0, 0.0],
+                                      "intensity": 0.2, "effective_radius": 0.4}}}}})
+    case = prepare_case(prepared, prepared.hypothesis(1e8, (0.4, -0.6)), prepared.observation,
+                        fit=FitSpec(mode="fixed_template"), use_jax=True)
+    model = case.model("smooth")
+    likelihood = case.log_likelihood("smooth", model.truth)
+    assert np.isfinite(likelihood)
+    starts = tuple(RefineStart.from_physical(index=index, physical=model.truth, lower=model.lower, upper=model.upper,
+                   source="sampler_ml" if index == 0 else "sampler_sample", original=index != 0,
+                   origin={"saved_log_likelihood": likelihood} if index == 0 else {}) for index in range(3))
+    outcome = refine(starts, case.objective("smooth"), RefineSettings(original_start_count=2))
+    assert outcome.acceptance_status is RoleStatus.UNRESOLVED
+    assert outcome.best_log_likelihood is None
+    assert all("Exponential gradient is undefined at an exactly zero-radius" in row["message"]
+               for row in outcome.to_mapping()["record"]["runs"])
+
+
 def test_custom_mask_case_records_round_trip(prepared_forecast, tmp_path):
     from hwoslaps.inference.settings import PixelMask
     from hwoslaps.simulation import simulate

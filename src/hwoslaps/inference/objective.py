@@ -58,7 +58,8 @@ def _residual_array(value: Any, xp: Any) -> Any:
     return xp.asarray(getattr(value, "array", value)).reshape(-1)
 
 
-def jax_objective(analysis: Any, model: Any, lower: Sequence[float], upper: Sequence[float]) -> BoxObjective:
+def jax_objective(analysis: Any, model: Any, lower: Sequence[float], upper: Sequence[float], *,
+                  check_gradient_domain: bool = False) -> BoxObjective:
     """The compiled objective of an AutoLens ``analysis`` and its AutoFit ``model``.
 
     ``jax.jit(jax.value_and_grad(f))`` and the compiled residual are built once here; the direct
@@ -83,7 +84,17 @@ def jax_objective(analysis: Any, model: Any, lower: Sequence[float], upper: Sequ
         residual = residual_jax(x)
         return 0.5 * jnp.vdot(residual, residual)
 
-    value_and_grad = jax.jit(jax.value_and_grad(half_chi2))
+    if check_gradient_domain:
+        from jax.experimental import checkify
+
+        checked_gradient = jax.jit(checkify.checkify(jax.value_and_grad(half_chi2)))
+
+        def value_and_grad(x):
+            error, result = checked_gradient(x)
+            error.throw()
+            return result
+    else:
+        value_and_grad = jax.jit(jax.value_and_grad(half_chi2))
     residual_compiled = jax.jit(residual_jax)
 
     def value_and_gradient(z: np.ndarray) -> tuple[float, np.ndarray]:
