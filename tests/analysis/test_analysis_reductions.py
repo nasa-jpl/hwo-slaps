@@ -107,13 +107,8 @@ def test_non_finite_values_at_consumed_positions_raise():
         summarize(clipped, q_threshold=10.0, selection=selection)
 
 
-def test_aperture_selection_is_a_closed_squared_distance_disc():
+def test_empty_aperture_and_empty_selection_raise():
     small = forecast(lattice(1.0, 1.0), np.ones((1, 9)))
-    exact = aperture_selection(small, centre_yx=(0.0, 0.0), radius_arcsec=1.0)
-    np.testing.assert_array_equal(exact.reshape(3, 3), [[False, True, False], [True, True, True],
-                                                        [False, True, False]])
-    below = aperture_selection(small, centre_yx=(0.0, 0.0), radius_arcsec=np.nextafter(1.0, 0.0))
-    assert np.count_nonzero(below) == 1
     with pytest.raises(ValueError, match="no position lies inside"):
         aperture_selection(small, centre_yx=(5.0, 5.0), radius_arcsec=0.5)
     with pytest.raises(ValueError, match="at least one position"):

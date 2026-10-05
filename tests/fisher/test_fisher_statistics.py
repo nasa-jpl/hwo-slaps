@@ -239,6 +239,17 @@ def test_workspace_data_size_is_fixed_at_construction(design):
         space.evaluate_bank(np.ones((1, 5)), bias_whitened=np.ones(4))
 
 
+@pytest.mark.parametrize("names, precision, match", [
+    (["shear_1", "shear_1"], [0.0, 0.0], "must be unique"),
+    (["shear_1"], [0.0, 0.0], "must be 2 non-empty strings"),
+    (["shear_1", "shear_2"], [0.0, -1.0], "must be non-negative"),
+    (["shear_1", "shear_2"], [0.0], r"prior_precision must have shape \(2,\)"),
+], ids=["duplicate-names", "name-count", "negative-precision", "precision-shape"])
+def test_workspace_refuses_inconsistent_nuisance_inputs(names, precision, match):
+    with pytest.raises(ValueError, match=match):
+        ProfileLikelihoodWorkspace(np.eye(3)[:, :2], np.array(precision), names)
+
+
 def test_significantly_negative_profiled_information_raises():
     space = workspace(np.eye(2))
     with pytest.raises(ValueError, match="significantly negative"):

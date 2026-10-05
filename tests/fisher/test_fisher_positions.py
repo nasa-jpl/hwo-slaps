@@ -54,6 +54,18 @@ def test_annulus_layout_keeps_closed_radii_and_lattice_indices():
         grid_positions((0.0, 0.0), spacing_arcsec=0.1, half_width_arcsec=0.2, annulus=(0.01, 0.02))
 
 
+@pytest.mark.parametrize("half_width, annulus, match", [
+    (0.999, None, "must be at least spacing_arcsec"),
+    (1.0, (-0.1, 1.0), "0 <= inner < outer"),
+    (1.0, (1.0, 1.0), "0 <= inner < outer"),
+    (1.0, (1.5, 1.0), "0 <= inner < outer"),
+    (1.0, (np.nan, 1.0), "0 <= inner < outer"),
+], ids=["half-width-below-spacing", "negative-inner", "equal-radii", "inverted-radii", "non-finite-inner"])
+def test_grid_layout_refuses_invalid_geometry(half_width, annulus, match):
+    with pytest.raises(ValueError, match=match):
+        grid_positions((0.0, 0.0), spacing_arcsec=1.0, half_width_arcsec=half_width, annulus=annulus)
+
+
 @pytest.mark.parametrize("annulus, expected", [
     (None, [(i, j) for i in range(5) for j in range(5) if i in (0, 4) or j in (0, 4)]),
     ((0.0, 1.5), [(1, 1), (1, 2), (1, 3), (2, 1), (2, 3), (3, 1), (3, 2), (3, 3)]),

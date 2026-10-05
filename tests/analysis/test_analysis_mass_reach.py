@@ -62,7 +62,11 @@ def test_invalid_measured_axes_are_rejected(masses, values, interpolation):
         crossing(masses, values, target=0.5, interpolation=interpolation)
 
 
-def test_adaptive_reach_is_bounded_finite_and_never_repeats_an_evaluation():
+@pytest.mark.parametrize("tolerance_dex, max_evaluations, calls, width_dex", [
+    (0.01, 12, 2 + 8, 2 / 2**8), (1e-6, 5, 5, 2 / 2**3),
+], ids=["tolerance-stops", "evaluation-cap-stops"])
+def test_adaptive_reach_is_bounded_finite_and_never_repeats_an_evaluation(tolerance_dex, max_evaluations, calls,
+                                                                          width_dex):
     visited = []
 
     def evaluate(mass):
@@ -70,12 +74,14 @@ def test_adaptive_reach_is_bounded_finite_and_never_repeats_an_evaluation():
         return np.log10(mass) - 7
 
     result = adaptive_mass_reach(evaluate, lower_mass_msun=1e7, upper_mass_msun=1e9, target=0.35,
-                                 interpolation="linear", tolerance_dex=0.01, max_evaluations=12)
-    assert len(visited) <= 12
+                                 interpolation="linear", tolerance_dex=tolerance_dex,
+                                 max_evaluations=max_evaluations)
+    assert len(visited) == calls
     assert len(set(visited)) == len(visited)
     assert all(1e7 <= mass <= 1e9 for mass in visited)
+    assert result.reach.status == "bracketed"
     assert result.reach.mass_msun == pytest.approx(10**7.35)
-    assert np.log10(result.reach.upper_mass_msun / result.reach.lower_mass_msun) <= 0.01
+    assert np.log10(result.reach.upper_mass_msun / result.reach.lower_mass_msun) == pytest.approx(width_dex)
     np.testing.assert_array_equal(result.masses_msun, sorted(visited))
 
 
