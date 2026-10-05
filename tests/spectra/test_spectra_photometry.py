@@ -78,8 +78,11 @@ def test_narrow_line_between_dense_nodes_is_integrated(spectral_file, frame):
 
 
 def test_bin_rates_partition_one_integrand_and_keep_narrow_line_photons(spectral_file):
-    response = band()
-    table = spectral_file([400.0, 499.998, 500.0, 500.002, 600.0], [0.0, 0.0, 1.0, 0.0, 0.0])
+    qe = spectral_file([400.0, 500.0, 600.0], [0.4, 0.5, 0.6], name="qe")
+    response = build_bandpass(parse_bandpass({"kind": "product", "support_nm": [450.0, 550.0],
+        "factors": [{"kind": "table", **qe}, {"kind": "constant", "value": 0.832}]}, "band"))
+    knots = np.array([400.0, 499.998, 500.0, 500.002, 600.0])
+    table = spectral_file(knots, 0.001*knots+np.array([0.0, 0.0, 1.0, 0.0, 0.0]), name="continuum_line")
     sed = build_sed(parse_sed({"kind": "table", **table, "quantity": "fnu"}, "sed"), redshift=0.0)
     wavelengths, throughput = response.integration_grid(sed)
     integrand = throughput * sed.fnu(wavelengths)
@@ -87,6 +90,11 @@ def test_bin_rates_partition_one_integrand_and_keep_narrow_line_photons(spectral
     rates = bin_integrals(integrand, wavelengths, edges)
     total = detected_flux_per_m2(sed, 1.0, response) * 6.62607015e-34 / 1.0e-26
     assert rates.sum() == pytest.approx(total, rel=1.0e-13)
-    whole_line = bin_integrals(integrand, wavelengths, np.array([450.0, 460.0, 480.0, 495.0, 505.0, 520.0, 540.0, 550.0])/1.0e9)
+    line_table = spectral_file(knots, [0.0, 0.0, 1.0, 0.0, 0.0], name="line_only")
+    line_sed = build_sed(parse_sed({"kind": "table", **line_table, "quantity": "fnu"}, "sed"), redshift=0.0)
+    line_grid, line_throughput = response.integration_grid(line_sed)
+    whole_line = bin_integrals(line_throughput*line_sed.fnu(line_grid), line_grid,
+        np.array([450.0, 460.0, 480.0, 495.0, 505.0, 520.0, 540.0, 550.0])/1.0e9)
+    line_total = detected_flux_per_m2(line_sed, 1.0, response) * 6.62607015e-34 / 1.0e-26
     np.testing.assert_array_equal(whole_line[[0, 1, 2, 4, 5, 6]], 0.0)
-    assert whole_line[3] == pytest.approx(total, rel=1.0e-13)
+    assert whole_line[3] == pytest.approx(line_total, rel=1.0e-13)

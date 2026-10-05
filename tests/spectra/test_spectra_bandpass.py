@@ -59,3 +59,28 @@ def test_nodes_and_clipped_bins_match_hand_geometry():
     values = np.array([1.0, 3.0, 2.0])
     wavelengths = np.exp([0.0, 1.0, 2.0])
     np.testing.assert_allclose(bin_integrals(values, wavelengths, np.exp([0.0, 0.5, 0.5, 2.0])), [0.75, 0.0, 3.75], atol=1.0e-14)
+
+
+def test_repeated_factor_path_refuses_two_loaded_file_epochs(spectral_file):
+    import sys
+    from pathlib import Path
+    from hwoslaps.spectra.tables import read_table
+
+    table = spectral_file([400.0, 600.0], [0.4, 0.6])
+    path = Path(table["path"])
+    original = path.read_bytes()
+    previous = sys.getprofile()
+    changed = []
+    def publish(frame, event, returned):
+        if not changed and event == "return" and frame.f_code is read_table.__code__:
+            np.savez(path, wave=[400.0, 600.0], response=[0.3, 0.8])
+            changed.append(True)
+    sys.setprofile(publish)
+    try:
+        with pytest.raises(ValueError, match="changed between factor reads"):
+            build_bandpass(parse_bandpass({"kind": "product", "support_nm": [450.0, 550.0],
+                "factors": [{"kind": "table", **table}, {"kind": "table", **table}]}, "band"))
+        assert changed == [True]
+    finally:
+        sys.setprofile(previous)
+        path.write_bytes(original)
