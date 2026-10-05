@@ -48,3 +48,18 @@ def test_rest_frame_and_blackbody_are_refused_for_analytic_kinds():
         parse_sed({"kind": "power_law", "index": 1.0, "frame": "rest"}, "sed")
     with pytest.raises(ConfigError, match="kind"):
         parse_sed({"kind": "blackbody", "temperature_k": 5000.0}, "sed")
+
+
+@pytest.mark.parametrize("quantity", ["fnu", "flambda"])
+def test_log_fnu_preserves_linear_table_interpolation_without_intermediate_overflow(spectral_file, quantity):
+    table = spectral_file([400.0, 600.0], [0.0, 1.0e308])
+    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": quantity}, "sed"), redshift=0.0)
+    wavelengths = np.array([400.0, 450.0, 500.0, 600.0])/1.0e9
+    actual = sed.log_fnu(wavelengths)
+    assert actual[0] == -np.inf
+    expected = np.log(1.0e308) + np.log(np.array([0.25, 0.5, 1.0]))
+    if quantity == "flambda":
+        expected += 2.0*np.log(wavelengths[1:])
+    np.testing.assert_allclose(actual[1:], expected, rtol=1.0e-15)
+    with pytest.raises(ValueError, match="support"):
+        sed.log_fnu(np.array([399.0, 601.0])/1.0e9)

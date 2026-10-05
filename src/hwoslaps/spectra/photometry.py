@@ -51,13 +51,13 @@ def _positive_integral(sed: SED | None, band: Bandpass) -> float:
 def _scaled_measure(sed: SED | None, band: Bandpass, *, response: bool = True) -> tuple[np.ndarray, np.ndarray, float]:
     """One bounded integrand and its logarithmic scale, on the prescribed spectral grid."""
     wavelengths, throughput = band.integration_grid(sed)
-    shape = np.ones_like(wavelengths) if sed is None else sed.fnu(wavelengths)
+    log_shape = np.zeros_like(wavelengths) if sed is None else sed.log_fnu(wavelengths)
     weights = throughput if response else np.ones_like(throughput)
-    positive = (shape > 0.0) & (weights > 0.0)
+    positive = np.isfinite(log_shape) & (weights > 0.0)
     normalized = np.zeros_like(wavelengths)
     if not np.any(positive):
         return wavelengths, normalized, -math.inf
-    logarithms = np.log(shape[positive]) + np.log(weights[positive])
+    logarithms = log_shape[positive] + np.log(weights[positive])
     scale = float(np.max(logarithms))
     normalized[positive] = np.exp(logarithms - scale)
     return wavelengths, normalized, scale

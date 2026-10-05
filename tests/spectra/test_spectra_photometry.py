@@ -100,18 +100,34 @@ def test_bin_rates_partition_one_integrand_and_keep_narrow_line_photons(spectral
     assert whole_line[3] == pytest.approx(line_total, rel=1.0e-13)
 
 
-@pytest.mark.parametrize("normalization", [1.0, 1.0e296, 1.0e308, 1.0e-308])
-def test_finite_table_rescaling_preserves_detected_photometry_and_spectral_means(spectral_file, normalization):
+@pytest.mark.parametrize("normalization", [1.0, 1.0e296, 1.0e308, 1.0e-308, 1.0e-310])
+@pytest.mark.parametrize("quantity", ["fnu", "flambda"])
+def test_finite_table_rescaling_preserves_detected_photometry_and_spectral_means(spectral_file, normalization, quantity):
     from hwoslaps.spectra.photometry import band_mean_throughput
 
     response = build_bandpass(parse_bandpass({"kind": "top_hat", "min_nm": 450.0, "max_nm": 550.0,
                                               "throughput": 0.5}, "band"))
-    table = spectral_file([400.0, 600.0], [normalization, normalization], name="scaled_flat")
-    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": "fnu"}, "sed"), redshift=0.0)
+    table = spectral_file([400.0, 1000.0], [normalization, normalization], name="scaled_flat")
+    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": quantity}, "sed"), redshift=0.0)
     expected = 33.6 * 0.5 * 3631.0 * 10.0**(-0.4*24.0) * 1.0e-26 / 6.62607015e-34 * math.log(550.0/450.0)
     assert rate_from_ab(24.0, response, 33.6, sed=sed, reference_band=response) == pytest.approx(expected, rel=1.0e-12)
-    per_m2 = 0.5 * 1.0e-26 / 6.62607015e-34 * math.log(550.0/450.0)
-    assert detected_flux_per_m2(sed, 1.0/normalization, response) == pytest.approx(per_m2, rel=1.0e-12)
-    mean_wavelength = (550.0-450.0)/1.0e9/math.log(550.0/450.0)
+    def constant_shape_integral(low_nm, high_nm):
+        if quantity == "fnu":
+            return math.log(high_nm/low_nm)
+        # Closed geometric sum of D69's 10000 equal log-grid trapezoids
+        # for lambda squared: analytic integral multiplied by h*coth(h).
+        step = math.log(high_nm/low_nm)/10000.0
+        return (high_nm**2-low_nm**2)/2.0/1.0e18 * step/math.tanh(step)
+    photon_integral = constant_shape_integral(450.0, 550.0)
+    scale_jy = 1.0/max(normalization, 1.0e-308)
+    per_m2 = 0.5 * 1.0e-26 / 6.62607015e-34 * photon_integral * (normalization*scale_jy)
+    assert detected_flux_per_m2(sed, scale_jy, response) == pytest.approx(per_m2, rel=1.0e-12)
+    mean_wavelength = ((550.0-450.0)/1.0e9/math.log(550.0/450.0) if quantity == "fnu"
+        else (2.0/3.0)*(550.0**3-450.0**3)/(550.0**2-450.0**2)/1.0e9)
     assert effective_wavelength_m(sed, response) == pytest.approx(mean_wavelength, rel=1.0e-9)
     assert band_mean_throughput(response, sed) == pytest.approx(0.5, rel=1.0e-12)
+    reference = build_bandpass(parse_bandpass({"kind": "top_hat", "min_nm": 700.0, "max_nm": 900.0,
+                                              "throughput": 0.8}, "reference"))
+    reference_integral = constant_shape_integral(700.0, 900.0)
+    colour_expected = expected * photon_integral/math.log(550.0/450.0) * math.log(900.0/700.0)/reference_integral
+    assert rate_from_ab(24.0, response, 33.6, sed=sed, reference_band=reference) == pytest.approx(colour_expected, rel=1.0e-12)

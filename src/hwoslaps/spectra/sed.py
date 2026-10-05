@@ -94,10 +94,32 @@ class SED:
         values = {} if self.table is None else {str(self.spec.table.path): self.table.digest}
         return MappingProxyType(values)
 
-    def fnu(self, wavelengths_m: ArrayLike) -> np.ndarray:
+    def _wavelengths(self, wavelengths_m: ArrayLike) -> np.ndarray:
         wavelengths = np.asarray(wavelengths_m, dtype=float)
         if not np.all(np.isfinite(wavelengths)) or np.any(wavelengths <= 0.0):
             raise ValueError("SED wavelengths must be positive and finite")
+        return wavelengths
+
+    def _table_evaluation(self, wavelengths: np.ndarray, *, logarithmic: bool = False) -> tuple[np.ndarray, np.ndarray]:
+        evaluated = wavelengths / (1.0 + self.redshift) if self.spec.frame == "rest" else wavelengths
+        coordinates, values = self.table.wavelengths_m, self.table.values
+        if np.any(evaluated < coordinates[0]) or np.any(evaluated > coordinates[-1]):
+            raise ValueError(f"{self.spec.table.path}: SED wavelengths exceed the table support")
+        if not logarithmic:
+            return evaluated, np.interp(evaluated, coordinates, values)
+        # The same linear-in-wavelength interpolant, with its non-negative
+        # endpoint contributions added in logs before any unit conversion.
+        indices = np.clip(np.searchsorted(coordinates, evaluated, side="right") - 1, 0, len(coordinates)-2)
+        fraction = (evaluated-coordinates[indices]) / (coordinates[indices+1]-coordinates[indices])
+        log_values = np.full_like(values, -np.inf)
+        np.log(values, out=log_values, where=values > 0.0)
+        with np.errstate(divide="ignore"):
+            result = np.logaddexp(log_values[indices] + np.log1p(-fraction),
+                                 log_values[indices+1] + np.log(fraction))
+        return evaluated, result
+
+    def fnu(self, wavelengths_m: ArrayLike) -> np.ndarray:
+        wavelengths = self._wavelengths(wavelengths_m)
         if isinstance(self.spec, FlatFnu):
             result = np.ones_like(wavelengths)
         elif isinstance(self.spec, FlatFlambda):
@@ -106,14 +128,33 @@ class SED:
             with np.errstate(over="ignore", invalid="ignore"):
                 result = (wavelengths / _REFERENCE_WAVELENGTH_M) ** (-self.spec.index)
         else:
-            evaluated = wavelengths / (1.0 + self.redshift) if self.spec.frame == "rest" else wavelengths
-            if np.any(evaluated < self.table.wavelengths_m[0]) or np.any(evaluated > self.table.wavelengths_m[-1]):
-                raise ValueError(f"{self.spec.table.path}: SED wavelengths exceed the table support")
-            result = np.interp(evaluated, self.table.wavelengths_m, self.table.values)
+            evaluated, result = self._table_evaluation(wavelengths)
             if self.spec.quantity == "flambda":
                 result = result * evaluated**2
         if not np.all(np.isfinite(result)) or np.any(result < 0.0):
             raise ValueError("SED produced a non-finite or negative spectral shape")
+        return np.asarray(result)
+
+    def log_fnu(self, wavelengths_m: ArrayLike) -> np.ndarray:
+        """Natural log of the observed shape; zero shape is negative infinity.
+
+        Positive tabulated flambda values are converted in logs so arbitrary
+        finite table normalization cannot quantize their wavelength dependence.
+        """
+        wavelengths = self._wavelengths(wavelengths_m)
+        if isinstance(self.spec, FlatFnu):
+            result = np.zeros_like(wavelengths)
+        elif isinstance(self.spec, FlatFlambda):
+            result = 2.0 * (np.log(wavelengths)-np.log(_REFERENCE_WAVELENGTH_M))
+        elif isinstance(self.spec, PowerLawSED):
+            with np.errstate(over="ignore", invalid="ignore"):
+                result = -self.spec.index * (np.log(wavelengths)-np.log(_REFERENCE_WAVELENGTH_M))
+        else:
+            evaluated, result = self._table_evaluation(wavelengths, logarithmic=True)
+            if self.spec.quantity == "flambda":
+                result = result + 2.0*np.log(evaluated)
+        if np.any(np.isnan(result)) or np.any(np.isposinf(result)):
+            raise ValueError("SED produced an unrepresentable logarithmic spectral shape")
         return np.asarray(result)
 
     def knots_m(self) -> np.ndarray:
