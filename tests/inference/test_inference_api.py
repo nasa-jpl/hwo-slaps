@@ -169,8 +169,8 @@ def test_freed_case_with_refinement_reports_sampler_and_refined_estimates(prepar
     observation = simulate(prepared_forecast, subhalo=trial, noise_seed=11)
     result = validate_nonlinear(prepared_forecast, trial, observation,
                                 fit=FitSpec(mode="freed", mass_support=MassSupport(6.0, 9.7)),
-                                sampler=SamplerSettings(use_jax=True, n_live_smooth=10, n_live_subhalo_search=10,
-                                                        n_like_max=80, jax_n_batch=100), sampler_seed=7,
+                                sampler=SamplerSettings(use_jax=True, n_live_smooth=20, n_live_subhalo_search=20, n_eff=200,
+                                                        n_like_max=2000, jax_n_batch=100), sampler_seed=7,
                                 refine=RefineSettings(maxiter=50, repeat_maxiter=50), output_dir=tmp_path)
     assert result.recovery is not None, (result.smooth.error, result.subhalo.error)
     assert result.recovery.sampler != result.recovery.refined
@@ -209,8 +209,8 @@ def test_supplied_session_is_borrowed_and_left_active(prepared_forecast, tmp_pat
                            session=session, output_dir=tmp_path / "outputs", case_id="first")
         assert session.active and {child.pid for child in multiprocessing.active_children()} == children
         with pytest.raises(ValueError, match="starts"):
-            validate_nonlinear(prepared_forecast, trial, observation, fit=fit, sampler=sampler, sampler_seed=8,
-                               refine=RefineSettings(original_start_count=1000),
+            validate_nonlinear(prepared_forecast, trial, observation, fit=fit, sampler=dataclasses.replace(sampler, n_live_smooth=20, n_eff=200, n_like_max=2000), sampler_seed=8,
+                               refine=RefineSettings(original_start_count=1000000),
                                session=session, output_dir=tmp_path / "outputs", case_id="second")
         assert session.active and {child.pid for child in multiprocessing.active_children()} == children
 
