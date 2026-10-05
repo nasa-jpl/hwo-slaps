@@ -51,6 +51,7 @@ def measure(args):
     from hwoslaps.identity import array_digest
     from hwoslaps.scene.builder import native_sampling_variation
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+    from hwoslaps.fisher.engines.base import BankAccumulator
     import hwoslaps.fisher.api as forecast_api
 
     mapping, directory = workload_mapping(args.workload)
@@ -89,20 +90,32 @@ def measure(args):
     positions = prepared.positions.positions_yx
     if args.estimate_nodes is not None:
         positions = positions[:args.estimate_nodes]
-    per_mass, reference = [], None
+    if args.stage == "first-batch":
+        positions, masses = positions[:args.batch_size], masses[:1]
+    per_mass = []
+    original_finish = BankAccumulator.finish
+    mass_start = perf_counter()
+    mass_compiles = len(compile_events)
+    def timed_finish(bank):
+        nonlocal mass_start, mass_compiles
+        value = original_finish(bank)
+        finished = perf_counter()
+        per_mass.append({"mass_msun": masses[len(per_mass)],
+                         "seconds": finished - mass_start if engine == "jax" else None,
+                         "backend_compiles": len(compile_events) - mass_compiles})
+        mass_start, mass_compiles = finished, len(compile_events)
+        return value
     start = perf_counter()
-    first = forecast(prepared, masses_msun=masses, positions=positions)
+    BankAccumulator.finish = timed_finish
+    try:
+        first = forecast(prepared, masses_msun=masses, positions=positions)
+    finally:
+        BankAccumulator.finish = original_finish
     seconds["forecast_first"] = perf_counter() - start
     seconds["first_call_backend_compile"] = sum(compile_events)
     start = perf_counter()
     warm = forecast(prepared, masses_msun=masses, positions=positions)
     seconds["forecast_warm"] = perf_counter() - start
-    for mass in masses:
-        compiled = len(compile_events)
-        start = perf_counter()
-        forecast(prepared, masses_msun=[mass], positions=positions)
-        per_mass.append({"mass_msun": mass, "seconds": perf_counter() - start,
-                         "backend_compiles": len(compile_events) - compiled})
     arrays = {"masses_msun": first.masses_msun, "positions_yx": first.positions_yx}
     for field in STATISTICS:
         left, right = getattr(first, field), getattr(warm, field)
@@ -137,6 +150,7 @@ def main(argv=None):
     parser.add_argument("--estimate-nodes", type=int)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--child", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--stage", choices=("full", "first-batch"), default="full", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     if args.child:
         measure(args)
@@ -150,27 +164,31 @@ def main(argv=None):
     args.out.mkdir(parents=True, exist_ok=True)
     records = []
     for repeat in range(args.repeats):
-        with tempfile.TemporaryDirectory(prefix="forecast-benchmark-", dir=os.environ.get("TMPDIR")) as cache:
-            environment = dict(os.environ, JAX_COMPILATION_CACHE_DIR=cache, PYTHONDONTWRITEBYTECODE="1")
-            if not args.gpu:
-                environment.update(CUDA_VISIBLE_DEVICES="", JAX_PLATFORMS="cpu")
-            else:
-                environment.update(JAX_ENABLE_X64="1", XLA_PYTHON_CLIENT_PREALLOCATE="false")
-            child_out = args.out / f"repeat-{repeat}"
-            command = [sys.executable, str(Path(__file__).resolve()), "--child", "--workload", args.workload,
-                       "--out", str(child_out), "--batch-size", str(args.batch_size)]
-            if args.gpu:
-                command.append("--gpu")
-            if args.estimate_nodes is not None:
-                command.extend(("--estimate-nodes", str(args.estimate_nodes)))
-            subprocess.run(command, env=environment, check=True, timeout=540 if args.gpu else 3600)
-            record = json.loads((child_out / f"{args.workload}.json").read_text())
-            if records and records[0]["outputs"] != record["outputs"]:
-                raise RuntimeError("repeated cold forecasts changed result bytes")
-            records.append(record)
+        stages = {}
+        for stage in ("first-batch", "full"):
+            with tempfile.TemporaryDirectory(prefix="forecast-benchmark-", dir=os.environ.get("TMPDIR")) as cache:
+                environment = dict(os.environ, JAX_COMPILATION_CACHE_DIR=cache, PYTHONDONTWRITEBYTECODE="1")
+                if not args.gpu:
+                    environment.update(CUDA_VISIBLE_DEVICES="", JAX_PLATFORMS="cpu")
+                else:
+                    environment.update(JAX_ENABLE_X64="1", XLA_PYTHON_CLIENT_PREALLOCATE="false")
+                child_out = args.out / f"repeat-{repeat}" / stage
+                command = [sys.executable, str(Path(__file__).resolve()), "--child", "--workload", args.workload,
+                           "--out", str(child_out), "--batch-size", str(args.batch_size), "--stage", stage]
+                if args.gpu:
+                    command.append("--gpu")
+                if args.estimate_nodes is not None:
+                    command.extend(("--estimate-nodes", str(args.estimate_nodes)))
+                subprocess.run(command, env=environment, check=True, timeout=540 if args.gpu else 3600)
+                stages[stage] = json.loads((child_out / f"{args.workload}.json").read_text())
+        record = stages["full"]
+        record["first_batch"] = stages["first-batch"]
+        if records and records[0]["outputs"] != record["outputs"]:
+            raise RuntimeError("repeated cold forecasts changed result bytes")
+        records.append(record)
     output = {"schema": 1, "workload": args.workload, "repeats": records}
     (args.out / f"{args.workload}.json").write_text(json.dumps(output, indent=2, sort_keys=True))
-    (args.out / f"{args.workload}.npz").write_bytes((args.out / f"repeat-0/{args.workload}.npz").read_bytes())
+    (args.out / f"{args.workload}.npz").write_bytes((args.out / f"repeat-0/full/{args.workload}.npz").read_bytes())
     print(json.dumps({"workload": args.workload, "steady_nodes_per_second":
                       [record["steady_nodes_per_second"] for record in records]}, sort_keys=True))
     return 0
