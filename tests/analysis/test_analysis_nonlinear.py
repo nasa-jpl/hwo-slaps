@@ -308,7 +308,7 @@ def test_agreement_reports_input_differences_and_scene_namespace(comparison, con
                                               "observation.background_offset_adu": 2, "psf.zernikes[4]": 2}
 
 
-@pytest.mark.parametrize("invalid", ["empty", "mixed_rules", "foreign_node", "accepted_missing_statistic"])
+@pytest.mark.parametrize("invalid", ["empty", "mixed_rules", "foreign_node", "accepted_missing_statistic", "stale_classification"])
 def test_agreement_refuses_incoherent_inputs(invalid, case_factory):
     case = case_factory(12., forecast_q=12.)
     classified = classify_case(case, _rule())
@@ -320,6 +320,8 @@ def test_agreement_refuses_incoherent_inputs(invalid, case_factory):
     elif invalid == "foreign_node":
         case = dataclasses.replace(case, forecast_reference=dataclasses.replace(case.forecast_reference, mass_msun=2e7))
         pairs, message = [(case, classified)], "reference node"
+    elif invalid == "stale_classification":
+        pairs, message = [(case, classify_case(case_factory(8., forecast_q=12.), _rule()))], "classification does not match"
     else:
         pairs, message = [(case, dataclasses.replace(classified, detected=None, q_signed=None))], "finite nonlinear statistic"
     with pytest.raises(ValueError, match=message):

@@ -224,6 +224,11 @@ def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]]) 
             rule = classification.rule
         elif classification.rule != rule:
             raise ValueError("detection agreement requires one ClassificationRule; mixed rules were supplied")
+        if classification.status == "accepted" and (classification.detected is None or classification.q_signed is None
+                                                       or not math.isfinite(classification.q_signed)):
+            raise ValueError("an accepted classification must have a finite nonlinear statistic and detection")
+        if classification != classify_case(result, classification.rule):
+            raise ValueError("classification does not match the supplied CaseResult under its rule")
         reference = result.forecast_reference
         if reference is not None:
             if reference.mass_msun != result.hypothesis.mass_msun or reference.position_yx_arcsec != result.hypothesis.position_yx_arcsec:
@@ -241,8 +246,6 @@ def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]]) 
             excluded["control_observation"] += 1
         elif result.observation.subhalo != result.hypothesis:
             excluded["observation_injection_mismatch"] += 1
-        elif classification.detected is None or classification.q_signed is None or not math.isfinite(classification.q_signed):
-            raise ValueError("an accepted classification must have a finite nonlinear statistic and detection")
         else:
             forecast = reference.detected(q_threshold=rule.q_threshold)
             key = "both" if forecast and classification.detected else "forecast_only" if forecast else (
