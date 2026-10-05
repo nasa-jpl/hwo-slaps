@@ -3,6 +3,7 @@
 from copy import deepcopy
 from pathlib import Path
 import json
+import math
 import pickle
 
 import numpy as np
@@ -133,10 +134,11 @@ def test_captured_table_seds_survive_file_removal_in_real_renderer_transport(min
             prepared.validate_identity()
 
 
-def test_loaded_spectral_publication_is_refused_before_resolution_render(minimal_mapping, tmp_path):
+def test_new_spectral_epoch_is_refused_before_diagnostic_render(minimal_mapping, tmp_path):
     import sys
     from hwoslaps.fisher.api import prepare_forecast
-    from hwoslaps.identity import read_file_snapshot
+    from hwoslaps.identity import file_digest
+    from hwoslaps.scene.builder import render_component_unlensed
 
     path = tmp_path / "sed.npz"
     np.savez(path, wave=[400.0, 500.0, 600.0], shape=[0.5, 1.0, 0.8])
@@ -148,17 +150,64 @@ def test_loaded_spectral_publication_is_refused_before_resolution_render(minimal
     original = path.read_bytes()
     previous = sys.getprofile()
     published = []
+    renders = []
     def publish(frame, event, returned):
-        if event == "return" and frame.f_code is read_file_snapshot.__code__ and Path(frame.f_locals["path"]) == path:
-            sys.setprofile(previous)
+        if event == "call" and frame.f_code is render_component_unlensed.__code__:
+            renders.append(True)
+        if not published and event == "return" and frame.f_code is file_digest.__code__ and Path(frame.f_locals["path"]) == path:
             np.savez(path, wave=[400.0, 500.0, 600.0], shape=[0.2, 1.0, 1.0])
             published.append(True)
     sys.setprofile(publish)
     try:
-        # The already decoded old snapshot stays truthful; final preparation must reject the new disk epoch.
         with pytest.raises(ValueError, match=str(path)):
             prepare_forecast(minimal_mapping)
         assert published == [True]
+        assert not renders
     finally:
         sys.setprofile(previous)
         path.write_bytes(original)
+
+
+def test_reference_band_flux_resolves_the_sed_colour_at_the_scene_boundary(minimal_mapping):
+    from hwoslaps.config.schema import parse_config
+    from hwoslaps.fisher.psf_pair import truth_provider
+    from hwoslaps.observation.normalization import resolve_observing
+
+    minimal_mapping["instrument"].update(collecting_area_m2=33.6,
+        bandpass={"kind": "top_hat", "min_nm": 450.0, "max_nm": 550.0, "throughput": 0.21})
+    component = minimal_mapping["scene"]["source"]["light"]["light"]
+    component.pop("intensity")
+    component["sed"] = {"kind": "power_law", "index": -1.5}
+    component["flux"] = {"ab_mag": 24.3,
+        "reference_band": {"kind": "top_hat", "min_nm": 700.0, "max_nm": 900.0, "throughput": 0.8}}
+    config = parse_config(minimal_mapping)
+    setup = resolve_observing(config.scene, config.instrument, config.observation, truth=truth_provider(config))
+    beta = 1.5
+    reference_mean = (900.0**beta-700.0**beta)/(beta*math.log(900.0/700.0))
+    instrument_integral = 0.21*(550.0**beta-450.0**beta)/beta
+    expected = 33.6*3631.0*10.0**(-0.4*24.3)*1.0e-26/6.62607015e-34*instrument_integral/reference_mean
+    assert setup.photometry.components["source.light"]["rate_e_per_s"] == pytest.approx(expected, rel=1.0e-9)
+    assert tuple(setup.loaded_seds) == ("source.light",)
+
+
+def test_optical_truth_area_resolves_pinned_paper_photometry(minimal_mapping):
+    from hwoslaps.config.schema import parse_config
+    from hwoslaps.fisher.psf_pair import truth_provider
+    from hwoslaps.observation.normalization import resolve_observing
+
+    minimal_mapping["scene"]["grid"]["pixel_scale_arcsec"] = 0.00716
+    minimal_mapping["psf"] = {"truth": {"kind": "optical",
+        "pupil": {"kind": "hex_segmented", "diameter_m": 7.225765, "pixels": 512, "supersampling": 4,
+                  "rings": 2, "segment_point_to_point_m": 1.65, "gap_m": 0.006},
+        "focal_length_m": 144.0, "wavelength_nm": 500.0, "detector_oversampling": 3, "kernel_shape": [17, 17]}}
+    minimal_mapping["instrument"]["bandpass"] = {"kind": "top_hat", "min_nm": 450.0, "max_nm": 550.0, "throughput": 0.21}
+    component = minimal_mapping["scene"]["source"]["light"]["light"]
+    component.pop("intensity")
+    component["flux"] = {"ab_mag": 24.845}
+    minimal_mapping["observation"]["sky"] = {"ab_mag_per_arcsec2": 23.0}
+    config = parse_config(minimal_mapping)
+    setup = resolve_observing(config.scene, config.instrument, config.observation, truth=truth_provider(config))
+    assert setup.instrument.collecting_area_source == "optical_pupil"
+    assert setup.instrument.collecting_area_m2 == pytest.approx(33.606448937520405, rel=1.0e-12)
+    assert setup.photometry.components["source.light"]["rate_e_per_s"] == pytest.approx(8.951505744562876, rel=1.0e-12)
+    assert setup.exposure.sky_rate_e_per_s == pytest.approx(0.002510279845963486, rel=1.0e-12)
