@@ -473,3 +473,35 @@ def test_circular_powerlaw_fixed_ellipse_keeps_other_parameter_gradients(minimal
                    case.log_likelihood("smooth",objective.to_physical(z-step)))/(2e-4)
         assert gradient[0]==pytest.approx(expected,rel=1e-6,abs=0.)
     finally:prepared.close()
+
+
+@pytest.mark.parametrize("slope",[2.,2.08],ids=["regular_isothermal_powerlaw","normalization_cusp"])
+def test_circular_powerlaw_one_sided_values_classify_the_shape_differential(slope,minimal_mapping,tmp_path):
+    from hwoslaps.inference.api import prepare_case
+
+    prepared,case=_powerlaw_boundary_case(minimal_mapping,tmp_path,slope)
+    try:
+        numpy_case=prepare_case(prepared,case.hypothesis,case.observation,fit=case.fit,use_jax=False)
+        model=case.model("smooth");physical=model.truth.copy()
+        axes=[i for i,name in enumerate(model.parameter_names) if "ell_comps_" in name]
+        f0=.5*numpy_case.chi_squared("smooth",physical)
+        differences=[]
+        for h in (1.e-4,1.e-5,1.e-6):
+            right=[];left=[]
+            for i in axes:
+                step=np.zeros_like(physical);step[i]=h
+                right.append((.5*numpy_case.chi_squared("smooth",physical+step)-f0)/h)
+                left.append((f0-.5*numpy_case.chi_squared("smooth",physical-step))/h)
+            differences.append(np.asarray(right)-np.asarray(left))
+            print(f"PowerLaw gamma={slope} h={h} right={right} left={left} gap={differences[-1]}")
+        z=(physical-model.lower)/(model.upper-model.lower)
+        if slope!=2.:
+            assert np.linalg.norm(differences[-1])>.5*np.linalg.norm(differences[0])
+            with pytest.raises(ValueError,match="normalization cusp"):
+                case.objective("smooth").value_and_gradient(z)
+        else:
+            assert np.linalg.norm(differences[-1])<.05*np.linalg.norm(differences[0])
+            value,gradient=case.objective("smooth").value_and_gradient(z)
+            print(f"PowerLaw gamma2 primitive value={value} gradient={gradient}")
+            assert math.isfinite(value) and np.all(np.isfinite(gradient))
+    finally:prepared.close()
