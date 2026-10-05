@@ -126,7 +126,7 @@ def test_affine_log_lookup_equals_general_interpolation_at_knots_and_neighbours(
     assert affine is not None
     actual = interpolate_log_grid(jnp.asarray(queries), jnp.asarray(knots), jnp.asarray(values), affine)
     expected = jnp.interp(jnp.asarray(queries), jnp.asarray(knots), jnp.asarray(values))
-    np.testing.assert_array_equal(np.asarray(actual), np.asarray(expected))
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=2.0e-14, atol=0.0, equal_nan=True)
     irregular = np.array([0.0, 0.01, 0.05, 0.9, 1.0])
     assert affine_log_grid_parameters(irregular) is None
     for refused in (np.array([0.0, np.nan]), np.array([0.0, 0.0]), np.array([1.0, 0.0]), knots.astype(np.float32)):

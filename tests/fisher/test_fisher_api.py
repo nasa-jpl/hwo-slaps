@@ -101,11 +101,15 @@ def test_identical_model_kernel_is_the_matched_limit(minimal_mapping):
 
 
 def test_execution_does_not_enter_configuration_digest(minimal_mapping):
-    from hwoslaps.fisher.api import Execution, prepare_forecast
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
     with prepare_forecast(minimal_mapping) as reference, prepare_forecast(minimal_mapping, execution=Execution(engine="jax")) as jax:
         assert reference.record["config_digest"] == jax.record["config_digest"]
         assert reference.record["comparison_digest"] == jax.record["comparison_digest"]
+        for prepared in (reference, jax):
+            result = forecast(prepared, masses_msun=[1.0e8])
+            assert result.provenance["engine"]["reference_workers"] == 1
+            assert result.provenance["engine"]["batch_size"] == 16
 
 
 @pytest.mark.parametrize("amplitude", [0.0, 1.0])
@@ -151,3 +155,15 @@ def test_prepared_kernel_buffers_cannot_change_identity(minimal_mapping, changed
             forecast(prepared, masses_msun=[1.0e8])
         with pytest.raises(TypeError):
             prepared.record["config_digest"] = "changed"
+
+
+@pytest.mark.parametrize("engine", ["reference", "jax"])
+def test_closed_preparation_refuses_forecast(minimal_mapping, engine):
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+
+    prepared = prepare_forecast(minimal_mapping, execution=Execution(engine=engine))
+    forecast(prepared, masses_msun=[1.0e8])
+    prepared.close()
+    prepared.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        forecast(prepared, masses_msun=[1.0e8])

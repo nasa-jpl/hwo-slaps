@@ -1,5 +1,6 @@
 """Real spawned reference evaluation and ordered worker failure semantics."""
 
+import multiprocessing
 import os
 from concurrent.futures.process import BrokenProcessPool
 from copy import deepcopy
@@ -47,14 +48,20 @@ def test_pooled_reference_engine_equals_serial_bitwise(minimal_mapping, tiny_gau
             np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
 
 
-@pytest.mark.parametrize("worker,error", [(worker_square, None), (worker_failure, ValueError), (worker_death, BrokenProcessPool)])
+@pytest.mark.parametrize("worker,error", [(worker_square, None), (worker_failure, ValueError), (worker_death, BrokenProcessPool), (worker_square, "early_close")])
 def test_ordered_process_map_surfaces_failures_and_keeps_order(worker, error):
     from hwoslaps.fisher.engines.reference import ordered_process_map
 
     def run():
         return list(ordered_process_map(worker, range(9), workers=2, initializer=worker_initializer, initargs=()))
-    if error is None:
+    before = {process.pid for process in multiprocessing.active_children()}
+    if error == "early_close":
+        iterator = ordered_process_map(worker, range(31), workers=2, initializer=worker_initializer, initargs=())
+        assert next(iterator) == 0
+        iterator.close()
+    elif error is None:
         assert run() == [0, 1, 4, 9, 16, 25, 36, 49, 64]
     else:
         with pytest.raises(error):
             run()
+    assert {process.pid for process in multiprocessing.active_children()} <= before
