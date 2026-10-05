@@ -13,8 +13,6 @@ import textwrap
 import numpy as np
 import pytest
 
-from hwoslaps.inference import backend
-from hwoslaps.inference.backend import BackendSession, make_analysis
 from hwoslaps.inference.fit_model import autofit_model
 
 pytestmark = pytest.mark.backend
@@ -55,6 +53,8 @@ def _set_prior_state(monkeypatch, variable, key):
 ], ids=["normal-exit", "exception-inside", "variable-absent", "autoconf-key-absent", "pooled-training",
         "several-sampler-cores"])
 def test_search_scope_restores_process_state(monkeypatch, variable, key, retain, workers, cores, raises):
+    from hwoslaps.inference.backend import BackendSession
+
     _set_prior_state(monkeypatch, variable, key)
     before = _process_state()
     seen = []
@@ -77,6 +77,8 @@ def test_search_scope_restores_process_state(monkeypatch, variable, key, retain,
 
 def test_session_pool_outlives_scopes_and_scopes_are_exclusive(monkeypatch):
     """CP2-06: one pool across searches and exceptions; one search scope at a time per process."""
+    from hwoslaps.inference.backend import BackendSession
+
     _set_prior_state(monkeypatch, "0", False)
     before_state = _process_state()
     outside = {child.pid for child in multiprocessing.active_children()}
@@ -121,6 +123,7 @@ def test_session_pool_outlives_scopes_and_scopes_are_exclusive(monkeypatch):
 def test_an_explicit_training_pool_is_kept():
     """Inside a pooled scope a caller's own pool still trains the networks."""
     from nautilus.neural import NeuralNetworkEmulator
+    from hwoslaps.inference.backend import BackendSession
 
     used = []
 
@@ -138,6 +141,8 @@ def test_an_explicit_training_pool_is_kept():
 
 @pytest.mark.parametrize("workers", [0, -1, True, 1.5, "2"], ids=str)
 def test_session_refuses_invalid_training_worker_counts(workers):
+    from hwoslaps.inference.backend import BackendSession
+
     with pytest.raises(ValueError, match="training_workers must be an integer >= 1"):
         BackendSession(training_workers=workers)
 
@@ -145,13 +150,14 @@ def test_session_refuses_invalid_training_worker_counts(workers):
 def test_make_analysis_uses_the_given_cosmology_and_writes_no_autolens_class(raw_imaging, light_model):
     import autogalaxy as ag
     import autolens as al
+    from hwoslaps.inference.backend import ANALYSIS_CLASS, make_analysis
 
     before = dict(vars(al.AnalysisImaging))
     cosmology = ag.cosmo.Planck15()
     analysis = make_analysis(raw_imaging, cosmology=cosmology, use_jax=False)
     instance = autofit_model(light_model).instance_from_vector(vector=list(light_model.truth))
     fit = analysis.fit_from(instance=instance)
-    assert isinstance(analysis, backend.ANALYSIS_CLASS) and analysis._use_jax is False
+    assert isinstance(analysis, ANALYSIS_CLASS) and analysis._use_jax is False
     assert analysis.cosmology is cosmology
     assert np.isfinite(fit.log_likelihood)
     assert dict(vars(al.AnalysisImaging)).keys() == before.keys()
@@ -197,6 +203,7 @@ def test_jax_analysis_enables_x64_and_returns_float64():
 def test_pooled_emulator_training_equals_serial():
     """Networks trained through the session pool are byte-equal to serial training."""
     from nautilus.neural import NeuralNetworkEmulator
+    from hwoslaps.inference.backend import BackendSession
 
     rng = np.random.default_rng(3)
     x, y = rng.random((200, 6)), rng.random(200)
