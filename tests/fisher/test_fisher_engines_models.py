@@ -26,5 +26,5 @@ def test_new_model_fisher_engines_have_reference_statistics(gpu,family,minimal_m
     assert jax.default_backend()==("gpu" if gpu else "cpu")
     with prepare_forecast(minimal_mapping) as reference,prepare_forecast(minimal_mapping,execution=Execution(engine="jax")) as candidate:
         expected=forecast(reference,masses_msun=[1.e8,3.e8]);actual=forecast(candidate,masses_msun=[1.e8,3.e8])
-        for field in ("fisher_raw","fisher_profiled","sigma_mass_msun"):
+        for field in ("fisher_raw","fisher_profiled","sigma_amplitude"):
             np.testing.assert_allclose(getattr(actual,field),getattr(expected,field),rtol=1e-6,atol=0.)

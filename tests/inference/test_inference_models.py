@@ -352,3 +352,12 @@ def test_image_persistent_jit_rotation_gradient_and_warm_transfer_contract():
         expected.append((upper-lower)/(2.e-6))
     assert np.all(np.isfinite(gradient)) and abs(gradient[4])>0.
     np.testing.assert_allclose(gradient,expected,rtol=1e-6,atol=1e-7)
+
+
+
+def test_isothermal_single_m4_has_seven_mass_priors(prepared_forecast_factory):
+    prepared=prepared_forecast_factory({"scene":{"lens":{"mass":{"mass":_mass("Isothermal",multipoles={"m4":[.02,-.01]})}}}})
+    free=[p.name for p in scene_parameters(prepared.scene.spec) if p.name.startswith("lens.mass.")]
+    converted=autofit_model(_models(prepared,free=free).smooth)
+    assert converted.prior_count==7
+    assert converted.galaxies.lens.mass_multipole_m4.slope==2.

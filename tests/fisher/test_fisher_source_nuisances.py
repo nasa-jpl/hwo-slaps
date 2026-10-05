@@ -28,7 +28,7 @@ def test_sersic_index_column_matches_analytic_derivative(minimal_mapping):
         derivative=intensity*(-db*(u**(1/n)-1)+b*u**(1/n)*np.log(u)/n**2)
         native=scene.grid.over_sampler.binned_array_2d_from(array=derivative).native
         from scipy.signal import convolve2d
-        kernel=prepared.psfs.model.binding.for_group("source").array
+        kernel=prepared.psfs.model.binding.for_group("source").kernel
         expected=convolve2d(np.asarray(native),kernel,mode="same")
         exposure=prepared.observation.exposure
         expected*=exposure.exposure_time_s/exposure.detector.gain_e_per_adu

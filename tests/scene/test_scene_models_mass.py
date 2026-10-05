@@ -174,3 +174,12 @@ def test_effective_radius_has_the_analytic_mass_definition(kind,q,slope,shear,mi
     expected = .8 if kind=="PowerLaw" else 2*math.sqrt(q)*.8/(1+q)
     if shear: expected=.8*math.sqrt(1+shear*shear/2)/(1-shear*shear)
     assert result == pytest.approx(expected,rel=2e-5,abs=0.)
+
+
+
+def test_multipole_expansion_names_cannot_shadow_components(minimal_mapping):
+    mapping=copy.deepcopy(minimal_mapping["scene"])
+    mapping["lens"]["mass"]["mass"]["multipoles"]={"m3":[.01,.0]}
+    mapping["lens"]["mass"]["mass_multipole_m3"]={"type":"ExternalShear","gamma_1":.01,"gamma_2":0.}
+    with pytest.raises(ConfigError) as error:parse_scene(mapping)
+    assert error.value.path=="scene.lens.mass.mass_multipole_m3"
