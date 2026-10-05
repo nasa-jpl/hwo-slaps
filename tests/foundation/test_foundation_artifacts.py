@@ -25,7 +25,7 @@ def forecast_value(kind="grid", mismatch=True):
                           "kernel" if mismatch else "matched", {"scene": {"lens": {"mass": {"zeta": {"type": "Isothermal"}, "alpha": {"type": "Isothermal"}}}}}, {"threshold": 2.0})
 
 
-def observation_value(noisy=False):
+def observation_value(noisy=False, include_lens=False):
     from hwoslaps.instrument import Detector
     from hwoslaps.observation.expected import Exposure
     from hwoslaps.observation.observation import Observation
@@ -36,11 +36,18 @@ def observation_value(noisy=False):
                                    normalize=False)
     psfs = KernelBinding((kernel, other), {"source:a": 0, "source:b": 0, "source:c": 1})
     rate = np.arange(6, dtype=float).reshape(2, 3)
+    by_plane = {"source": rate}
+    sampling = {"source:a": 0.01, "source:b": 0.02, "source:c": 0.03}
+    if include_lens:
+        by_plane["lens"] = np.full(rate.shape, 0.25)
+        rate = by_plane["lens"] + by_plane["source"]
+        psfs = KernelBinding(psfs.kernels, {**dict(psfs.group_index), "lens": 0})
+        sampling["lens"] = 0.01
     exposure = Exposure(Detector(2.0, 0.5, 0.1), 10.0, 1.0, 2)
     expected = exposure.mean_adu(rate)
-    observed = Observation("expected", expected, expected, exposure.noise_map_adu(rate), rate, {"source": rate},
+    observed = Observation("expected", expected, expected, exposure.noise_map_adu(rate), rate, by_plane,
                            GridSpec((2, 3), 0.1, 4), exposure, psfs, None, None, "c" * 64, None,
-                           {"source:a": 0.01, "source:b": 0.02, "source:c": 0.03})
+                           sampling)
     return observed.draw(11) if noisy else observed
 
 
@@ -159,7 +166,7 @@ def test_text_writers_use_finite_canonical_values_and_refuse_duplicate_json_keys
     ("seed_text", "noise_seed"), ("seed_bool", "noise_seed"), ("digest_bool", "config_digest"),
 ])
 def test_observation_loader_rejects_single_field_domain_defects(tmp_path, defect, match):
-    path = save_observation(observation_value(noisy=True), tmp_path / "valid.npz")
+    path = save_observation(observation_value(noisy=True, include_lens=True), tmp_path / "valid.npz")
     with np.load(path, allow_pickle=False) as stored:
         members = {name: stored[name] for name in stored.files}
     metadata = json.loads(str(members["metadata_json"]))
