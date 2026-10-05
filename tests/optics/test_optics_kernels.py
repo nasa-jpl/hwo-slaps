@@ -34,8 +34,11 @@ def _kernel(seed, shape=(5, 5)):
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": 0.0}, "pixel_scale_arcsec"),
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": -0.03}, "pixel_scale_arcsec"),
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": True}, "pixel_scale_arcsec"),
-], ids=["even-rows", "even-columns", "1-d", "3-d", "nan", "negative", "zero-flux", "unnormalized", "zero-scale", "negative-scale",
-        "bool-scale"])
+    (np.pad([[1.0]], 1), {"source": {"kind": "array"}}, "must record 'captured_power_fraction'"),
+    (np.pad([[1.0]], 1), {"source": {"kind": "optical", "captured_power_fraction": 1.5}},
+     r"None or a number in \(0, 1\]"),
+], ids=["even-rows", "even-columns", "1-d", "3-d", "nan", "negative", "zero-flux", "unnormalized", "zero-scale",
+        "negative-scale", "bool-scale", "no-captured-fraction", "captured-fraction-above-one"])
 def test_detector_psf_validation(values, keywords, message):
     arguments = {"pixel_scale_arcsec": SCALE, "normalize": True, **keywords}
     with pytest.raises(ValueError, match=message):

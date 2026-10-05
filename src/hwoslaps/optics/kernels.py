@@ -108,6 +108,13 @@ class DetectorPSF:
         array.flags.writeable = False
         if not isinstance(self.source, Mapping) or not isinstance(self.source.get("kind"), str):
             raise ValueError(f"source must be a mapping with a text 'kind', got {self.source!r}")
+        if "captured_power_fraction" not in self.source:
+            raise ValueError("source must record 'captured_power_fraction' (None when the kernel does not hold it), "
+                             f"got {dict(self.source)!r}")
+        fraction = self.source["captured_power_fraction"]
+        if fraction is not None and (isinstance(fraction, (bool, np.bool_)) or not isinstance(fraction, Real)
+                                     or not 0.0 < float(fraction) <= 1.0):
+            raise ValueError(f"source captured_power_fraction must be None or a number in (0, 1], got {fraction!r}")
         object.__setattr__(self, "kernel", array)
         object.__setattr__(self, "pixel_scale_arcsec", _pixel_scale(self.pixel_scale_arcsec, "pixel_scale_arcsec"))
         object.__setattr__(self, "source", types.MappingProxyType(json_ready(dict(self.source))))
