@@ -1,0 +1,144 @@
+"""Custom/TNFW mass transport, real JAX profile math, spawn and multi-plane truth fits."""
+
+import multiprocessing
+
+import numpy as np
+import pytest
+
+from hwoslaps.inference.settings import FitSpec, MassSupport
+from hwoslaps.scene.cosmology import Cosmology, parse_cosmology
+from hwoslaps.scene.halos import (Halo, HaloModel, OverdensityTruncation, PowerLawConcentration,
+                                  TauTruncation, halo_lensing_traced)
+
+pytestmark = pytest.mark.backend
+CUSTOM = {"flat_lcdm": {"H0": 60., "Om0": 0.4}}
+POINTS = np.array([[0.12, 0.23], [-0.17, 0.09], [0.31, -0.14], [0.07, -0.32]])
+
+
+def _halo(kind, cosmology_name="custom", truncation=None):
+    cosmology = Cosmology(parse_cosmology(CUSTOM if cosmology_name == "custom" else {"name": "Planck15"}))
+    relation = PowerLawConcentration(15., 1e8, -0.1, -0.4) if kind in ("NFW", "TNFW") else None
+    return Halo(HaloModel(kind, relation, truncation), 1e8, (0.02, -0.03), 0.2, 0.6, cosmology)
+
+
+def _profile_scales(kind, mapping, log_mass):
+    from hwoslaps.inference.subhalo_classes import freed_profile_class
+
+    profile = freed_profile_class(kind)(centre=(0.02, -0.03), log10_m200=log_mass, mass_mapping=mapping)
+    names = ("kappa_s", "scale_radius", "truncation_radius") if kind == "TNFW" else (
+        ("kappa_s", "scale_radius") if kind == "NFW" else ("einstein_radius",))
+    return tuple(getattr(profile, name) for name in names)
+
+
+@pytest.mark.parametrize("kind, named, truncation", [
+    ("PointMass", "custom", None), ("SIS", "custom", None), ("NFW", "custom", None),
+    ("TNFW", "custom", TauTruncation(10.)), ("TNFW", "custom", OverdensityTruncation(100.)),
+    ("TNFW", "Planck15", TauTruncation(10.)), ("TNFW", "Planck15", OverdensityTruncation(100.)),
+])
+def test_mass_classes_equal_halo_scales(kind, named, truncation):
+    import jax
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.subhalo_classes import mass_mapping
+
+    ensure_jax_x64()
+    halo = _halo(kind, named, truncation)
+    mapping = mass_mapping(halo, halo.cosmology, MassSupport(6., 10.))
+    expected_traced = halo_lensing_traced(halo.model, 1e8, halo.geometry, reduced_h=halo.reduced_h, xp=np)
+    plain = _profile_scales(kind, mapping, 8.)
+    np.testing.assert_array_equal(plain, tuple(expected_traced.values()))
+    np.testing.assert_allclose(plain, tuple(halo.lensing().parameters.values()), rtol=1e-14, atol=0.)
+    compiled = jax.jit(lambda value: _profile_scales(kind, mapping, value))(8.)
+    np.testing.assert_allclose(compiled, plain, rtol=1e-14, atol=0.)
+
+
+def _spawned_tnfw(inputs):
+    halo, mapping = inputs
+    return halo.to_mapping(), tuple(float(value) for value in _profile_scales("TNFW", mapping, 8.))
+
+
+def test_custom_tnfw_halo_and_freed_class_pickle_into_spawned_workers():
+    from hwoslaps.inference.subhalo_classes import mass_mapping
+
+    halo = _halo("TNFW", truncation=OverdensityTruncation(100.))
+    mapping = mass_mapping(halo, halo.cosmology, MassSupport(6., 10.))
+    expected = _spawned_tnfw((halo, mapping))
+    with multiprocessing.get_context("spawn").Pool(1) as pool:
+        actual = pool.apply_async(_spawned_tnfw, ((halo, mapping),)).get(timeout=60)
+    assert actual == expected
+
+
+def test_truncated_nfw_class_traces_under_jax():
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.subhalo_classes import TruncatedNFWSph
+
+    ensure_jax_x64()
+    grid = al.Grid2DIrregular(values=POINTS)
+
+    def values(profile_class, kappa, xp):
+        profile = profile_class(centre=(0.02, -0.03), kappa_s=kappa, scale_radius=0.2, truncation_radius=2.)
+        return (profile.deflections_yx_2d_from(grid=grid, xp=xp).array,
+                profile.convergence_2d_from(grid=grid, xp=xp).array)
+
+    expected = values(al.mp.NFWTruncatedSph, 0.03, np)
+    plain = values(TruncatedNFWSph, 0.03, np)
+    compiled = jax.jit(lambda kappa: values(TruncatedNFWSph, kappa, jnp))(0.03)
+    for parent, actual, traced in zip(expected, plain, compiled, strict=True):
+        np.testing.assert_array_equal(actual, parent)
+        np.testing.assert_allclose(traced, parent, rtol=1e-13, atol=0.)
+    derivative = jax.jit(jax.jacfwd(lambda kappa: values(TruncatedNFWSph, kappa, jnp)))(0.03)
+    for actual, parent in zip(derivative, expected, strict=True):
+        np.testing.assert_allclose(actual, parent / 0.03, rtol=1e-13, atol=0.)
+
+
+@pytest.mark.parametrize("mode", ["fixed_template", "local_search", "freed"])
+def test_tnfw_fit_modes_and_fixed_perturbers_trace_the_truth_scene(mode, prepared_forecast_factory):
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.fit_model import autofit_model
+    from hwoslaps.inference.hypotheses import build_role_models
+
+    ensure_jax_x64()
+    recipe = {"type": "TNFW", "concentration": {"kind": "fixed", "value": 12.},
+              "truncation": {"kind": "tau", "tau": 10.}}
+    prepared = prepared_forecast_factory({"cosmology": {"name": None, **CUSTOM}, "scene": {
+        "subhalo": recipe, "perturbers": {"halos": [{**recipe, "mass_msun": 5e7,
+                                                      "centre": [0.1, -0.2], "redshift": 0.4}]}}})
+    trial = prepared.hypothesis(1e8, (0.4, -0.6))
+    free = [parameter.name for parameter in prepared.nuisances.parameters if parameter.kind == "scene"]
+    fit = FitSpec(mode=mode, mass_support=MassSupport(6., 10.) if mode == "freed" else None)
+    models = build_role_models(prepared.scene, trial, free, fit, use_jax=True)
+    grid = al.Grid2DIrregular(values=POINTS)
+    for role in ("smooth", "subhalo"):
+        model = getattr(models, role)
+        backend_model = autofit_model(model)
+        truth_scene = prepared.renderer.scene(subhalo=None if role == "smooth" else trial)
+        expected = truth_scene.tracer.traced_grid_2d_list_from(grid=grid)[-1].array
+
+        def traced(vector):
+            instance = backend_model.instance_from_vector(vector=vector, xp=jnp)
+            tracer = al.Tracer(galaxies=list(instance.galaxies), cosmology=prepared.scene.cosmology.autogalaxy())
+            return tracer.traced_grid_2d_list_from(grid=grid, xp=jnp)[-1].array
+
+        np.testing.assert_allclose(jax.jit(traced)(jnp.asarray(model.truth)), expected, rtol=1e-13, atol=1e-14)
+
+
+def test_fit_traces_with_the_scene_cosmology(prepared_forecast_factory):
+    from hwoslaps.inference.api import prepare_case
+    from hwoslaps.inference.backend import ANALYSIS_CLASS
+
+    prepared = prepared_forecast_factory({"cosmology": {"name": None, **CUSTOM}, "scene": {
+        "perturbers": {"halos": [{"type": "PointMass", "mass_msun": 1e8,
+                                  "centre": [-0.2, 0.5], "redshift": 0.4}]}}})
+    trial = prepared.hypothesis(1e8, (0.4, -0.6))
+    case = prepare_case(prepared, trial, prepared.observation, fit=FitSpec(mode="fixed_template"), use_jax=False)
+    truth = case.truth_vector("smooth")
+    assert case.chi_squared("smooth", truth) <= 1e-8
+    # The deliberately omitted cosmology must move the actual multi-plane fit image.
+    wrong_analysis = ANALYSIS_CLASS(dataset=case.data.imaging, use_jax=False)
+    instance = case.autofit_models["smooth"].instance_from_vector(vector=truth.tolist())
+    assert float(wrong_analysis.fit_from(instance=instance).chi_squared) > 1e-8

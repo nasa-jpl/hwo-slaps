@@ -211,7 +211,9 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
 def _fixed_halo(halo: Halo) -> FitComponent:
     arguments = [FitArgument("centre", tuple(fixed(value) for value in halo.position_yx_arcsec), pair=True)]
     arguments.extend(FitArgument(name, (fixed(value),), pair=False) for name, value in halo.lensing().parameters.items())
-    return FitComponent(f"autolens:mp.{halo.model.profile_class}", tuple(arguments))
+    path = ("hwoslaps.inference.subhalo_classes:TruncatedNFWSph" if halo.model.type == "TNFW" else
+            f"autolens:mp.{halo.model.profile_class}")
+    return FitComponent(path, tuple(arguments))
 
 
 def _subhalo(hypothesis: Halo, fit: FitSpec, mapping: SubhaloMassMapping | None) -> FitComponent:
