@@ -43,6 +43,22 @@ def _set_prior_state(monkeypatch, variable, key):
         monkeypatch.setitem(conf.instance["output"], "search_internal", key)
 
 
+def _record_process_pool_maps(monkeypatch):
+    """Item counts of every ``map`` call on a real process pool (the session's), delegated unchanged."""
+    from multiprocessing.pool import Pool
+
+    counts = []
+    pool_map = Pool.map
+
+    def recording_map(self, function, iterable, *args, **kwargs):
+        items = list(iterable)
+        counts.append(len(items))
+        return pool_map(self, function, items, *args, **kwargs)
+
+    monkeypatch.setattr(Pool, "map", recording_map)
+    return counts
+
+
 @pytest.mark.parametrize(("variable", "key", "retain", "workers", "cores", "raises"), [
     ("0", False, True, 1, 1, False),
     ("0", False, True, 1, 1, True),
@@ -120,23 +136,27 @@ def test_session_pool_outlives_scopes_and_scopes_are_exclusive(monkeypatch):
     assert _process_state()[:2] == before_state[:2]
 
 
-def test_an_explicit_training_pool_is_kept():
-    """Inside a pooled scope a caller's own pool still trains the networks."""
+@pytest.mark.parametrize("caller_pool", [False, True], ids=["session-pool", "caller-pool"])
+def test_pooled_scope_trains_through_the_session_pool_unless_the_caller_gives_one(monkeypatch, caller_pool):
+    """Nautilus passes ``pool=None`` with one sampler core; inside a pooled scope its networks then
+    train through the session's pool, and a pool the caller passes is kept."""
     from nautilus.neural import NeuralNetworkEmulator
     from hwoslaps.inference.backend import BackendSession
 
-    used = []
+    session_maps, caller_maps = _record_process_pool_maps(monkeypatch), []
 
-    class RecordingPool:
+    class CallerPool:
         def map(self, function, iterable):
-            used.append(True)
-            return list(map(function, iterable))
+            items = list(iterable)
+            caller_maps.append(len(items))
+            return list(map(function, items))
 
     rng = np.random.default_rng(3)
     with BackendSession(training_workers=2) as session:
         with session.search_scope(retain_search_internal=False, number_of_cores=1):
-            NeuralNetworkEmulator.train(rng.random((50, 3)), rng.random(50), n_networks=2, pool=RecordingPool())
-    assert used == [True]
+            NeuralNetworkEmulator.train(rng.random((50, 3)), rng.random(50), n_networks=2,
+                                        pool=CallerPool() if caller_pool else None)
+    assert (session_maps, caller_maps) == (([], [2]) if caller_pool else ([2], []))
 
 
 @pytest.mark.parametrize("workers", [0, -1, True, 1.5, "2"], ids=str)
@@ -200,7 +220,7 @@ def test_jax_analysis_enables_x64_and_returns_float64():
 
 
 @pytest.mark.xtx_gpu
-def test_pooled_emulator_training_equals_serial():
+def test_pooled_emulator_training_equals_serial(monkeypatch):
     """Networks trained through the session pool are byte-equal to serial training."""
     from nautilus.neural import NeuralNetworkEmulator
     from hwoslaps.inference.backend import BackendSession
@@ -208,10 +228,12 @@ def test_pooled_emulator_training_equals_serial():
     rng = np.random.default_rng(3)
     x, y = rng.random((200, 6)), rng.random(200)
     serial = NeuralNetworkEmulator.train(x, y, n_networks=2)
+    pool_maps = _record_process_pool_maps(monkeypatch)
     with BackendSession(training_workers=2) as session:
         with session.search_scope(retain_search_internal=False, number_of_cores=1) as workers:
             assert workers == 2
             pooled = NeuralNetworkEmulator.train(x, y, n_networks=2)
+    assert pool_maps == [2]
 
     def weights(emulator):
         return [array for network in emulator.neural_networks for array in [*network.coefs_, *network.intercepts_]]
