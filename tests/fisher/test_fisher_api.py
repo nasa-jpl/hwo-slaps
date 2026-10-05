@@ -1,0 +1,109 @@
+"""Prepared-state lifecycle and public mass/position semantics."""
+
+from copy import deepcopy
+from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+pytestmark = pytest.mark.backend
+
+
+@pytest.mark.parametrize("engine", ["reference", "jax"])
+def test_mass_rows_ignore_masses_evaluated_earlier(minimal_mapping, engine):
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+
+    execution = Execution(engine=engine)
+    with prepare_forecast(minimal_mapping, execution=execution) as reused:
+        forecast(reused, masses_msun=[3.0e8, 8.0e8])
+        actual = forecast(reused, masses_msun=[1.0e8])
+        with pytest.raises(TypeError):
+            forecast(reused)
+    with prepare_forecast(minimal_mapping, execution=execution) as fresh:
+        expected = forecast(fresh, masses_msun=[1.0e8])
+    np.testing.assert_array_equal(actual.fisher_profiled, expected.fisher_profiled)
+    np.testing.assert_array_equal(actual.fisher_raw, expected.fisher_raw)
+
+
+def test_prepared_configuration_cannot_relabel_cached_science(minimal_mapping):
+    from hwoslaps.config.schema import resolve_config
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    config = resolve_config(minimal_mapping)
+    component = replace(config.scene.source.light[0], values=dict(config.scene.source.light[0].values))
+    config = replace(config, scene=replace(config.scene, source=replace(config.scene.source, light=(component,))))
+    with prepare_forecast(config) as prepared:
+        before = forecast(prepared, masses_msun=[1.0e8])
+        digest = prepared.record["config_digest"]
+        component.values["intensity"] = 100.0
+        copy = prepared.config.to_mapping()
+        copy["scene"]["source"]["light"][component.name]["intensity"] = 200.0
+        minimal_mapping["scene"]["source"]["light"][component.name]["intensity"] = 300.0
+        after = forecast(prepared, masses_msun=[1.0e8])
+        assert prepared.config.scene.source.light[0].values["intensity"] == 1.0
+        assert after.provenance["config_digest"] == before.provenance["config_digest"] == digest
+        np.testing.assert_array_equal(after.fisher_profiled, before.fisher_profiled)
+
+
+@pytest.mark.parametrize("asset_kind", ["kernel", "image"])
+def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, image_asset, asset_kind):
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    if asset_kind == "image":
+        minimal_mapping["scene"]["source"]["light"] = {"light": {"type": "Image", "asset_path": str(image_asset),
+            "centre": [0.0, 0.0], "flux_scale": 1.0, "size_scale": 1.0, "rotation_deg": 0.0, "total_flux": 1.0}}
+        path = image_asset
+    else:
+        path = Path(minimal_mapping["psf"]["truth"]["path"])
+    original = path.read_bytes()
+    with prepare_forecast(minimal_mapping) as prepared:
+        before = forecast(prepared, masses_msun=[1.0e8])
+        try:
+            path.write_bytes(original + b"changed")
+            with pytest.raises(ValueError, match=str(path)):
+                forecast(prepared, masses_msun=[1.0e8])
+        finally:
+            path.write_bytes(original)
+        after = forecast(prepared, masses_msun=[1.0e8])
+        np.testing.assert_array_equal(after.fisher_profiled, before.fisher_profiled)
+        assert after.provenance["config_digest"] == before.provenance["config_digest"]
+
+
+@pytest.mark.parametrize("engine", ["reference", "jax"])
+def test_position_subsets_reproduce_full_map_rows_and_keep_domain(minimal_mapping, engine):
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+
+    minimal_mapping["forecast"]["positions"] = {"kind": "grid", "spacing_arcsec": 0.3, "half_width_arcsec": 0.6}
+    with prepare_forecast(minimal_mapping, execution=Execution(engine=engine)) as prepared:
+        full = forecast(prepared, masses_msun=[1.0e8])
+        keep = np.arange(len(prepared.positions)) % 3 == 0
+        subset = forecast(prepared, masses_msun=[1.0e8], positions=prepared.positions.select(keep))
+        np.testing.assert_allclose(subset.fisher_profiled, full.fisher_profiled[:, keep], rtol=1.0e-12)
+        assert subset.positions.domain_radius_arcsec == full.positions.domain_radius_arcsec
+        with pytest.raises(ValueError, match="outside the prepared domain"):
+            forecast(prepared, masses_msun=[1.0e8], positions=[[3.0, 0.0]])
+
+
+def test_identical_model_kernel_is_the_matched_limit(minimal_mapping):
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    with prepare_forecast(minimal_mapping) as prepared:
+        matched = forecast(prepared, masses_msun=[1.0e8])
+        assert prepared.mean_model_adu is prepared.mean_truth_adu
+        digest = prepared.record["config_digest"]
+    minimal_mapping["psf"]["model"] = deepcopy(minimal_mapping["psf"]["truth"])
+    with prepare_forecast(minimal_mapping) as prepared:
+        mismatched = forecast(prepared, masses_msun=[1.0e8])
+        assert prepared.record["config_digest"] != digest
+    np.testing.assert_allclose(mismatched.q_mismatch, matched.q_asimov, rtol=1.0e-10)
+    np.testing.assert_allclose(mismatched.amplitude_hat, 1.0, rtol=1.0e-10)
+    np.testing.assert_allclose(mismatched.q_spurious, 0.0, atol=1.0e-20)
+
+
+def test_execution_does_not_enter_configuration_digest(minimal_mapping):
+    from hwoslaps.fisher.api import Execution, prepare_forecast
+
+    with prepare_forecast(minimal_mapping) as reference, prepare_forecast(minimal_mapping, execution=Execution(engine="jax")) as jax:
+        assert reference.record["config_digest"] == jax.record["config_digest"]
+        assert reference.record["comparison_digest"] == jax.record["comparison_digest"]
