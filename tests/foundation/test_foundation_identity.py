@@ -96,6 +96,7 @@ def test_kernel_identity_mapping_is_strict():
     assert KernelIdentity.from_mapping(json.loads(json.dumps(record))) == identity
     for broken in ({**record, "normalize": True}, {"sha256": "ab" * 32, "shape": [17, 17]},
                    {**record, "sha256": "AB" * 32}, {**record, "shape": [17, 0]},
-                   {**record, "pixel_scale_arcsec": 0}):
+                   {**record, "pixel_scale_arcsec": 0.0}, {**record, "pixel_scale_arcsec": -0.03},
+                   {**record, "pixel_scale_arcsec": 1}):
         with pytest.raises(ValueError):
             KernelIdentity.from_mapping(broken)
