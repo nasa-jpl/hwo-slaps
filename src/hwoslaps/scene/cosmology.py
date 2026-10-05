@@ -206,7 +206,7 @@ class Cosmology:
         parameters["m_nu_eV"] = list(parameters["m_nu_eV"])
         offset = None
         if self._spec.name is not None and self._spec.name != "Planck15":
-            distance = self.autogalaxy().angular_diameter_distance_to_earth_in_kpc_from(0.5) / 1000.0
+            distance = float(self.autogalaxy().angular_diameter_distance_to_earth_in_kpc_from(0.5)) / 1000.0
             reference = _flat_realization(self._spec.name).angular_diameter_distance(0.5).value
             offset = float(distance / reference - 1.0)
         return {"name": self._spec.name, "parameters": parameters, "rho_crit_convention": RHO_CRIT_CONVENTION,
