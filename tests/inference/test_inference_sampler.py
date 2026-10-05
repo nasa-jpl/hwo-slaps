@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import hashlib
 import zipfile
 from pathlib import Path
@@ -17,26 +18,36 @@ from hwoslaps.inference.starts import select_starts
 DATA = {"data_digest": "aa" * 32, "noise_digest": "bb" * 32}
 
 
-def _search(light_model, settings, case_dir, *, seed=7, n_live=20):
-    return make_search(model=light_model, role="smooth", n_live=n_live, settings=settings, seed=seed,
-                       case_dir=case_dir, case_id="case", data_identity=DATA)
+def _search(light_model, settings, case_dir, *, seed=7, n_live=20, role="smooth", case_id="case", data=DATA):
+    return make_search(model=light_model, role=role, n_live=n_live, settings=settings, seed=seed,
+                       case_dir=case_dir, case_id=case_id, data_identity=data)
 
 
 @pytest.mark.backend
 def test_search_paths_differ_for_every_sampler_setting(light_model, tmp_path):
-    """C6: runs differing in one setting AutoFit's Nautilus identifier omits never share an output path."""
-    base = SamplerSettings()
-    variants = {"base": (base, 7), "f_live": (SamplerSettings(f_live=0.02), 7),
-                "n_like_max": (SamplerSettings(n_like_max=5000), 7),
-                "number_of_cores": (SamplerSettings(number_of_cores=2), 7),
-                "discard_exploration": (SamplerSettings(discard_exploration=True), 7),
-                "n_eff": (SamplerSettings(n_eff=400.0), 7), "n_shell": (SamplerSettings(n_shell=2), 7),
-                "jax_n_batch": (SamplerSettings(use_jax=True, jax_n_batch=50), 7),
-                "use_jax": (SamplerSettings(use_jax=True), 7), "seed": (base, 8)}
-    locations = {name: (search.paths.path_prefix, search.paths.name)
-                 for name, (settings, seed) in variants.items()
-                 for search in [_search(light_model, settings, tmp_path, seed=seed)]}
+    """C6: runs differing in one setting AutoFit's Nautilus identifier omits never share an output path.
+    The path also follows the case, role, live points, fit model and data identity, and equal inputs
+    give the same path, so a rerun finds its own search."""
+    moved_lens = dataclasses.replace(light_model, galaxies=(dataclasses.replace(light_model.galaxies[0],
+                                                                                redshift=0.6),))
+    variants = {"base": {}, "f_live": {"settings": SamplerSettings(f_live=0.02)},
+                "n_like_max": {"settings": SamplerSettings(n_like_max=5000)},
+                "number_of_cores": {"settings": SamplerSettings(number_of_cores=2)},
+                "discard_exploration": {"settings": SamplerSettings(discard_exploration=True)},
+                "n_eff": {"settings": SamplerSettings(n_eff=400.0)},
+                "n_shell": {"settings": SamplerSettings(n_shell=2)},
+                "jax_n_batch": {"settings": SamplerSettings(use_jax=True, jax_n_batch=50)},
+                "use_jax": {"settings": SamplerSettings(use_jax=True)}, "seed": {"seed": 8},
+                "case_id": {"case_id": "other"}, "role": {"role": "subhalo"}, "n_live": {"n_live": 21},
+                "fit_model": {"model": moved_lens}, "data": {"data": {**DATA, "data_digest": "cc" * 32}}}
+
+    def location(model=light_model, settings=SamplerSettings(), **inputs):
+        search = _search(model, settings, tmp_path, **inputs)
+        return search.paths.path_prefix, search.paths.name
+
+    locations = {name: location(**inputs) for name, inputs in variants.items()}
     assert len(set(locations.values())) == len(variants)
+    assert location() == locations["base"]
     assert all(Path(prefix) == tmp_path for prefix, _ in locations.values())
 
 
