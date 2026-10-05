@@ -31,7 +31,8 @@ import numpy as np
 from .cosmology import Cosmology
 from .halos import Halo
 from .image_source import ImageAsset
-from .profiles import instantiate
+from .profiles import PROFILE_TYPES, instantiate
+from ..spectra.sed import SED
 from .spec import ComponentSpec, GridSpec, LightGroup, SceneSpec
 
 __all__ = ["Scene", "build_scene", "native_sampling_variation", "render_component_unlensed"]
@@ -131,7 +132,7 @@ def _read_only(image: Any) -> np.ndarray:
 
 
 def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, perturbers: Sequence[Halo] = (),
-                assets: Mapping[str, ImageAsset] | None = None) -> Scene:
+                assets: Mapping[str, ImageAsset] | None = None, loaded_seds: Mapping[str, SED] | None = None) -> Scene:
     """Build the tracer and light images of ``spec`` with ``subhalo`` (or none) and the realized perturbers.
 
     ``assets`` maps an absolute asset path to its loaded ``ImageAsset``; when given, no file is read.
@@ -181,15 +182,32 @@ def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, 
 
     grid = _over_sampled_grid(spec.grid)
     tracer = al.Tracer(galaxies=list(galaxies.values()), cosmology=cosmology.autogalaxy())
-    groups = spec.light_groups()
-    light_profiles = {"lens": tuple(lens_light.values())} if lens_light else {}
-    light_profiles["source"] = tuple(source_light.values())
-    if list(groups) == ["source"]:
-        images = {"source": _read_only(tracer.image_2d_from(grid=grid))}
+    groups = spec.light_groups(loaded_seds=loaded_seds)
+    if set(groups) <= {"lens", "source"}:
+        light_profiles = {"lens": tuple(lens_light.values())} if lens_light else {}
+        light_profiles["source"] = tuple(source_light.values())
+        if list(groups) == ["source"]:
+            images = {"source": _read_only(tracer.image_2d_from(grid=grid))}
+        else:
+            traced = tracer.traced_grid_2d_list_from(grid=grid)
+            images = {plane: _read_only(galaxies[plane].image_2d_from(
+                grid=traced[tracer.plane_redshifts.index(redshifts[plane])])) for plane in ("lens", "source")}
     else:
         traced = tracer.traced_grid_2d_list_from(grid=grid)
-        images = {plane: _read_only(galaxies[plane].image_2d_from(
-            grid=traced[tracer.plane_redshifts.index(redshifts[plane])])) for plane in ("lens", "source")}
+        light_profiles, images = {}, {}
+        for key, group in groups.items():
+            galaxy_spec = spec.lens if group.plane == "lens" else spec.source
+            profiles = lens_light if group.plane == "lens" else source_light
+            selected = tuple(profiles[component.name + layout.suffix]
+                             for component in galaxy_spec.light if component.name in group.components
+                             for layout in PROFILE_TYPES[component.type].layout(component.values))
+            light_profiles[key] = selected
+            plane_grid = traced[tracer.plane_redshifts.index(redshifts[group.plane])]
+            image = _read_only(selected[0].image_2d_from(grid=plane_grid))
+            for profile in selected[1:]:
+                image = image + _read_only(profile.image_2d_from(grid=plane_grid))
+            image.setflags(write=False)
+            images[key] = image
     for key, image in images.items():
         if not np.all(np.isfinite(image)):
             raise ValueError(f"the {key} light image has non-finite values")
@@ -221,9 +239,9 @@ def native_sampling_variation(scene: Scene) -> Mapping[str, float]:
     return types.MappingProxyType(variations)
 
 
-def render_component_unlensed(component: ComponentSpec, grid: GridSpec) -> np.ndarray:
+def render_component_unlensed(component: ComponentSpec, grid: GridSpec, *, assets: Mapping[str, ImageAsset] | None = None) -> np.ndarray:
     """A light component on the over-sampled grid without lensing, block-meaned: e-/s per pixel."""
     if component.role != "light":
         raise ValueError(f"component {component.name!r} is a {component.role} component; only light renders")
-    (profile,) = instantiate(component).values()
+    (profile,) = instantiate(component, assets=assets).values()
     return _read_only(profile.image_2d_from(grid=_over_sampled_grid(grid)))

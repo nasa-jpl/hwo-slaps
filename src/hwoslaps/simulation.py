@@ -14,6 +14,7 @@ from .scene.cosmology import Cosmology
 from .scene.halos import Halo
 from .scene.image_source import load_image_asset
 from .scene.perturbers import realize_perturbers
+from .spectra.bandpass import build_bandpass
 from .fisher.psf_pair import bind_truth, truth_provider, validate_loaded_psf_files
 
 if TYPE_CHECKING:
@@ -54,22 +55,29 @@ def simulate(source: ConfigSource | PreparedForecast, *, subhalo: Halo | None, n
         identity = config.capture_identity()
         config_digest = identity["config_digest"]
         manifest = identity["file_digests"]
-        cosmology = Cosmology(config.cosmology)
-        provider = truth_provider(config)
-        setup = resolve_observing(config.scene, config.instrument, config.observation, truth=provider)
-        _validate_subhalo(subhalo, setup.scene, cosmology)
-        kernels, _ = bind_truth(provider, setup.scene, setup.instrument)
-        perturbers = realize_perturbers(setup.scene, cosmology, seed=config.seed)
-        paths = dict.fromkeys(str(component.values["asset_path"]) for galaxy in (setup.scene.lens, setup.scene.source)
+        bandpass = None if config.instrument.bandpass is None else build_bandpass(config.instrument.bandpass)
+        if bandpass is not None:
+            for path, digest in bandpass.file_digests.items():
+                validate_loaded_file(path, digest, manifest)
+        paths = dict.fromkeys(str(component.values["asset_path"]) for galaxy in (config.scene.lens, config.scene.source)
                               for component in galaxy.light if component.type == "Image")
         assets = {path: load_image_asset(path) for path in paths}
         for path, asset in assets.items():
             validate_loaded_file(path, asset.digest, manifest)
+        cosmology = Cosmology(config.cosmology)
+        provider = truth_provider(config, bandpass=bandpass)
+        setup = resolve_observing(config.scene, config.instrument, config.observation, truth=provider,
+                                  bandpass=bandpass, assets=assets, expected_file_digests=manifest)
+        for path, digest in setup.file_digests.items():
+            validate_loaded_file(path, digest, manifest)
+        _validate_subhalo(subhalo, setup.scene, cosmology)
+        kernels, _ = bind_truth(provider, setup.scene, setup.instrument, loaded_seds=setup.loaded_seds)
+        perturbers = realize_perturbers(setup.scene, cosmology, seed=config.seed)
         validate_loaded_psf_files(provider, kernels, manifest)
-        smooth = build_scene(setup.scene, cosmology, subhalo=None, perturbers=perturbers, assets=assets)
+        smooth = build_scene(setup.scene, cosmology, subhalo=None, perturbers=perturbers, assets=assets, loaded_seds=setup.loaded_seds)
         sampling = native_sampling_variation(smooth)
         scene = smooth if subhalo is None else build_scene(setup.scene, cosmology, subhalo=subhalo,
-                                                         perturbers=perturbers, assets=assets)
+                                                         perturbers=perturbers, assets=assets, loaded_seds=setup.loaded_seds)
         expected = observe(scene, kernels, setup.exposure, config_digest=config_digest,
                            photometry=setup.photometry, sampling=sampling)
         validate_file_manifest(manifest)

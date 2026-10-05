@@ -15,6 +15,7 @@ from ..scene.cosmology import Cosmology
 from ..scene.halos import Halo
 from ..scene.image_source import ImageAsset, frozen_value
 from ..scene.spec import SceneSpec
+from ..spectra.sed import SED
 
 
 @dataclass(frozen=True)
@@ -26,13 +27,15 @@ class SceneRenderer:
     perturbers: tuple[Halo, ...]
     exposure: Exposure
     assets: Mapping[str, ImageAsset] = field(kw_only=True)
+    loaded_seds: Mapping[str, SED] = field(default_factory=dict, kw_only=True)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "assets", types.MappingProxyType(dict(self.assets)))
+        object.__setattr__(self, "loaded_seds", types.MappingProxyType(dict(self.loaded_seds)))
 
     def scene(self, *, subhalo: Halo | None = None, spec: SceneSpec | None = None) -> Scene:
         return build_scene(self.spec if spec is None else spec, self.cosmology, subhalo=subhalo,
-                           perturbers=self.perturbers, assets=self.assets)
+                           perturbers=self.perturbers, assets=self.assets, loaded_seds=self.loaded_seds)
 
     def light_rate(self, scene: Scene, binding: KernelBinding,
                    planes: Collection[str] | None = None) -> np.ndarray:
@@ -74,7 +77,8 @@ class SceneRenderer:
         # values, and restore the same frozen types without reading an asset file.
         assets = {path: (asset.sb, asset.pixel_scale_arcsec, _transport_value(asset.metadata, frozen=False), asset.digest)
                   for path, asset in self.assets.items()}
-        return (_restore_renderer, (_transport_value(self.spec, frozen=False), self.cosmology, self.perturbers, self.exposure, assets))
+        return (_restore_renderer, (_transport_value(self.spec, frozen=False), self.cosmology, self.perturbers,
+                                    self.exposure, assets, _transport_value(self.loaded_seds, frozen=False)))
 
 
 def _transport_value(value, *, frozen):
@@ -89,9 +93,10 @@ def _transport_value(value, *, frozen):
     return value
 
 
-def _restore_renderer(spec, cosmology, perturbers, exposure, records):
+def _restore_renderer(spec, cosmology, perturbers, exposure, records, seds):
     assets = {path: ImageAsset(samples, scale, frozen_value(metadata), digest)
               for path, (samples, scale, metadata, digest) in records.items()}
     for asset in assets.values():
         asset.sb.setflags(write=False)
-    return SceneRenderer(_transport_value(spec, frozen=True), cosmology, perturbers, exposure, assets=assets)
+    return SceneRenderer(_transport_value(spec, frozen=True), cosmology, perturbers, exposure, assets=assets,
+                         loaded_seds=_transport_value(seds, frozen=True))

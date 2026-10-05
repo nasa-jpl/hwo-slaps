@@ -9,8 +9,10 @@ import numpy as np
 
 from ..identity import validate_loaded_file
 from ..optics.kernels import KernelBinding
-from ..optics.optical_psf import OpticalPSF
-from ..optics.providers import ModelPSF, PSFProvider, build_model_psf, build_psf_provider
+from ..optics.optical_psf import OpticalPSF, OpticalSpec
+from ..optics.providers import KernelFileSpec, ModelPSF, PSFProvider, build_model_psf, build_psf_provider
+from ..spectra.bandpass import Bandpass
+from ..spectra.sed import SED
 from ..optics.wavefront import WavefrontMode
 
 if TYPE_CHECKING:
@@ -59,12 +61,22 @@ class PsfPair:
                 "spectral": self.spectral}
 
 
-def truth_provider(config: EngineConfig) -> PSFProvider:
-    return build_psf_provider(config.psf.truth, pixel_scale_arcsec=config.scene.grid.pixel_scale_arcsec)
+def truth_provider(config: EngineConfig, *, bandpass: Bandpass | None = None) -> PSFProvider:
+    spec = config.psf.truth
+    keywords = {}
+    if isinstance(spec, OpticalSpec) and spec.wavelength_m is None:
+        if bandpass is None:
+            raise ValueError("sampled optical wavelengths require the primary bandpass")
+        keywords["wavelengths_m"] = bandpass.nodes(spec.wavelength_samples)
+    elif not isinstance(spec, (OpticalSpec, KernelFileSpec)) and bandpass is not None:
+        keywords["bandpass_support_m"] = bandpass.support_m
+    return build_psf_provider(spec, pixel_scale_arcsec=config.scene.grid.pixel_scale_arcsec, **keywords)
 
 
 def validate_loaded_psf_files(provider: PSFProvider, binding: KernelBinding, manifest: Mapping[str, str]) -> None:
     """The provider's loaded kernel and truth-draw files must match the input manifest."""
+    for path, digest in provider.file_digests.items():
+        validate_loaded_file(path, digest, manifest)
     for kernel in binding.kernels:
         if kernel.source["kind"] == "file":
             validate_loaded_file(kernel.source["path"], kernel.source["file_sha256"], manifest)
@@ -75,7 +87,7 @@ def validate_loaded_psf_files(provider: PSFProvider, binding: KernelBinding, man
 
 
 def bind_truth(provider: PSFProvider, scene: SceneSpec,
-               instrument: Instrument) -> tuple[KernelBinding, Mapping[str, Any] | None]:
+               instrument: Instrument, *, loaded_seds: Mapping[str, SED] | None = None) -> tuple[KernelBinding, Mapping[str, Any] | None]:
     nodes = provider.wavelengths_m
     if nodes is None:
         kernel = provider.kernel()
@@ -83,11 +95,13 @@ def bind_truth(provider: PSFProvider, scene: SceneSpec,
         kernel = provider.kernel(nodes[0])
     else:
         raise ValueError("several wavelength nodes require chromatic PSF binding")
-    return KernelBinding.uniform(kernel, tuple(scene.light_groups())), None
+    return KernelBinding.uniform(kernel, tuple(scene.light_groups(loaded_seds=loaded_seds))), None
 
 
-def bind_psfs(config: EngineConfig, scene: SceneSpec, instrument: Instrument, *, truth: PSFProvider) -> PsfPair:
-    truth_kernels, spectral = bind_truth(truth, scene, instrument)
+def bind_psfs(config: EngineConfig, scene: SceneSpec, instrument: Instrument, *, truth: PSFProvider,
+              loaded_seds: Mapping[str, SED] | None = None) -> PsfPair:
+    truth_kernels, spectral = bind_truth(truth, scene, instrument, loaded_seds=loaded_seds)
     model = build_model_psf(config.psf.model, truth, pixel_scale_arcsec=scene.grid.pixel_scale_arcsec)
-    model_kernels = truth_kernels if model.relation == "matched" else bind_truth(model.provider, scene, instrument)[0]
+    model_kernels = truth_kernels if model.relation == "matched" else bind_truth(
+        model.provider, scene, instrument, loaded_seds=loaded_seds)[0]
     return PsfPair(truth, model, truth_kernels, model_kernels, spectral)

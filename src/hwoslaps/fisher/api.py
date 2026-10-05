@@ -25,6 +25,7 @@ from ..scene.halos import Halo, make_halo
 from ..scene.image_source import frozen_value, load_image_asset
 from ..scene.perturbers import realize_perturbers
 from ..scene.spec import SceneSpec, pixel_centres_yx
+from ..spectra.bandpass import build_bandpass
 from .data_space import (DataSpace, all_pixels_mask, annulus_mask, build_data_space,
                          grid_centre_yx, load_noise_covariance, psf_border_mask, source_snr_mask)
 from .engines.base import EngineContext, TemplateEngine, make_engine
@@ -181,17 +182,26 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
     config_digest = identity["config_digest"]
     comparison_digest = identity["comparison_digest"]
     file_digests = identity["file_digests"]
+    bandpass = None if resolved.instrument.bandpass is None else build_bandpass(resolved.instrument.bandpass)
+    if bandpass is not None:
+        for path, digest in bandpass.file_digests.items():
+            validate_loaded_file(path, digest, file_digests)
+    assets = _assets(resolved.scene)
+    for path, asset in assets.items():
+        validate_loaded_file(path, asset.digest, file_digests)
     cosmology = Cosmology(resolved.cosmology)
-    truth = truth_provider(resolved)
-    setup = resolve_observing(resolved.scene, resolved.instrument, resolved.observation, truth=truth)
+    truth = truth_provider(resolved, bandpass=bandpass)
+    setup = resolve_observing(resolved.scene, resolved.instrument, resolved.observation, truth=truth,
+                              bandpass=bandpass, assets=assets, expected_file_digests=file_digests)
+    for path, digest in setup.file_digests.items():
+        validate_loaded_file(path, digest, file_digests)
     perturbers = realize_perturbers(setup.scene, cosmology, seed=resolved.seed)
-    assets = _assets(setup.scene)
-    smooth = build_scene(setup.scene, cosmology, subhalo=None, perturbers=perturbers, assets=assets)
+    smooth = build_scene(setup.scene, cosmology, subhalo=None, perturbers=perturbers, assets=assets, loaded_seds=setup.loaded_seds)
     sampling = native_sampling_variation(smooth)
-    psfs = bind_psfs(resolved, setup.scene, setup.instrument, truth=truth)
+    psfs = bind_psfs(resolved, setup.scene, setup.instrument, truth=truth, loaded_seds=setup.loaded_seds)
     observation = observe(smooth, psfs.truth_kernels, setup.exposure, config_digest=config_digest,
                           photometry=setup.photometry, sampling=sampling)
-    renderer = SceneRenderer(setup.scene, cosmology, perturbers, setup.exposure, assets=assets)
+    renderer = SceneRenderer(setup.scene, cosmology, perturbers, setup.exposure, assets=assets, loaded_seds=setup.loaded_seds)
     mean_model = renderer.mean_adu(smooth, psfs.model_kernels) if psfs.mismatched else observation.expected_adu
     mean_model.flags.writeable = False
     positions = _positions(resolved.forecast.positions, smooth)

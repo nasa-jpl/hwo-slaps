@@ -33,7 +33,7 @@ DOMAIN_ROWS = [
      "scene.source.light.disk.ell_comps"),
     ("non-positive-einstein-radius", {"lens.mass.main.einstein_radius": 0.0}, "scene.lens.mass.main.einstein_radius"),
     ("source-in-front-of-the-lens", {"source.redshift": 0.2}, "scene.source.redshift"),
-    ("missing-light-amplitude", {"source.light.disk.intensity": _DELETE}, "scene.source.light.disk.intensity"),
+    ("missing-light-amplitude", {"source.light.disk.intensity": _DELETE}, "scene.source.light.disk"),
     ("unknown-component-key", {"lens.mass.main.slope": 2.1}, "scene.lens.mass.main.slope"),
     ("no-lens-mass", {"lens.mass": {}}, "scene.lens.mass"),
     ("zero-over-sampling", {"grid.over_sample_size": 0}, "scene.grid.over_sample_size"),

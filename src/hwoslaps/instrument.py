@@ -10,11 +10,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, fields
 from numbers import Real as _Number
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 import numpy as np
 
 from .config.checks import ConfigError, Key, Nullable, Real, Rule, Table, Text
+from .spectra.bandpass import BANDPASS_TABLE, Bandpass, BandpassSpec, build_bandpass, parse_bandpass
 
 __all__ = [
     "CROSS_RULES", "DETECTOR_TABLE", "Detector", "INSTRUMENT_TABLE", "Instrument", "InstrumentSpec",
@@ -87,6 +88,8 @@ INSTRUMENT_TABLE = Table(
     keys=(
         Key("name", Nullable(Text()), "instrument label, recorded only", default=None),
         Key("detector", DETECTOR_TABLE, "detector noise parameters"),
+        Key("bandpass", Nullable(BANDPASS_TABLE), "system throughput including detector quantum efficiency", None),
+        Key("collecting_area_m2", Nullable(Real(min=0.0, min_open=True)), "photon-collecting area", None, unit="m^2"),
     ),
     doc="the instrument",
 )
@@ -101,11 +104,16 @@ class InstrumentSpec:
 
     name: str | None
     detector: Detector
+    bandpass: BandpassSpec | None = None
+    collecting_area_m2: float | None = None
 
     @classmethod
     def from_values(cls, values: Mapping[str, Any]) -> InstrumentSpec:
         """The spec of values already read by ``INSTRUMENT_TABLE``."""
-        return cls(name=values["name"], detector=Detector(**values["detector"]))
+        bandpass = values["bandpass"]
+        return cls(name=values["name"], detector=Detector(**values["detector"]),
+                   bandpass=None if bandpass is None else parse_bandpass(bandpass, "instrument.bandpass"),
+                   collecting_area_m2=values["collecting_area_m2"])
 
 
 def parse_instrument(mapping: Mapping[str, Any], path: str = "instrument") -> InstrumentSpec:
@@ -119,7 +127,23 @@ class Instrument:
 
     name: str | None
     detector: Detector
+    bandpass: Bandpass | None = None
+    collecting_area_m2: float | None = None
+    collecting_area_source: Literal["config", "optical_pupil"] | None = None
 
 
-def build_instrument(spec: InstrumentSpec) -> Instrument:
-    return Instrument(name=spec.name, detector=spec.detector)
+def build_instrument(spec: InstrumentSpec, *, provider_area_m2: float | None = None,
+                     area_required: bool = False, bandpass: Bandpass | None = None) -> Instrument:
+    if bandpass is not None and bandpass.source_spec != spec.bandpass:
+        raise ValueError("the supplied primary bandpass was built for another instrument specification")
+    built_bandpass = bandpass if bandpass is not None else (
+        None if spec.bandpass is None else build_bandpass(spec.bandpass))
+    area = spec.collecting_area_m2
+    source = "config" if area is not None else None
+    if area is None and area_required:
+        area, source = provider_area_m2, "optical_pupil"
+    if area_required and area is None:
+        raise ConfigError("instrument.collecting_area_m2", "AB photometry requires a collecting area or an optical truth pupil")
+    if area is not None:
+        area = check_finite_number("collecting_area_m2", area, positive=True)
+    return Instrument(spec.name, spec.detector, built_bandpass, area, source)
