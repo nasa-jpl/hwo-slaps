@@ -124,7 +124,9 @@ def guard_isothermal_origin(objective: BoxObjective, model: FitModel) -> BoxObje
 
     Resolve each constructor element to its canonical physical-vector index (including
     linked priors) once. Unreachable and entirely fixed circular pairs need no guard.
-    The likelihood, residual and compiled objective graphs are unchanged.
+    A circular PowerLaw with free ellipticity and slope !=2 has the additional
+    (2-slope)|ell_comps| normalization cusp (A2 1.3). Fixed ellipse and value-only
+    paths remain valid. The likelihood, residual and compiled graphs are unchanged.
     """
     pairs = []
     next_index = 0
@@ -140,20 +142,31 @@ def guard_isothermal_origin(objective: BoxObjective, model: FitModel) -> BoxObje
                         elements[key] = (next_index if prior.kind == "uniform" else None, prior)
                         if prior.kind == "uniform":
                             next_index += 1
-            if component.profile_class != "autolens:mp.Isothermal":
+            if component.profile_class not in {"autolens:mp.Isothermal", "autolens:mp.PowerLaw"}:
                 continue
             pair = tuple(elements[(component_name, "ell_comps", index)] for index in (0, 1))
             if any(index is not None for index, _ in pair) and all(
                     prior.lower <= 0.0 <= prior.upper if index is not None else prior.value == 0.0
                     for index, prior in pair):
-                pairs.append((f"galaxies.{galaxy.name}.{component_name}", pair))
+                slope = (elements[(component_name, "slope", None)]
+                         if component.profile_class == "autolens:mp.PowerLaw" else None)
+                pairs.append((f"galaxies.{galaxy.name}.{component_name}", pair, slope))
     if not pairs:
         return objective
 
     def value_and_gradient(z):
         physical = objective.to_physical(z)
-        for name, pair in pairs:
+        for name, pair, slope in pairs:
             if all((physical[index] if index is not None else prior.value) == 0.0 for index, prior in pair):
+                if slope is not None:
+                    index, prior = slope
+                    gamma = physical[index] if index is not None else prior.value
+                    if gamma == 2.0:
+                        continue
+                    raise ValueError(f"PowerLaw gradient is undefined at exactly ell_comps=(0,0) for {name} "
+                                     f"with free ellipticity and slope {gamma:g}: the (2-slope)|ell_comps| "
+                                     "normalization cusp has no gradient; use value-only sampling, fixed "
+                                     "ellipticity, or a noncircular shape")
                 raise ValueError(f"Isothermal gradient is undefined at exactly ell_comps=(0,0) for {name} "
                                  "with free ellipticity; use value-only sampling or a noncircular shape")
         return objective.value_and_gradient(z)
