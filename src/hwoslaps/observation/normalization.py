@@ -12,6 +12,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
+from ..config.checks import Rule
 from ..instrument import Instrument, InstrumentSpec, build_instrument
 from .expected import Exposure
 from .observation import ObservationSpec
@@ -20,7 +21,10 @@ if TYPE_CHECKING:
     from ..optics.providers import PSFProvider
     from ..scene.spec import SceneSpec
 
-__all__ = ["ObservingSetup", "PhotometryRecord", "resolve_observing"]
+__all__ = ["CROSS_RULES", "ObservingSetup", "PhotometryRecord", "resolve_observing"]
+
+# Rules over the whole configuration that config/schema.py runs after the section reads (SPEC_CORE 4.8).
+CROSS_RULES: tuple[Rule, ...] = ()
 
 
 @dataclass(frozen=True)

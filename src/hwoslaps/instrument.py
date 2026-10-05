@@ -17,7 +17,7 @@ import numpy as np
 from .config.checks import ConfigError, Key, Nullable, Real, Rule, Table, Text
 
 __all__ = [
-    "DETECTOR_TABLE", "Detector", "INSTRUMENT_TABLE", "Instrument", "InstrumentSpec",
+    "CROSS_RULES", "DETECTOR_TABLE", "Detector", "INSTRUMENT_TABLE", "Instrument", "InstrumentSpec",
     "build_instrument", "parse_instrument",
 ]
 
@@ -77,6 +77,9 @@ INSTRUMENT_TABLE = Table(
     ),
     doc="the instrument",
 )
+
+# Rules over the whole configuration that config/schema.py runs after the section reads (SPEC_CORE 4.8).
+CROSS_RULES: tuple[Rule, ...] = ()
 
 
 @dataclass(frozen=True)
