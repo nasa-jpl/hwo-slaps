@@ -1,5 +1,4 @@
 """Current artifact formats, exact scientific values and atomic no-overwrite publishing."""
-from dataclasses import fields
 import json
 
 import numpy as np
@@ -23,7 +22,7 @@ def forecast_value(kind="grid", mismatch=True):
         amplitude[0, 0] = np.nan
     return ForecastResult(np.array([1e8]), positions, raw, profiled, amplitude,
                           None if amplitude is None else amplitude.copy(),
-                          "kernel" if mismatch else "matched", {"scene": "synthetic"}, {"threshold": 2.0})
+                          "kernel" if mismatch else "matched", {"scene": {"lens": {"mass": {"zeta": {"type": "Isothermal"}, "alpha": {"type": "Isothermal"}}}}}, {"threshold": 2.0})
 
 
 def observation_value(noisy=False):
@@ -80,6 +79,7 @@ def test_forecast_round_trip_preserves_arrays_layout_and_provenance(tmp_path, ki
     assert original.positions.kind == loaded.positions.kind
     assert original.positions.domain_radius_arcsec == loaded.positions.domain_radius_arcsec
     assert original.config == loaded.config and original.provenance == loaded.provenance
+    assert tuple(original.config["scene"]["lens"]["mass"]) == tuple(loaded.config["scene"]["lens"]["mass"])
     if original.positions.grid is not None:
         assert original.positions.grid.indices.tobytes() == loaded.positions.grid.indices.tobytes()
         assert original.positions.grid.spacing_arcsec == loaded.positions.grid.spacing_arcsec
@@ -99,6 +99,7 @@ def test_observation_round_trip_preserves_bytes_sampling_and_kernel_sharing(tmp_
     assert original.to_mapping() == loaded.to_mapping()
 
 
+@pytest.mark.backend
 def test_case_round_trip_preserves_typed_result(tmp_path):
     original = case_value()
     loaded = load_case(save_case(original, tmp_path / "case.json"))
@@ -106,7 +107,7 @@ def test_case_round_trip_preserves_typed_result(tmp_path):
 
 
 @pytest.mark.parametrize("writer,payload", [(save_forecast, forecast_value()), (save_observation, observation_value()),
-                                          (save_case, case_value()), (write_json, {"x": 1}),
+                                          pytest.param(save_case, case_value(), marks=pytest.mark.backend), (write_json, {"x": 1}),
                                           (write_yaml, {"x": 1})])
 def test_publish_refuses_existing_destination_and_preserves_original_bytes(tmp_path, writer, payload):
     path = tmp_path / "artifact"

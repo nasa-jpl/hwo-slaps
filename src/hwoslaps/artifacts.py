@@ -139,7 +139,7 @@ def save_forecast(result: ForecastResult, path) -> Path:
     members = {"schema_version": np.asarray(2), "artifact_kind": np.asarray("forecast"),
                "masses_msun": result.masses_msun, "positions_yx": positions.positions_yx,
                "positions_json": np.asarray(canonical_json(layout)),
-               "config_json": np.asarray(canonical_json(result.config)),
+               "config_json": np.asarray(json.dumps(json_ready(result.config), separators=(",", ":"), allow_nan=False)),
                "provenance_json": np.asarray(canonical_json(result.provenance)),
                "psf_relation": np.asarray(result.psf_relation)}
     members.update({name: getattr(result, name) for name in _STATISTICS})
