@@ -217,7 +217,7 @@ def test_cartesian_multipole_objective_gradient_matches_independent_fd(gpu,comps
         upper=ncase.log_likelihood("smooth",objective.to_physical(z+step))
         lower=ncase.log_likelihood("smooth",objective.to_physical(z-step))
         expected=-(upper-lower)/(2.e-4)
-        assert gradient[i]==pytest.approx(expected,rel=1e-6,abs=1e-6)
+        assert gradient[i]==pytest.approx(expected,rel=1e-6,abs=0.)
 
 
 @pytest.mark.parametrize("n",[.36,.5,.75,1.,2.5,4.,8.])
