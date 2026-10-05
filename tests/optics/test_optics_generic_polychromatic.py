@@ -14,6 +14,10 @@ from hwoslaps.optics.wavefront import WavefrontCoefficients
 
 pytestmark = pytest.mark.backend
 
+# Carried from the validated mono EE owner, not loosened for this stack.
+# XTX must justify this bound at both new pixel scales before acceptance.
+_STACK_EE_ATOL_PENDING_XTX = 3e-3
+
 
 def _optics(circular_pupil, *, pixel, nodes=(4e-7, 6e-7), coefficients=None):
     spec = parse_psf({"truth": {"kind": "optical", "pupil": circular_pupil, "focal_length_m": 10.0,
@@ -58,6 +62,13 @@ def test_wavelength_stack_shares_pixels_and_follows_integrated_airy(circular_pup
         widths.append(fwhm_arcsec(_kernel_field(kernel.kernel, pixel, wavelength)))
         reference = _integrated_airy(31, pixel, wavelength)
         reference_widths.append(fwhm_arcsec(_kernel_field(reference, pixel, wavelength)))
+        axis = (np.arange(31) - 15) * pixel
+        x, y = np.meshgrid(axis, axis)
+        distance = np.hypot(y, x)
+        radii = pixel * np.array([2.0, 4.0, 8.0, 12.0])
+        observed_energy = np.array([np.sum(kernel.kernel[distance <= radius]) for radius in radii])
+        reference_energy = np.array([np.sum(reference[distance <= radius]) for radius in radii])
+        np.testing.assert_allclose(observed_energy, reference_energy, rtol=0.0, atol=_STACK_EE_ATOL_PENDING_XTX)
     ratio, expected_ratio = widths[1] / widths[0], reference_widths[1] / reference_widths[0]
     assert ratio == pytest.approx(expected_ratio, rel=1e-3)
     if fine:
