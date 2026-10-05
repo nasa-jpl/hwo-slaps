@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.fisher.positions import explicit_positions
-from hwoslaps.fisher.result import ForecastResult
+from hwoslaps.fisher.result import ForecastResult, is_detection
 
 nan, inf = np.nan, np.inf
 
@@ -49,6 +49,11 @@ def test_mismatch_detections_require_positive_amplitude():
     assert matched.detection_metric == "q_asimov"
     with pytest.raises(ValueError, match="q_mismatch was not evaluated"):
         matched.detections(q_threshold=10.0, metric="q_mismatch")
+    single_node = [is_detection(25.0, amplitude, q_threshold=10.0) for amplitude in (None, 0.5, -0.5, 0.0, nan)]
+    assert single_node == [True, True, False, False, False]
+    assert not is_detection(nan, None, q_threshold=10.0) and not is_detection(9.5, 1.0, q_threshold=10.0)
+    with pytest.raises(ValueError, match="amplitude shape"):
+        is_detection(information, amplitude_hat[:, :2], q_threshold=10.0)
 
 
 def test_properties_reproduce_974cee9_bank_statistics_bitwise():

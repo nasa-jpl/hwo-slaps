@@ -33,7 +33,7 @@ __all__ = ["GridIndex", "PositionSet", "explicit_positions", "grid_positions", "
 _LAYOUT_KINDS = ("grid", "ring", "explicit")
 
 
-def _frozen(values: np.ndarray) -> np.ndarray:
+def _read_only(values: np.ndarray) -> np.ndarray:
     copy = np.array(values, order="C")
     copy.setflags(write=False)
     return copy
@@ -73,7 +73,7 @@ class GridIndex:
             if coords.ndim != 1 or coords.size == 0 or not np.all(np.isfinite(coords)) \
                     or np.any(np.diff(coords) <= 0.0):
                 raise ValueError(f"{name} must be a non-empty, finite, increasing vector")
-            object.__setattr__(self, name, _frozen(coords))
+            object.__setattr__(self, name, _read_only(coords))
         indices = np.asarray(self.indices)
         if indices.ndim != 2 or indices.shape[1] != 2 or indices.shape[0] == 0 or indices.dtype.kind not in "iu":
             raise ValueError(f"indices must be a non-empty integer (n, 2) array, got shape {indices.shape}")
@@ -81,7 +81,7 @@ class GridIndex:
             raise ValueError(f"indices must lie inside the {self.shape} lattice")
         if np.unique(indices, axis=0).shape[0] != indices.shape[0]:
             raise ValueError("indices must not repeat a lattice node")
-        object.__setattr__(self, "indices", _frozen(indices.astype(np.int64)))
+        object.__setattr__(self, "indices", _read_only(indices.astype(np.int64)))
         object.__setattr__(self, "spacing_arcsec", _positive(self.spacing_arcsec, "spacing_arcsec"))
 
     def __setstate__(self, state: dict[str, object]) -> None:
@@ -151,9 +151,9 @@ class PositionSet:
                 boundary = np.asarray(self.boundary)
                 if boundary.dtype != bool or boundary.shape != (count,):
                     raise ValueError(f"boundary must be a boolean vector of length {count}")
-                object.__setattr__(self, "boundary", _frozen(boundary))
-            object.__setattr__(self, "cell_areas_arcsec2", _frozen(areas))
-        object.__setattr__(self, "positions_yx", _frozen(positions))
+                object.__setattr__(self, "boundary", _read_only(boundary))
+            object.__setattr__(self, "cell_areas_arcsec2", _read_only(areas))
+        object.__setattr__(self, "positions_yx", _read_only(positions))
         object.__setattr__(self, "centre_yx", centre)
         object.__setattr__(self, "domain_radius_arcsec", domain)
 
