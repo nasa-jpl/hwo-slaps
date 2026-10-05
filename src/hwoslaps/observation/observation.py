@@ -8,6 +8,7 @@ observation, so the noise map always describes the expectation.
 
 from __future__ import annotations
 
+import types
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
@@ -77,8 +78,9 @@ def parse_observation(mapping: Mapping[str, Any], path: str = "observation") -> 
 class Observation:
     """An expected or noisy detector image of a scene, with the light it was made from.
 
-    Arrays are read-only and shaped like the grid. ``light_rate_e_per_s`` is the convolved
-    light of every plane in detected e-/s per pixel (round-off negatives kept);
+    Arrays and mappings are read-only, and arrays are shaped like the grid, so the expected
+    observation and its draws can share them. ``light_rate_e_per_s`` is the convolved light of
+    every plane in detected e-/s per pixel (round-off negatives kept);
     ``light_rate_by_plane_e_per_s`` holds it per plane, ``"source"`` always and ``"lens"``
     with lens light, and without lens light its ``"source"`` entry is the total itself.
     ``noise_map_adu`` comes from the expected image for both kinds. ``sampling`` is the
@@ -121,6 +123,9 @@ class Observation:
         if set(self.sampling) != set(self.psfs.group_index):
             raise ValueError(f"sampling covers {sorted(self.sampling)}; the light groups are "
                              f"{sorted(self.psfs.group_index)}")
+        object.__setattr__(self, "light_rate_by_plane_e_per_s",
+                           types.MappingProxyType(dict(self.light_rate_by_plane_e_per_s)))
+        object.__setattr__(self, "sampling", types.MappingProxyType(dict(self.sampling)))
 
     @property
     def pixel_scale_arcsec(self) -> float:
@@ -168,7 +173,7 @@ def observe(scene: Scene, kernels: KernelBinding, exposure: Exposure, *, config_
     """
     from ..scene.builder import native_sampling_variation
 
-    sampling = dict(native_sampling_variation(scene))
+    sampling = native_sampling_variation(scene)
     by_plane = convolve_light(scene.light_images, scene.light_groups, kernels, scene.pixel_scale_arcsec)
     total = by_plane["lens"] + by_plane["source"] if "lens" in by_plane else by_plane["source"]
     expected = exposure.mean_adu(total)
