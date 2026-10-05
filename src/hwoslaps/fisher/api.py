@@ -223,6 +223,7 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
     spec = prepared.scene.spec
     covariance = prepared._config.forecast.noise_covariance
     draw = prepared.psfs.model.knowledge_error
+    condition = prepared.workspace.condition_number
     return {key: json_ready(prepared.record[key]) for key in ("config_digest", "comparison_digest", "file_digests", "sampling")} | {
         "truth_kernels": prepared.psfs.truth_kernels.to_mapping(), "model_kernels": prepared.psfs.model_kernels.to_mapping(),
         "psf_relation": prepared.psfs.relation, "knowledge_error": None if draw is None else draw.to_mapping(),
@@ -236,7 +237,7 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
         "coordinate_order": "y,x", "units": {"mass": "solar_mass", "position": "arcsec"},
         "engine": dict(prepared.engine.describe()) | {"reference_workers": prepared.execution.reference_workers,
                                                      "batch_size": prepared.execution.batch_size}, "nuisance_names": list(prepared.nuisances.names),
-        "nuisance_rank": prepared.workspace.nuisance_rank, "gram_condition_number": prepared.workspace.condition_number,
+        "nuisance_rank": prepared.workspace.nuisance_rank, "gram_condition_number": condition if np.isfinite(condition) else None,
         "mask": {"kind": prepared._config.forecast.mask.kind, "pixel_count": prepared.record["pixel_count"],
                  "digest": prepared.record["mask_digest"]},
         "noise_covariance": None if covariance is None else prepared.record["file_digests"][str(covariance)],

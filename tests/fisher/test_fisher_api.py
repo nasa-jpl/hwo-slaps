@@ -167,3 +167,24 @@ def test_closed_preparation_refuses_forecast(minimal_mapping, engine):
     prepared.close()
     with pytest.raises(RuntimeError, match="closed"):
         forecast(prepared, masses_msun=[1.0e8])
+
+
+def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_mapping, tmp_path):
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    kernel_path = tmp_path / "delta.npy"
+    np.save(kernel_path, np.ones((1, 1)))
+    minimal_mapping["psf"]["truth"]["path"] = str(kernel_path)
+    minimal_mapping["scene"]["grid"].update(shape=[3, 3], over_sample_size=1)
+    minimal_mapping["scene"]["lens"]["mass"]["mass"]["ell_comps"] = [0.0, 0.0]
+    minimal_mapping["scene"]["source"]["light"]["light"]["centre"] = [0.0, 0.0]
+    minimal_mapping["forecast"]["mask"] = {"kind": "annulus", "about": "grid", "inner_arcsec": 0.0, "outer_arcsec": 0.001}
+    minimal_mapping["forecast"]["nuisances"] = {"background_offset": False,
+        "fixed": ["lens.*", "source.*.centre_x", "source.*.ell_*", "source.*.intensity", "source.*.effective_radius"]}
+    with prepare_forecast(minimal_mapping) as prepared:
+        assert prepared.nuisances.names == ("source.light.light.centre_y",)
+        assert prepared.workspace.nuisance_rank == 0
+        assert np.isinf(prepared.workspace.condition_number)
+        result = forecast(prepared, masses_msun=[1.0e8])
+        assert result.provenance["nuisance_rank"] == 0
+        assert result.provenance["gram_condition_number"] is None
