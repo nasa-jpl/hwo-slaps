@@ -144,9 +144,12 @@ def test_truncated_nfw_class_traces_under_jax():
         np.testing.assert_allclose(reverse_gradient, expected_gradient, rtol=1e-10, atol=1e-12,
                                    err_msg=f"TNFW reverse scale/centre derivatives at radius/scale={radius}")
         step = 1e-3
+        # The five-point stencil resolves small off-point derivatives without widening tolerances.
         finite_difference = np.column_stack([
-            (geometry_values(al.mp.NFWTruncatedSph, arguments + step * direction, np) -
-             geometry_values(al.mp.NFWTruncatedSph, arguments - step * direction, np)) / (2 * step)
+            (-geometry_values(al.mp.NFWTruncatedSph, arguments + 2 * step * direction, np) +
+             8 * geometry_values(al.mp.NFWTruncatedSph, arguments + step * direction, np) -
+             8 * geometry_values(al.mp.NFWTruncatedSph, arguments - step * direction, np) +
+             geometry_values(al.mp.NFWTruncatedSph, arguments - 2 * step * direction, np)) / (12 * step)
             for direction in np.eye(3)])
         np.testing.assert_allclose(actual_gradient, finite_difference, rtol=1e-5, atol=1e-9)
 
