@@ -192,14 +192,19 @@ DEFAULT_BOX_RULES: tuple[tuple[str, BoxRule], ...] = (
     ("lens.amplitude", BoxRule(0.5, fractional=True)),
     ("lens.einstein_radius", BoxRule(0.01)),
     ("lens.ellipticity", BoxRule(0.02, clip=(-0.9, 0.9))),
+    ("lens.orientation", BoxRule(5.0)),
     ("lens.position", BoxRule(0.005)),
     ("lens.size", BoxRule(0.3, fractional=True)),
     ("source.amplitude", BoxRule(0.5, fractional=True)),
     ("source.ellipticity", BoxRule(0.05, clip=(-0.9, 0.9))),
+    ("source.orientation", BoxRule(5.0)),
     ("source.position", BoxRule(0.01)),
     ("source.size", BoxRule(0.3, fractional=True)),
 )
-"""Box rules keyed ``<galaxy>.<parameter kind>``, sorted by key (41621de autolens_model_builder.py:22-34)."""
+"""Box rules keyed ``<galaxy>.<parameter kind>``, sorted by key. The widths are those of 41621de
+autolens_model_builder.py:22-34; the lens light rows reuse the source widths, and the orientation
+rows (degrees, an Image ``rotation_deg``) match the analytic source's orientation freedom at the P1
+ellipticity (SCI-16)."""
 
 _RULE_KEYS = tuple(name for name, _ in DEFAULT_BOX_RULES)
 

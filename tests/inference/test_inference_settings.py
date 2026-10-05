@@ -132,7 +132,8 @@ def test_box_rules_reproduce_paper_bounds():
 
 
 def test_default_settings_equal_the_paper_procedure():
-    """Literals of 41621de fresh_profile.py:62-76 and autolens_model_builder.py:22-34."""
+    """Literals of 41621de fresh_profile.py:62-76 and autolens_model_builder.py:22-34; the lens light
+    rows (A6 3.1) and the orientation rows in degrees (SCI-16, SPEC 10.2 Q7) are new."""
     assert RefineSettings().to_mapping() == {
         "original_start_count": 8, "start_separation_normalized_l2": 0.05, "start_separation_posterior_sigma": 1.0,
         "maxiter": 500, "ftol": 0.0, "gtol": 1.0e-10, "maxls": 50, "repeat_maxiter": 1000, "repeat_ftol": 0.0,
@@ -144,8 +145,10 @@ def test_default_settings_equal_the_paper_procedure():
         "lens.ellipticity": {"half_width": 0.02, "fractional": False, "clip": [-0.9, 0.9]},
         "lens.amplitude": {"half_width": 0.5, "fractional": True, "clip": None},
         "lens.size": {"half_width": 0.3, "fractional": True, "clip": None},
+        "lens.orientation": {"half_width": 5.0, "fractional": False, "clip": None},
         "source.position": {"half_width": 0.01, "fractional": False, "clip": None},
         "source.ellipticity": {"half_width": 0.05, "fractional": False, "clip": [-0.9, 0.9]},
+        "source.orientation": {"half_width": 5.0, "fractional": False, "clip": None},
         "source.amplitude": {"half_width": 0.5, "fractional": True, "clip": None},
         "source.size": {"half_width": 0.3, "fractional": True, "clip": None}}
     widths = PriorWidths()
