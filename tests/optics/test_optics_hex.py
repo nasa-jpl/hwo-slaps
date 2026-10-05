@@ -9,7 +9,7 @@ import pytest
 from hwoslaps.config.checks import ConfigError
 from hwoslaps.optics.metrics import captured_power_fraction, strehl_ratio
 from hwoslaps.optics.providers import build_psf_provider, parse_psf
-from hwoslaps.optics.pupils import build_pupil, parse_pupil
+from hwoslaps.optics.pupils import Pupil, build_pupil, parse_pupil
 from hwoslaps.optics.wavefront import WavefrontMode
 
 pytestmark = pytest.mark.backend
@@ -48,9 +48,13 @@ def test_pupil_grid_must_contain_the_aperture(p1_pupil, paper_pupil):
         build_pupil(dataclasses.replace(spec, diameter_m=7.0))
 
 
-def test_built_pupil_cannot_be_edited_through_its_arrays(p1_pupil):
+def test_pupil_cannot_be_edited_through_its_arrays(p1_pupil):
     pupil = build_pupil(parse_pupil(p1_pupil, "pupil"))
-    for array in (pupil.transmission, pupil.illuminated_mask):
+    caller = pupil.transmission.copy()
+    direct = Pupil(pupil.spec, pupil.grid, caller, pupil.segments, pupil.segment_centres)
+    caller[:] = 0.0
+    assert np.array_equal(direct.transmission, pupil.transmission)
+    for array in (pupil.transmission, pupil.illuminated_mask, direct.transmission):
         with pytest.raises(ValueError, match="read-only"):
             array[0] = 0
     mask = pupil.segments[3]

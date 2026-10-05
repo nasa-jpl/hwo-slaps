@@ -54,7 +54,9 @@ def fwhm_arcsec(field: FocalField) -> float:
     """Full width at half maximum of the azimuthally averaged intensity about its peak.
 
     The peak is refined by three-point parabolas along each axis; samples are averaged in
-    radial bins one sample pitch wide; the half-maximum crossing is interpolated linearly
+    radial bins one sample pitch wide. Scaled radii within eight float64 ULPs of an integer
+    are classified at that boundary, while their actual values enter the mean radii. This does not bound
+    perturbations of an ill-conditioned fitted peak. The crossing is interpolated linearly
     between the mean radii of the two bins that bracket it. Raises when the peak sample lies
     on the field edge or the profile never falls below half maximum.
     """
@@ -69,7 +71,13 @@ def fwhm_arcsec(field: FocalField) -> float:
         intensity[row - 1, column], intensity[row, column], intensity[row + 1, column])
     radius = np.hypot(field.x_arcsec - centre_x, field.y_arcsec - centre_y).ravel()
     values = intensity.ravel()
-    bins = np.floor(radius / pitch).astype(int)
+    scaled_radius = radius / pitch
+    integer_radius = np.rint(scaled_radius)
+    # Stabilize bin membership at a rounded integer; keep true radii for the means.
+    roundoff = 8 * np.spacing(np.maximum(integer_radius, 1.0))
+    classified_radius = np.where(np.abs(scaled_radius - integer_radius) <= roundoff,
+                                 integer_radius, scaled_radius)
+    bins = np.floor(classified_radius).astype(int)
     counts = np.bincount(bins)
     filled = counts > 0
     mean_radius = np.bincount(bins, weights=radius)[filled] / counts[filled]

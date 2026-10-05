@@ -183,10 +183,11 @@ def parse_pupil(mapping: Mapping[str, Any], path: str) -> PupilSpec:
 class Pupil:
     """A pupil sampled on its HCIPy grid; built by ``build_pupil``.
 
-    ``transmission`` is the grey amplitude transmission in [0, 1], read-only after
-    ``build_pupil``. ``segments`` is the sequence of grey segment masks HCIPy evaluates
-    for the segment generators (hex pupils; None for a circular pupil), in HCIPy order;
-    HCIPy stores them as a sparse mode basis, and indexing it returns a new array.
+    ``transmission`` is the grey amplitude transmission in [0, 1], held as a private
+    read-only copy of the HCIPy field it is given. ``segments`` is the sequence of grey
+    segment masks HCIPy evaluates for the segment generators (hex pupils; None for a
+    circular pupil), in HCIPy order; HCIPy stores them as a sparse mode basis, and
+    indexing it returns a new array.
     ``segment_centres`` are their centres. ``illuminated_mask`` (``transmission > 0.5``) is the aperture over which
     wavefront RMS values and prior bases are defined. ``zernike_diameter_m`` is the disc
     the global Zernikes are normalized on: the grid extent ``x.max() - x.min()`` of a hex
@@ -208,7 +209,10 @@ class Pupil:
     active_segments: tuple[int, ...] = field(init=False)
 
     def __post_init__(self) -> None:
-        values = np.asarray(self.transmission)
+        transmission = self.transmission.copy()
+        transmission.flags.writeable = False
+        object.__setattr__(self, "transmission", transmission)
+        values = np.asarray(transmission)
         illuminated = values > 0.5
         illuminated.flags.writeable = False
         count = segment_count(self.spec)
@@ -298,5 +302,4 @@ def build_pupil(spec: PupilSpec) -> Pupil:
     else:
         aperture = hcipy.make_circular_aperture(spec.diameter_m)
     transmission = hcipy.evaluate_supersampled(_with_modifiers(aperture, spec), grid, spec.supersampling)
-    transmission.flags.writeable = False
     return Pupil(spec, grid, transmission, segments, centres)

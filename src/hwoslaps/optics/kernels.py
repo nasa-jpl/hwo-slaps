@@ -73,6 +73,8 @@ def _pixel_scale(value: Any, what: str) -> float:
 
 def _kernel_array(values: ArrayLike, *, signed: bool) -> np.ndarray:
     """A float64 C-contiguous copy of a 2-D kernel with odd sides and finite values."""
+    if np.iscomplexobj(values):
+        raise ValueError("detector kernel values must be real; complex values cannot be cast to intensity")
     array = np.array(values, dtype=np.float64, copy=True, order="C")
     if array.ndim != 2:
         raise ValueError(f"a detector kernel must be two-dimensional, got shape {array.shape}")

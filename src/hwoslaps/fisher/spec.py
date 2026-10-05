@@ -252,7 +252,8 @@ def _check_forecast(root: Mapping[str, Any], path: str) -> None:
     model_has_basis = psf["truth"]["kind"] == "optical" and psf["model"]["kind"] != "kernel"
     check_nuisance_spec(scene, spec.nuisances, model_has_basis=model_has_basis)
     if spec.nuisances.wavefront is not None:
-        pupil = parse_pupil(psf["truth"]["pupil"], "psf.truth.pupil")
+        section = "model" if psf["model"]["kind"] == "optical" else "truth"
+        pupil = parse_pupil(psf[section]["pupil"], f"psf.{section}.pupil")
         select_modes(spec.nuisances.wavefront.modes, pupil, "forecast.nuisances.wavefront.modes")
     if isinstance(spec.positions, RingPositionsSpec) and spec.positions.radius == "einstein_radius":
         if len(scene.einstein_radii()) != 1:
