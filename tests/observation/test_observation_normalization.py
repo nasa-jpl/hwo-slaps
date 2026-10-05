@@ -112,8 +112,7 @@ def test_grouped_monochromatic_scene_keeps_real_flux_and_nuisance_paths(minimal_
     np.testing.assert_allclose(jax.fisher_profiled, actual.fisher_profiled, rtol=5.0e-6)
 
 
-@pytest.mark.parametrize("workers", [1, 2])
-def test_captured_table_seds_survive_file_removal_in_real_renderer_transport(minimal_mapping, tmp_path, workers):
+def test_captured_table_seds_survive_file_removal_in_real_renderer_transport(minimal_mapping, tmp_path):
     from hwoslaps.fisher.api import Execution, prepare_forecast
 
     path = tmp_path / "sed.npz"
@@ -124,10 +123,14 @@ def test_captured_table_seds_survive_file_removal_in_real_renderer_transport(min
     second = deepcopy(component)
     second.update(centre=[0.04, -0.06], intensity=0.3)
     minimal_mapping["scene"]["source"]["light"]["second"] = second
-    with prepare_forecast(minimal_mapping, execution=Execution(reference_workers=workers)) as prepared:
+    with prepare_forecast(minimal_mapping) as serial, prepare_forecast(
+            minimal_mapping, execution=Execution(reference_workers=2)) as prepared:
         renderer = pickle.loads(pickle.dumps(prepared.renderer))
-        expected = renderer.mean_adu(renderer.scene(), prepared.psfs.truth_kernels)
-        expected_bank = prepared.engine.evaluate(prepared.positions.positions_yx, [1.0e8])[0]
+        expected = serial.renderer.mean_adu(serial.scene, serial.psfs.truth_kernels)
+        expected_bank = serial.engine.evaluate(serial.positions.positions_yx, [1.0e8])[0]
+        pooled_bank = prepared.engine.evaluate(prepared.positions.positions_yx, [1.0e8])[0]
+        np.testing.assert_array_equal(pooled_bank.fisher_raw, expected_bank.fisher_raw)
+        np.testing.assert_array_equal(pooled_bank.fisher_profiled, expected_bank.fisher_profiled)
         path.unlink()
         actual = renderer.mean_adu(renderer.scene(), prepared.psfs.truth_kernels)
         actual_bank = prepared.engine.evaluate(prepared.positions.positions_yx, [1.0e8])[0]
