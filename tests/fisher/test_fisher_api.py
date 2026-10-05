@@ -194,15 +194,15 @@ def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_map
 def test_input_publication_during_preparation_is_refused(minimal_mapping, publication):
     import sys
     from hwoslaps.fisher.api import prepare_forecast
-    from hwoslaps.identity import file_digest, read_file_snapshot
+    from hwoslaps.identity import file_digest
 
     path = Path(minimal_mapping["psf"]["truth"]["path"])
     original = path.read_bytes()
-    trigger = file_digest if publication == "after_capture" else read_file_snapshot
+    trigger = file_digest if publication == "after_capture" else np.load
     published = []
     previous_profile = sys.getprofile()
     def publish(frame, event, returned):
-        if event == "return" and frame.f_code is trigger.__code__ and Path(frame.f_locals["path"]) == path:
+        if event == "return" and frame.f_code is trigger.__code__:
             sys.setprofile(previous_profile)
             kernel = np.load(path, allow_pickle=False)
             kernel[3, 3] *= 1.4

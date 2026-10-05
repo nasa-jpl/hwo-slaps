@@ -83,17 +83,25 @@ def test_standalone_simulation_needs_no_forecast_section(minimal_mapping):
 
 
 def test_prepared_asset_mapping_cannot_relabel_injected_science(minimal_mapping, image_asset):
+    import json
     from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.identity import json_ready
     from hwoslaps.scene.image_source import load_image_asset
     from hwoslaps.simulation import simulate
 
     minimal_mapping["scene"]["source"]["light"] = {"light": {"type": "Image", "asset_path": str(image_asset),
         "centre": [-0.03, 0.08], "flux_scale": 1.0, "size_scale": 1.0, "rotation_deg": 0.0, "total_flux": 1.0}}
+    original = load_image_asset(image_asset)
+    replacement_path = image_asset.with_name("replacement.npz")
+    np.savez(replacement_path, sb=np.flip(original.sb, axis=0),
+             pixel_scale_arcsec=np.asarray(original.pixel_scale_arcsec),
+             metadata_json=np.asarray(json.dumps(json_ready(original.metadata))))
+    replacement = load_image_asset(replacement_path)
     with prepare_forecast(minimal_mapping) as prepared:
         trial = prepared.hypothesis(1.0e8, (0.1, 0.7))
         before = simulate(prepared, subhalo=trial, noise_seed=None)
         with pytest.raises(TypeError):
-            prepared.renderer.assets[str(image_asset)] = load_image_asset(image_asset)
+            prepared.renderer.assets[str(image_asset)] = replacement
         with pytest.raises(ValueError):
             prepared.renderer.assets[str(image_asset)].sb[0, 0] = 1.0
         prepared.validate_identity()
