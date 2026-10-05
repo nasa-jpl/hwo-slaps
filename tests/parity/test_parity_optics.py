@@ -39,8 +39,15 @@ def _paper_truth(shape):
                  "family": "combined"}}}
 
 
+def _blas_threads():
+    from threadpoolctl import threadpool_info
+
+    return [library["num_threads"] for library in threadpool_info() if library["user_api"] == "blas"]
+
+
 def test_paper_optics_reproduce_the_submitted_code():
-    from threadpoolctl import threadpool_info, threadpool_limits
+    import scipy.linalg  # noqa: F401  (HCIPy's propagation runs on SciPy's BLAS: load it before raising threads)
+    from threadpoolctl import threadpool_limits
 
     anchor = json.loads(FIXTURE.read_text(encoding="utf-8"))
     aberrations = anchor["psf"]["aberrations"]
@@ -49,8 +56,7 @@ def test_paper_optics_reproduce_the_submitted_code():
                             for s, modes in aberrations["segment_hexikes"].items()},
         "zernikes": {int(n): v for n, v in aberrations["global_zernikes"].items()}}
     with threadpool_limits(limits=THREADS):
-        blas = [library["num_threads"] for library in threadpool_info() if library["user_api"] == "blas"]
-        assert blas and all(threads == THREADS for threads in blas), blas
+        assert set(_blas_threads()) == {THREADS}, _blas_threads()
         for shape in (999, 51):
             psf = build_psf_provider(parse_psf(_paper_truth(shape)).truth,
                                      pixel_scale_arcsec=anchor["pixel_scale_arcsec"])
@@ -58,3 +64,4 @@ def test_paper_optics_reproduce_the_submitted_code():
             kernel = psf.kernel().kernel
             assert kernel.shape == tuple(anchor["kernels"][f"{shape}x{shape}"]["shape"])
             assert _paper_digest(kernel) == anchor["kernels"][f"{shape}x{shape}"]["sha256"]
+        assert set(_blas_threads()) == {THREADS}, _blas_threads()
