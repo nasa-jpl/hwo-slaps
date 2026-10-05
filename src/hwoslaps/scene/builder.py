@@ -136,21 +136,29 @@ def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, 
 
     ``assets`` maps an absolute asset path to its loaded ``ImageAsset``; when given, no file is read.
     """
+    import autofit as af
     import autolens as al
 
     perturbers = tuple(perturbers)
-    for component in spec.lens.mass + spec.lens.light + spec.source.light:
-        if hasattr(al.Galaxy, component.name):
-            raise ValueError(f"component name {component.name!r} shadows an attribute of al.Galaxy; rename it")
     for index, halo in enumerate(perturbers):
         _check_halo(halo, spec, cosmology, f"perturber {index}")
     if subhalo is not None:
         _check_halo(subhalo, spec, cosmology, "the subhalo")
+    # Profiles become attributes of the truth galaxy and of the fit's galaxy model by keyword: a name
+    # that shadows a galaxy method breaks the truth galaxy, one that shadows a model attribute drops
+    # the component from the fit model without an error.
+    owners = {"al.Galaxy": al.Galaxy(redshift=spec.lens.redshift),
+              "af.Model(al.Galaxy)": af.Model(al.Galaxy, redshift=spec.lens.redshift)}
 
     def profiles_of(components: Sequence[ComponentSpec]) -> dict[str, Any]:
         profiles: dict[str, Any] = {}
         for component in components:
-            profiles.update(instantiate(component, assets=assets))
+            for attribute, profile in instantiate(component, assets=assets).items():
+                for label, owner in owners.items():
+                    if hasattr(owner, attribute):
+                        raise ValueError(f"scene.{component.plane}.{component.role}.{component.name}: the galaxy "
+                                         f"attribute {attribute!r} shadows an attribute of {label}; rename it")
+                profiles[attribute] = profile
         return profiles
 
     lens_redshift = spec.lens.redshift

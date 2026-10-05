@@ -2,6 +2,7 @@
 
 import dataclasses
 import json
+import re
 
 import numpy as np
 import pytest
@@ -182,10 +183,12 @@ def test_unrenderable_scenes_are_refused(scene_mapping, planck15):
     with pytest.raises(ValueError, match="cannot lens|lenses a source"):
         build_scene(spec, planck15, subhalo=make_halo(spec.subhalo, 1.0e8, (0.1, 0.2), redshift=0.2,
                                                       source_redshift=0.9, cosmology=planck15))
-    renamed = dataclasses.replace(spec.lens.mass[0], name="has")
-    with pytest.raises(ValueError, match="shadows an attribute of al.Galaxy"):
-        build_scene(dataclasses.replace(spec, lens=dataclasses.replace(spec.lens, mass=(renamed,))), planck15,
-                    subhalo=None)
+    for name, owner in (("id", "al.Galaxy"), ("info", "af.Model(al.Galaxy)"), ("has", "al.Galaxy")):
+        renamed = dataclasses.replace(spec.lens.mass[0], name=name)
+        shadowed = rf"scene\.lens\.mass\.{name}: .* shadows an attribute of {re.escape(owner)}"
+        with pytest.raises(ValueError, match=shadowed):
+            build_scene(dataclasses.replace(spec, lens=dataclasses.replace(spec.lens, mass=(renamed,))), planck15,
+                        subhalo=None)
     scene_mapping["source"]["light"]["disk"]["intensity"] = 1.0e308
     with pytest.raises(ValueError, match="non-finite"):
         build_scene(parse_scene(scene_mapping), planck15, subhalo=None)

@@ -5,8 +5,8 @@ from the profile registry, halo keys from ``scene.halos``, the injection from
 ``scene.subhalo``, perturbers from ``scene.perturbers``) and checks the scene rules:
 - the source lies behind the lens;
 - component names are unique within a galaxy across its mass and light components and
-  avoid ``redshift``, ``subhalo``, the prefix ``perturber`` and the layout suffixes
-  ``_multipole_m3``, ``_multipole_m4``;
+  avoid ``cls``, ``id``, ``redshift``, ``subhalo``, the prefix ``perturber`` and the layout
+  suffixes ``_multipole_m3``, ``_multipole_m4``;
 - halo redshifts lie in (0, source redshift), and ``moline2017_eq7`` is used only at the
   lens redshift and inside its calibrated mass range;
 - a placement with ``radius: einstein_radius`` has exactly one lens mass component with an
@@ -41,7 +41,9 @@ __all__ = [
 Plane = Literal["lens", "source"]
 Role = Literal["mass", "light"]
 
-_RESERVED_NAMES = ("redshift", "subhalo")
+# The instance attributes and constructor keywords of al.Galaxy and af.Model(al.Galaxy), which a
+# class-level lookup cannot see, and the hypothesis attribute; build_scene refuses class attributes.
+_RESERVED_NAMES = ("cls", "id", "redshift", "subhalo")
 _RESERVED_PREFIX = "perturber"
 _LAYOUT_SUFFIXES = ("_multipole_m3", "_multipole_m4")
 
