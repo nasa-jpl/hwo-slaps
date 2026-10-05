@@ -113,7 +113,12 @@ def test_role_acceptance_status_follows_the_role_outcome(build, status):
     ("q_asimov", 9.0, None, False),
     ("q_mismatch", 16.0, 2.0, True),
     ("q_mismatch", 16.0, -2.0, False),
-], ids=["asimov-above", "asimov-below", "mismatch-positive-amplitude", "mismatch-negative-amplitude"])
+    ("q_asimov", float("inf"), None, False),
+    ("q_asimov", float("nan"), None, False),
+    ("q_mismatch", 16.0, float("inf"), False),
+    ("q_mismatch", 16.0, float("nan"), False),
+], ids=["asimov-above", "asimov-below", "mismatch-positive-amplitude", "mismatch-negative-amplitude",
+        "infinite-q", "nan-q", "infinite-amplitude", "nan-amplitude"])
 def test_forecast_reference_detection_requires_a_positive_amplitude(metric, q, amplitude, detected):
     """SCI-02: q_mismatch = a_hat^2 F with a_hat = -2, F = 4 is 16 but a template of the wrong sign."""
     reference = ForecastReference(q=q, metric=metric, mass_msun=1.0e9, position_yx_arcsec=(0.4, -0.8),

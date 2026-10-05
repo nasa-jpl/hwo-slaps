@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from ..fisher.result import is_detection
 from ..identity import KernelIdentity, json_ready
 from .settings import FitSpec, RefineSettings, SamplerSettings
 
@@ -283,7 +284,7 @@ class ForecastReference:
 
     def detected(self, *, q_threshold: float) -> bool:
         """``q >= q_threshold`` with a positive amplitude where one is recorded (the forecast rule)."""
-        return self.q >= q_threshold and (self.amplitude is None or self.amplitude > 0.0)
+        return bool(is_detection(self.q, self.amplitude, q_threshold=q_threshold))
 
     def to_mapping(self) -> dict[str, Any]:
         record = {item.name: getattr(self, item.name) for item in dataclasses.fields(self)}
