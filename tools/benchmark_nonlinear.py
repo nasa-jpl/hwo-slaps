@@ -26,14 +26,11 @@ FIXTURES = Path(__file__).resolve().parents[1] / "tests/fixtures/paper_parity/en
 
 def _inputs(name: str, config_path: Path | None = None):
     from hwoslaps.fisher.api import Execution, prepare_forecast
-    from hwoslaps.simulation import simulate
-
     scene = "p1_optical_matched" if name == "B4a" else "p2_delta_knowledge_error"
     prepared = prepare_forecast(config_path or FIXTURES / f"{scene}.yaml", execution=Execution(engine="reference"))
     trial = prepared.hypothesis(1.0e9, (0.4, -0.8))
-    observation = simulate(prepared, subhalo=trial, noise_seed=None if name == "B4a" else 11)
     fit = FitSpec(mode="fixed_template") if name == "B4a" else FitSpec(mode="freed", mass_support=MassSupport(6.0, 9.7))
-    return prepared, trial, observation, fit
+    return prepared, trial, fit
 
 
 def _median(call, samples: int) -> float:
@@ -77,14 +74,20 @@ def run_fit_case(name: str, work_dir: Path, *, config_path: Path | None = None) 
 
     if name not in ("B4a", "B4b"):
         raise ValueError(f"fit case must be B4a or B4b, got {name!r}")
-    prepared, trial, observation, fit = _inputs(name, config_path)
+    prepared, trial, fit = _inputs(name, config_path)
     try:
         sampler = SamplerSettings(n_live_smooth=50, n_live_subhalo_fixed=50, n_live_subhalo_search=80,
                                   n_eff=200, n_shell=1, f_live=0.01, discard_exploration=False,
                                   use_jax=True, jax_n_batch=50, retain_search_internal=True)
+        from hwoslaps.simulation import simulate
+
         start = perf_counter()
+        observation = simulate(prepared, subhalo=trial, noise_seed=None if name == "B4a" else 11)
+        simulation_seconds = perf_counter() - start
+        fit_start = perf_counter()
         result = validate_nonlinear(prepared, trial, observation, fit=fit, sampler=sampler, sampler_seed=20261005,
                                     refine=RefineSettings(), output_dir=work_dir, case_id=name)
+        fit_only_seconds = perf_counter() - fit_start
         wall = perf_counter() - start
         case = prepare_case(prepared, trial, observation, fit=fit, use_jax=True)
         timings = {}
@@ -98,9 +101,11 @@ def run_fit_case(name: str, work_dir: Path, *, config_path: Path | None = None) 
             if fitted.refinement is None or fitted.refinement.best_vector is None:
                 raise RuntimeError(f"{name} {role} did not produce a refined finite maximum: {fitted.error}")
             point = np.asarray(fitted.refinement.record["candidate_best_z"], dtype=float)
+            objective = case.objective(role)
             timings[f"{role}_objective_value_and_gradient_seconds_median"] = _median(
-                lambda: case.objective(role).value_and_gradient(point), 50)
-        return result, {"case_wall_seconds": wall, **timings, "results": fit_engine_results(result)}
+                lambda: objective.value_and_gradient(point), 50)
+        return result, {"case_wall_seconds": wall, "simulation_seconds": simulation_seconds,
+                        "fit_only_seconds": fit_only_seconds, "inclusive_case_wall_seconds": wall, **timings, "results": fit_engine_results(result)}
     finally:
         prepared.close()
 
@@ -108,8 +113,11 @@ def run_fit_case(name: str, work_dir: Path, *, config_path: Path | None = None) 
 def run_likelihood(*, config_path: Path | None = None) -> dict[str, Any]:
     import jax
 
-    prepared, trial, observation, fit = _inputs("B4L", config_path)
+    prepared, trial, fit = _inputs("B4L", config_path)
+    from hwoslaps.simulation import simulate
+
     try:
+        observation = simulate(prepared, subhalo=trial, noise_seed=11)
         case = prepare_case(prepared, trial, observation, fit=fit, use_jax=True)
         model = case.autofit_models["subhalo"]
         def call(parameters):
@@ -167,6 +175,9 @@ def main() -> int:
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--config", type=Path)
     args = parser.parse_args()
+    import importlib.util
+    from autoconf import conf
+    conf.instance.push(str(Path(importlib.util.find_spec("autoarray").origin).parent / "config"), keep_first=True)
     reference = json.loads(args.baseline.read_text())["workloads"][args.case]["summary"]
     with tempfile.TemporaryDirectory(prefix="nonlinear-benchmark-", dir=args.work_dir) as space:
         if args.case == "B4L":

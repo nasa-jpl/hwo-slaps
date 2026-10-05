@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 
@@ -113,12 +114,10 @@ def test_role_acceptance_status_follows_the_role_outcome(build, status):
     ("q_asimov", 9.0, None, False),
     ("q_mismatch", 16.0, 2.0, True),
     ("q_mismatch", 16.0, -2.0, False),
-    ("q_asimov", float("inf"), None, False),
-    ("q_asimov", float("nan"), None, False),
-    ("q_mismatch", 16.0, float("inf"), False),
-    ("q_mismatch", 16.0, float("nan"), False),
+    ("q_asimov", 0.0, None, False),
+    ("q_mismatch", 16.0, 0.0, False),
 ], ids=["asimov-above", "asimov-below", "mismatch-positive-amplitude", "mismatch-negative-amplitude",
-        "infinite-q", "nan-q", "infinite-amplitude", "nan-amplitude"])
+        "zero-q", "zero-amplitude"])
 def test_forecast_reference_detection_requires_a_positive_amplitude(metric, q, amplitude, detected):
     """SCI-02: q_mismatch = a_hat^2 F with a_hat = -2, F = 4 is 16 but a template of the wrong sign."""
     reference = ForecastReference(q=q, metric=metric, mass_msun=1.0e9, position_yx_arcsec=(0.4, -0.8),
@@ -126,3 +125,39 @@ def test_forecast_reference_detection_requires_a_positive_amplitude(metric, q, a
                                   model_kernel=KERNEL, amplitude=amplitude, comparison_digest="03" * 32,
                                   noise_model="diagonal")
     assert reference.detected(q_threshold=10.0) is detected
+
+
+@pytest.mark.parametrize("field", ["q", "amplitude"])
+@pytest.mark.parametrize("invalid", [None, float("nan"), float("inf"), -float("inf"), "invalid", True],
+                         ids=["null", "nan", "infinite", "negative-infinite", "text", "boolean"])
+def test_forecast_reference_refuses_invalid_scientific_fields(field, invalid):
+    reference = RECORDS["forecast-reference-mismatch"]()
+    with pytest.raises(ValueError, match=field):
+        dataclasses.replace(reference, **{field: invalid})
+    with pytest.raises(ValueError, match=field):
+        ForecastReference.from_mapping({**reference.to_mapping(), field: invalid})
+
+
+def test_zero_information_mismatch_refuses_reference_and_matched_zero_round_trips():
+    import numpy as np
+    from hwoslaps.fisher.positions import PositionSet
+    from hwoslaps.fisher.result import ForecastResult
+    from hwoslaps.fisher.statistics import ProfileLikelihoodWorkspace
+
+    # This signal is exactly in the flat-prior nuisance span: F_raw=1, F_profiled=0.
+    workspace = ProfileLikelihoodWorkspace([[1.], [0.]], [0.], ["source.light.intensity"])
+    bank = workspace.evaluate_bank([[1., 0.]], data_whitened=[[2., 1.]], bias_whitened=[1., 1.])
+    assert bank.fisher_raw[0] == 1.0 and bank.fisher_profiled[0] == 0.0
+    positions = PositionSet("explicit", np.array([[.4, -.6]]), (0., 0.), 1., None, None, None)
+    provenance = {"config_digest": "01" * 32, "comparison_digest": "02" * 32,
+                  "mask": {"digest": "03" * 32}, "nuisance_names": ["source.light.intensity"],
+                  "model_kernels": {"kernels": [{"identity": KERNEL.to_mapping()}]}, "noise_covariance": None}
+    mismatch = ForecastResult([1e8], positions, bank.fisher_raw[None], bank.fisher_profiled[None],
+                              bank.amplitude_hat[None], bank.amplitude_spurious[None], "mismatched", {}, provenance)
+    with pytest.raises(ValueError, match="q_mismatch at node.*finite"):
+        ForecastReference.from_result(mismatch, mass_index=0, position_index=0)
+    matched = ForecastResult([1e8], positions, bank.fisher_raw[None], bank.fisher_profiled[None],
+                             None, None, "matched", {}, provenance)
+    reference = ForecastReference.from_result(matched, mass_index=0, position_index=0)
+    assert reference.q == 0.0 and reference.amplitude is None
+    assert ForecastReference.from_mapping(json.loads(json.dumps(reference.to_mapping(), allow_nan=False))) == reference

@@ -52,8 +52,24 @@ def _joint_ellipticity(component: ComponentSpec, parameters: dict[str, Any], fre
                                 f"ellipticity half width is {maximum:.3g} (strictly below)")
 
 
+def _ellipticity_box_reaches_origin(component: ComponentSpec, parameters: dict[str, Any], free: set[str],
+                                    fit: FitSpec) -> bool:
+    pair = [parameter for parameter in parameters.values() if parameter.definition.kind == "ellipticity"]
+    if not any(parameter.name in free for parameter in pair):
+        return False
+    for parameter in pair:
+        if parameter.name in free:
+            lower, upper = fit.prior_widths.rule(component.plane, "ellipticity").box(
+                parameter.value, parameter.definition.domain)
+            if not lower <= 0.0 <= upper:
+                return False
+        elif parameter.value != 0.0:
+            return False
+    return len(pair) == 2
+
+
 def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fit: FitSpec,
-                      loaded: dict[tuple[str, str], Any]) -> list[tuple[str, FitComponent]]:
+                      loaded: dict[tuple[str, str], Any], use_jax: bool) -> list[tuple[str, FitComponent]]:
     prefix = f"{component.plane}.{component.role}.{component.name}."
     parameters = {parameter.definition.name: parameter for parameter in scene_parameters(scene.spec)
                   if parameter.name.startswith(prefix)}
@@ -89,6 +105,8 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
             arguments.extend((FitArgument("pixel_scale_arcsec", (fixed(profile.pixel_scale_arcsec),), pair=False),
                               FitArgument("sb", (fixed(profile.sb),), pair=False)))
             path = "hwoslaps.scene.image_profile:ImageLightProfile"
+        elif use_jax and component.type == "Exponential" and _ellipticity_box_reaches_origin(component, parameters, free, fit):
+            path = "hwoslaps.inference.light_profiles:Exponential"
         else:
             path = f"autolens:{'mp' if component.role == 'mass' else 'lp'}.{layout.profile_class}"
         arguments.sort(key=lambda argument: ranks.get(argument.name, len(parameters)))
@@ -145,9 +163,9 @@ def build_role_models(scene: Scene, hypothesis: Halo, free_parameters: Sequence[
             for layout in PROFILE_TYPES[component.type].layout(component.values):
                 loaded[(galaxy.plane, component.name + layout.suffix)] = next(profiles)
     lens = [profile for component in scene.spec.lens.mass + scene.spec.lens.light
-            for profile in _component_models(scene, component, free, fit, loaded)]
+            for profile in _component_models(scene, component, free, fit, loaded, use_jax)]
     source = [profile for component in scene.spec.source.light
-              for profile in _component_models(scene, component, free, fit, loaded)]
+              for profile in _component_models(scene, component, free, fit, loaded, use_jax)]
     lens_redshift = scene.spec.lens.redshift
     off_plane = sorted({halo.redshift for halo in scene.perturbers} - {lens_redshift})
     perturbers = {redshift: [] for redshift in off_plane}

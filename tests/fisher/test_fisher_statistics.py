@@ -12,6 +12,7 @@ from dataclasses import fields
 
 import numpy as np
 import pytest
+from threadpoolctl import threadpool_limits
 
 from hwoslaps.fisher.statistics import BankReductions, ProfileLikelihoodWorkspace, SignalBankResult, Whitener
 
@@ -226,6 +227,32 @@ def test_dense_whitening_reproduces_the_inverse_covariance_metric():
     np.testing.assert_allclose(bank.fisher_profiled, [profiled], rtol=1e-12)
     with pytest.raises(ValueError, match="positive definite"):
         Whitener.from_covariance(np.array([[1.0, 2.0], [2.0, 1.0]]))
+
+
+@pytest.mark.parametrize("n_nuisance", [12, 128])
+def test_host_algebra_does_not_depend_on_the_caller_thread_count(n_nuisance):
+    rng = np.random.default_rng(7)
+    root = rng.normal(size=(64, 64)) / 8.0
+    covariance = root @ root.T + np.eye(64)
+    block = rng.normal(size=(64, 64))
+    design = rng.normal(size=(2000, n_nuisance))
+    signals, data = rng.normal(size=(256, 2000)), rng.normal(size=(256, 2000))
+    bias = rng.normal(size=2000)
+    reductions = reductions_of(signals, design, data, bias)
+    runs = []
+    for threads in (1, 4):
+        with threadpool_limits(limits=threads):
+            whitener = Whitener.from_covariance(covariance)
+            space = workspace(design, np.linspace(0.0, 1.0, n_nuisance))
+            bank = space.evaluate_bank(signals, data_whitened=data, bias_whitened=bias)
+            reduced = space.evaluate_reductions(reductions, bias_whitened=bias)
+            runs.append({"cholesky_factor": whitener.cholesky_factor, "whitened": whitener.apply(block),
+                         "normal_pinv": space.normal_pinv,
+                         **{f"bank.{name}": getattr(bank, name) for name in BANK_FIELDS},
+                         **{f"reduced.{name}": getattr(reduced, name) for name in BANK_FIELDS}})
+    single, threaded = runs
+    for name, values in single.items():
+        assert values.tobytes() == threaded[name].tobytes(), name
 
 
 @pytest.mark.parametrize("design", [np.empty((5, 0)), np.ones((5, 2))], ids=["no-nuisance", "two-nuisances"])

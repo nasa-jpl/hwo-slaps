@@ -20,7 +20,7 @@ from ..scene.image_source import frozen_value
 from .data import FitData, build_fit_data, support_half_widths
 from .fit_model import FitModel, autofit_model
 from .hypotheses import RoleModels, build_role_models
-from .objective import BoxObjective, jax_objective
+from .objective import BoxObjective, guard_isothermal_origin, jax_objective
 from .result import CaseResult, ForecastReference, ObservationRecord
 from .settings import FitSpec, PixelMask, RefineSettings, SamplerSettings
 from .statistics import likelihood_ratio
@@ -77,7 +77,11 @@ class PreparedCase:
         if not self.use_jax:
             raise ValueError("refinement requires a prepared JAX analysis")
         if role not in self._objectives:
-            self._objectives[role] = jax_objective(self.analysis, self.autofit_models[role], model.lower, model.upper)
+            checked = any(component.profile_class == "hwoslaps.inference.light_profiles:Exponential"
+                          for galaxy in model.galaxies for _, component in galaxy.components)
+            objective = jax_objective(self.analysis, self.autofit_models[role], model.lower, model.upper,
+                                      check_gradient_domain=checked)
+            self._objectives[role] = guard_isothermal_origin(objective, model)
         return self._objectives[role]
 
 
@@ -104,6 +108,8 @@ def _check_inputs(prepared: PreparedForecast, trial: Halo, observation: Observat
     redshift = spec.lens.redshift if spec.subhalo_redshift is None else spec.subhalo_redshift
     if trial.redshift != redshift:
         raise ValueError(f"trial redshift {trial.redshift} differs from configured hypothesis redshift {redshift}")
+    if trial.model != spec.subhalo:
+        raise ValueError("trial halo model recipe differs from the configured hypothesis model")
     if trial.source_redshift != spec.source.redshift or trial.cosmology != prepared.scene.cosmology:
         raise ValueError("trial source redshift or cosmology differs from the prepared scene")
     support = support_half_widths(tuple(observation.grid.shape), observation.pixel_scale_arcsec, kernel.shape)

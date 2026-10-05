@@ -25,14 +25,20 @@ __all__ = [
 def check_finite_number(name: str, value: Any, *, positive: bool) -> float:
     """``value`` as a float when it is a finite number, > 0 if ``positive`` and >= 0 otherwise.
 
-    Booleans are refused. A value outside the domain raises a ValueError whose message starts
-    with ``name``; ``Detector`` and ``Exposure`` check their number fields with it.
+    Booleans are refused, an integer too large for a float is not finite, and the bound applies
+    to the float returned. A value outside the domain raises a ValueError whose message starts
+    with ``name``; ``Detector``, ``Exposure`` and ``Observation.sampling`` check their numbers
+    with it.
     """
-    valid = (isinstance(value, _Number) and not isinstance(value, (bool, np.bool_))
-             and math.isfinite(value) and (value > 0 if positive else value >= 0))
-    if not valid:
+    number = math.nan
+    if isinstance(value, _Number) and not isinstance(value, (bool, np.bool_)):
+        try:
+            number = float(value)
+        except OverflowError:
+            number = math.inf
+    if not (math.isfinite(number) and (number > 0 if positive else number >= 0)):
         raise ValueError(f"{name} must be a finite number {'> 0' if positive else '>= 0'}, got {value!r}")
-    return float(value)
+    return number
 
 
 @dataclass(frozen=True)
