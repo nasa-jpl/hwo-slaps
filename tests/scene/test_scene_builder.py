@@ -92,6 +92,7 @@ def test_scene_builds_share_no_grid_state(scene_mapping, planck15):
     third = build_scene(spec, planck15, subhalo=None)
     np.testing.assert_array_equal(third.grid.over_sampled.array, expected)
     np.testing.assert_array_equal(third.light_images["source"], second.light_images["source"])
+    assert first != second and len({first, second, third}) == 3
 
 
 def _sub_pixel_coordinates(shape, scale, sub):

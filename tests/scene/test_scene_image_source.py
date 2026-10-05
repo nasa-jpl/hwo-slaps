@@ -87,6 +87,7 @@ def test_image_asset_loader_reads_the_format_and_reloads_rewritten_files(tmp_pat
     _write(path, sb=_unit_sb(shape=(9, 10)))
     reloaded = load_image_asset(path)
     assert reloaded is not asset and reloaded.sb.shape == (9, 10)
+    assert reloaded != asset and len({asset, reloaded}) == 2
 
 
 def _evaluate(profile, points):

@@ -44,12 +44,12 @@ def _frozen(value: Any) -> Any:
     return value
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class ImageAsset:
     """A validated asset: read-only samples, pixel scale, metadata and the digest of its content.
 
     ``digest`` is the file's SHA-256 for a loaded asset and ``identity.array_digest`` of ``sb``
-    for a prepared one.
+    for a prepared one. Assets compare and hash by identity (``digest`` names their content).
     """
 
     sb: np.ndarray

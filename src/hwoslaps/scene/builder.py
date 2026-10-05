@@ -40,9 +40,12 @@ _GRID_TEMPLATES: OrderedDict[tuple[tuple[int, int], float, int], Any] = OrderedD
 _GRID_TEMPLATE_LIMIT = 4
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Scene:
-    """A built scene: its spec, halos, AutoLens grid and tracer, and the light of each group."""
+    """A built scene: its spec, halos, AutoLens grid and tracer, and the light of each group.
+
+    Scenes compare and hash by identity.
+    """
 
     spec: SceneSpec
     cosmology: Cosmology
