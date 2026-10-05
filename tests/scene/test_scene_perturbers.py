@@ -90,7 +90,8 @@ def test_population_streams_are_isolated(scene_mapping, population_block):
     assert not np.array_equal(other[0], masses) and not np.array_equal(other[1], positions)
     cosmology = Cosmology(parse_cosmology({"name": "Planck15"}))
     injected = copy.deepcopy(scene_mapping)
-    injected["injection"] = {"mass_msun": 1e8, "position": {"kind": "random", "radius": 0.8}}
+    injected["injection"] = {"mass_msun": 1e8,
+                             "position": {"kind": "random", "radius": 0.8, "scatter_arcsec": 0.1}}
     with_injection = _scene(injected, [population_block])
     configured_injection(with_injection, cosmology, seed=11)
     np.testing.assert_array_equal(draw_population(with_injection.perturbers.populations[0], **args)[1], positions)
