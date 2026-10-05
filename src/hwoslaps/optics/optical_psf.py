@@ -13,6 +13,7 @@ binning.
 
 from __future__ import annotations
 
+import dataclasses
 import functools
 import math
 from dataclasses import dataclass
@@ -284,10 +285,17 @@ class OpticalPSF:
                           pixel_scale_arcsec=self._pixel_scale_arcsec, coefficients=coefficients)
 
     def to_mapping(self) -> dict[str, Any]:
-        """The provider record: optics, sampling, wavefront and the draw that set it."""
+        """The provider record: optics, sampling, wavefront and the draw that set it.
+
+        The pupil enters through its specification and the Zernike disc; the sampled pupil's
+        own record (``Pupil.to_mapping``: area, power, active and dark segments) follows from
+        the specification and stays out of the provider identity.
+        """
+        pupil = self._pupil.spec
         return {
             "provider": "optical",
-            "pupil": self._pupil.to_mapping(),
+            "pupil": {"kind": pupil.kind, **dataclasses.asdict(pupil)},
+            "zernike_diameter_m": self._pupil.zernike_diameter_m,
             "focal_length_m": self._focal_length_m,
             "wavelengths_m": list(self._wavelengths_m),
             "reference_wavelength_m": self.reference_wavelength_m,
