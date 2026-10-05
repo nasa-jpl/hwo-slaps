@@ -26,8 +26,8 @@ with ``z_mismatch = a_hat sqrt(F)``, ``z_spurious = |a_spurious| sqrt(F)`` and
 
 The derived statistics are module functions shared by the bank finisher and
 :class:`hwoslaps.fisher.result.ForecastResult`, so a forecast's properties are
-the bank's bits. Host algebra runs with one BLAS thread, so results do not
-depend on the caller's thread count.
+the bank's bits. Dense whitening and the workspace algebra run with one BLAS
+thread, so results do not depend on the caller's thread count.
 """
 
 from __future__ import annotations
@@ -147,7 +147,8 @@ class Whitener:
         _require_finite(matrix, "covariance")
         matrix = 0.5 * (matrix + matrix.T)
         try:
-            factor = np.linalg.cholesky(matrix)
+            with threadpool_limits(limits=1):
+                factor = np.linalg.cholesky(matrix)
         except np.linalg.LinAlgError as error:
             raise ValueError("covariance must be symmetric positive definite") from error
         return cls("dense", None, factor)
@@ -164,7 +165,8 @@ class Whitener:
             raise ValueError(f"values must have shape ({self.size},) or ({self.size}, k), got {array.shape}")
         if self.mode == "diagonal":
             return array / self.sigma if array.ndim == 1 else array / self.sigma[:, None]
-        return np.linalg.solve(self.cholesky_factor, array)
+        with threadpool_limits(limits=1):
+            return np.linalg.solve(self.cholesky_factor, array)
 
 
 @dataclass(frozen=True, eq=False)

@@ -14,6 +14,7 @@ error.
 from __future__ import annotations
 
 import functools
+import io
 import math
 import types
 from collections.abc import Iterator, Mapping, Sequence
@@ -27,7 +28,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..identity import KernelIdentity, array_digest, file_digest, json_ready
+from ..identity import KernelIdentity, array_digest, json_ready, read_file_snapshot
 
 __all__ = [
     "PIXEL_SCALE_ATOL_ARCSEC", "DetectorPSF", "KernelBinding", "convolve_real_space",
@@ -148,17 +149,17 @@ class DetectorPSF:
         file is parsed. Pickled object arrays are refused.
         """
         location = Path(path)
-        digest = file_digest(location)
+        content, digest = read_file_snapshot(location)
         if file_sha256 is not None and digest != file_sha256:
             raise ValueError(f"{location}: file SHA-256 is {digest}, the configuration states {file_sha256}")
         if location.suffix == ".npy":
             if array_key is not None:
                 raise ValueError(f"{location}: a .npy kernel file has no members; array_key must be None")
-            values = np.load(location, allow_pickle=False)
+            values = np.load(io.BytesIO(content), allow_pickle=False)
         elif location.suffix == ".npz":
             if not isinstance(array_key, str) or not array_key:
                 raise ValueError(f"{location}: a .npz kernel file needs the member name in array_key")
-            with np.load(location, allow_pickle=False) as members:
+            with np.load(io.BytesIO(content), allow_pickle=False) as members:
                 if array_key not in members.files:
                     raise ValueError(f"{location}: no member {array_key!r}; members are {sorted(members.files)}")
                 values = members[array_key]

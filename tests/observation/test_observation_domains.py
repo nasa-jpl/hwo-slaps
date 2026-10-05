@@ -49,6 +49,8 @@ REJECTED = [
                  ValueError, "gain_e_per_adu", "gain_e_per_adu", id="direct-gain-negative"),
     pytest.param(lambda: Detector(gain_e_per_adu=True, read_noise_e=0.2, dark_current_e_per_s=0.002),
                  ValueError, "gain_e_per_adu", "gain_e_per_adu", id="direct-gain-bool"),
+    pytest.param(lambda: Detector(gain_e_per_adu=10**400, read_noise_e=0.2, dark_current_e_per_s=0.002),
+                 ValueError, "gain_e_per_adu", "gain_e_per_adu", id="direct-gain-overflow"),
     pytest.param(lambda: Detector(gain_e_per_adu=1.0, read_noise_e=float("nan"), dark_current_e_per_s=0.002),
                  ValueError, "read_noise_e", "read_noise_e", id="direct-read-noise-nan"),
     pytest.param(_exposure(exposure_count=1.5), ValueError, "exposure_count", "exposure_count", id="direct-count-fraction"),
