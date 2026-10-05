@@ -60,7 +60,8 @@ def test_cube_keeps_declared_nodes_unit_bytes_source_and_support(cube_input):
 
 
 @pytest.mark.parametrize("defect", ["missing-member", "shape", "node-count", "duplicate", "descending",
-                                    "nonfinite", "nonpositive", "negative-kernel", "even-kernel", "bad-sum"])
+                                    "nonfinite", "nonpositive", "negative-kernel", "even-kernel", "bad-sum",
+                                    "complex-nonzero", "complex-nonfinite"])
 def test_invalid_cube_data_is_refused_at_the_real_builder(tmp_path, defect):
     values = np.zeros((2, 3, 3))
     values[:, 1, 1] = 1.0
@@ -83,12 +84,15 @@ def test_invalid_cube_data_is_refused_at_the_real_builder(tmp_path, defect):
         values = values[:, :, :2]
     elif defect == "bad-sum":
         values *= 2.0
+    elif defect.startswith("complex"):
+        values = values.astype(complex)
+        values[0, 1, 1] = complex(1.0, 2.0 if defect == "complex-nonzero" else np.nan)
     path = tmp_path / "invalid_cube.npz"
     if defect == "missing-member":
         np.savez(path, kernels=values)
     else:
         np.savez(path, kernels=values, wavelengths_m=waves)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="must be real" if defect.startswith("complex") else None):
         build_psf_provider(KernelCubeSpec(path, 0.03, False, None), pixel_scale_arcsec=0.03)
 
 

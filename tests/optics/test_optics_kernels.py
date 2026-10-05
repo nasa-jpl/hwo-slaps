@@ -28,6 +28,8 @@ def _kernel(seed, shape=(5, 5)):
     (np.ones(5), {}, "two-dimensional"),
     (np.full((3, 3, 3), 1 / 27), {}, "two-dimensional"),
     (np.array([[0.0, np.nan, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]), {}, "finite"),
+    (np.pad([[1.0 + 2.0j]], 1), {}, "must be real"),
+    (np.pad([[complex(1.0, np.nan)]], 1), {}, "must be real"),
     (np.array([[0.0, -0.1, 0.0], [0.0, 1.1, 0.0], [0.0, 0.0, 0.0]]), {}, "non-negative"),
     (np.zeros((3, 3)), {}, "positive finite flux"),
     (np.pad([[1.0 + 1e-9]], 1), {"normalize": False}, "sum to one"),
@@ -37,7 +39,7 @@ def _kernel(seed, shape=(5, 5)):
     (np.pad([[1.0]], 1), {"source": {"kind": "array"}}, "must record 'captured_power_fraction'"),
     (np.pad([[1.0]], 1), {"source": {"kind": "optical", "captured_power_fraction": 1.5}},
      r"None or a number in \(0, 1\]"),
-], ids=["even-rows", "even-columns", "1-d", "3-d", "nan", "negative", "zero-flux", "unnormalized", "zero-scale",
+], ids=["even-rows", "even-columns", "1-d", "3-d", "nan", "complex-nonzero", "complex-nonfinite", "negative", "zero-flux", "unnormalized", "zero-scale",
         "negative-scale", "bool-scale", "no-captured-fraction", "captured-fraction-above-one"])
 def test_detector_psf_validation(values, keywords, message):
     arguments = {"pixel_scale_arcsec": SCALE, "normalize": True, **keywords}
@@ -89,6 +91,14 @@ def test_kernel_files_load_with_integrity_checks(tmp_path):
     np.save(pickled, np.array([{"kernel": values}], dtype=object), allow_pickle=True)
     with pytest.raises(ValueError, match="pickle"):
         DetectorPSF.from_file(pickled, pixel_scale_arcsec=SCALE, array_key=None, normalize=True, file_sha256=None)
+
+
+@pytest.mark.parametrize("imaginary", [2.0, np.nan], ids=["nonzero", "nonfinite"])
+def test_kernel_file_refuses_complex_intensities_before_casting(tmp_path, imaginary):
+    path = tmp_path / "complex.npy"
+    np.save(path, np.pad([[complex(1.0, imaginary)]], 1))
+    with pytest.raises(ValueError, match="must be real"):
+        DetectorPSF.from_file(path, pixel_scale_arcsec=SCALE, array_key=None, normalize=False, file_sha256=None)
 
 
 @pytest.mark.backend
