@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.experimental import checkify
+from jax.custom_derivatives import SymbolicZero
 
 __all__ = ["Exponential", "Sersic"]
 
@@ -73,11 +74,18 @@ def _sersic_radius(ell_comps, grid, sersic_index):
     return _parent_radius(ell_comps, grid)
 
 
-@_sersic_radius.defjvp
 def _sersic_radius_jvp(primals, tangents):
     ell, grid, n = primals
     de, dg, _ = tangents
     radius = _parent_radius(ell, grid)
+    if isinstance(de, SymbolicZero) and isinstance(dg, SymbolicZero):
+        # Index-only differentiation cannot move a radius. In particular,
+        # I(0)=I_e exp(b_n) has a finite index partial for every supported n.
+        return radius, jnp.zeros_like(radius)
+    if isinstance(de, SymbolicZero):
+        de = jnp.zeros_like(ell)
+    if isinstance(dg, SymbolicZero):
+        dg = jnp.zeros_like(grid)
     centre = jnp.all(grid == 0.0, axis=1)
     checkify.check(jnp.all(~centre | (n < 1.0)),
                    "Sersic gradient is undefined at an exactly zero-radius source-centre sample for n >= 1; "
@@ -99,6 +107,9 @@ def _sersic_radius_jvp(primals, tangents):
 
     differential = jax.lax.cond(jnp.all(ell == 0.0), circular, nonround, operand=None)
     return radius, differential
+
+
+_sersic_radius.defjvp(_sersic_radius_jvp, symbolic_zeros=True)
 
 
 @jax.custom_jvp
