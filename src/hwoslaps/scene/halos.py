@@ -267,7 +267,7 @@ def _model_mapping(model: HaloModel) -> dict[str, Any]:
 # ------------------------------------------------------------------ physics
 
 
-def truncation_tau(spec: TruncationSpec, c200: Any, *, xp: Any = np) -> Any:
+def truncation_tau(spec: TruncationSpec, c200: Any, xp: Any = np) -> Any:
     """BMO r_t/r_s; twelve log-radius Newton steps for a parent NFW overdensity radius."""
     if isinstance(spec, TauTruncation):
         return spec.tau
@@ -289,7 +289,7 @@ def truncation_tau(spec: TruncationSpec, c200: Any, *, xp: Any = np) -> Any:
     return tau
 
 
-def bmo_mass_fraction(tau: Any, *, xp: Any = np) -> Any:
+def bmo_mass_fraction(tau: Any, xp: Any = np) -> Any:
     """Dimensionless total mass of the BMO profile, relative to 4 pi rho_s r_s^3."""
     squared = tau**2
     return squared / (squared + 1.0)**2 * ((squared - 1.0) * xp.log(tau) + tau * xp.pi - (squared + 1.0))
