@@ -60,7 +60,7 @@ def test_macro_columns_equal_the_lens_source_chain_rule(name,minimal_mapping,tmp
 
 @pytest.mark.parametrize("slope",[1.8,2.08])
 @pytest.mark.parametrize("constraint,accepted",[
-    ("bare_flat",True),("fixed_radius",False),("radius_prior",False),("radius_underflow_prior",False),
+    ("bare_flat",True),("fixed_radius",False),("radius_prior",False),("huge_finite_radius_prior",False),
     ("multipoles_flat_zero_fixed",True),("fixed_nonzero_coefficient",False),("nonzero_coefficient_prior",False),
     ("ellipse_fixed",True),
 ])
@@ -72,7 +72,7 @@ def test_circular_powerlaw_tangents_require_semantic_flat_compensators(slope,con
     mass.update(type="PowerLaw",slope=slope,ell_comps=[0.,0.])
     nuisance={"priors":{"lens.mass.mass.ell_comp_1":.03,"lens.mass.mass.ell_comp_2":.03}}
     if constraint=="fixed_radius":nuisance["fixed"]=["lens.mass.mass.einstein_radius"]
-    if constraint in {"radius_prior","radius_underflow_prior"}:
+    if constraint in {"radius_prior","huge_finite_radius_prior"}:
         nuisance["priors"]["lens.mass.mass.einstein_radius"]=.03 if constraint=="radius_prior" else 1.e300
     if "coefficient" in constraint or constraint=="multipoles_flat_zero_fixed":
         mass["multipoles"]={"m3":[.01,0.],"m4":[-.02,0.]}
