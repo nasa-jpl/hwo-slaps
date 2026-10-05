@@ -77,7 +77,7 @@ def test_settings_reject_incoherent_combinations(build, path):
 @pytest.mark.parametrize(("cls", "field", "value"), [
     (SamplerSettings, "n_eff", True), (SamplerSettings, "n_eff", 0.0), (SamplerSettings, "n_eff", -5.0),
     (SamplerSettings, "n_eff", math.nan), (SamplerSettings, "n_eff", math.inf), (SamplerSettings, "n_shell", True),
-    (SamplerSettings, "n_shell", 0), (SamplerSettings, "n_shell", 1.5), (SamplerSettings, "f_live", 0.0),
+    (SamplerSettings, "n_shell", 0), (SamplerSettings, "n_shell", -1), (SamplerSettings, "n_shell", 1.5), (SamplerSettings, "f_live", 0.0),
     (SamplerSettings, "f_live", 1.5), (SamplerSettings, "discard_exploration", 1),
     (SamplerSettings, "discard_exploration", "yes"), (SamplerSettings, "retain_search_internal", None),
     (SamplerSettings, "retain_search_internal", 1), (SamplerSettings, "jax_n_batch", 0),
