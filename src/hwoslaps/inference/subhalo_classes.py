@@ -91,6 +91,20 @@ def _scales(mapping: SubhaloMassMapping | None, kind: str, centre: Any, log10_m2
     return mapping.traced_scales(log10_m200, _xp_for(centre, log10_m200))
 
 
+_REGULAR_WIDTH = 0.02
+_F_REGULAR = (1.0, -2 / 3, 7 / 15, -12 / 35, 83 / 315, -146 / 693, 523 / 3003,
+              -952 / 6435, 14051 / 109395)
+_G_REGULAR = (1 / 3, -2 / 5, 13 / 35, -20 / 63, 61 / 231, -94 / 429, 1181 / 6435,
+              -1896 / 12155, 6223 / 46189)
+
+
+def _regular_polynomial(offset, coefficients):
+    value = coefficients[-1]
+    for coefficient in reversed(coefficients[:-1]):
+        value = coefficient + offset * value
+    return value
+
+
 class TruncatedNFWSph(al.mp.NFWTruncatedSph):
     """Pinned BMO profile with array-namespace propagation through its radial functions."""
 
@@ -98,22 +112,21 @@ class TruncatedNFWSph(al.mp.NFWTruncatedSph):
         if xp is np:
             return super().coord_func_f(grid_radius=grid_radius, xp=xp)
         radius = xp.array([grid_radius]) if isinstance(grid_radius, (float, complex)) else xp.asarray(grid_radius)
-        regular = radius == 1.0
+        regular = xp.abs(radius - 1.0) <= _REGULAR_WIDTH
         safe_radius = xp.where(regular, 2.0, radius)
         value = super().coord_func_f(grid_radius=safe_radius, xp=xp)
-        # F is smooth at one; the parent's equality branch loses F'(1)=-2/3.
-        return xp.where(regular, 1.0 - (2.0 / 3.0) * (radius - 1.0), value)
+        # The regular series avoids cancellation near one and retains its limiting derivatives.
+        return xp.where(regular, _regular_polynomial(radius - 1.0, _F_REGULAR), value)
 
     def coord_func_g(self, grid_radius, xp=np):
         if xp is np:
             return super().coord_func_g(grid_radius=grid_radius, xp=xp)
         radius = (xp.array([grid_radius], dtype=xp.complex64) if isinstance(grid_radius, (float, complex))
                   else xp.asarray(grid_radius))
-        regular = radius == 1.0
+        regular = xp.abs(radius - 1.0) <= _REGULAR_WIDTH
         safe_radius = xp.where(regular, 2.0, radius)
         value = super().coord_func_g(grid_radius=safe_radius, xp=xp)
-        # G=(1-F)/(r**2-1) has the regular limits G(1)=1/3 and G'(1)=-2/5.
-        return xp.where(regular, 1.0 / 3.0 - (2.0 / 5.0) * (radius - 1.0), value)
+        return xp.where(regular, _regular_polynomial(radius - 1.0, _G_REGULAR), value)
 
     @aa.decorators.to_vector_yx
     @aa.decorators.transform
