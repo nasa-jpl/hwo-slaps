@@ -145,7 +145,7 @@ def _fitness_pair(prepared):
     from hwoslaps.inference.api import prepare_case
     from autofit.non_linear.fitness import Fitness
 
-    halo=prepared.hypothesis(1.e8,(.4,-.6));fit=FitSpec(mode="fixed_template")
+    halo=prepared.hypothesis(1.e8,(.1,-.15));fit=FitSpec(mode="fixed_template")
     numpy_case=prepare_case(prepared,halo,prepared.observation,fit=fit,use_jax=False)
     jax_case=prepare_case(prepared,halo,prepared.observation,fit=fit,use_jax=True)
     model=jax_case.autofit_models["smooth"]
@@ -202,7 +202,7 @@ def test_cartesian_multipole_objective_gradient_matches_independent_fd(gpu,comps
 
     prepared=prepared_forecast_factory({"scene":{"grid":{"shape":[20,20]},"lens":{"mass":{"mass":_mass(
         multipoles={"m3":list(comps),"m4":list(comps)})}}}})
-    halo=prepared.hypothesis(1.e8,(.4,-.6))
+    halo=prepared.hypothesis(1.e8,(.1,-.15))
     case=prepare_case(prepared,halo,prepared.observation.draw(7),fit=FitSpec(mode="fixed_template"),use_jax=True)
     assert jax.default_backend()==("gpu" if gpu else "cpu")
     objective=case.objective("smooth");model=case.model("smooth")
