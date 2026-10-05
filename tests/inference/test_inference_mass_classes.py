@@ -103,10 +103,13 @@ def test_truncated_nfw_class_traces_under_jax():
             np.testing.assert_array_equal(getattr(adapter_profile, name)(radius, xp=jnp),
                                           getattr(parent_profile, name)(radius, xp=jnp))
 
+    def density_at_radius(radius):
+        return 100. / ((100. + radius**2) * radius * (1. + radius)**2)
+
     def projected_density(x, kappa):
         def density(z):
             radius = np.hypot(x, z)
-            return 100. / ((100. + radius**2) * radius * (1. + radius)**2)
+            return density_at_radius(radius)
 
         def radial_derivative(z):
             radius = np.hypot(x, z)
@@ -114,6 +117,14 @@ def test_truncated_nfw_class_traces_under_jax():
 
         return tuple(2 * kappa * quad(function, 0., np.inf, epsabs=1e-12, epsrel=1e-12)[0]
                      for function in (density, radial_derivative))
+
+    def projected_deflection(x, kappa):
+        # Spherical shells contribute their polar-cap fraction inside the projected cylinder.
+        interior = quad(lambda radius: density_at_radius(radius) * radius**2, 0., x,
+                        epsabs=1e-12, epsrel=1e-12)[0]
+        exterior = quad(lambda z: density_at_radius(np.hypot(x, z)) * z / (np.hypot(x, z) + z),
+                        0., np.inf, epsabs=1e-12, epsrel=1e-12)[0]
+        return 4 * kappa * (interior + x**2 * exterior) / x
 
     for radius in (0.8, 1., 1.2):
         point_grid = al.Grid2DIrregular(values=[[radius, 0.]])
@@ -152,6 +163,24 @@ def test_truncated_nfw_class_traces_under_jax():
              geometry_values(al.mp.NFWTruncatedSph, arguments - 2 * step * direction, np)) / (12 * step)
             for direction in np.eye(3)])
         np.testing.assert_allclose(actual_gradient, finite_difference, rtol=1e-5, atol=1e-9)
+
+    critical_radii = (np.nextafter(0.98, 0.), np.nextafter(0.98, 1.),
+                      np.nextafter(1., 0.), np.nextafter(1., 2.),
+                      np.nextafter(1.02, 1.), np.nextafter(1.02, 2.))
+    for radius in critical_radii:
+        point_grid = al.Grid2DIrregular(values=[[radius, 0.]])
+        kappa, radial_derivative = projected_density(radius, 0.03)
+        alpha = projected_deflection(radius, 0.03)
+        expected_values = np.array([alpha, 0., kappa])
+        np.testing.assert_allclose(jax.jit(lambda value: geometry_values(TruncatedNFWSph, value, jnp))(arguments),
+                                   expected_values, rtol=1e-12, atol=1e-14)
+        expected_gradient = np.array([[2 * (alpha - radius * kappa), -(2 * kappa - alpha / radius), 0.],
+                                      [0., 0., -alpha / radius],
+                                      [-radius * radial_derivative, -radial_derivative, 0.]])
+        for derivative_operator in (jax.jacfwd, jax.jacrev):
+            gradient = jax.jit(derivative_operator(lambda value: geometry_values(TruncatedNFWSph, value, jnp)))(arguments)
+            np.testing.assert_allclose(gradient, expected_gradient, rtol=1e-10, atol=1e-12,
+                                       err_msg=f"TNFW critical-neighborhood derivative at radius/scale={radius}")
 
     halo = replace(_halo("TNFW", truncation=TauTruncation(10.)), position_yx_arcsec=(0., 0.),
                    model=HaloModel("TNFW", FixedConcentration(12.), TauTruncation(10.)))
