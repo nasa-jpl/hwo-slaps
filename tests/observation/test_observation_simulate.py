@@ -80,3 +80,23 @@ def test_standalone_simulation_needs_no_forecast_section(minimal_mapping):
     assert expected.sampling["source"] >= 0.0
     with pytest.raises(ConfigError, match="forecast"):
         prepare_forecast(minimal_mapping)
+
+
+def test_prepared_asset_mapping_cannot_relabel_injected_science(minimal_mapping, image_asset):
+    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.scene.image_source import load_image_asset
+    from hwoslaps.simulation import simulate
+
+    minimal_mapping["scene"]["source"]["light"] = {"light": {"type": "Image", "asset_path": str(image_asset),
+        "centre": [-0.03, 0.08], "flux_scale": 1.0, "size_scale": 1.0, "rotation_deg": 0.0, "total_flux": 1.0}}
+    with prepare_forecast(minimal_mapping) as prepared:
+        trial = prepared.hypothesis(1.0e8, (0.1, 0.7))
+        before = simulate(prepared, subhalo=trial, noise_seed=None)
+        with pytest.raises(TypeError):
+            prepared.renderer.assets[str(image_asset)] = load_image_asset(image_asset)
+        with pytest.raises(ValueError):
+            prepared.renderer.assets[str(image_asset)].sb[0, 0] = 1.0
+        prepared.validate_identity()
+        after = simulate(prepared, subhalo=trial, noise_seed=None)
+        np.testing.assert_array_equal(after.expected_adu, before.expected_adu)
+        assert after.config_digest == before.config_digest

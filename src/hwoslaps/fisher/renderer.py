@@ -27,6 +27,9 @@ class SceneRenderer:
     exposure: Exposure
     assets: Mapping[str, ImageAsset] = field(kw_only=True)
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "assets", types.MappingProxyType(dict(self.assets)))
+
     def scene(self, *, subhalo: Halo | None = None, spec: SceneSpec | None = None) -> Scene:
         return build_scene(self.spec if spec is None else spec, self.cosmology, subhalo=subhalo,
                            perturbers=self.perturbers, assets=self.assets)
