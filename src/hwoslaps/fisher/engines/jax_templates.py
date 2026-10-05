@@ -211,5 +211,17 @@ class JaxTemplateEngine:
                 "device": str(jax.devices()[0]), "projection": self.context.data_space.whitener.mode}
 
     def close(self) -> None:
+        if self._closed:
+            return
+        for function in (self._signals, self._reductions):
+            if function is not None:
+                function.clear_cache()
+        self._signals = self._reductions = None
         self._radial_tables.clear()
+        self._light_evaluators.clear()
+        self._model_slots = self._truth_slots = ()
+        for name in ("_coords", "_alpha_macro_fit", "_log_radii", "_mu0_flat", "_mask_flat_idx",
+                     "_model_constant", "_truth_constant", "_sigma_masked", "_nuisance_whitened",
+                     "_bias_whitened"):
+            setattr(self, name, None)
         self._closed = True
