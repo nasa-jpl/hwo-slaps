@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 from ..config.checks import ConfigError, Rule
 from ..constants import JANSKY_SI, PLANCK_J_S
-from ..identity import json_ready
-from ..instrument import Instrument, InstrumentSpec, build_instrument
-from ..scene.image_source import frozen_value
+from ..identity import json_ready, validate_loaded_file
+from ..instrument import Instrument, InstrumentSpec, build_instrument, check_finite_number
+from ..scene.image_source import ImageAsset, frozen_value, load_image_asset
 from ..scene.profiles import PROFILE_TYPES
 from ..spectra.bandpass import Bandpass, bandpass_spec_mapping, build_bandpass, integrate_dlnlambda
 from ..spectra.photometry import band_mean_throughput, fnu_jy_to_ab, rate_from_ab, sky_rate_e_per_s_per_pixel
@@ -76,7 +76,9 @@ class ObservingSetup:
 
 
 def resolve_observing(scene: SceneSpec, instrument: InstrumentSpec, observation: ObservationSpec, *,
-                      truth: PSFProvider, bandpass: Bandpass | None = None) -> ObservingSetup:
+                      truth: PSFProvider, bandpass: Bandpass | None = None,
+                      assets: Mapping[str, ImageAsset] | None = None,
+                      expected_file_digests: Mapping[str, str] | None = None) -> ObservingSetup:
     """Resolved amplitudes, sky rate and captured spectra for every later render.
 
     An amplitude-given component is retained as the same object. Intrinsic flux inputs
@@ -88,6 +90,8 @@ def resolve_observing(scene: SceneSpec, instrument: InstrumentSpec, observation:
         for path, digest in values.items():
             if path in files and files[path] != digest:
                 raise ValueError(f"{path}: spectral input changed between reads")
+            if expected_file_digests is not None:
+                validate_loaded_file(path, digest, expected_file_digests)
             files[path] = digest
 
     components = tuple(component for galaxy in (scene.lens, scene.source) for component in galaxy.light)
@@ -130,6 +134,16 @@ def resolve_observing(scene: SceneSpec, instrument: InstrumentSpec, observation:
                            "sed": None if sky.sed is None else sed_spec_mapping(sky.sed)}, "rate_e_per_s": sky_rate}
     record_needed = (area_required or built.bandpass is not None or built.collecting_area_m2 is not None
                      or any(component.flux is not None or component.sed is not None for component in components))
+    if not record_needed:
+        exposure = Exposure(built.detector, observation.exposure_time_s, sky_rate, observation.exposure_count)
+        return ObservingSetup(scene, built, exposure, None, files, loaded_seds)
+    loaded_assets = {} if assets is None else dict(assets)
+    for component in components:
+        if component.type == "Image" and component.flux is not None:
+            path = str(component.values["asset_path"])
+            if path not in loaded_assets:
+                loaded_assets[path] = load_image_asset(path)
+            merge({path: loaded_assets[path].digest})
     component_records = {}
     resolved = scene
     omega_pixel = scene.grid.pixel_scale_arcsec**2
@@ -139,7 +153,8 @@ def resolve_observing(scene: SceneSpec, instrument: InstrumentSpec, observation:
             profile = PROFILE_TYPES[component.type]
             values = dict(component.values)
             amplitude_key = profile.amplitude_key
-            unit_integral = profile.unit_integral(values)
+            unit_integral = check_finite_number(f"{galaxy.plane}.{component.name}.unit_integral_arcsec2",
+                                                profile.unit_integral(values), positive=True)
             name = f"{galaxy.plane}.{component.name}"
             sed = loaded_seds.get(name)
             flux = component.flux
@@ -156,13 +171,11 @@ def resolve_observing(scene: SceneSpec, instrument: InstrumentSpec, observation:
                         raise ValueError(f"{name}: AB flux requires the instrument bandpass and collecting area")
                     rate = rate_from_ab(flux.ab_mag, built.bandpass, built.collecting_area_m2,
                                         sed=sed, reference_band=reference(flux.reference_band))
-                amplitude = rate * omega_pixel / unit_integral
-                if not profile.table.keys:
-                    raise ValueError(f"{name}: light profile has no parameter table")
+                amplitude = check_finite_number(f"{name}.{amplitude_key}", rate * omega_pixel / unit_integral, positive=True)
                 values[amplitude_key] = amplitude
                 updated = replace(component, values=frozen_value(values), flux=None)
                 from ..scene.builder import render_component_unlensed
-                ratio = float(render_component_unlensed(updated, scene.grid).sum()) * omega_pixel / (amplitude * unit_integral)
+                ratio = float(render_component_unlensed(updated, scene.grid, assets=loaded_assets).sum()) * omega_pixel / (amplitude * unit_integral)
             light.append(updated)
             if record_needed:
                 magnitude = None
