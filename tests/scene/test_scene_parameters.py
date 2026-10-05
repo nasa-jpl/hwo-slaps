@@ -1,6 +1,8 @@
 """Scene parameters: names and order (the nuisance columns), replacement by name, pattern matching."""
 
 import dataclasses
+import math
+from pathlib import Path
 
 import pytest
 
@@ -48,23 +50,28 @@ def test_parameter_names_follow_registry_order(rich_scene):
     ]
 
 
-def test_with_parameter_replaces_one_scalar(rich_scene):
+def test_with_parameter_replaces_one_scalar_without_reading_files(rich_scene):
+    Path(rich_scene.source.light[1].values["asset_path"]).unlink()
     moved = with_parameter(rich_scene, "source.light.disk.centre_x", -0.031)
     before = {p.name: p.value for p in scene_parameters(rich_scene)}
     after = {p.name: p.value for p in scene_parameters(moved)}
     assert after.pop("source.light.disk.centre_x") == -0.031
     assert before.pop("source.light.disk.centre_x") == -0.03
     assert after == before
-    assert moved.lens is rich_scene.lens and moved.source.light[1] is rich_scene.source.light[1]
+    assert moved.source.light[0].values["centre"] == (0.02, -0.031)
     assert dataclasses.replace(moved, source=rich_scene.source) == rich_scene
+    assert moved.source.light[1] == rich_scene.source.light[1]
     assert with_parameter(rich_scene, "lens.light.bulge.intensity", 3.03).lens.light[0].values["intensity"] == 3.03
+    scaled = with_parameter(rich_scene, "source.light.clumps.size_scale", 1.01).source.light[1]
+    assert dict(scaled.values) == dict(rich_scene.source.light[1].values, size_scale=1.01)
 
 
 @pytest.mark.parametrize("name, value, path", [
     ("lens.mass.main.einstein_radius", -0.001, "scene.lens.mass.main.einstein_radius"),
     ("source.light.disk.ell_comp_2", 0.9945, "scene.source.light.disk.ell_comps"),
     ("source.light.clumps.size_scale", 0.0, "scene.source.light.clumps.size_scale"),
-], ids=["einstein-radius-below-zero", "ellipticity-pair-at-the-clamp", "zero-size-scale"])
+    ("lens.mass.main.centre_y", math.nan, "scene.lens.mass.main.centre[0]"),
+], ids=["einstein-radius-below-zero", "ellipticity-pair-at-the-clamp", "zero-size-scale", "centre-not-a-number"])
 def test_with_parameter_refuses_values_outside_the_domain(rich_scene, name, value, path):
     with pytest.raises(ConfigError) as error:
         with_parameter(rich_scene, name, value)

@@ -50,10 +50,12 @@ def scene_parameters(spec: SceneSpec) -> tuple[SceneParameter, ...]:
 
 
 def with_parameter(spec: SceneSpec, name: str, value: float) -> SceneSpec:
-    """A copy of ``spec`` with one parameter replaced, re-read through its component table.
+    """A copy of ``spec`` with one parameter replaced.
 
-    A value outside the parameter's domain (or a joint rule of its component) raises
-    ``ConfigError`` naming the parameter and the value.
+    The value is checked against the parameter's own domain, then the joint rules of its
+    component's table run on the replaced values. Nothing else is read again, so no file is
+    touched: a finite-difference step inside a preparation works on its loaded assets. A
+    refused value raises ``ConfigError`` naming the parameter and the value.
     """
     for galaxy, component in _components(spec):
         for definition in PROFILE_TYPES[component.type].parameters(component.values):
@@ -64,20 +66,26 @@ def with_parameter(spec: SceneSpec, name: str, value: float) -> SceneSpec:
 
 def _replaced(spec: SceneSpec, galaxy: GalaxySpec, component: ComponentSpec, definition: ParameterDef,
               value: float) -> SceneSpec:
+    label = f"{_name(component, definition)} = {value!r}"
+    path = f"scene.{component.plane}.{component.role}.{component.name}"
+    if not definition.domain.contains(value):
+        element = "" if definition.index is None else f"[{definition.index}]"
+        raise ConfigError(f"{path}.{definition.key}{element}", f"{label}: outside {definition.domain.describe()}")
     values = dict(component.values)
     if definition.index is None:
-        values[definition.key] = value
+        values[definition.key] = float(value)
     else:
         pair = list(values[definition.key])
-        pair[definition.index] = value
+        pair[definition.index] = float(value)
         values[definition.key] = pair
-    table = MASS_COMPONENT_TABLE if component.role == "mass" else LIGHT_COMPONENT_TABLE
-    path = f"scene.{component.plane}.{component.role}.{component.name}"
-    try:
-        read = table.read({"type": component.type, **values}, path)
-    except ConfigError as error:
-        raise ConfigError(error.path, f"{_name(component, definition)} = {value!r}: {error.message}") from None
-    replacement = component_from_values(component.name, component.plane, component.role, read)
+    table = (MASS_COMPONENT_TABLE if component.role == "mass" else LIGHT_COMPONENT_TABLE).tables[component.type]
+    for rule in table.rules:
+        try:
+            rule.check(values, path)
+        except ConfigError as error:
+            raise ConfigError(error.path, f"{label}: {error.message}") from None
+    replacement = component_from_values(component.name, component.plane, component.role,
+                                        {"type": component.type, **values})
     role_components = tuple(replacement if item is component else item for item in getattr(galaxy, component.role))
     new_galaxy = dataclasses.replace(galaxy, **{component.role: role_components})
     return dataclasses.replace(spec, **{galaxy.plane: new_galaxy})

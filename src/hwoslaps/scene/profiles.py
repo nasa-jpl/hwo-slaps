@@ -54,10 +54,17 @@ class Interval:
         below = value < self.upper if self.open_upper else value <= self.upper
         return above and below
 
+    def describe(self) -> str:
+        return f"{'(' if self.open_lower else '['}{self.lower:g}, {self.upper:g}{')' if self.open_upper else ']'}"
+
 
 @dataclass(frozen=True)
 class ParameterDef:
-    """One scalar parameter: value at ``values[key]`` (element ``index`` of a pair, or the scalar)."""
+    """One scalar parameter: value at ``values[key]`` (element ``index`` of a pair, or the scalar).
+
+    ``domain`` is the interval of the scalar alone; constraints that join several scalars (the
+    ellipticity ``hypot``) are rules of the component table.
+    """
 
     name: str
     key: str
@@ -128,7 +135,15 @@ _REAL_LINE = Interval(-math.inf, math.inf)
 _POSITIVE = Interval(0.0, math.inf)
 _ELLIPTICITY = Interval(-ELLIPTICITY_LIMIT, ELLIPTICITY_LIMIT)
 
-_CENTRE = Key("centre", Pair(Real()), "(y, x) centre", unit="arcsec")
+
+def _real(domain: Interval) -> Real:
+    """The configuration check of a finite scalar in ``domain``, so the key and its parameter share one interval."""
+    return Real(min=None if math.isinf(domain.lower) else domain.lower,
+                max=None if math.isinf(domain.upper) else domain.upper,
+                min_open=domain.open_lower, max_open=domain.open_upper)
+
+
+_CENTRE = Key("centre", Pair(_real(_REAL_LINE)), "(y, x) centre", unit="arcsec")
 _ELL_COMPS = Key("ell_comps", Ellipticity(),
                  f"elliptical components (f sin 2 phi, f cos 2 phi), f = (1 - q) / (1 + q), q the axis ratio and "
                  f"phi the major-axis angle counter-clockwise from +x; hypot below {ELLIPTICITY_LIMIT}")
@@ -195,7 +210,7 @@ ISOTHERMAL = ProfileType(
     role="mass",
     table=Table(
         (_CENTRE,
-         Key("einstein_radius", Real(min=0.0, min_open=True), "AutoLens Einstein radius of the SIE", unit="arcsec"),
+         Key("einstein_radius", _real(_POSITIVE), "AutoLens Einstein radius of the SIE", unit="arcsec"),
          _ELL_COMPS),
         rules=(_ELLIPTICITY_RULE,),
         doc="Singular isothermal ellipsoid (al.mp.Isothermal); AutoGalaxy evaluates it at q <= 0.99999.",
@@ -226,8 +241,8 @@ EXPONENTIAL = ProfileType(
     role="light",
     table=Table(
         (_CENTRE, _ELL_COMPS,
-         Key("effective_radius", Real(min=0.0, min_open=True), "circularized half-light radius", unit="arcsec"),
-         Key("intensity", Nullable(Real(min=0.0, min_open=True)),
+         Key("effective_radius", _real(_POSITIVE), "circularized half-light radius", unit="arcsec"),
+         Key("intensity", Nullable(_real(_POSITIVE)),
              "surface brightness at the effective radius, detected e-/s per pixel sample", None)),
         rules=(_ELLIPTICITY_RULE,),
         doc="Exponential (Sersic n = 1) light profile (al.lp.Exponential).",
@@ -265,11 +280,11 @@ IMAGE = ProfileType(
     table=Table(
         (Key("asset_path", FilePath((".npz",)), "prepared image asset (format version 1)"),
          _CENTRE,
-         Key("rotation_deg", Real(), "counter-clockwise rotation of the image on the sky", 0.0, unit="deg"),
+         Key("rotation_deg", _real(_REAL_LINE), "counter-clockwise rotation of the image on the sky", 0.0, unit="deg"),
          Key("total_flux", Nullable(Real(min=0.0, min_open=True)),
              "integral of the image at unit flux and size scales, e-/s per pixel sample times arcsec^2", None),
-         Key("flux_scale", Real(min=0.0, min_open=True), "brightness multiplier", 1.0),
-         Key("size_scale", Real(min=0.0, min_open=True), "magnification of the image at fixed surface brightness",
+         Key("flux_scale", _real(_POSITIVE), "brightness multiplier", 1.0),
+         Key("size_scale", _real(_POSITIVE), "magnification of the image at fixed surface brightness",
              1.0)),
         doc="Pixelized source: a unit-integral asset evaluated by bilinear interpolation with a one-pixel zero pad.",
     ),
