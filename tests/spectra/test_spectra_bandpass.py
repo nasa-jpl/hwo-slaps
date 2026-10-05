@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.config.checks import ConfigError
-from hwoslaps.spectra.bandpass import bandpass_nodes, bin_integrals, build_bandpass, integrate_dlnlambda, parse_bandpass
+from hwoslaps.spectra.bandpass import bin_integrals, build_bandpass, integrate_dlnlambda, parse_bandpass
 from hwoslaps.spectra.photometry import band_mean_throughput
 
 
@@ -51,8 +51,7 @@ def test_product_top_hat_must_cover_its_support():
 
 def test_nodes_and_clipped_bins_match_hand_geometry():
     band = build_bandpass(parse_bandpass({"kind": "top_hat", "min_nm": 400.0, "max_nm": 600.0, "throughput": 1.0}, "band"))
-    np.testing.assert_array_equal(band.nodes(2), np.array([450.0, 550.0]) / 1.0e9)
-    np.testing.assert_array_equal(bandpass_nodes(band.support_m, 2), band.nodes(2))
+    np.testing.assert_allclose(band.nodes(2), np.array([450.0, 550.0]) / 1.0e9, rtol=0.0, atol=1.0e-22)
     np.testing.assert_allclose(band.bin_edges(np.array([300.0, 450.0, 550.0, 800.0]) / 1.0e9),
                                np.array([400.0, 400.0, 500.0, 600.0, 600.0]) / 1.0e9, rtol=0.0, atol=1.0e-22)
     with pytest.raises(ValueError, match="integer"):

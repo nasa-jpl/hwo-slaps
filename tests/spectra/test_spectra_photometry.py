@@ -71,8 +71,8 @@ def test_narrow_line_between_dense_nodes_is_integrated(spectral_file, frame):
     assert not np.any(sed.fnu(response.wavelengths_m))
     low, peak, high = knots
     # Integrating the two linear-in-lambda flanks in log wavelength analytically.
-    expected = 0.21 * ((peak-low-low*math.log(peak/low))/(peak-low)
-                       + (high*math.log(high/peak)-(high-peak))/(high-peak))
+    expected = 0.21 * ((peak-low-low*math.log1p((peak-low)/low))/(peak-low)
+                       + (high*math.log1p((high-peak)/peak)-(high-peak))/(high-peak))
     actual = detected_flux_per_m2(sed, 1.0, response) * 6.62607015e-34 / 1.0e-26
     assert actual == pytest.approx(expected, rel=1.0e-6)
 
