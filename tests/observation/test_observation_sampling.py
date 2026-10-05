@@ -264,6 +264,7 @@ def test_subhalo_template_meets_the_budget_below_the_threshold():
     # the threshold, so this checks the P1 scene at half its pixel scale (200 x 200 at 0.015").
     cases = [case for phase in HALF_PIXEL_PHASES
              for case in _lensed_cases(phase, PIXEL / 2, HALF_PIXEL_REFERENCE_FACTOR)]
+    assert cases and all(case.eps_s is not None for case in cases), "no lensed template case was measured"
     _print_table(cases)
     for case in cases:
         assert case.variation <= MAX_NATIVE_SAMPLING_VARIATION, case
