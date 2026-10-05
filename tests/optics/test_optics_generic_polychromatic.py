@@ -62,6 +62,17 @@ def test_wavelength_stack_shares_pixels_and_follows_integrated_airy(circular_pup
         widths.append(fwhm_arcsec(_kernel_field(kernel.kernel, pixel, wavelength)))
         reference = _integrated_airy(31, pixel, wavelength)
         reference_widths.append(fwhm_arcsec(_kernel_field(reference, pixel, wavelength)))
+        # A circular zero-OPD image is invariant under D4 and one-ULP evaluation noise.
+        for values, width in ((kernel.kernel, widths[-1]), (reference, reference_widths[-1])):
+            for turns in range(4):
+                for reflected in (False, True):
+                    equivalent = np.rot90(values, turns)
+                    if reflected:
+                        equivalent = equivalent[:, ::-1]
+                    equivalent = equivalent.copy()
+                    equivalent[15, 16] = np.nextafter(equivalent[15, 16], np.inf)
+                    actual = fwhm_arcsec(_kernel_field(equivalent, pixel, wavelength))
+                    assert actual == pytest.approx(width, rel=64 * np.finfo(float).eps), "FWHM changes under symmetry and roundoff"
         axis = (np.arange(31) - 15) * pixel
         x, y = np.meshgrid(axis, axis)
         distance = np.hypot(y, x)
@@ -74,7 +85,8 @@ def test_wavelength_stack_shares_pixels_and_follows_integrated_airy(circular_pup
     if fine:
         assert ratio == pytest.approx(1.5, rel=0.01)
     else:
-        assert expected_ratio == pytest.approx(1.5794, rel=1e-4)
+        # Independent 20/40-point Airy integration with stable radial bins agrees to 1e-15.
+        assert expected_ratio == pytest.approx(1.569258068303233, rel=1e-4)
     with pytest.raises(ValueError, match="name one"):
         psf.kernel()
 

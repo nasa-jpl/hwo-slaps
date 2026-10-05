@@ -8,6 +8,7 @@ from scipy import integrate, optimize, special
 
 from hwoslaps.constants import ARCSEC_PER_RAD
 from hwoslaps.optics.metrics import captured_power_fraction, encircled_energy, fwhm_arcsec, strehl_ratio
+from hwoslaps.optics.optical_psf import FocalField
 from hwoslaps.optics.providers import build_psf_provider, parse_psf
 from hwoslaps.optics.pupils import build_pupil, parse_pupil
 
@@ -45,6 +46,28 @@ def test_airy_fwhm_and_encircled_energy():
                                rtol=0.0, atol=3e-3)
     with pytest.raises(ValueError, match="field radius"):
         encircled_energy(field, [7 * lambda_over_d])
+
+
+def test_fwhm_retains_a_real_fractional_peak():
+    sigma = 1.1
+    centre = np.array([0.27, -0.13])
+    y, x = np.mgrid[-15:16, -15:16].astype(float)
+    image = np.exp(-((y-centre[0])**2 + (x-centre[1])**2) / (2*sigma**2))
+    field = FocalField(image/image.sum(), x, y, 1.0, 5e-7)
+    # Closed Gaussian three-sample peak, without calling the metric's peak helper.
+    fitted = np.sinh(centre/sigma**2) / (2*(np.exp(1/(2*sigma**2))-np.cosh(centre/sigma**2)))
+    # Hand-enumerated memberships of [0,1) and [1,2) around this fractional peak.
+    points = (np.array([(0, 0), (1, 0), (0, -1)]),
+              np.array([(-1, -1), (-1, 0), (-1, 1), (0, -2), (0, 1),
+                        (1, -1), (1, 1), (2, -1), (2, 0)]))
+    mean_radius, mean_intensity = [], []
+    for members in points:
+        mean_radius.append(np.mean(np.hypot(members[:, 0]-fitted[0], members[:, 1]-fitted[1])))
+        mean_intensity.append(np.mean(np.exp(-np.sum((members-centre)**2, axis=1)/(2*sigma**2))))
+    half = 0.5*np.exp(-np.sum(centre**2)/(2*sigma**2))
+    fraction = (mean_intensity[0]-half)/(mean_intensity[0]-mean_intensity[1])
+    expected = 2*(mean_radius[0] + fraction*(mean_radius[1]-mean_radius[0]))
+    assert fwhm_arcsec(field) == pytest.approx(expected, rel=64*np.finfo(float).eps)
 
 
 def test_obscured_encircled_energy_matches_annular_form():
