@@ -1,13 +1,15 @@
 """TNFW parent-mass convention, BMO far field and independent enclosed-density equations."""
 
 import math
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from hwoslaps.constants import ARCSEC_PER_RAD, MPC_TO_M, MSUN_KG
 from hwoslaps.scene.cosmology import LensingGeometry
-from hwoslaps.scene.halos import (FixedConcentration, Halo, HaloModel, OverdensityTruncation,
+from hwoslaps.scene.halos import (FixedConcentration, Halo, HaloModel, Moline2017, OverdensityTruncation,
                                   TauTruncation, halo_lensing)
 
 GEOMETRY = LensingGeometry(0.3, 1.4, 950., 1750., 1100., 80., 1.2e-26, 2.9)
@@ -18,13 +20,22 @@ GEOMETRY = LensingGeometry(0.3, 1.4, 950., 1750., 1100., 80., 1.2e-26, 2.9)
 def test_truncated_nfw_total_mass_and_nfw_limit(tau, planck15):
     import autolens as al
 
-    model = HaloModel("TNFW", FixedConcentration(12.), TauTruncation(tau))
+    model = HaloModel("TNFW", Moline2017(1., None), TauTruncation(tau))
     halo = Halo(model, 1e8, (0., 0.), 0.2, 0.6, planck15)
     lensing = halo.lensing()
     theta = lensing.parameters["scale_radius"]
     kappa = lensing.parameters["kappa_s"]
     fraction = tau**2 / (tau**2 + 1.)**2 * ((tau**2 - 1.) * math.log(tau) + tau * math.pi - (tau**2 + 1.))
-    expected_mass = 1e8 * fraction / (math.log(13.) - 12. / 13.)
+    # The originalAPI scalar fixture supplies parent scales independently of the new TNFW branch.
+    fixture = Path(__file__).resolve().parents[1] / "fixtures/scene/halo_scales_8fa6209.json"
+    sweep = json.loads(fixture.read_text())
+    index = [float.fromhex(value) for value in sweep["masses_msun"]].index(1e8)
+    base = next(pair for pair in sweep["pairs"] if pair["z_deflector"] == 0.2 and pair["z_source"] == 0.6)["scalar"]
+    assert theta == float.fromhex(base["nfw_scale_radius"][index])
+    assert kappa == float.fromhex(base["nfw_kappa_s"][index])
+    concentration = float.fromhex(base["nfw_concentration"][index])
+    assert lensing.derived["concentration"] == concentration
+    expected_mass = 1e8 * fraction / (math.log(1 + concentration) - concentration / (1 + concentration))
     assert model.mass_definition == "M200c_parent"
     assert lensing.derived["total_mass_msun"] == pytest.approx(expected_mass, rel=1e-14)
     assert lensing.parameters["truncation_radius"] == tau * theta
