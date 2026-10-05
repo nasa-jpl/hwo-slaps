@@ -18,6 +18,8 @@ def _kernel(seed, shape=(5, 5)):
 
 
 @pytest.mark.parametrize("values, keywords, message", [
+    (np.full((4, 5), 0.05), {}, "odd sides"),
+    (np.full((5, 4), 0.05), {}, "odd sides"),
     (np.ones(5), {}, "two-dimensional"),
     (np.full((3, 3, 3), 1 / 27), {}, "two-dimensional"),
     (np.array([[0.0, np.nan, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 0.0]]), {}, "finite"),
@@ -27,7 +29,7 @@ def _kernel(seed, shape=(5, 5)):
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": 0.0}, "pixel_scale_arcsec"),
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": -0.03}, "pixel_scale_arcsec"),
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": True}, "pixel_scale_arcsec"),
-], ids=["1-d", "3-d", "nan", "negative", "zero-flux", "unnormalized", "zero-scale", "negative-scale",
+], ids=["even-rows", "even-columns", "1-d", "3-d", "nan", "negative", "zero-flux", "unnormalized", "zero-scale", "negative-scale",
         "bool-scale"])
 def test_detector_psf_validation(values, keywords, message):
     arguments = {"pixel_scale_arcsec": SCALE, "normalize": True, **keywords}

@@ -67,6 +67,8 @@ PARSE_ROWS = {
                           "psf.model.draw.prior.colour"),
     "unknown-truth-kind": ({"truth.kind": "telescope"}, "psf.truth.kind"),
     "unknown-model-kind": ({"model": {"kind": "explicit"}}, "psf.model.kind"),
+    "even-kernel-rows": ({"truth.kernel_shape": [16, 17]}, "psf.truth.kernel_shape[0]"),
+    "even-kernel-columns": ({"truth.kernel_shape": [17, 16]}, "psf.truth.kernel_shape[1]"),
     "wavelength-required": ({"truth.wavelength_nm": DELETE}, "psf.truth.wavelength_nm"),
     "oversampling-required": ({"truth.detector_oversampling": DELETE}, "psf.truth.detector_oversampling"),
     "rings-required": ({"truth.pupil.rings": DELETE}, "psf.truth.pupil.rings"),
