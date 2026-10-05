@@ -1,5 +1,6 @@
 """Physical domains of the detector and observation values, configured and built in Python."""
 
+import numpy as np
 import pytest
 
 from hwoslaps.config.checks import ConfigError
@@ -73,9 +74,12 @@ def test_physical_boundary_values_are_accepted_and_normalized():
     assert parse_instrument({"detector": {**DETECTOR, "dark_current_e_per_s": 0.0}}).detector.dark_current_e_per_s == 0.0
     assert parse_observation({"exposure_time_s": 900, "sky": {"rate_e_per_s": 0}}) == ObservationSpec(
         exposure_time_s=900.0, exposure_count=1, sky=SkySpec(rate_e_per_s=0.0))
-    exposure = Exposure(Detector(2, 0, 0), exposure_time_s=1, sky_rate_e_per_s=1, exposure_count=2)
-    assert exposure.to_mapping() == {
+    exposure = Exposure(Detector(2, 0, 0), exposure_time_s=1, sky_rate_e_per_s=1, exposure_count=np.int64(2))
+    mapping = exposure.to_mapping()
+    assert mapping == {
         "detector": {"gain_e_per_adu": 2.0, "read_noise_e": 0.0, "dark_current_e_per_s": 0.0},
         "exposure_time_s": 1.0, "exposure_count": 2, "sky_rate_e_per_s": 1.0,
     }
-    assert all(type(value) is float for value in exposure.to_mapping()["detector"].values())
+    assert [type(mapping[key]) for key in ("exposure_time_s", "sky_rate_e_per_s", "exposure_count")] == [
+        float, float, int]
+    assert all(type(value) is float for value in mapping["detector"].values())
