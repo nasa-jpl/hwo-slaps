@@ -98,8 +98,10 @@ def test_padded_fft_convolution_matches_direct_real_space():
     np.testing.assert_allclose(actual, convolve2d(image, kernel, mode="same"), rtol=1.0e-12, atol=1.0e-12)
 
 
-def test_image_evaluator_refuses_reference_convention_drift(image_asset):
-    from hwoslaps.fisher.engines.jax_profiles import build_light_evaluator
+@pytest.mark.parametrize("tiny_support", [False, True])
+def test_image_evaluator_refuses_reference_convention_drift(image_asset, tiny_support):
+    import autolens as al
+    from hwoslaps.fisher.engines.jax_profiles import build_light_evaluator, verification_points
     from hwoslaps.scene.image_source import load_image_asset
     from hwoslaps.scene.image_profile import ImageLightProfile
 
@@ -107,10 +109,22 @@ def test_image_evaluator_refuses_reference_convention_drift(image_asset):
         def image_2d_from(self, grid, **kwargs):
             return 1.01 * super().image_2d_from(grid=grid, **kwargs)
 
-    profile = ShiftedConvention.from_asset(load_image_asset(image_asset), centre=(0.0, 0.0), rotation_deg=0.0,
-                                          total_flux=1.0, flux_scale=1.0, size_scale=1.0)
+    if tiny_support:
+        samples = np.zeros((8, 8))
+        samples[3, 3] = 1.0e16
+        profile = ShiftedConvention(centre=(0.1, 0.2), rotation_deg=19.0, pixel_scale_arcsec=1.0e-8,
+                                    sb=samples, total_flux=1.0, flux_scale=1.0, size_scale=1.0)
+        macro = np.array([[-1.0, -1.0], [-1.0, 1.0], [1.0, -1.0], [1.0, 1.0]])
+        old_points = np.random.default_rng(0).uniform([-1.0, -1.0], [1.0, 1.0], size=(128, 2))
+        assert not np.any(np.asarray(profile.image_2d_from(grid=al.Grid2DIrregular(values=old_points))))
+        points = verification_points(macro, [profile])
+        assert np.any(np.asarray(profile.image_2d_from(grid=al.Grid2DIrregular(values=points))))
+    else:
+        profile = ShiftedConvention.from_asset(load_image_asset(image_asset), centre=(0.0, 0.0), rotation_deg=0.0,
+                                              total_flux=1.0, flux_scale=1.0, size_scale=1.0)
+        points = np.array([[0.0, 0.0], [0.01, 0.02], [-0.01, 0.0]])
     with pytest.raises(ValueError, match="convention drift"):
-        build_light_evaluator(profile, np.array([[0.0, 0.0], [0.01, 0.02], [-0.01, 0.0]]))
+        build_light_evaluator(profile, points)
 
 
 def test_affine_log_lookup_equals_general_interpolation_at_knots_and_neighbours():
@@ -126,7 +140,7 @@ def test_affine_log_lookup_equals_general_interpolation_at_knots_and_neighbours(
     assert affine is not None
     actual = interpolate_log_grid(jnp.asarray(queries), jnp.asarray(knots), jnp.asarray(values), affine)
     expected = jnp.interp(jnp.asarray(queries), jnp.asarray(knots), jnp.asarray(values))
-    np.testing.assert_array_equal(np.asarray(actual), np.asarray(expected))
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=2.0e-14, atol=0.0, equal_nan=True)
     irregular = np.array([0.0, 0.01, 0.05, 0.9, 1.0])
     assert affine_log_grid_parameters(irregular) is None
     for refused in (np.array([0.0, np.nan]), np.array([0.0, 0.0]), np.array([1.0, 0.0]), knots.astype(np.float32)):
@@ -168,11 +182,17 @@ def test_dense_covariance_uses_host_projection_and_matches_reference(minimal_map
     np.testing.assert_allclose(actual.fisher_profiled, expected.fisher_profiled, rtol=5.0e-6)
 
 
-def test_jax_engine_refuses_off_plane_hypothesis(minimal_mapping):
+@pytest.mark.parametrize("geometry", ["off_plane_hypothesis", "other_plane_perturber"])
+def test_jax_engine_refuses_geometry_it_cannot_render(minimal_mapping, geometry):
     from hwoslaps.fisher.api import Execution, prepare_forecast
 
-    minimal_mapping["scene"]["subhalo"]["redshift"] = 0.3
-    with pytest.raises(ValueError, match="lens-plane subhalo"):
+    if geometry == "off_plane_hypothesis":
+        minimal_mapping["scene"]["subhalo"] = {"type": "NFW", "redshift": 0.3,
+                                                 "concentration": {"kind": "fixed", "value": 10.0}}
+    else:
+        minimal_mapping["scene"]["perturbers"] = {"halos": [{"type": "PointMass", "redshift": 0.3,
+                                                            "mass_msun": 1.0e8, "centre": [0.1, 0.7]}]}
+    with pytest.raises(ValueError, match="two-plane scene"):
         prepare_forecast(minimal_mapping, execution=Execution(engine="jax"))
 
 

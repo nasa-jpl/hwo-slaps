@@ -1,8 +1,8 @@
 """Real spawned reference evaluation and ordered worker failure semantics."""
 
+import multiprocessing
 import os
 from concurrent.futures.process import BrokenProcessPool
-from copy import deepcopy
 
 import numpy as np
 import pytest
@@ -31,9 +31,12 @@ def worker_death(value):
 
 
 @pytest.mark.parametrize("mismatched", [False, True])
-def test_pooled_reference_engine_equals_serial_bitwise(minimal_mapping, tiny_gaussian_kernel, tmp_path, mismatched):
+def test_pooled_reference_engine_equals_serial_bitwise(minimal_mapping, tiny_gaussian_kernel, tmp_path, mismatched, monkeypatch):
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
+    monkeypatch.delenv("JAX_PLATFORMS", raising=False)
+    parent_environment = {name: os.environ.get(name) for name in
+                          ("JAX_PLATFORMS", "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")}
     if mismatched:
         kernel = tiny_gaussian_kernel.copy()
         kernel[3, 3] *= 1.1
@@ -45,16 +48,23 @@ def test_pooled_reference_engine_equals_serial_bitwise(minimal_mapping, tiny_gau
     for name in ("fisher_raw", "fisher_profiled", "amplitude_hat", "amplitude_spurious"):
         if getattr(expected, name) is not None:
             np.testing.assert_array_equal(getattr(actual, name), getattr(expected, name))
+    assert {name: os.environ.get(name) for name in parent_environment} == parent_environment
 
 
-@pytest.mark.parametrize("worker,error", [(worker_square, None), (worker_failure, ValueError), (worker_death, BrokenProcessPool)])
+@pytest.mark.parametrize("worker,error", [(worker_square, None), (worker_failure, ValueError), (worker_death, BrokenProcessPool), (worker_square, "early_close")])
 def test_ordered_process_map_surfaces_failures_and_keeps_order(worker, error):
     from hwoslaps.fisher.engines.reference import ordered_process_map
 
     def run():
         return list(ordered_process_map(worker, range(9), workers=2, initializer=worker_initializer, initargs=()))
-    if error is None:
+    before = {process.pid for process in multiprocessing.active_children()}
+    if error == "early_close":
+        iterator = ordered_process_map(worker, range(31), workers=2, initializer=worker_initializer, initargs=())
+        assert next(iterator) == 0
+        iterator.close()
+    elif error is None:
         assert run() == [0, 1, 4, 9, 16, 25, 36, 49, 64]
     else:
         with pytest.raises(error):
             run()
+    assert {process.pid for process in multiprocessing.active_children()} <= before

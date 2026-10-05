@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from ..identity import validate_loaded_file
 from ..optics.kernels import KernelBinding
+from ..optics.optical_psf import OpticalPSF
 from ..optics.providers import ModelPSF, PSFProvider, build_model_psf, build_psf_provider
 from ..optics.wavefront import WavefrontMode
 
@@ -16,7 +18,7 @@ if TYPE_CHECKING:
     from ..instrument import Instrument
     from ..scene.spec import SceneSpec
 
-__all__ = ["PsfPair", "bind_psfs", "bind_truth", "truth_provider"]
+__all__ = ["PsfPair", "bind_psfs", "bind_truth", "truth_provider", "validate_loaded_psf_files"]
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,17 @@ class PsfPair:
 
 def truth_provider(config: EngineConfig) -> PSFProvider:
     return build_psf_provider(config.psf.truth, pixel_scale_arcsec=config.scene.grid.pixel_scale_arcsec)
+
+
+def validate_loaded_psf_files(provider: PSFProvider, binding: KernelBinding, manifest: Mapping[str, str]) -> None:
+    """The provider's loaded kernel and truth-draw files must match the input manifest."""
+    for kernel in binding.kernels:
+        if kernel.source["kind"] == "file":
+            validate_loaded_file(kernel.source["path"], kernel.source["file_sha256"], manifest)
+    if isinstance(provider, OpticalPSF) and provider.draw is not None:
+        draw = provider.draw
+        if draw.spec.prior.kind == "path":
+            validate_loaded_file(draw.spec.prior.path, draw.prior_digest, manifest)
 
 
 def bind_truth(provider: PSFProvider, scene: SceneSpec,

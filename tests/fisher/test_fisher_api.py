@@ -101,11 +101,15 @@ def test_identical_model_kernel_is_the_matched_limit(minimal_mapping):
 
 
 def test_execution_does_not_enter_configuration_digest(minimal_mapping):
-    from hwoslaps.fisher.api import Execution, prepare_forecast
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
     with prepare_forecast(minimal_mapping) as reference, prepare_forecast(minimal_mapping, execution=Execution(engine="jax")) as jax:
         assert reference.record["config_digest"] == jax.record["config_digest"]
         assert reference.record["comparison_digest"] == jax.record["comparison_digest"]
+        for prepared in (reference, jax):
+            result = forecast(prepared, masses_msun=[1.0e8])
+            assert result.provenance["engine"]["reference_workers"] == 1
+            assert result.provenance["engine"]["batch_size"] == 16
 
 
 @pytest.mark.parametrize("amplitude", [0.0, 1.0])
@@ -151,3 +155,69 @@ def test_prepared_kernel_buffers_cannot_change_identity(minimal_mapping, changed
             forecast(prepared, masses_msun=[1.0e8])
         with pytest.raises(TypeError):
             prepared.record["config_digest"] = "changed"
+
+
+@pytest.mark.parametrize("engine", ["reference", "jax"])
+def test_closed_preparation_refuses_forecast(minimal_mapping, engine):
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+
+    prepared = prepare_forecast(minimal_mapping, execution=Execution(engine=engine))
+    forecast(prepared, masses_msun=[1.0e8])
+    prepared.close()
+    prepared.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        forecast(prepared, masses_msun=[1.0e8])
+
+
+def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_mapping, tmp_path):
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    kernel_path = tmp_path / "delta.npy"
+    np.save(kernel_path, np.ones((1, 1)))
+    minimal_mapping["psf"]["truth"]["path"] = str(kernel_path)
+    minimal_mapping["scene"]["grid"].update(shape=[3, 3], over_sample_size=1)
+    minimal_mapping["scene"]["lens"]["mass"]["mass"]["ell_comps"] = [0.0, 0.0]
+    minimal_mapping["scene"]["source"]["light"]["light"]["centre"] = [0.0, 0.0]
+    minimal_mapping["forecast"]["mask"] = {"kind": "annulus", "about": "grid", "inner_arcsec": 0.0, "outer_arcsec": 0.001}
+    minimal_mapping["forecast"]["nuisances"] = {"background_offset": False,
+        "fixed": ["lens.*", "source.*.centre_x", "source.*.ell_*", "source.*.intensity", "source.*.effective_radius"]}
+    with prepare_forecast(minimal_mapping) as prepared:
+        assert prepared.nuisances.names == ("source.light.light.centre_y",)
+        assert prepared.workspace.nuisance_rank == 0
+        assert np.isinf(prepared.workspace.condition_number)
+        result = forecast(prepared, masses_msun=[1.0e8])
+        assert result.provenance["nuisance_rank"] == 0
+        assert result.provenance["gram_condition_number"] is None
+
+
+@pytest.mark.parametrize("publication", ["after_capture", "after_read"])
+@pytest.mark.parametrize("product", ["forecast", "simulation"])
+def test_input_publication_during_preparation_is_refused(minimal_mapping, publication, product):
+    import sys
+    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.identity import file_digest
+    from hwoslaps.simulation import simulate
+
+    path = Path(minimal_mapping["psf"]["truth"]["path"])
+    original = path.read_bytes()
+    trigger = file_digest if publication == "after_capture" else np.load
+    published = []
+    previous_profile = sys.getprofile()
+    def publish(frame, event, returned):
+        if event == "return" and frame.f_code is trigger.__code__:
+            sys.setprofile(previous_profile)
+            kernel = np.load(path, allow_pickle=False)
+            kernel[3, 3] *= 1.4
+            np.save(path, kernel / kernel.sum())
+            published.append(True)
+    sys.setprofile(publish)
+    try:
+        with pytest.raises(ValueError, match=str(path)):
+            if product == "forecast":
+                prepare_forecast(minimal_mapping)
+            else:
+                simulate(minimal_mapping, subhalo=None, noise_seed=None)
+        assert published == [True]
+    finally:
+        sys.setprofile(previous_profile)
+        path.write_bytes(original)

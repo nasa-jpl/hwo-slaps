@@ -18,6 +18,7 @@ dense covariance over the full image is given, with its masked block.
 
 from __future__ import annotations
 
+import io
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..identity import array_digest
+from ..identity import array_digest, read_file_snapshot
 from .statistics import Whitener
 
 __all__ = [
@@ -112,11 +113,14 @@ def grid_centre_yx(y_arcsec: np.ndarray, x_arcsec: np.ndarray) -> tuple[float, f
     return 0.5 * (float(np.max(y)) + float(np.min(y))), 0.5 * (float(np.max(x)) + float(np.min(x)))
 
 
-def load_noise_covariance(path: str | os.PathLike[str], n_pixels: int) -> np.ndarray:
+def load_noise_covariance(path: str | os.PathLike[str], n_pixels: int, *, file_sha256: str | None = None) -> np.ndarray:
     """A finite ``(n_pixels, n_pixels)`` float covariance over the full image from a ``.npy`` file."""
     if isinstance(n_pixels, bool) or not isinstance(n_pixels, (int, np.integer)) or n_pixels <= 0:
         raise ValueError(f"n_pixels must be a positive integer, got {n_pixels!r}")
-    covariance = np.load(path, allow_pickle=False)
+    content, digest = read_file_snapshot(path)
+    if file_sha256 is not None and digest != file_sha256:
+        raise ValueError(f"referenced file {os.fspath(path)} changed; prepare the forecast again")
+    covariance = np.load(io.BytesIO(content), allow_pickle=False)
     if not isinstance(covariance, np.ndarray) or covariance.dtype.kind not in "iuf":
         raise ValueError(f"{os.fspath(path)} must hold one numeric .npy array")
     if covariance.shape != (n_pixels, n_pixels):

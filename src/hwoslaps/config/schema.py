@@ -95,22 +95,31 @@ class EngineConfig:
         """An independent effective mapping, with table defaults and absolute paths."""
         return deepcopy(dict(self._values))
 
-    def _identity_record(self, *, content: bool) -> dict[str, Any]:
+    def _identity_record(self, *, content: bool, manifest: Mapping[str, str] | None = None) -> dict[str, Any]:
         def record(path: str, check: FilePath) -> Any:
-            return {"file_sha256": file_digest(path)} if content else path
+            if not content:
+                return path
+            return {"file_sha256": file_digest(path) if manifest is None else manifest[path]}
         values = ROOT_TABLE.digest_record(self._values, record)
         del values["run_name"]
         return values
 
     def digest(self) -> str:
         """Recompute scientific identity from the current bytes of every referenced file."""
-        return mapping_digest(self._identity_record(content=True))
+        return self.capture_identity()["config_digest"]
 
     def comparison_digest(self) -> str:
         """Identity of all scientific inputs except the model PSF."""
-        values = self._identity_record(content=True)
+        return self.capture_identity()["comparison_digest"]
+
+    def capture_identity(self) -> dict[str, Any]:
+        """Both scientific digests from one captured manifest of the referenced files."""
+        manifest = dict(self.file_digests())
+        values = self._identity_record(content=True, manifest=manifest)
+        config_digest = mapping_digest(values)
         del values["psf"]["model"]
-        return mapping_digest(values)
+        return {"config_digest": config_digest, "comparison_digest": mapping_digest(values),
+                "file_digests": manifest}
 
     def file_digests(self) -> Mapping[str, str]:
         """Current SHA-256 of every referenced file, keyed by its absolute path."""

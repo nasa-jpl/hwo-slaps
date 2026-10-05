@@ -15,7 +15,7 @@ from numpy.typing import ArrayLike
 from .._version import __version__
 from ..config.checks import ConfigError
 from ..config.schema import ConfigSource, EngineConfig, resolve_config
-from ..identity import array_digest, file_digest, json_ready
+from ..identity import array_digest, json_ready, validate_file_manifest, validate_loaded_file
 from ..observation.normalization import resolve_observing
 from ..observation.observation import Observation, observe
 from ..scene.builder import Scene, build_scene, native_sampling_variation
@@ -30,7 +30,7 @@ from .data_space import (DataSpace, all_pixels_mask, annulus_mask, build_data_sp
 from .engines.base import EngineContext, TemplateEngine, make_engine
 from .nuisances import NuisanceDesign, build_nuisance_design, resolve_nuisances
 from .positions import PositionSet, explicit_positions, grid_positions, ring_positions
-from .psf_pair import PsfPair, bind_psfs, truth_provider
+from .psf_pair import PsfPair, bind_psfs, truth_provider, validate_loaded_psf_files
 from .renderer import SceneRenderer
 from .result import ForecastResult
 from .statistics import ProfileLikelihoodWorkspace
@@ -103,9 +103,7 @@ class PreparedForecast:
                 digest = array_digest(np.asarray(kernel.convolver().kernel.native))
                 if digest != self.record[side + "_convolver_digests"][index]:
                     raise ValueError(f"the {side} convolver kernel {index} changed; prepare the forecast again")
-        for path, digest in self.record["file_digests"].items():
-            if file_digest(path) != digest:
-                raise ValueError(f"referenced file {path} changed; prepare the forecast again")
+        validate_file_manifest(self.record["file_digests"])
 
     def close(self) -> None:
         self.engine.close()
@@ -161,6 +159,17 @@ def _constant(renderer: SceneRenderer, scene: Scene, binding: Any) -> float | np
     return offset + renderer.exposure.signal_adu(renderer.light_rate(scene, binding, planes=("lens",)))
 
 
+def _validate_loaded_files(manifest: Mapping[str, str], assets: Mapping[str, Any], psfs: PsfPair) -> None:
+    for path, asset in assets.items():
+        validate_loaded_file(path, asset.digest, manifest)
+    validate_loaded_psf_files(psfs.truth, psfs.truth_kernels, manifest)
+    validate_loaded_psf_files(psfs.model.provider, psfs.model_kernels, manifest)
+    if psfs.model.knowledge_error is not None:
+        draw = psfs.model.knowledge_error.draw
+        if draw.spec.prior.kind == "path":
+            validate_loaded_file(draw.spec.prior.path, draw.prior_digest, manifest)
+
+
 def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution(),
                      base_dir: PathLike[str] | None = None) -> PreparedForecast:
     resolved = deepcopy(resolve_config(config, base_dir=base_dir))
@@ -168,9 +177,10 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
         raise ConfigError("forecast", "a forecast section is required to prepare a forecast")
     if not isinstance(execution, Execution):
         raise TypeError("execution must be an Execution")
-    config_digest = resolved.digest()
-    comparison_digest = resolved.comparison_digest()
-    file_digests = resolved.file_digests()
+    identity = resolved.capture_identity()
+    config_digest = identity["config_digest"]
+    comparison_digest = identity["comparison_digest"]
+    file_digests = identity["file_digests"]
     cosmology = Cosmology(resolved.cosmology)
     truth = truth_provider(resolved)
     setup = resolve_observing(resolved.scene, resolved.instrument, resolved.observation, truth=truth)
@@ -187,7 +197,8 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
     positions = _positions(resolved.forecast.positions, smooth)
     mask = _mask(resolved.forecast.mask, smooth, observation, psfs)
     covariance_path = resolved.forecast.noise_covariance
-    covariance = None if covariance_path is None else load_noise_covariance(covariance_path, mask.size)
+    covariance = None if covariance_path is None else load_noise_covariance(
+        covariance_path, mask.size, file_sha256=file_digests[str(covariance_path)])
     data_space = build_data_space(mask, observation.noise_map_adu, covariance)
     parameters = resolve_nuisances(setup.scene, resolved.forecast.nuisances, psfs)
     design = build_nuisance_design(parameters, renderer=renderer, smooth_scene=smooth, psfs=psfs)
@@ -214,15 +225,23 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
                                            for kernel in psfs.model_kernels.kernels],
               "nuisance_names": list(design.names), "mask_digest": data_space.digest(),
               "pixel_count": data_space.pixel_count, "sampling": dict(observation.sampling)}
+    _validate_loaded_files(file_digests, assets, psfs)
     engine = make_engine(execution.engine, context, execution)
-    return PreparedForecast(resolved, smooth, psfs, observation, positions, renderer, data_space,
-                            design, workspace, mean_model, engine, execution, frozen_value(record))
+    prepared = PreparedForecast(resolved, smooth, psfs, observation, positions, renderer, data_space,
+                                design, workspace, mean_model, engine, execution, frozen_value(record))
+    try:
+        prepared.validate_identity()
+    except BaseException:
+        prepared.close()
+        raise
+    return prepared
 
 
 def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str, Any]:
     spec = prepared.scene.spec
     covariance = prepared._config.forecast.noise_covariance
     draw = prepared.psfs.model.knowledge_error
+    condition = prepared.workspace.condition_number
     return {key: json_ready(prepared.record[key]) for key in ("config_digest", "comparison_digest", "file_digests", "sampling")} | {
         "truth_kernels": prepared.psfs.truth_kernels.to_mapping(), "model_kernels": prepared.psfs.model_kernels.to_mapping(),
         "psf_relation": prepared.psfs.relation, "knowledge_error": None if draw is None else draw.to_mapping(),
@@ -234,8 +253,9 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
         "source_model": {"components": [component.type for component in spec.source.light],
                          "profiled_parameters": sum(name.startswith("source.light.") for name in prepared.nuisances.names)},
         "coordinate_order": "y,x", "units": {"mass": "solar_mass", "position": "arcsec"},
-        "engine": dict(prepared.engine.describe()), "nuisance_names": list(prepared.nuisances.names),
-        "nuisance_rank": prepared.workspace.nuisance_rank, "gram_condition_number": prepared.workspace.condition_number,
+        "engine": dict(prepared.engine.describe()) | {"reference_workers": prepared.execution.reference_workers,
+                                                     "batch_size": prepared.execution.batch_size}, "nuisance_names": list(prepared.nuisances.names),
+        "nuisance_rank": prepared.workspace.nuisance_rank, "gram_condition_number": condition if np.isfinite(condition) else None,
         "mask": {"kind": prepared._config.forecast.mask.kind, "pixel_count": prepared.record["pixel_count"],
                  "digest": prepared.record["mask_digest"]},
         "noise_covariance": None if covariance is None else prepared.record["file_digests"][str(covariance)],
