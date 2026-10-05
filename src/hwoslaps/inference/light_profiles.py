@@ -118,8 +118,39 @@ def _sersic_power_jvp(primals, tangents):
     return power, derivative_u * du + derivative_n * dn
 
 
+@jax.custom_jvp
+def _sersic_transform(grid, centre, angle):
+    return aa.util.geometry.transform_grid_2d_to_reference_frame(
+        grid_2d=grid, centre=centre, angle=angle, xp=jnp)
+
+
+@_sersic_transform.defjvp
+def _sersic_transform_jvp(primals, tangents):
+    grid, centre, angle = primals
+    dg, dc, da = tangents
+    primal = _sersic_transform(grid, centre, angle)
+    coincident = jnp.all(grid == centre, axis=1)
+    # AutoArray's polar transform has an undefined norm/atan2 derivative at
+    # a coincident point. Keep its primal and its noncoincident differential.
+    safe = jnp.where(coincident[:, None], centre + jnp.array([1.0, 0.0]), grid)
+    _, original = jax.jvp(lambda g, c, a: aa.util.geometry.transform_grid_2d_to_reference_frame(
+        grid_2d=g, centre=c, angle=a, xp=jnp), (safe, centre, angle), (dg, dc, da))
+    radians = jnp.radians(angle)
+    translated = dg - dc
+    dy, dx = translated[:, 0], translated[:, 1]
+    at_centre = jnp.stack((dy * jnp.cos(radians) - dx * jnp.sin(radians),
+                          dx * jnp.cos(radians) + dy * jnp.sin(radians)), axis=-1)
+    return primal, jnp.where(coincident[:, None], at_centre, original)
+
+
 class Sersic(ag.lp.Sersic):
     """Exact backend values with Cartesian circular and n-dependent centre differentials."""
+
+    @aa.decorators.to_grid
+    def transformed_to_reference_frame_grid_from(self, grid, xp=np, **kwargs):
+        if xp is np:
+            return super().transformed_to_reference_frame_grid_from(grid=grid, xp=xp, **kwargs)
+        return _sersic_transform(jnp.asarray(grid.array), jnp.asarray(self.centre), self.angle(xp))
 
     @aa.decorators.to_array
     def eccentric_radii_grid_from(self, grid, xp=np, **kwargs):
