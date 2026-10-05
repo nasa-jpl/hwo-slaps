@@ -50,9 +50,11 @@ class Interval:
     open_upper: bool = True
 
     def contains(self, value: float) -> bool:
+        if not Real().accepts(value) or not math.isfinite(value):
+            return False
         above = value > self.lower if self.open_lower else value >= self.lower
         below = value < self.upper if self.open_upper else value <= self.upper
-        return above and below
+        return bool(above and below)
 
     def describe(self) -> str:
         return f"{'(' if self.open_lower else '['}{self.lower:g}, {self.upper:g}{')' if self.open_upper else ']'}"
