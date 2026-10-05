@@ -1,8 +1,9 @@
-"""Hexagonally segmented pupils: area convention, containment, phase units and the captured-power record."""
+"""Hexagonally segmented pupils: area convention, containment, read-only arrays, phase units, captured power."""
 
 import dataclasses
 import math
 
+import numpy as np
 import pytest
 
 from hwoslaps.config.checks import ConfigError
@@ -45,6 +46,16 @@ def test_pupil_grid_must_contain_the_aperture(p1_pupil, paper_pupil):
     spec = parse_pupil(p1_pupil, "pupil")
     with pytest.raises(ValueError, match=f"at least {2 * reach:.6g}"):
         build_pupil(dataclasses.replace(spec, diameter_m=7.0))
+
+
+def test_built_pupil_cannot_be_edited_through_its_arrays(p1_pupil):
+    pupil = build_pupil(parse_pupil(p1_pupil, "pupil"))
+    for array in (pupil.transmission, pupil.illuminated_mask):
+        with pytest.raises(ValueError, match="read-only"):
+            array[0] = 0
+    mask = pupil.segments[3]
+    mask[:] = 0.0
+    assert np.max(pupil.segments[3]) > 0.5
 
 
 @pytest.mark.parametrize("defocus_nm", [5.0, 20.0])

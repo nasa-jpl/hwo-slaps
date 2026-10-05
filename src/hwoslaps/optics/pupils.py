@@ -183,10 +183,11 @@ def parse_pupil(mapping: Mapping[str, Any], path: str) -> PupilSpec:
 class Pupil:
     """A pupil sampled on its HCIPy grid; built by ``build_pupil``.
 
-    ``transmission`` is the grey amplitude transmission in [0, 1]. ``segments`` is the
-    sequence of grey segment masks HCIPy evaluates for the segment generators (hex
-    pupils; None for a circular pupil), in HCIPy order, and ``segment_centres`` their
-    centres. ``illuminated_mask`` (``transmission > 0.5``) is the aperture over which
+    ``transmission`` is the grey amplitude transmission in [0, 1], read-only after
+    ``build_pupil``. ``segments`` is the sequence of grey segment masks HCIPy evaluates
+    for the segment generators (hex pupils; None for a circular pupil), in HCIPy order;
+    HCIPy stores them as a sparse mode basis, and indexing it returns a new array.
+    ``segment_centres`` are their centres. ``illuminated_mask`` (``transmission > 0.5``) is the aperture over which
     wavefront RMS values and prior bases are defined. ``zernike_diameter_m`` is the disc
     the global Zernikes are normalized on: the grid extent ``x.max() - x.min()`` of a hex
     pupil (the paper convention) or the aperture diameter of a circular pupil.
@@ -297,4 +298,5 @@ def build_pupil(spec: PupilSpec) -> Pupil:
     else:
         aperture = hcipy.make_circular_aperture(spec.diameter_m)
     transmission = hcipy.evaluate_supersampled(_with_modifiers(aperture, spec), grid, spec.supersampling)
+    transmission.flags.writeable = False
     return Pupil(spec, grid, transmission, segments, centres)
