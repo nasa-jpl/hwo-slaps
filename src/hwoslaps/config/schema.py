@@ -45,8 +45,7 @@ ROOT_TABLE = Table((
 def _copy_spec(value: Any, memo: dict[int, Any]) -> Any:
     """Copy typed section graphs, including read-only mapping proxies.
 
-    Frozen dataclasses can still be constructed with mutable nested values in Python;
-    copying their fields also isolates those direct inputs. No file is opened or checked.
+    Each field is copied without parsing, validation or file access.
     """
     if isinstance(value, Mapping):
         copied = {deepcopy(key, memo): _copy_spec(item, memo) for key, item in value.items()}
@@ -61,8 +60,14 @@ def _copy_spec(value: Any, memo: dict[int, Any]) -> Any:
     return deepcopy(value, memo)
 
 
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True, eq=False, init=False)
 class EngineConfig:
+    """Configuration built by parse_config or load_config and changed through replace.
+
+    Typed sections and their effective mapping are created together. Arbitrary typed
+    construction would let executed inputs disagree with replay and scientific identity.
+    """
+
     run_name: str
     seed: int
     cosmology: CosmologySpec
@@ -75,9 +80,15 @@ class EngineConfig:
 
     __hash__ = None
 
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("construct EngineConfig with parse_config or load_config; "
+                        "change inputs with EngineConfig.replace(overrides)")
+
     def __deepcopy__(self, memo: dict[int, Any]) -> EngineConfig:
-        copy = type(self)(**{item.name: _copy_spec(getattr(self, item.name), memo) for item in fields(self)})
+        copy = object.__new__(type(self))
         memo[id(self)] = copy
+        for item in fields(self):
+            object.__setattr__(copy, item.name, _copy_spec(getattr(self, item.name), memo))
         return copy
 
     def to_mapping(self) -> dict[str, Any]:
@@ -169,7 +180,7 @@ def parse_config(mapping: Mapping[str, Any], *, base_dir: ConfigPath | None = No
     if not isinstance(mapping, Mapping):
         raise ConfigError("", "configuration must be a mapping")
     values = ROOT_TABLE.read(ROOT_TABLE.transform_paths(mapping, _resolver(base_dir)), "")
-    return EngineConfig(
+    sections = dict(
         run_name=values["run_name"], seed=values["seed"], cosmology=parse_cosmology(values["cosmology"]),
         scene=parse_scene(values["scene"]), psf=parse_psf(values["psf"]),
         instrument=InstrumentSpec.from_values(values["instrument"]),
@@ -177,6 +188,10 @@ def parse_config(mapping: Mapping[str, Any], *, base_dir: ConfigPath | None = No
         forecast=None if values["forecast"] is None else ForecastSpec.from_values(values["forecast"]),
         _values=values,
     )
+    config = object.__new__(EngineConfig)
+    for name, value in sections.items():
+        object.__setattr__(config, name, value)
+    return config
 
 
 def load_config(paths: ConfigPath | Sequence[ConfigPath], *, overrides: Mapping[str, Any] | None = None,

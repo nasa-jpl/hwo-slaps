@@ -292,21 +292,36 @@ def test_comparison_digest_holds_every_scientific_input_except_model_psf(minimal
     assert exposure.comparison_digest() != base.comparison_digest()
 
 
-def test_copy_isolates_nested_typed_inputs_without_reopening_assets(minimal_mapping):
+def test_typed_changes_require_configuration_replace(minimal_mapping):
     base = parse_config(minimal_mapping)
-    caller_values = {"centre": [0.0, 0.0], "ell_comps": [0.05, 0.0], "einstein_radius": 0.8}
-    component = replace(base.scene.lens.mass[0], values=caller_values)
-    caller = replace(base, scene=replace(base.scene, lens=replace(base.scene.lens, mass=(component,))))
-    copy = deepcopy(caller)
-    caller_values["centre"][0] = 4.0
-    assert copy.scene.lens.mass[0].values["centre"] == [0.0, 0.0]
-    copy.scene.lens.mass[0].values["ell_comps"][0] = 0.2
-    assert caller.scene.lens.mass[0].values["ell_comps"] == [0.05, 0.0]
+    with pytest.raises(TypeError, match="parse_config.*replace"):
+        replace(base, observation=replace(base.observation, exposure_time_s=901.0))
+    with pytest.raises(TypeError, match="parse_config.*replace"):
+        replace(base, scene=replace(base.scene, lens=replace(base.scene.lens, mass=())))
+    with pytest.raises(TypeError, match="parse_config.*replace"):
+        type(base)()
+    changed = base.replace({"observation": {"exposure_time_s": 901.0}})
+    assert changed.observation.exposure_time_s == 901.0
+    assert changed.to_mapping()["observation"]["exposure_time_s"] == 901.0
+    assert changed.digest() != base.digest()
+
+
+def test_copy_keeps_typed_fields_immutable_without_reopening_assets(minimal_mapping):
+    base = parse_config(minimal_mapping)
     base.psf.truth.path.unlink()
     isolated = deepcopy(base)
     assert isolated.scene.lens.mass[0].values["centre"] == (0.0, 0.0)
     with pytest.raises(TypeError):
         isolated.scene.lens.mass[0].values["centre"][0] = 3
+    with pytest.raises(TypeError):
+        isolated.forecast.nuisances.steps["position"] = 4
+    optical = load_config(PARITY / "p1_optical_matched.yaml")
+    wavefront_copy = deepcopy(optical)
+    assert wavefront_copy.psf.truth.wavefront.entries == optical.psf.truth.wavefront.entries
+    with pytest.raises(TypeError):
+        wavefront_copy.forecast.nuisances.wavefront.modes.hexike_segments[0] = 100
+    with pytest.raises(TypeError):
+        wavefront_copy.psf.truth.wavefront.entries[0] = ()
 
 
 def test_config_source_resolution_and_optional_forecast(minimal_mapping, write_config):
