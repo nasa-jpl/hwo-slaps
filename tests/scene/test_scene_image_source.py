@@ -180,11 +180,12 @@ SIGMA_PIXELS = 6.0
 
 def _galaxy_frame(bin_factor=1):
     """A circular Gaussian (sigma 6 binned pixels, peak 1) at binned pixel (50, 46) of a 96 x 96 binned frame,
-    on a constant 0.37 offset with Gaussian noise of 0.01 and a bright blob in a corner.
+    on a constant 0.37 offset with Gaussian noise of 0.01 and a bright blob in a corner. The input
+    has bin_factor - 1 extra rows and columns at the bottom and right, which binning crops.
 
     Centring then crops binned rows 5-95 and columns 0-92 and pads two rows: a 93 x 93 asset
     whose corner blob, if kept, would sit at rows 0-2, columns 3-6."""
-    shape = (96 * bin_factor, 96 * bin_factor)
+    shape = (97 * bin_factor - 1, 97 * bin_factor - 1)
     rows, cols = np.indices(shape, dtype=float)
     centre = (50 * bin_factor + (bin_factor - 1) / 2.0, 46 * bin_factor + (bin_factor - 1) / 2.0)
     galaxy = np.exp(-0.5 * ((rows - centre[0]) ** 2 + (cols - centre[1]) ** 2) / (SIGMA_PIXELS * bin_factor) ** 2)
@@ -204,7 +205,8 @@ def test_prepare_image_asset_recovers_a_synthetic_galaxy(bin_factor):
     assert asset.pixel_scale_arcsec == pytest.approx(0.12 / r_half, rel=0.02)
     assert record["background"] == pytest.approx(0.37, abs=0.005)
     assert record["caller"] == {"catalog_id": "synthetic"} and record["bin_factor"] == bin_factor
-    assert record["input_shape"] == (96 * bin_factor, 96 * bin_factor)
+    assert record["input_shape"] == (97 * bin_factor - 1, 97 * bin_factor - 1)
+    assert record["bin_crop"] == {"bottom_rows": bin_factor - 1, "right_columns": bin_factor - 1}
     rows, cols = np.indices(asset.sb.shape, dtype=float)
     middle = ((asset.sb.shape[0] - 1) / 2.0, (asset.sb.shape[1] - 1) / 2.0)
     assert abs((rows * asset.sb).sum() / asset.sb.sum() - middle[0]) <= 0.5
@@ -230,8 +232,9 @@ def _edge_frame():
     ("galaxy", {"bin_factor": 0}, "bin_factor"),
     ("galaxy", {"pixel_scale_arcsec": 0.01}, "exactly one"),
     ("galaxy", {"half_light_radius_arcsec": None}, "exactly one"),
+    ("galaxy", {"half_light_radius_arcsec": None, "pixel_scale_arcsec": -0.01}, "positive and finite"),
 ], ids=["footprint-at-the-edge", "nothing-above-the-threshold", "unresolved-centre", "non-finite-input",
-        "bin-factor-zero", "both-scales", "no-scale"])
+        "bin-factor-zero", "both-scales", "no-scale", "negative-pixel-scale"])
 def test_prepare_image_asset_refuses_unusable_inputs(image, keywords, fragment):
     frames = {"edge": _edge_frame, "galaxy": _galaxy_frame, "point": lambda: np.pad(np.ones((1, 1)), 20),
               "non-finite": lambda: np.where(np.indices((96, 96))[0] == 50, np.inf, _galaxy_frame())}

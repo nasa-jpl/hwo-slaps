@@ -158,6 +158,9 @@ def test_halos_outside_their_domains_are_refused(planck15):
         HaloModel("SIS", FixedConcentration(10.0), None)
     with pytest.raises(ValueError):
         Moline2017(x_sub=1.6, h=None)
+    for relation in (lambda: FixedConcentration(0.0), lambda: PowerLawConcentration(5.0, 1.0e12, math.nan, 0.0)):
+        with pytest.raises(ValueError):
+            relation()
 
 
 def test_cosmology_is_an_immutable_value_recorded_with_its_convention(planck15):

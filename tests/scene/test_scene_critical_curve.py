@@ -32,6 +32,19 @@ def test_effective_einstein_radius_of_analytic_lenses(scene_mapping, planck15, t
     assert effective_einstein_radius(parse_scene(scene_mapping), planck15) == pytest.approx(expected, rel=2.0e-5)
 
 
+def test_the_critical_curve_is_the_one_around_the_lens_centre(scene_mapping, planck15):
+    """The larger critical curve of a second lens component 3" away is not the lens's.
+
+    The companion (theta_E 1.2") adds convergence and shear of 0.2 each at the main lens
+    (theta_E 0.3"), so the main curve's radius lies between 0.3" and 0.3 / (1 - 0.4) = 0.5";
+    the companion's own, separate curve is larger than 1.2".
+    """
+    scene_mapping["lens"]["mass"]["main"].update(einstein_radius=0.3, ell_comps=[0.0, 0.0])
+    scene_mapping["lens"]["mass"]["companion"] = {"type": "Isothermal", "centre": [0.0, 3.0], "einstein_radius": 1.2,
+                                                  "ell_comps": [0.0, 0.0]}
+    assert 0.3 < effective_einstein_radius(parse_scene(scene_mapping), planck15) < 0.5
+
+
 def test_a_lens_below_the_extraction_resolution_is_refused(scene_mapping, planck15):
     scene_mapping["lens"]["mass"]["main"]["einstein_radius"] = 0.02
     with pytest.raises(ValueError, match="too small to measure"):
