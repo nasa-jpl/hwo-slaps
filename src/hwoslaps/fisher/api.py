@@ -15,14 +15,14 @@ from numpy.typing import ArrayLike
 from .._version import __version__
 from ..config.checks import ConfigError
 from ..config.schema import ConfigSource, EngineConfig, resolve_config
-from ..identity import array_digest, file_digest
+from ..identity import array_digest, file_digest, json_ready
 from ..observation.normalization import resolve_observing
 from ..observation.observation import Observation, observe
 from ..scene.builder import Scene, build_scene, native_sampling_variation
 from ..scene.cosmology import Cosmology
 from ..scene.critical_curve import effective_einstein_radius
 from ..scene.halos import Halo, make_halo
-from ..scene.image_source import load_image_asset
+from ..scene.image_source import frozen_value, load_image_asset
 from ..scene.perturbers import realize_perturbers
 from ..scene.spec import SceneSpec, pixel_centres_yx
 from .data_space import (DataSpace, all_pixels_mask, annulus_mask, build_data_space,
@@ -216,14 +216,14 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
               "pixel_count": data_space.pixel_count, "sampling": dict(observation.sampling)}
     engine = make_engine(execution.engine, context, execution)
     return PreparedForecast(resolved, smooth, psfs, observation, positions, renderer, data_space,
-                            design, workspace, mean_model, engine, execution, record)
+                            design, workspace, mean_model, engine, execution, frozen_value(record))
 
 
 def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str, Any]:
     spec = prepared.scene.spec
     covariance = prepared._config.forecast.noise_covariance
     draw = prepared.psfs.model.knowledge_error
-    return {key: deepcopy(prepared.record[key]) for key in ("config_digest", "comparison_digest", "file_digests", "sampling")} | {
+    return {key: json_ready(prepared.record[key]) for key in ("config_digest", "comparison_digest", "file_digests", "sampling")} | {
         "truth_kernels": prepared.psfs.truth_kernels.to_mapping(), "model_kernels": prepared.psfs.model_kernels.to_mapping(),
         "psf_relation": prepared.psfs.relation, "knowledge_error": None if draw is None else draw.to_mapping(),
         "spectral": prepared.psfs.spectral, "photometry": None if prepared.observation.photometry is None else prepared.observation.photometry.to_mapping(),

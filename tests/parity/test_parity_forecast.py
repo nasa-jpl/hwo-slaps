@@ -37,9 +37,9 @@ def assert_inputs_match_paper(scene, preparation, manifest, paper_digest, final_
         assert draw.spec.family == expected["family"]
         coefficients = draw.coefficients.to_mapping()
         old = expected["draw_aberrations"]
-        assert coefficients["segment_hexikes"] == {int(segment): {int(noll): value for noll, value in modes.items()}
-                                                   for segment, modes in old["segment_hexikes"].items()}
-        assert coefficients["zernikes"] == {int(noll): value for noll, value in old["global_zernikes"].items()}
+        assert coefficients["segment_hexikes"] == {int(segment): {int(noll): value for noll, value in modes}
+                                                   for segment, modes in old["segment_hexikes"]}
+        assert coefficients["zernikes"] == {int(noll): value for noll, value in old["global_zernikes"]}
 
 
 def assert_statistics_match_paper(scene, preparation, lane, manifest, *, rtol=None):
