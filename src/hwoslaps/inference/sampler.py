@@ -72,14 +72,19 @@ def make_search(*, model: FitModel, role: Literal["smooth", "subhalo"], n_live: 
     Nothing here reads ``search.paths.output_path``: AutoFit fixes the identifier on first
     access, and before ``fit`` the model is unset.
     """
+    identity = search_identity(case_id=case_id, role=role, model=model, data_identity=data_identity,
+                               settings=settings, seed=seed, n_live=n_live)
+    return _named_search(identity, role=role, n_live=n_live, settings=settings, seed=seed, case_dir=case_dir)
+
+
+def _named_search(identity: str, *, role: str, n_live: int, settings: SamplerSettings, seed: int,
+                  case_dir: Path) -> Any:
     import autofit as af
 
     if role not in ("smooth", "subhalo"):
         raise ValueError(f"role must be smooth or subhalo, got {role!r}")
     if isinstance(n_live, bool) or not isinstance(n_live, int) or n_live < 1:
         raise ValueError(f"n_live must be at least 1, got {n_live!r}")
-    identity = search_identity(case_id=case_id, role=role, model=model, data_identity=data_identity,
-                               settings=settings, seed=seed, n_live=n_live)
     return af.Nautilus(path_prefix=str(case_dir), name=f"{role}_{identity[:16]}",
                        **_search_keywords(settings, n_live=n_live, seed=seed))
 
@@ -156,8 +161,7 @@ def run_search(*, fit_model: FitModel, model: Any, analysis: Any, role: Literal[
         raise ValueError(f"case_dir must be absolute, got {case_dir}")
     identity = search_identity(case_id=case_id, role=role, model=fit_model, data_identity=data_identity,
                                settings=settings, seed=seed, n_live=n_live)
-    search = make_search(model=fit_model, role=role, n_live=n_live, settings=settings, seed=seed,
-                         case_dir=case_dir, case_id=case_id, data_identity=data_identity)
+    search = _named_search(identity, role=role, n_live=n_live, settings=settings, seed=seed, case_dir=case_dir)
     effective = effective_settings(search)
     _check_effective(effective, _search_keywords(settings, n_live=n_live, seed=seed), analysis, settings.use_jax)
     result = None
@@ -184,7 +188,7 @@ def run_search(*, fit_model: FitModel, model: Any, analysis: Any, role: Literal[
         evidence = result.samples.log_evidence
         log_evidence = None if evidence is None else float(evidence)
         likelihood_calls = int(result.samples.total_samples)
-    record = SamplerRecord(name=f"{role}_{identity[:16]}", output_path=output_path.relative_to(root).as_posix(),
+    record = SamplerRecord(name=search.paths.name, output_path=output_path.relative_to(root).as_posix(),
                            identity=identity, n_live=n_live, requested=settings.to_mapping(),
                            effective=effective, seed=seed, training_workers=training_workers,
                            log_likelihood_max=log_likelihood_max, log_evidence=log_evidence,
