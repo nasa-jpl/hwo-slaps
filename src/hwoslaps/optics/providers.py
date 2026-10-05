@@ -1,8 +1,8 @@
 """The ``psf`` configuration section, PSF providers, and the model PSF of every relation.
 
-``psf.truth`` is the PSF that makes the data: an optical system (``kind: optical``) or a
-detector kernel file (``kind: kernel``). ``psf.model`` is the PSF the analysis assumes:
-the truth itself (``matched``, the default), another kernel file (``kernel``), the truth
+``psf.truth`` is the PSF that makes the data: an optical system, a detector kernel file,
+or tabulated node kernels. ``psf.model`` is the PSF the analysis assumes: the truth
+itself (``matched``, the default), another optical system or kernel file, the truth
 optics with other wavefront coefficients (``wavefront``: replaced, or an ``offset`` added
 to the truth's), or the truth optics plus a knowledge-error draw (``knowledge_error``).
 
@@ -12,28 +12,33 @@ is the one place the model PSF of a relation is built.
 
 from __future__ import annotations
 
+import io
 import math
 import numbers
+import types
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, Sequence
+
+import numpy as np
 
 from ..config.checks import (
     Boolean, ConfigError, FilePath, Integer, Key, Nullable, Real, Rule, Sha256, Shape, Table, Text, Variants,
 )
+from ..identity import array_digest, read_file_snapshot
 from .kernels import PIXEL_SCALE_ATOL_ARCSEC, DetectorPSF
 from .knowledge_error import (
     DRAW_TABLE, KnowledgeErrorDraw, WavefrontDrawSpec, draw_knowledge_error, draw_wavefront, parse_wavefront_draw,
 )
-from .optical_psf import OpticalPSF, OpticalSpec, check_sampling
+from .optical_psf import OpticalPSF, OpticalSpec, check_sampling, checked_wavelengths, resolve_wavelengths
 from .pupils import PUPIL_TABLE, CircularPupilSpec, build_pupil, parse_pupil
 from .wavefront import WAVEFRONT_TABLE, WavefrontBasis, WavefrontCoefficients, validate_coefficients
 
 __all__ = [
     "CROSS_RULES", "PSF_TABLE", "KernelFileSpec", "KernelPSF", "KnowledgeErrorModel", "MatchedModel", "ModelPSF",
     "PSFProvider", "PsfModelSpec", "PsfSpec", "PsfTruthSpec", "WavefrontModel", "build_model_psf",
-    "build_psf_provider", "parse_psf",
+    "build_psf_provider", "parse_psf", "KernelCubePSF", "KernelCubeSpec",
 ]
 
 
@@ -61,6 +66,12 @@ class PSFProvider(Protocol):
     def kernel(self, wavelength_m: float | None = None, *,
                coefficients: WavefrontCoefficients | None = None) -> DetectorPSF: ...
 
+    def kernels(self, wavelengths_m: Sequence[float] | None = None, *,
+                coefficients: WavefrontCoefficients | None = None) -> tuple[DetectorPSF, ...]: ...
+
+    @property
+    def file_digests(self) -> Mapping[str, str]: ...
+
     def to_mapping(self) -> dict[str, Any]: ...
 
 
@@ -75,6 +86,16 @@ class KernelPSF:
     @property
     def psf(self) -> DetectorPSF:
         return self._psf
+
+    def kernels(self, wavelengths_m: Sequence[float] | None = None, *,
+                coefficients: WavefrontCoefficients | None = None) -> tuple[DetectorPSF, ...]:
+        raise ValueError("a kernel PSF has no spectral information; it has one fixed kernel")
+
+    @property
+    def file_digests(self) -> Mapping[str, str]:
+        source = self._psf.source
+        files = {source["path"]: source["file_sha256"]} if "file_sha256" in source else {}
+        return types.MappingProxyType(files)
 
     @property
     def pixel_scale_arcsec(self) -> float:
@@ -114,6 +135,124 @@ class KernelPSF:
                 "source": dict(self._psf.source)}
 
 
+class KernelCubePSF:
+    """Tabulated detector kernels evaluated only at their exact declared wavelengths."""
+
+    def __init__(self, kernels: Sequence[DetectorPSF], wavelengths_m: Sequence[float]) -> None:
+        wavelengths = checked_wavelengths(wavelengths_m)
+        supplied = tuple(kernels)
+        if len(supplied) != len(wavelengths) or not all(isinstance(kernel, DetectorPSF) for kernel in supplied):
+            raise ValueError("a kernel cube needs one DetectorPSF per declared wavelength")
+        first = supplied[0]
+        if any(kernel.shape != first.shape or
+               abs(kernel.pixel_scale_arcsec - first.pixel_scale_arcsec) > PIXEL_SCALE_ATOL_ARCSEC
+               for kernel in supplied):
+            raise ValueError("every cube node must have the same support and pixel sampling")
+        nodes, files = [], {}
+        for kernel, wavelength in zip(supplied, wavelengths):
+            source = dict(kernel.source)
+            if "file_sha256" in source:
+                path, digest = source["path"], source["file_sha256"]
+                if path in files and files[path] != digest:
+                    raise ValueError(f"{path}: conflicting actual cube input digests")
+                files[path] = digest
+            if source.get("kind") != "cube" or source.get("wavelength_m") != wavelength \
+                    or source["captured_power_fraction"] is not None:
+                source.update(kind="cube", wavelength_m=wavelength, captured_power_fraction=None)
+                kernel = DetectorPSF.from_array(kernel.kernel, kernel.pixel_scale_arcsec, normalize=False, source=source)
+            nodes.append(kernel)
+        self._kernels = tuple(nodes)
+        self._wavelengths_m = wavelengths
+        self._file_digests = types.MappingProxyType(files)
+        if not all(math.isfinite(edge) for edge in self.support_m):
+            raise ValueError("cube spectral coverage must be finite")
+
+    @property
+    def pixel_scale_arcsec(self) -> float:
+        return self._kernels[0].pixel_scale_arcsec
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._kernels[0].shape
+
+    @property
+    def wavelengths_m(self) -> tuple[float, ...]:
+        return self._wavelengths_m
+
+    @property
+    def support_m(self) -> tuple[float, float]:
+        nodes = self._wavelengths_m
+        if len(nodes) == 1:
+            return nodes[0], nodes[0]
+        return nodes[0] - (nodes[1] - nodes[0]) / 2, nodes[-1] + (nodes[-1] - nodes[-2]) / 2
+
+    @property
+    def basis(self) -> None:
+        return None
+
+    @property
+    def coefficients(self) -> None:
+        return None
+
+    @property
+    def collecting_area_m2(self) -> None:
+        return None
+
+    @property
+    def file_digests(self) -> Mapping[str, str]:
+        return self._file_digests
+
+    def validate_bandpass_support(self, support_m: tuple[float, float]) -> None:
+        low, high = checked_wavelengths(support_m)
+        if len(self._wavelengths_m) == 1:
+            raise ValueError("a single-node kernel cube has no finite-width spectral coverage")
+        first, last = self.support_m
+        # Reconstructed midpoint-cell edges can differ from the original band edge
+        # by rounding. This is equality slack, not wavelength extrapolation.
+        equality_slack = 4 * np.finfo(float).eps
+        below = low < first and not math.isclose(low, first, rel_tol=equality_slack, abs_tol=0.0)
+        above = high > last and not math.isclose(high, last, rel_tol=equality_slack, abs_tol=0.0)
+        if below or above:
+            raise ValueError(f"bandpass support {(low, high)} m is outside cube coverage {(first, last)} m; "
+                             "cube kernels are never extrapolated")
+
+    def kernel(self, wavelength_m: float | None = None, *,
+               coefficients: WavefrontCoefficients | None = None) -> DetectorPSF:
+        if coefficients is not None:
+            raise ValueError("a kernel cube has no wavefront basis")
+        if wavelength_m is None:
+            if len(self._kernels) != 1:
+                raise ValueError("a kernel cube needs an exact tabulated wavelength")
+            return self._kernels[0]
+        wavelength = checked_wavelengths((wavelength_m,))[0]
+        if wavelength not in self._wavelengths_m:
+            raise ValueError(f"{wavelength!r} m is not a tabulated cube wavelength; no interpolation or extrapolation")
+        return self._kernels[self._wavelengths_m.index(wavelength)]
+
+    def kernels(self, wavelengths_m: Sequence[float] | None = None, *,
+                coefficients: WavefrontCoefficients | None = None) -> tuple[DetectorPSF, ...]:
+        if coefficients is not None:
+            raise ValueError("a kernel cube has no wavefront basis")
+        if wavelengths_m is None:
+            return self._kernels
+        return tuple(self.kernel(wavelength) for wavelength in checked_wavelengths(wavelengths_m))
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {"provider": "kernel_cube", "wavelengths_m": list(self._wavelengths_m),
+                "wavelengths_digest": array_digest(np.asarray(self._wavelengths_m)),
+                "support_m": list(self.support_m), "pixel_scale_arcsec": self.pixel_scale_arcsec,
+                "kernel_shape": list(self.shape), "file_digests": dict(self._file_digests),
+                "kernels": [kernel.kernel_identity().to_mapping() for kernel in self._kernels]}
+
+
+@dataclass(frozen=True)
+class KernelCubeSpec:
+    path: Path
+    pixel_scale_arcsec: float
+    normalize: bool
+    file_sha256: str | None
+
+
 @dataclass(frozen=True)
 class KernelFileSpec:
     """A detector kernel file at ``pixel_scale_arcsec``; ``array_key`` names the ``.npz`` member."""
@@ -145,8 +284,8 @@ class KnowledgeErrorModel:
     draw: WavefrontDrawSpec
 
 
-PsfTruthSpec = OpticalSpec | KernelFileSpec
-PsfModelSpec = MatchedModel | KernelFileSpec | WavefrontModel | KnowledgeErrorModel
+PsfTruthSpec = OpticalSpec | KernelFileSpec | KernelCubeSpec
+PsfModelSpec = MatchedModel | KernelFileSpec | OpticalSpec | WavefrontModel | KnowledgeErrorModel
 
 
 @dataclass(frozen=True)
@@ -160,7 +299,7 @@ class ModelPSF:
     """The model PSF: its provider, its relation to the truth, and the knowledge error drawn for it."""
 
     provider: PSFProvider
-    relation: Literal["matched", "kernel", "wavefront", "knowledge_error"]
+    relation: Literal["matched", "kernel", "optical", "wavefront", "knowledge_error"]
     knowledge_error: KnowledgeErrorDraw | None
 
 
@@ -184,29 +323,40 @@ KERNEL_FILE_TABLE = Table((
 ), rules=(Rule("a .npy file takes no array_key", _check_kernel_file),))
 
 
+KERNEL_CUBE_TABLE = Table((
+    Key("path", FilePath((".npz",)), "kernels and wavelengths_m members in one .npz snapshot"),
+    Key("pixel_scale_arcsec", Real(min=0.0, min_open=True), "angular sampling of every cube slice", unit="arcsec"),
+    Key("normalize", Boolean(), "divide each slice by its sum; false preserves unit-kernel bytes", default=True),
+    Key("file_sha256", Nullable(Sha256()), "SHA-256 of the bytes decoded for both cube members", default=None),
+))
+
+
 def _check_optical(values: Mapping[str, Any], path: str) -> None:
     wavefront = values["wavefront"]
     if values["draw"] is not None and (wavefront["segment_hexikes"] or wavefront["zernikes"]):
-        raise ConfigError(_join(path, "draw"), "a drawn truth wavefront excludes listed wavefront coefficients")
+        raise ConfigError(_join(path, "draw"), "a drawn optical wavefront excludes listed wavefront coefficients")
 
 
 OPTICAL_TABLE = Table((
     Key("pupil", PUPIL_TABLE, "pupil geometry and sampling"),
     Key("focal_length_m", Real(min=0.0, min_open=True), "effective focal length", unit="m"),
-    Key("wavelength_nm", Real(min=0.0, min_open=True), "wavelength of the monochromatic kernel", unit="nm"),
+    Key("wavelength_nm", Nullable(Real(min=0.0, min_open=True)), "wavelength of the monochromatic kernel",
+        unit="nm", default=None),
+    Key("wavelength_samples", Nullable(Integer(min=1)), "number of caller-supplied bandpass nodes", default=None),
     Key("detector_oversampling", Integer(min=1),
         "sub-samples per detector pixel side for the pixel integral (paper 3)"),
     Key("kernel_shape", Shape(odd=True), "kernel support (ny, nx), both odd", unit="pixels"),
     Key("wavefront", WAVEFRONT_TABLE, "truth wavefront coefficients", default={}),
     Key("draw", Nullable(DRAW_TABLE), "truth wavefront drawn from a prior at an exact RMS", default=None),
-), rules=(Rule("draw excludes listed wavefront coefficients", _check_optical),))
+), exactly_one=(("wavelength_nm", "wavelength_samples"),),
+    rules=(Rule("draw excludes listed wavefront coefficients", _check_optical),))
 
 WAVEFRONT_MODEL_TABLE = Table((
     Key("wavefront", Nullable(WAVEFRONT_TABLE), "coefficients replacing the truth coefficients", default=None),
     Key("offset", Nullable(WAVEFRONT_TABLE), "coefficients added to the truth coefficients", default=None),
 ), exactly_one=(("wavefront", "offset"),))
 
-_OPTICAL_MODELS = ("wavefront", "knowledge_error")
+_OPTICAL_MODELS = ("optical", "wavefront", "knowledge_error")
 
 
 def _check_relations(values: Mapping[str, Any], path: str) -> None:
@@ -214,9 +364,17 @@ def _check_relations(values: Mapping[str, Any], path: str) -> None:
     truth, model = values["truth"], values["model"]
     if model["kind"] in _OPTICAL_MODELS and truth["kind"] != "optical":
         raise ConfigError(_join(path, "model.kind"),
-                          f"model kind {model['kind']} changes the truth wavefront and needs an optical truth")
+                          f"model kind {model['kind']} needs an optical truth")
     if truth["kind"] != "optical":
         return
+    if model["kind"] == "optical":
+        if any(model[key] != truth[key] for key in ("wavelength_nm", "wavelength_samples")):
+            raise ConfigError(_join(path, "model"), "an optical model must have the truth's wavelength keys")
+        model_pupil = parse_pupil(model["pupil"], _join(path, "model.pupil"))
+        validate_coefficients(WavefrontCoefficients.from_mapping(model["wavefront"], _join(path, "model.wavefront")),
+                              model_pupil, _join(path, "model.wavefront"))
+        if model["draw"] is not None and model["draw"]["family"] != "global" and isinstance(model_pupil, CircularPupilSpec):
+            raise ConfigError(_join(path, "model.draw.family"), "a segment draw needs a hex-segmented model pupil")
     pupil = parse_pupil(truth["pupil"], _join(path, "truth.pupil"))
     blocks = [("truth.wavefront", truth["wavefront"])]
     if model["kind"] == "wavefront":
@@ -234,15 +392,17 @@ def _check_relations(values: Mapping[str, Any], path: str) -> None:
 
 
 PSF_TABLE = Table((
-    Key("truth", Variants("kind", {"kernel": KERNEL_FILE_TABLE, "optical": OPTICAL_TABLE}),
+    Key("truth", Variants("kind", {"kernel": KERNEL_FILE_TABLE, "kernel_cube": KERNEL_CUBE_TABLE,
+                                  "optical": OPTICAL_TABLE}),
         "the PSF that makes the data"),
     Key("model", Variants("kind", {
         "matched": Table(()),
         "kernel": KERNEL_FILE_TABLE,
+        "optical": OPTICAL_TABLE,
         "wavefront": WAVEFRONT_MODEL_TABLE,
         "knowledge_error": Table((Key("draw", DRAW_TABLE, "knowledge-error draw added to the truth coefficients"),)),
     }, default="matched"), "the PSF the analysis assumes", default={}),
-), rules=(Rule("wavefront and knowledge_error models need an optical truth; segment hexikes and segment draws "
+), rules=(Rule("optical, wavefront and knowledge_error models need an optical truth; segment hexikes and segment draws "
                "need a hex-segmented pupil with those segments", _check_relations),))
 
 
@@ -257,22 +417,30 @@ def _kernel_file_spec(values: Mapping[str, Any]) -> KernelFileSpec:
 def _optical_spec(values: Mapping[str, Any], path: str) -> OpticalSpec:
     draw = None if values["draw"] is None else parse_wavefront_draw(values["draw"], _join(path, "draw"))
     return OpticalSpec(parse_pupil(values["pupil"], _join(path, "pupil")), values["focal_length_m"],
-                       values["wavelength_nm"] / 1e9, values["detector_oversampling"], tuple(values["kernel_shape"]),
-                       WavefrontCoefficients.from_mapping(values["wavefront"], _join(path, "wavefront")), draw)
+                       None if values["wavelength_nm"] is None else values["wavelength_nm"] / 1e9,
+                       values["detector_oversampling"], tuple(values["kernel_shape"]),
+                       WavefrontCoefficients.from_mapping(values["wavefront"], _join(path, "wavefront")), draw,
+                       values["wavelength_samples"])
 
 
 def parse_psf(mapping: Mapping[str, Any], path: str = "psf") -> PsfSpec:
     """The ``psf`` section, read strictly through ``PSF_TABLE``."""
     values = PSF_TABLE.read(mapping, path)
     truth = values["truth"]
-    truth_spec = (_kernel_file_spec(truth) if truth["kind"] == "kernel"
-                  else _optical_spec(truth, _join(path, "truth")))
+    if truth["kind"] == "kernel":
+        truth_spec: PsfTruthSpec = _kernel_file_spec(truth)
+    elif truth["kind"] == "kernel_cube":
+        truth_spec = KernelCubeSpec(Path(truth["path"]), truth["pixel_scale_arcsec"], truth["normalize"], truth["file_sha256"])
+    else:
+        truth_spec = _optical_spec(truth, _join(path, "truth"))
     model = values["model"]
     where = _join(path, "model")
     if model["kind"] == "matched":
         model_spec: PsfModelSpec = MatchedModel()
     elif model["kind"] == "kernel":
         model_spec = _kernel_file_spec(model)
+    elif model["kind"] == "optical":
+        model_spec = _optical_spec(model, where)
     elif model["kind"] == "wavefront":
         replaced, offset = (None if model[name] is None else
                             WavefrontCoefficients.from_mapping(model[name], _join(where, name))
@@ -284,7 +452,8 @@ def parse_psf(mapping: Mapping[str, Any], path: str = "psf") -> PsfSpec:
 
 
 def _kernel_files(psf: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
-    return [(section, psf[section]) for section in ("truth", "model") if psf[section]["kind"] == "kernel"]
+    return [(section, psf[section]) for section in ("truth", "model")
+            if psf[section]["kind"] in ("kernel", "kernel_cube")]
 
 
 def _same_pixel_scale(first: float, second: float) -> bool:
@@ -302,21 +471,46 @@ def _check_kernel_pixel_scales(root: Mapping[str, Any], path: str) -> None:
 
 
 def _check_truth_sampling(root: Mapping[str, Any], path: str) -> None:
+    for section in ("truth", "model"):
+        optical = root["psf"][section]
+        if optical["kind"] != "optical":
+            continue
+        where = f"psf.{section}"
+        spec = _optical_spec(optical, where)
+        if spec.wavelength_m is not None:
+            nodes = (spec.wavelength_m,)
+        else:
+            band = root.get("instrument", {}).get("bandpass")
+            if band is None or band["kind"] != "top_hat":
+                continue  # loaded table/product nodes are checked by the runtime constructor
+            from ..spectra.bandpass import bandpass_nodes
+            nodes = bandpass_nodes((band["min_nm"] / 1e9, band["max_nm"] / 1e9), spec.wavelength_samples)
+        try:
+            for wavelength in nodes:
+                check_sampling(spec, pixel_scale_arcsec=root["scene"]["grid"]["pixel_scale_arcsec"],
+                               wavelength_m=wavelength)
+        except ValueError as error:
+            raise ConfigError(where, str(error)) from error
+
+
+def _check_spectral_inputs(root: Mapping[str, Any], path: str) -> None:
     truth = root["psf"]["truth"]
-    if truth["kind"] != "optical":
+    if truth["kind"] != "optical" or truth["wavelength_samples"] is None:
         return
-    spec = _optical_spec(truth, "psf.truth")
-    try:
-        check_sampling(spec, pixel_scale_arcsec=root["scene"]["grid"]["pixel_scale_arcsec"],
-                       wavelength_m=spec.wavelength_m)
-    except ValueError as error:
-        raise ConfigError("psf.truth", str(error)) from error
+    if root.get("instrument", {}).get("bandpass") is None:
+        raise ConfigError("instrument.bandpass", "wavelength_samples requires a bandpass")
+    for plane in ("lens", "source"):
+        for name, light in root["scene"][plane]["light"].items():
+            if light.get("sed") is None:
+                raise ConfigError(f"scene.{plane}.light.{name}.sed",
+                                  "wavelength_samples requires an SED for every light component")
 
 
 CROSS_RULES: tuple[Rule, ...] = (
     Rule("every kernel file is sampled at scene.grid.pixel_scale_arcsec (X1)", _check_kernel_pixel_scales),
-    Rule("an optical truth at the scene pixel scale is neither aliased nor under-resolved (X4)",
+    Rule("optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale (X4)",
          _check_truth_sampling),
+    Rule("wavelength_samples requires a bandpass and component SEDs (X5)", _check_spectral_inputs),
 )
 """Rules spanning ``psf`` and ``scene``; ``config.schema`` runs them on the read root values."""
 
@@ -341,15 +535,47 @@ def _kernel_provider(spec: KernelFileSpec, pixel_scale_arcsec: float, what: str)
     return KernelPSF(psf)
 
 
-def build_psf_provider(spec: PsfTruthSpec, *, pixel_scale_arcsec: float) -> PSFProvider:
+def _cube_provider(spec: KernelCubeSpec, pixel_scale_arcsec: float) -> KernelCubePSF:
+    content, digest = read_file_snapshot(spec.path)
+    if spec.file_sha256 is not None and digest != spec.file_sha256:
+        raise ValueError(f"{spec.path}: file SHA-256 is {digest}, the configuration states {spec.file_sha256}")
+    with np.load(io.BytesIO(content), allow_pickle=False) as members:
+        if not {"kernels", "wavelengths_m"} <= set(members.files):
+            raise ValueError(f"{spec.path}: a cube requires kernels and wavelengths_m members")
+        values, wavelengths = members["kernels"], members["wavelengths_m"]
+    if values.ndim != 3 or wavelengths.ndim != 1 or values.shape[0] != len(wavelengths):
+        raise ValueError(f"{spec.path}: kernels must be (n, ny, nx) and wavelengths_m must be (n,)")
+    nodes = checked_wavelengths(wavelengths)
+    kernels = tuple(DetectorPSF.from_array(values[index], spec.pixel_scale_arcsec, normalize=spec.normalize,
+                   source={"kind": "cube", "path": str(spec.path), "file_sha256": digest, "array_index": index,
+                           "wavelength_m": wavelength, "normalized": spec.normalize, "captured_power_fraction": None})
+                    for index, wavelength in enumerate(nodes))
+    provider = KernelCubePSF(kernels, nodes)
+    _require_pixel_scale(kernels[0], pixel_scale_arcsec, "psf.truth")
+    return provider
+
+
+def build_psf_provider(spec: PsfTruthSpec, *, pixel_scale_arcsec: float,
+                       wavelengths_m: Sequence[float] | None = None,
+                       bandpass_support_m: tuple[float, float] | None = None) -> PSFProvider:
     """The truth provider at the scene pixel scale; evaluates no kernel (a kernel file is read)."""
     scale = _scene_pixel_scale(pixel_scale_arcsec)
     if isinstance(spec, KernelFileSpec):
         return _kernel_provider(spec, scale, "psf.truth")
+    if isinstance(spec, KernelCubeSpec):
+        if wavelengths_m is not None:
+            raise ValueError("a kernel cube declares its own tabulated wavelengths; supplied nodes cannot replace them")
+        provider = _cube_provider(spec, scale)
+        if bandpass_support_m is not None:
+            provider.validate_bandpass_support(bandpass_support_m)
+        return provider
     if not isinstance(spec, OpticalSpec):
-        raise ValueError(f"a truth PSF is an OpticalSpec or a KernelFileSpec, got {type(spec).__name__}")
+        raise ValueError(f"a truth PSF is optical, a kernel file or a kernel cube, got {type(spec).__name__}")
+    nodes = resolve_wavelengths(spec, wavelengths_m=wavelengths_m)
+    for wavelength in nodes:
+        check_sampling(spec, pixel_scale_arcsec=scale, wavelength_m=wavelength)
     pupil = build_pupil(spec.pupil)
-    basis = WavefrontBasis(pupil, reference_wavelength_m=spec.wavelength_m)
+    basis = WavefrontBasis(pupil, reference_wavelength_m=min(nodes))
     draw = None
     coefficients = spec.wavefront
     if spec.draw is not None:
@@ -358,16 +584,17 @@ def build_psf_provider(spec: PsfTruthSpec, *, pixel_scale_arcsec: float) -> PSFP
         draw = draw_wavefront(basis, spec.draw)
         coefficients = draw.coefficients
     return OpticalPSF(spec, pupil=pupil, basis=basis, pixel_scale_arcsec=scale, coefficients=coefficients,
-                      draw=draw)
+                      draw=draw, wavelengths_m=nodes)
 
 
 def _optical_truth(truth: PSFProvider, relation: str) -> OpticalPSF:
     if not isinstance(truth, OpticalPSF):
-        raise ValueError(f"a {relation} model changes the truth wavefront and needs an optical truth PSF")
+        raise ValueError(f"a {relation} model needs an optical truth PSF")
     return truth
 
 
-def build_model_psf(spec: PsfModelSpec, truth: PSFProvider, *, pixel_scale_arcsec: float) -> ModelPSF:
+def build_model_psf(spec: PsfModelSpec, truth: PSFProvider, *, pixel_scale_arcsec: float,
+                    wavelengths_m: Sequence[float] | None = None) -> ModelPSF:
     """The model PSF of ``spec`` relative to ``truth``, both at the scene pixel scale."""
     scale = _scene_pixel_scale(pixel_scale_arcsec)
     if not _same_pixel_scale(truth.pixel_scale_arcsec, scale):
@@ -377,6 +604,14 @@ def build_model_psf(spec: PsfModelSpec, truth: PSFProvider, *, pixel_scale_arcse
         return ModelPSF(truth, "matched", None)
     if isinstance(spec, KernelFileSpec):
         return ModelPSF(_kernel_provider(spec, scale, "psf.model"), "kernel", None)
+    if isinstance(spec, OpticalSpec):
+        optical = _optical_truth(truth, "optical")
+        if (spec.wavelength_m, spec.wavelength_samples) != (optical.spec.wavelength_m, optical.spec.wavelength_samples):
+            raise ValueError("an optical model must have the truth's wavelength keys")
+        nodes = optical.wavelengths_m if wavelengths_m is None else checked_wavelengths(wavelengths_m)
+        if nodes != optical.wavelengths_m:
+            raise ValueError("an optical model must use the truth's wavelength nodes")
+        return ModelPSF(build_psf_provider(spec, pixel_scale_arcsec=scale, wavelengths_m=nodes), "optical", None)
     if isinstance(spec, WavefrontModel):
         optical = _optical_truth(truth, "wavefront")
         if (spec.wavefront is None) == (spec.offset is None):
