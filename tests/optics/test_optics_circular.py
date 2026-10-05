@@ -63,12 +63,24 @@ def test_obscured_encircled_energy_matches_annular_form():
                                rtol=0.0, atol=3e-3)
 
 
-def test_collecting_area_with_obscuration_and_spiders():
+def test_obscuration_and_spiders_set_area_and_orientation():
     pupil = build_pupil(parse_pupil({"kind": "circular", "diameter_m": 1.0, "pixels": 512, "supersampling": 4,
                                      "obscuration_ratio": 0.3,
                                      "spiders": {"count": 4, "width_m": 0.01, "angle_deg": 45.0}}, "pupil"))
     expected = math.pi / 4 * (1 - 0.3 ** 2) - 4 * 0.01 * 0.5 * (1 - 0.3)
     assert pupil.collecting_area_m2 == pytest.approx(expected, rel=2e-3)
+    transmission = np.asarray(pupil.transmission)
+    x, y = np.asarray(pupil.grid.x), np.asarray(pupil.grid.y)
+
+    def at(x0, y0):
+        return transmission[np.argmin(np.hypot(x - x0, y - y0))]
+
+    radius = 0.35
+    for angle in (45.0, 135.0, 225.0, 315.0):
+        assert at(radius * math.cos(math.radians(angle)), radius * math.sin(math.radians(angle))) == 0.0
+    for angle in (0.0, 90.0, 180.0, 270.0):
+        assert at(radius * math.cos(math.radians(angle)), radius * math.sin(math.radians(angle))) == 1.0
+    assert at(0.0, 0.0) == 0.0
     unobstructed = build_pupil(parse_pupil({"kind": "circular", "diameter_m": 1.0, "pixels": 512,
                                             "supersampling": 4}, "pupil"))
     assert unobstructed.collecting_area_m2 == pytest.approx(math.pi / 4, rel=2e-3)
