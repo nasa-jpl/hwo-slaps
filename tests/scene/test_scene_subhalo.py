@@ -2,11 +2,13 @@
 
 import math
 
+import numpy as np
 import pytest
 
 from hwoslaps.config.checks import ConfigError
 from hwoslaps.scene.spec import parse_scene
 from hwoslaps.scene.subhalo import configured_injection
+from hwoslaps.seeding import stream_rng
 
 LENS_CENTRE = (0.3, -0.2)
 
@@ -30,13 +32,41 @@ def test_injection_is_the_hypothesis_halo_at_the_configured_position(scene_mappi
     assert (off_plane.model.type, off_plane.redshift) == ("PointMass", 0.45)
 
 
-@pytest.mark.parametrize("angle_deg, offset_arcsec", [(0.0, 0.0), (90.0, 0.1), (210.0, -0.25)])
-def test_placement_is_about_the_lens_centre(scene_mapping, planck15, angle_deg, offset_arcsec):
-    spec = _inject(scene_mapping, {"kind": "angle", "angle_deg": angle_deg, "offset_arcsec": offset_arcsec})
-    y, x = configured_injection(spec, planck15, seed=3).position_yx_arcsec
-    radius = 0.8 + offset_arcsec
+def _stream_draws(seed, scatter):
+    """Angle (deg) and radial offset (arcsec) of a random placement, drawn by the documented stream."""
+    stream = stream_rng(seed, "scene.injection_position")
+    return stream.uniform(0.0, 360.0), stream.uniform(-scatter, scatter)
+
+
+@pytest.mark.parametrize("position, seed", [
+    ({"kind": "angle", "angle_deg": 0.0}, 3),
+    ({"kind": "angle", "angle_deg": 90.0, "offset_arcsec": 0.1}, 3),
+    ({"kind": "angle", "angle_deg": 210.0, "offset_arcsec": -0.25}, 3),
+    ({"kind": "random", "scatter_arcsec": 0.05}, 3),
+    ({"kind": "random", "scatter_arcsec": 0.05}, 20261005),
+], ids=["angle-0", "angle-90-outward", "angle-210-inward", "random-seed-3", "random-seed-20261005"])
+def test_placement_is_about_the_lens_centre(scene_mapping, planck15, position, seed):
+    spec = _inject(scene_mapping, position)
+    y, x = configured_injection(spec, planck15, seed=seed).position_yx_arcsec
+    if position["kind"] == "angle":
+        angle_deg, offset = position["angle_deg"], position.get("offset_arcsec", 0.0)
+    else:
+        angle_deg, offset = _stream_draws(seed, position["scatter_arcsec"])
+    radius = 0.8 + offset
     assert y == pytest.approx(LENS_CENTRE[0] + radius * math.sin(math.radians(angle_deg)), abs=1.0e-15)
     assert x == pytest.approx(LENS_CENTRE[1] + radius * math.cos(math.radians(angle_deg)), abs=1.0e-15)
+
+
+def test_random_placement_draws_from_its_named_stream(scene_mapping, planck15):
+    spec = _inject(scene_mapping, {"kind": "random", "scatter_arcsec": 0.05})
+    placed = {seed: configured_injection(spec, planck15, seed=seed).position_yx_arcsec for seed in (5, 6, 70)}
+    assert configured_injection(spec, planck15, seed=5).position_yx_arcsec == placed[5]
+    assert len(set(placed.values())) == 3
+    for seed, (y, x) in placed.items():
+        drawn_angle = math.degrees(math.atan2(y - LENS_CENTRE[0], x - LENS_CENTRE[1])) % 360.0
+        assert drawn_angle == pytest.approx(_stream_draws(seed, 0.05)[0], abs=1.0e-9)
+        for aliased in (np.random.default_rng(seed + 1), np.random.default_rng(seed)):
+            assert drawn_angle != pytest.approx(aliased.uniform(0.0, 360.0), abs=1.0e-6)
 
 
 def test_placement_radius_is_a_number_or_the_lens_einstein_radius(scene_mapping, planck15):

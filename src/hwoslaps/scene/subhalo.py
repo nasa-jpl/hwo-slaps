@@ -9,6 +9,10 @@ mass component with one), like forecast layouts. The angle runs counter-clockwis
 toward +y. ``radius: einstein_radius`` is the Einstein-radius parameter of the single lens
 mass component that has one; ``radius: critical_curve`` is the effective Einstein radius
 of the tangential critical curve (``scene.critical_curve``); a number is in arcsec.
+
+A random placement draws, in this order, the angle uniform in [0, 360) deg and a radial
+offset uniform in [-scatter_arcsec, scatter_arcsec] from the named stream
+``scene.injection_position`` of the configuration seed, which no other draw uses.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from ..config.checks import Key, Pair, Real, Table, Text, Union, Variants
+from ..seeding import stream_rng
 from .convert import polar_offset
 from .cosmology import Cosmology
 from .critical_curve import effective_einstein_radius
@@ -26,8 +31,11 @@ from .halos import Halo, make_halo
 if TYPE_CHECKING:
     from .spec import SceneSpec
 
-__all__ = ["AnglePlacement", "DirectPlacement", "INJECTION_TABLE", "InjectionSpec", "PLACEMENT_TABLE",
-           "PlacementSpec", "configured_injection", "injection_from_values"]
+__all__ = ["AnglePlacement", "DirectPlacement", "INJECTION_TABLE", "InjectionSpec",
+           "PLACEMENT_TABLE", "PlacementSpec", "RandomPlacement", "configured_injection", "injection_from_values"]
+
+_INJECTION_POSITION_STREAM = "scene.injection_position"
+"""Named stream of the configuration seed that draws a random injection placement."""
 
 Radius = Literal["einstein_radius", "critical_curve"] | float
 
@@ -48,7 +56,15 @@ class AnglePlacement:
     offset_arcsec: float
 
 
-PlacementSpec = DirectPlacement | AnglePlacement
+@dataclass(frozen=True)
+class RandomPlacement:
+    """The subhalo at a uniform angle and ``radius`` plus a uniform offset in [-scatter_arcsec, scatter_arcsec]."""
+
+    radius: Radius
+    scatter_arcsec: float
+
+
+PlacementSpec = DirectPlacement | AnglePlacement | RandomPlacement
 
 
 @dataclass(frozen=True)
@@ -70,6 +86,11 @@ PLACEMENT_TABLE = Variants(
             _RADIUS,
             Key("offset_arcsec", Real(), "added to the radius", 0.0, unit="arcsec"),
         )),
+        "random": Table((
+            _RADIUS,
+            Key("scatter_arcsec", Real(min=0.0, min_open=True), "half width of the uniform radial offset",
+                unit="arcsec"),
+        )),
     },
     doc="Where the injected subhalo sits.",
 )
@@ -85,9 +106,11 @@ def injection_from_values(values: Mapping[str, Any]) -> InjectionSpec:
     position = values["position"]
     if position["kind"] == "direct":
         placement: PlacementSpec = DirectPlacement(tuple(position["centre"]))
-    else:
+    elif position["kind"] == "angle":
         placement = AnglePlacement(angle_deg=position["angle_deg"], radius=position["radius"],
                                    offset_arcsec=position["offset_arcsec"])
+    else:
+        placement = RandomPlacement(radius=position["radius"], scatter_arcsec=position["scatter_arcsec"])
     return InjectionSpec(mass_msun=values["mass_msun"], position=placement)
 
 
@@ -99,20 +122,26 @@ def _radius(radius: Radius, spec: SceneSpec, cosmology: Cosmology) -> float:
     return radius
 
 
-def _position(placement: PlacementSpec, spec: SceneSpec, cosmology: Cosmology) -> tuple[float, float]:
+def _position(placement: PlacementSpec, spec: SceneSpec, cosmology: Cosmology, seed: int) -> tuple[float, float]:
     if isinstance(placement, DirectPlacement):
         return placement.centre
-    radius = _radius(placement.radius, spec, cosmology) + placement.offset_arcsec
+    if isinstance(placement, AnglePlacement):
+        angle_deg, offset = placement.angle_deg, placement.offset_arcsec
+    else:
+        stream = stream_rng(seed, _INJECTION_POSITION_STREAM)
+        angle_deg = float(stream.uniform(0.0, 360.0))
+        offset = float(stream.uniform(-placement.scatter_arcsec, placement.scatter_arcsec))
+    radius = _radius(placement.radius, spec, cosmology) + offset
     if not radius > 0.0:
         raise ValueError(f"the placement radius {radius} arcsec about the lens centre is not positive")
-    return polar_offset(radius, placement.angle_deg, spec.lens_centre)
+    return polar_offset(radius, angle_deg, spec.lens_centre)
 
 
 def configured_injection(spec: SceneSpec, cosmology: Cosmology, *, seed: int) -> Halo | None:
-    """The configured injected subhalo, or None without an injection block."""
+    """The configured injected subhalo, or None without an injection block; ``seed`` is the configuration seed."""
     injection = spec.injection
     if injection is None:
         return None
     redshift = spec.lens.redshift if spec.subhalo_redshift is None else spec.subhalo_redshift
-    return make_halo(spec.subhalo, injection.mass_msun, _position(injection.position, spec, cosmology),
+    return make_halo(spec.subhalo, injection.mass_msun, _position(injection.position, spec, cosmology, seed),
                      redshift=redshift, source_redshift=spec.source.redshift, cosmology=cosmology)
