@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import dataclasses
+import itertools
 import json
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from hwoslaps.inference.objective import ScalarCheck
 from hwoslaps.inference.refine import refine
 from hwoslaps.inference.result import RoleStatus
 from hwoslaps.inference.settings import RefineSettings
@@ -16,6 +19,11 @@ from hwoslaps.inference.starts import RefineStart, select_starts
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "inference" / "refine_records_8fa6209.json"
 CASES = json.loads(FIXTURE.read_text(encoding="utf-8"))["cases"]
 UNIT = ([0.0, 0.0], [1.0, 1.0])
+TARGET = (0.23, 0.71)
+ACCEPT_POINTS = [[0.10, 0.70], [0.05, 0.10], [0.90, 0.20], [0.80, 0.90], [0.10, 0.90], [0.50, 0.20], [0.70, 0.60],
+                 [0.20, 0.40], [0.40, 0.80]]
+SLOW_TARGET, SLOW_WEIGHTS = (0.9, 0.9), (0.08, 0.08)
+SLOW_POINTS = [[0.11, 0.11], [0.10, 0.12], [0.12, 0.10]]
 
 
 def quadratic(target, weights=None):
@@ -64,65 +72,172 @@ def starts_from(points, lower, upper, saved_log_likelihood):
                  for index, point in enumerate(points))
 
 
+def offset_direct_check(half_chi2, offset):
+    """Direct check on the unit box: direct log L ``-f(z) - offset(z)`` against the implied ``-f``."""
+    def direct_check(z, value):
+        direct = -half_chi2(np.asarray(z)) - offset(np.asarray(z))
+        return ScalarCheck(direct_log_likelihood=direct, implied_log_likelihood=-float(value),
+                           direct_log_likelihood_error=abs(direct + float(value)))
+    return direct_check
+
+
 def test_quadratic_refinement_is_accepted_with_full_support(box_objective):
-    target, incumbent = np.array([0.23, 0.71]), np.array([0.10, 0.70])
-    value, gradient = quadratic(target)
-    points = [incumbent, [0.05, 0.10], [0.90, 0.20], [0.80, 0.90], [0.10, 0.90], [0.50, 0.20], [0.70, 0.60],
-              [0.20, 0.40], [0.40, 0.80]]
-    outcome = refine(starts_from(points, *UNIT, -value(incumbent)), box_objective(*UNIT, value, gradient),
+    """Every gate passes, and the role value is the direct likelihood at the best: a direct check
+    3e-5 below the implied one (inside the 1e-4 tolerance) shows in ``best_log_likelihood``."""
+    value, gradient = quadratic(TARGET)
+    objective = dataclasses.replace(box_objective(*UNIT, value, gradient),
+                                    direct_check=offset_direct_check(value, lambda z: 3.0e-5))
+    outcome = refine(starts_from(ACCEPT_POINTS, *UNIT, -value(np.array(ACCEPT_POINTS[0]))), objective,
                      RefineSettings(maxiter=100, repeat_maxiter=100, start_separation_normalized_l2=0.01))
     assert outcome.acceptance_status is RoleStatus.ACCEPTED
     assert all(outcome.gates.values())
-    assert outcome.best_vector == pytest.approx(target.tolist(), abs=1.0e-8)
-    assert outcome.best_log_likelihood == pytest.approx(0.0, abs=1.0e-12)
+    assert outcome.best_vector == pytest.approx(TARGET, abs=1.0e-8)
+    assert outcome.best_log_likelihood == pytest.approx(-3.0e-5, abs=1.0e-12)
+    assert outcome.record["candidate_implied_log_likelihood"] == pytest.approx(0.0, abs=1.0e-12)
     agreement = outcome.record["candidate_start_agreement"]
     assert agreement["supporting_original_start_indices"] == list(range(1, 9))
     assert outcome.record["incumbent"]["passed"] is True
 
 
-@pytest.mark.parametrize("case", ["incumbent_saved_mismatch", "unsupported_incumbent", "support_below_minimum",
-                                  "no_finite_evaluation"])
-def test_refinement_gates_reject_each_failure(case, box_objective):
-    """Each defect fails its own gate and leaves the role unresolved."""
+def _quadratic_setup(box_objective):
+    value, gradient = quadratic(TARGET)
+    starts = starts_from(ACCEPT_POINTS, *UNIT, -value(np.array(ACCEPT_POINTS[0])))
+    return value, box_objective(*UNIT, value, gradient), starts, RefineSettings(maxiter=100, repeat_maxiter=100)
+
+
+def _slow_setup(box_objective, gradient=None):
+    """The flat objective 0.04 |z - 0.9|^2 of the SCI-14 keeper: its range over the box (0.065) is
+    below the support tolerance, so every start supports any best."""
+    value, slow_gradient = quadratic(SLOW_TARGET, SLOW_WEIGHTS)
+    starts = starts_from(SLOW_POINTS, *UNIT, -value(np.array(SLOW_POINTS[0])))
+    return value, box_objective(*UNIT, value, slow_gradient if gradient is None else gradient), starts
+
+
+def _incumbent_saved_mismatch(box_objective):
+    value, gradient = quadratic(TARGET)
+    points = [[0.10, 0.70]] + [[0.1 * (i + 1), 0.2 + 0.05 * i] for i in range(8)]
+    outcome = refine(starts_from(points, *UNIT, -5.0), box_objective(*UNIT, value, gradient),
+                     RefineSettings(maxiter=100, repeat_maxiter=100))
+    assert outcome.record["incumbent"]["saved_log_likelihood_error"] == pytest.approx(
+        5.0 - value(np.array([0.10, 0.70])), rel=1.0e-12)
+    return outcome, {"incumbent"}
+
+
+def _unsupported_incumbent(box_objective):
     one_d = ([0.0], [1.0])
-    if case == "incumbent_saved_mismatch":
-        target = np.array([0.23, 0.71])
-        value, gradient = quadratic(target)
-        points = [[0.10, 0.70]] + [[0.1 * (i + 1), 0.2 + 0.05 * i] for i in range(8)]
-        outcome = refine(starts_from(points, *UNIT, -5.0), box_objective(*UNIT, value, gradient),
-                         RefineSettings(maxiter=100, repeat_maxiter=100))
-        assert outcome.record["incumbent"]["saved_log_likelihood_error"] == pytest.approx(
-            5.0 - value(np.array([0.10, 0.70])), rel=1.0e-12)
-        failed = {"incumbent"}
-    elif case == "unsupported_incumbent":
-        value, gradient = objective_functions({"kind": "two_wells_split"})
-        points = [[0.2]] + [[0.56 + 0.03 * i] for i in range(8)]
-        outcome = refine(starts_from(points, *one_d, 0.0), box_objective(*one_d, value, gradient),
-                         RefineSettings(maxiter=200, repeat_maxiter=200))
-        assert outcome.best_vector == pytest.approx([0.2], abs=1.0e-8)
-        assert all(run["observed_best_half_chi2"] == pytest.approx(1.0, abs=1.0e-8)
-                   for run in outcome.record["runs"][1:])
-        failed = {"support"}
-    elif case == "support_below_minimum":
-        value, gradient = quadratic([0.2, 0.3])
-        points = [[0.2, 0.3]] + [[0.2 + 0.05 * i, 0.3] for i in range(8)]
-        outcome = refine(starts_from(points, *UNIT, 0.0), box_objective(*UNIT, value, gradient),
-                         RefineSettings(maxiter=20, repeat_maxiter=20, minimum_distinct_original_start_support=9))
-        assert len(outcome.record["candidate_start_agreement"]["supporting_original_start_indices"]) == 8
-        failed = {"support"}
-    else:
-        value, gradient = objective_functions({"kind": "nan"})
-        points = [[0.2, 0.3]] + [[0.2 + 0.05 * i, 0.3] for i in range(8)]
-        outcome = refine(starts_from(points, *UNIT, 0.0), box_objective(*UNIT, value, gradient),
-                         RefineSettings(maxiter=3, repeat_maxiter=3))
-        assert (outcome.best_log_likelihood, outcome.best_vector) == (None, None)
-        failed = set(outcome.gates)
+    value, gradient = objective_functions({"kind": "two_wells_split"})
+    points = [[0.2]] + [[0.56 + 0.03 * i] for i in range(8)]
+    outcome = refine(starts_from(points, *one_d, 0.0), box_objective(*one_d, value, gradient),
+                     RefineSettings(maxiter=200, repeat_maxiter=200))
+    assert outcome.best_vector == pytest.approx([0.2], abs=1.0e-8)
+    assert all(run["observed_best_half_chi2"] == pytest.approx(1.0, abs=1.0e-8) for run in outcome.record["runs"][1:])
+    return outcome, {"support"}
+
+
+def _support_below_minimum(box_objective):
+    value, gradient = quadratic([0.2, 0.3])
+    points = [[0.2, 0.3]] + [[0.2 + 0.05 * i, 0.3] for i in range(8)]
+    outcome = refine(starts_from(points, *UNIT, 0.0), box_objective(*UNIT, value, gradient),
+                     RefineSettings(maxiter=20, repeat_maxiter=20, minimum_distinct_original_start_support=9))
+    assert len(outcome.record["candidate_start_agreement"]["supporting_original_start_indices"]) == 8
+    return outcome, {"support"}
+
+
+REPEAT_SETTINGS = RefineSettings(original_start_count=2, gtol=1.0, repeat_log_likelihood_tolerance=0.01)
+"""The starts stop where they begin (gtol above their gradient); the repeat (gtol 1e-12) does not."""
+
+
+def _repeat_moves_the_best(box_objective):
+    """The repeat lowers the best by 0.0499: above the repeat tolerance, inside the support one."""
+    value, objective, starts = _slow_setup(box_objective)
+    outcome = refine(starts, objective, REPEAT_SETTINGS)
+    assert [run["observed_best_half_chi2"] for run in outcome.record["runs"]] == [
+        pytest.approx(value(np.array(point)), rel=1.0e-12) for point in SLOW_POINTS]
+    assert outcome.best_vector == pytest.approx(SLOW_TARGET, abs=1.0e-8)
+    return outcome, {"repeat"}
+
+
+def _repeat_raises(box_objective):
+    """The objective fails from the repeat's first evaluation on (counted from a first run)."""
+    value, objective, starts = _slow_setup(box_objective)
+    multistart = sum(run["evaluation_count"] for run in refine(starts, objective, REPEAT_SETTINGS).record["runs"])
+    calls = itertools.count(1)
+
+    def fails_in_the_repeat(z):
+        if next(calls) > multistart:
+            raise FloatingPointError("the tighter repeat cannot evaluate")
+        return objective.value_and_gradient(z)
+
+    outcome = refine(starts, dataclasses.replace(objective, value_and_gradient=fails_in_the_repeat), REPEAT_SETTINGS)
+    assert outcome.repeat_converged is None
+    assert outcome.record["tighter_repeat"]["message"] == "FloatingPointError: the tighter repeat cannot evaluate"
+    assert outcome.best_vector == tuple(SLOW_POINTS[0])
+    return outcome, {"repeat"}
+
+
+def _non_finite_gradient(box_objective):
+    """The gradient is NaN beyond 0.15 in both coordinates, where the value keeps falling: the first
+    step lands there and that point, finite in value, is retained as the best."""
+    _, slow_gradient = quadratic(SLOW_TARGET, SLOW_WEIGHTS)
+    _, objective, starts = _slow_setup(box_objective, lambda x: np.full(2, np.nan) if np.min(x) > 0.15
+                                       else slow_gradient(x))
+    outcome = refine(starts, objective, RefineSettings(original_start_count=2))
+    assert min(outcome.best_vector) > 0.15
+    assert outcome.record["candidate_best_gradient_valid"] is False and outcome.projected_gradient_linf is None
+    return outcome, {"finite_gradient"}
+
+
+def _scalar_residual_inconsistent(box_objective):
+    """A residual callback of sqrt(2 f) + 1 gives |2 f - r . r| = 1 + 2 sqrt(2 f) at the best."""
+    value, objective, starts, settings = _quadratic_setup(box_objective)
+    outcome = refine(starts, dataclasses.replace(objective, residual=lambda z: np.sqrt([2.0 * value(z)]) + 1.0),
+                     settings)
+    half = outcome.record["candidate_best_half_chi2"]
+    assert outcome.record["candidate_scalar_residual_error"] == pytest.approx(1.0 + 2.0 * np.sqrt(2.0 * half),
+                                                                              rel=1.0e-12)
+    return outcome, {"scalar_residual"}
+
+
+def _direct_likelihood_inconsistent(box_objective):
+    """The direct log L is 1e-3 below the implied one within 0.05 of the target and equal to it at
+    the incumbent (0.13 away), so only the check at the best fails."""
+    value, objective, starts, settings = _quadratic_setup(box_objective)
+    offset = offset_direct_check(value, lambda z: 1.0e-3 if np.max(np.abs(z - np.asarray(TARGET))) < 0.05 else 0.0)
+    outcome = refine(starts, dataclasses.replace(objective, direct_check=offset), settings)
+    assert outcome.record["candidate_direct_log_likelihood_error"] == pytest.approx(1.0e-3, rel=1.0e-9)
+    assert outcome.record["incumbent"]["passed"] is True
+    return outcome, {"direct_log_likelihood"}
+
+
+def _no_finite_evaluation(box_objective):
+    value, gradient = objective_functions({"kind": "nan"})
+    points = [[0.2, 0.3]] + [[0.2 + 0.05 * i, 0.3] for i in range(8)]
+    outcome = refine(starts_from(points, *UNIT, 0.0), box_objective(*UNIT, value, gradient),
+                     RefineSettings(maxiter=3, repeat_maxiter=3))
+    assert (outcome.best_log_likelihood, outcome.best_vector) == (None, None)
+    return outcome, set(outcome.gates)
+
+
+GATE_FAILURES = {
+    "incumbent_saved_mismatch": _incumbent_saved_mismatch, "unsupported_incumbent": _unsupported_incumbent,
+    "support_below_minimum": _support_below_minimum, "repeat_moves_the_best": _repeat_moves_the_best,
+    "repeat_raises": _repeat_raises, "non_finite_gradient": _non_finite_gradient,
+    "scalar_residual_inconsistent": _scalar_residual_inconsistent,
+    "direct_likelihood_inconsistent": _direct_likelihood_inconsistent, "no_finite_evaluation": _no_finite_evaluation,
+}
+
+
+@pytest.mark.parametrize("case", list(GATE_FAILURES))
+def test_refinement_gates_reject_each_failure(case, box_objective):
+    """Each defect fails exactly its own gate and leaves the role unresolved."""
+    outcome, failed = GATE_FAILURES[case](box_objective)
     assert outcome.acceptance_status is RoleStatus.UNRESOLVED
     assert {name for name, passed in outcome.gates.items() if not passed} == failed
 
 
 def test_starts_are_normalized_once(tmp_path, box_objective):
-    """The reviewer's counterexample: prior [2, 4], two basins, sampler maximum at 2.5."""
+    """The reviewer's counterexample: prior [2, 4], two basins, sampler maximum at 2.5. A start whose
+    unit-box vector leaves [0, 1] is refused when it is built."""
     write_search_files(tmp_path, ["x"], [2.5], 0.0, [([2.3], -0.4), ([2.7], -0.4)])
     settings = RefineSettings(original_start_count=2, start_separation_normalized_l2=0.05)
     starts = select_starts(tmp_path, ["x"], [2.0], [4.0], settings)
@@ -134,9 +249,11 @@ def test_starts_are_normalized_once(tmp_path, box_objective):
     assert outcome.record["runs"][0]["start_half_chi2"] == 0.0
     assert outcome.best_vector == pytest.approx((2.5,), abs=1.0e-8)
     assert outcome.acceptance_status is RoleStatus.ACCEPTED
+    with pytest.raises(ValueError, match="outside the unit box"):
+        RefineStart(index=0, physical=(4.4,), normalized=(1.2,), source="sampler_ml", original=False, origin={})
 
 
-@pytest.mark.parametrize("defect", ["outside_unit_box", "other_box", "incumbent_not_first", "count"])
+@pytest.mark.parametrize("defect", ["other_box", "incumbent_not_first", "count"])
 def test_bad_starts_fail_before_any_evaluation(defect, box_objective):
     evaluations = []
 
@@ -147,10 +264,7 @@ def test_bad_starts_fail_before_any_evaluation(defect, box_objective):
     objective = box_objective([0.0], [1.0], value, lambda x: np.zeros(1))
     starts = starts_from([[0.4], [0.3]], [0.0], [1.0], 0.0)
     settings = RefineSettings(original_start_count=1)
-    if defect == "outside_unit_box":
-        with pytest.raises(ValueError, match="outside the unit box"):
-            RefineStart(index=0, physical=(0.5,), normalized=(1.2,), source="sampler_ml", original=False, origin={})
-    elif defect == "other_box":
+    if defect == "other_box":
         shifted = starts_from([[0.4], [0.3]], [0.0], [2.0], 0.0)
         with pytest.raises(ValueError, match="does not map back to its physical origin"):
             refine(shifted, objective, settings)
@@ -197,21 +311,34 @@ def test_start_selection_uses_prior_and_posterior_scales(posterior, tmp_path):
 
 
 def test_historical_gates_accept_a_non_stationary_point(box_objective):
-    """SCI-14: the six gates certify repeatability, not stationarity, and the record shows it.
+    """SCI-14: the six gates accept a maximum that repeats although it is far from stationary, and
+    the record says how far.
 
     f(z) = 0.04 sum (z - 0.9)^2 on [0, 1]^2 changes by less than 0.065 over the box, so every
     start supports the best and the repeat passes after one iteration each, far from z = 0.9.
     """
-    target = np.array([0.9, 0.9])
-    value, gradient = quadratic(target, [0.08, 0.08])
-    points = [[0.11, 0.11], [0.10, 0.12], [0.12, 0.10]]
-    outcome = refine(starts_from(points, *UNIT, -value(np.array(points[0]))), box_objective(*UNIT, value, gradient),
+    value, gradient = quadratic(SLOW_TARGET, SLOW_WEIGHTS)
+    outcome = refine(starts_from(SLOW_POINTS, *UNIT, -value(np.array(SLOW_POINTS[0]))),
+                     box_objective(*UNIT, value, gradient),
                      RefineSettings(original_start_count=2, maxiter=1, repeat_maxiter=1, maxls=1))
     assert outcome.acceptance_status is RoleStatus.ACCEPTED
     best = np.asarray(outcome.best_vector)
     assert outcome.projected_gradient_linf == pytest.approx(0.08 * float(np.max(np.abs(best - 0.9))), rel=1.0e-12)
     assert outcome.projected_gradient_linf > 0.04
     assert outcome.repeat_converged is False
+
+
+def test_projected_gradient_ignores_outward_components_at_active_bounds(box_objective):
+    """SCI-14 at the box edges: 0.5 |z - (1.2, -0.3)|^2 on [0, 1]^2 is lowest at the corner (1, 0),
+    where the gradient (-0.2, 0.3) points out of the box in both components, so the projected
+    gradient there is zero."""
+    value, gradient = quadratic([1.2, -0.3])
+    outcome = refine(starts_from(ACCEPT_POINTS, *UNIT, -value(np.array(ACCEPT_POINTS[0]))),
+                     box_objective(*UNIT, value, gradient), RefineSettings(maxiter=100, repeat_maxiter=100))
+    assert outcome.best_vector == (1.0, 0.0)
+    assert outcome.record["candidate_best_gradient_z"] == pytest.approx([-0.2, 0.3], rel=1.0e-12)
+    assert outcome.record["candidate_best_projected_gradient"]["values"] == [0.0, 0.0]
+    assert outcome.projected_gradient_linf == 0.0
 
 
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])

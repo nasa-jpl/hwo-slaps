@@ -8227,6 +8227,1505 @@
      "candidate_acceptance_status": "accepted_repeatable_profile"
     }
    }
+  },
+  {
+   "name": "bound_active_accept",
+   "objective": {
+    "kind": "quadratic",
+    "target": [
+     1.2,
+     -0.3
+    ],
+    "weights": [
+     1.0,
+     1.0
+    ]
+   },
+   "lower": [
+    0.0,
+    0.0
+   ],
+   "upper": [
+    1.0,
+    1.0
+   ],
+   "settings": {
+    "maxiter": 100,
+    "repeat_maxiter": 100
+   },
+   "starts": {
+    "points": [
+     [
+      0.1,
+      0.7
+     ],
+     [
+      0.05,
+      0.1
+     ],
+     [
+      0.9,
+      0.2
+     ],
+     [
+      0.8,
+      0.9
+     ],
+     [
+      0.1,
+      0.9
+     ],
+     [
+      0.5,
+      0.2
+     ],
+     [
+      0.7,
+      0.6
+     ],
+     [
+      0.2,
+      0.4
+     ],
+     [
+      0.4,
+      0.8
+     ]
+    ],
+    "saved_log_likelihood": -1.105
+   },
+   "expected": {
+    "acceptance_status": "accepted_repeatable_profile",
+    "best_log_likelihood": -0.06499999999999999,
+    "best_vector": [
+     1.0,
+     0.0
+    ],
+    "projected_gradient_linf": 0.0,
+    "repeat_converged": true,
+    "record": {
+     "procedure_version": "normalized_lbfgsb_v2",
+     "incumbent": {
+      "physical_vector": [
+       0.1,
+       0.7
+      ],
+      "normalized_vector": [
+       0.1,
+       0.7
+      ],
+      "half_chi2": 1.105,
+      "chi2": 2.21,
+      "evaluated": true,
+      "saved_log_likelihood": -1.105,
+      "direct_log_likelihood": -1.105,
+      "direct_log_likelihood_error": 0.0,
+      "saved_log_likelihood_error": 0.0,
+      "candidate_not_worse": true,
+      "scalar_consistent": true,
+      "tolerance": 0.0001,
+      "passed": true,
+      "matches_sampler": true
+     },
+     "candidate_not_worse_than_incumbent": true,
+     "start_provenance": [
+      {
+       "index": 0,
+       "physical": [
+        0.1,
+        0.7
+       ],
+       "normalized": [
+        0.1,
+        0.7
+       ],
+       "source": "sampler_ml",
+       "original": false,
+       "origin": {
+        "saved_log_likelihood": -1.105
+       }
+      },
+      {
+       "index": 1,
+       "physical": [
+        0.05,
+        0.1
+       ],
+       "normalized": [
+        0.05,
+        0.1
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 2,
+       "physical": [
+        0.9,
+        0.2
+       ],
+       "normalized": [
+        0.9,
+        0.2
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 3,
+       "physical": [
+        0.8,
+        0.9
+       ],
+       "normalized": [
+        0.8,
+        0.9
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 4,
+       "physical": [
+        0.1,
+        0.9
+       ],
+       "normalized": [
+        0.1,
+        0.9
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 5,
+       "physical": [
+        0.5,
+        0.2
+       ],
+       "normalized": [
+        0.5,
+        0.2
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 6,
+       "physical": [
+        0.7,
+        0.6
+       ],
+       "normalized": [
+        0.7,
+        0.6
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 7,
+       "physical": [
+        0.2,
+        0.4
+       ],
+       "normalized": [
+        0.2,
+        0.4
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 8,
+       "physical": [
+        0.4,
+        0.8
+       ],
+       "normalized": [
+        0.4,
+        0.8
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      }
+     ],
+     "runs": [
+      {
+       "start_index": 0,
+       "start_provenance": {
+        "index": 0,
+        "physical": [
+         0.1,
+         0.7
+        ],
+        "normalized": [
+         0.1,
+         0.7
+        ],
+        "source": "sampler_ml",
+        "original": false,
+        "origin": {
+         "saved_log_likelihood": -1.105
+        }
+       },
+       "start_z": [
+        0.1,
+        0.7
+       ],
+       "start_x": [
+        0.1,
+        0.7
+       ],
+       "start_half_chi2": 1.105,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 1,
+       "start_provenance": {
+        "index": 1,
+        "physical": [
+         0.05,
+         0.1
+        ],
+        "normalized": [
+         0.05,
+         0.1
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.05,
+        0.1
+       ],
+       "start_x": [
+        0.05,
+        0.1
+       ],
+       "start_half_chi2": 0.74125,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 2,
+       "start_provenance": {
+        "index": 2,
+        "physical": [
+         0.9,
+         0.2
+        ],
+        "normalized": [
+         0.9,
+         0.2
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.9,
+        0.2
+       ],
+       "start_x": [
+        0.9,
+        0.2
+       ],
+       "start_half_chi2": 0.16999999999999998,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 3,
+       "start_provenance": {
+        "index": 3,
+        "physical": [
+         0.8,
+         0.9
+        ],
+        "normalized": [
+         0.8,
+         0.9
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.8,
+        0.9
+       ],
+       "start_x": [
+        0.8,
+        0.9
+       ],
+       "start_half_chi2": 0.7999999999999999,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 4,
+       "start_provenance": {
+        "index": 4,
+        "physical": [
+         0.1,
+         0.9
+        ],
+        "normalized": [
+         0.1,
+         0.9
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.1,
+        0.9
+       ],
+       "start_x": [
+        0.1,
+        0.9
+       ],
+       "start_half_chi2": 1.3249999999999997,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 5,
+       "start_provenance": {
+        "index": 5,
+        "physical": [
+         0.5,
+         0.2
+        ],
+        "normalized": [
+         0.5,
+         0.2
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.5,
+        0.2
+       ],
+       "start_x": [
+        0.5,
+        0.2
+       ],
+       "start_half_chi2": 0.37,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 6,
+       "start_provenance": {
+        "index": 6,
+        "physical": [
+         0.7,
+         0.6
+        ],
+        "normalized": [
+         0.7,
+         0.6
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.7,
+        0.6
+       ],
+       "start_x": [
+        0.7,
+        0.6
+       ],
+       "start_half_chi2": 0.5299999999999999,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 7,
+       "start_provenance": {
+        "index": 7,
+        "physical": [
+         0.2,
+         0.4
+        ],
+        "normalized": [
+         0.2,
+         0.4
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.2,
+        0.4
+       ],
+       "start_x": [
+        0.2,
+        0.4
+       ],
+       "start_half_chi2": 0.745,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      },
+      {
+       "start_index": 8,
+       "start_provenance": {
+        "index": 8,
+        "physical": [
+         0.4,
+         0.8
+        ],
+        "normalized": [
+         0.4,
+         0.8
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.4,
+        0.8
+       ],
+       "start_x": [
+        0.4,
+        0.8
+       ],
+       "start_half_chi2": 0.925,
+       "solver_endpoint_z": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_x": [
+        1.0,
+        0.0
+       ],
+       "solver_endpoint_half_chi2": 0.06499999999999999,
+       "solver_endpoint_chi2": 0.12999999999999998,
+       "solver_endpoint_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "observed_best_z": [
+        1.0,
+        0.0
+       ],
+       "observed_best_x": [
+        1.0,
+        0.0
+       ],
+       "observed_best_half_chi2": 0.06499999999999999,
+       "observed_best_chi2": 0.12999999999999998,
+       "observed_best_gradient_z": [
+        -0.19999999999999996,
+        0.3
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0,
+        "l2": 0.0,
+        "values": [
+         0.0,
+         0.0
+        ]
+       },
+       "evaluation_count": 4,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 1,
+       "nfev": 4,
+       "njev": 2
+      }
+     ],
+     "tighter_repeat": {
+      "start_z": [
+       1.0,
+       0.0
+      ],
+      "solver_endpoint_z": [
+       1.0,
+       0.0
+      ],
+      "solver_endpoint_half_chi2": 0.06499999999999999,
+      "solver_endpoint_gradient_valid": true,
+      "observed_best_half_chi2": 0.06499999999999999,
+      "observed_best_z": [
+       1.0,
+       0.0
+      ],
+      "observed_best_gradient_valid": true,
+      "evaluation_count": 3,
+      "failed_evaluation_count": 0,
+      "success": true,
+      "status": 0,
+      "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL"
+     },
+     "candidate_best_vector": [
+      1.0,
+      0.0
+     ],
+     "candidate_best_z": [
+      1.0,
+      0.0
+     ],
+     "candidate_best_half_chi2": 0.06499999999999999,
+     "candidate_best_chi2": 0.12999999999999998,
+     "candidate_best_log_likelihood": -0.06499999999999999,
+     "candidate_best_gradient_z": [
+      -0.19999999999999996,
+      0.3
+     ],
+     "candidate_best_gradient_valid": true,
+     "candidate_best_projected_gradient": {
+      "valid": true,
+      "linf": 0.0,
+      "l2": 0.0,
+      "values": [
+       0.0,
+       0.0
+      ]
+     },
+     "candidate_scalar_residual_error": 0.0,
+     "candidate_direct_log_likelihood": -0.06499999999999999,
+     "candidate_implied_log_likelihood": -0.06499999999999999,
+     "candidate_direct_log_likelihood_error": 0.0,
+     "candidate_start_agreement": {
+      "finite_start_count": 9,
+      "original_start_count": 8,
+      "supporting_original_start_indices": [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8
+      ],
+      "duplicate_original_start_indices": [],
+      "minimum_supporting_original_starts": 2,
+      "support_tolerance_log_likelihood": 0.1,
+      "support_passed": true
+     },
+     "candidate_acceptance_status": "accepted_repeatable_profile"
+    }
+   }
+  },
+  {
+   "name": "repeat_moves_the_best",
+   "objective": {
+    "kind": "quadratic",
+    "target": [
+     0.9,
+     0.9
+    ],
+    "weights": [
+     0.08,
+     0.08
+    ]
+   },
+   "lower": [
+    0.0,
+    0.0
+   ],
+   "upper": [
+    1.0,
+    1.0
+   ],
+   "settings": {
+    "original_start_count": 2,
+    "gtol": 1.0,
+    "repeat_log_likelihood_tolerance": 0.01
+   },
+   "starts": {
+    "points": [
+     [
+      0.11,
+      0.11
+     ],
+     [
+      0.1,
+      0.12
+     ],
+     [
+      0.12,
+      0.1
+     ]
+    ],
+    "saved_log_likelihood": -0.04992800000000001
+   },
+   "expected": {
+    "acceptance_status": "unresolved_optimization",
+    "best_log_likelihood": -4.831773044478697e-32,
+    "best_vector": [
+     0.8999999999999992,
+     0.8999999999999992
+    ],
+    "projected_gradient_linf": 6.217248937900877e-17,
+    "repeat_converged": true,
+    "record": {
+     "procedure_version": "normalized_lbfgsb_v2",
+     "incumbent": {
+      "physical_vector": [
+       0.11,
+       0.11
+      ],
+      "normalized_vector": [
+       0.11,
+       0.11
+      ],
+      "half_chi2": 0.04992800000000001,
+      "chi2": 0.09985600000000001,
+      "evaluated": true,
+      "saved_log_likelihood": -0.04992800000000001,
+      "direct_log_likelihood": -0.04992800000000001,
+      "direct_log_likelihood_error": 0.0,
+      "saved_log_likelihood_error": 0.0,
+      "candidate_not_worse": true,
+      "scalar_consistent": true,
+      "tolerance": 0.0001,
+      "passed": true,
+      "matches_sampler": true
+     },
+     "candidate_not_worse_than_incumbent": true,
+     "start_provenance": [
+      {
+       "index": 0,
+       "physical": [
+        0.11,
+        0.11
+       ],
+       "normalized": [
+        0.11,
+        0.11
+       ],
+       "source": "sampler_ml",
+       "original": false,
+       "origin": {
+        "saved_log_likelihood": -0.04992800000000001
+       }
+      },
+      {
+       "index": 1,
+       "physical": [
+        0.1,
+        0.12
+       ],
+       "normalized": [
+        0.1,
+        0.12
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      },
+      {
+       "index": 2,
+       "physical": [
+        0.12,
+        0.1
+       ],
+       "normalized": [
+        0.12,
+        0.1
+       ],
+       "source": "sampler_sample",
+       "original": true,
+       "origin": {}
+      }
+     ],
+     "runs": [
+      {
+       "start_index": 0,
+       "start_provenance": {
+        "index": 0,
+        "physical": [
+         0.11,
+         0.11
+        ],
+        "normalized": [
+         0.11,
+         0.11
+        ],
+        "source": "sampler_ml",
+        "original": false,
+        "origin": {
+         "saved_log_likelihood": -0.04992800000000001
+        }
+       },
+       "start_z": [
+        0.11,
+        0.11
+       ],
+       "start_x": [
+        0.11,
+        0.11
+       ],
+       "start_half_chi2": 0.04992800000000001,
+       "solver_endpoint_z": [
+        0.11,
+        0.11
+       ],
+       "solver_endpoint_x": [
+        0.11,
+        0.11
+       ],
+       "solver_endpoint_half_chi2": 0.04992800000000001,
+       "solver_endpoint_chi2": 0.09985600000000001,
+       "solver_endpoint_gradient_z": [
+        -0.0632,
+        -0.0632
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.0632,
+        "l2": 0.08937829714197962,
+        "values": [
+         -0.0632,
+         -0.0632
+        ]
+       },
+       "observed_best_z": [
+        0.11,
+        0.11
+       ],
+       "observed_best_x": [
+        0.11,
+        0.11
+       ],
+       "observed_best_half_chi2": 0.04992800000000001,
+       "observed_best_chi2": 0.09985600000000001,
+       "observed_best_gradient_z": [
+        -0.0632,
+        -0.0632
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.0632,
+        "l2": 0.08937829714197962,
+        "values": [
+         -0.0632,
+         -0.0632
+        ]
+       },
+       "evaluation_count": 3,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 0,
+       "nfev": 3,
+       "njev": 1
+      },
+      {
+       "start_index": 1,
+       "start_provenance": {
+        "index": 1,
+        "physical": [
+         0.1,
+         0.12
+        ],
+        "normalized": [
+         0.1,
+         0.12
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.1,
+        0.12
+       ],
+       "start_x": [
+        0.1,
+        0.12
+       ],
+       "start_half_chi2": 0.04993600000000001,
+       "solver_endpoint_z": [
+        0.1,
+        0.12
+       ],
+       "solver_endpoint_x": [
+        0.1,
+        0.12
+       ],
+       "solver_endpoint_half_chi2": 0.04993600000000001,
+       "solver_endpoint_chi2": 0.09987200000000002,
+       "solver_endpoint_gradient_z": [
+        -0.064,
+        -0.062400000000000004
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.064,
+        "l2": 0.0893854574301659,
+        "values": [
+         -0.064,
+         -0.062400000000000004
+        ]
+       },
+       "observed_best_z": [
+        0.1,
+        0.12
+       ],
+       "observed_best_x": [
+        0.1,
+        0.12
+       ],
+       "observed_best_half_chi2": 0.04993600000000001,
+       "observed_best_chi2": 0.09987200000000002,
+       "observed_best_gradient_z": [
+        -0.064,
+        -0.062400000000000004
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.064,
+        "l2": 0.0893854574301659,
+        "values": [
+         -0.064,
+         -0.062400000000000004
+        ]
+       },
+       "evaluation_count": 3,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 0,
+       "nfev": 3,
+       "njev": 1
+      },
+      {
+       "start_index": 2,
+       "start_provenance": {
+        "index": 2,
+        "physical": [
+         0.12,
+         0.1
+        ],
+        "normalized": [
+         0.12,
+         0.1
+        ],
+        "source": "sampler_sample",
+        "original": true,
+        "origin": {}
+       },
+       "start_z": [
+        0.12,
+        0.1
+       ],
+       "start_x": [
+        0.12,
+        0.1
+       ],
+       "start_half_chi2": 0.04993600000000001,
+       "solver_endpoint_z": [
+        0.12,
+        0.1
+       ],
+       "solver_endpoint_x": [
+        0.12,
+        0.1
+       ],
+       "solver_endpoint_half_chi2": 0.04993600000000001,
+       "solver_endpoint_chi2": 0.09987200000000002,
+       "solver_endpoint_gradient_z": [
+        -0.062400000000000004,
+        -0.064
+       ],
+       "solver_endpoint_gradient_valid": true,
+       "solver_endpoint_projected_gradient": {
+        "valid": true,
+        "linf": 0.064,
+        "l2": 0.0893854574301659,
+        "values": [
+         -0.062400000000000004,
+         -0.064
+        ]
+       },
+       "observed_best_z": [
+        0.12,
+        0.1
+       ],
+       "observed_best_x": [
+        0.12,
+        0.1
+       ],
+       "observed_best_half_chi2": 0.04993600000000001,
+       "observed_best_chi2": 0.09987200000000002,
+       "observed_best_gradient_z": [
+        -0.062400000000000004,
+        -0.064
+       ],
+       "observed_best_gradient_valid": true,
+       "observed_best_gradient_error": null,
+       "observed_best_projected_gradient": {
+        "valid": true,
+        "linf": 0.064,
+        "l2": 0.0893854574301659,
+        "values": [
+         -0.062400000000000004,
+         -0.064
+        ]
+       },
+       "evaluation_count": 3,
+       "failed_evaluation_count": 0,
+       "success": true,
+       "status": 0,
+       "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+       "nit": 0,
+       "nfev": 3,
+       "njev": 1
+      }
+     ],
+     "tighter_repeat": {
+      "start_z": [
+       0.11,
+       0.11
+      ],
+      "solver_endpoint_z": [
+       0.8999999999999992,
+       0.8999999999999992
+      ],
+      "solver_endpoint_half_chi2": 4.831773044478697e-32,
+      "solver_endpoint_gradient_valid": true,
+      "observed_best_half_chi2": 4.831773044478697e-32,
+      "observed_best_z": [
+       0.8999999999999992,
+       0.8999999999999992
+      ],
+      "observed_best_gradient_valid": true,
+      "evaluation_count": 5,
+      "failed_evaluation_count": 0,
+      "success": true,
+      "status": 0,
+      "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL"
+     },
+     "candidate_best_vector": [
+      0.8999999999999992,
+      0.8999999999999992
+     ],
+     "candidate_best_z": [
+      0.8999999999999992,
+      0.8999999999999992
+     ],
+     "candidate_best_half_chi2": 4.831773044478697e-32,
+     "candidate_best_chi2": 9.663546088957394e-32,
+     "candidate_best_log_likelihood": -4.831773044478697e-32,
+     "candidate_best_gradient_z": [
+      -6.217248937900877e-17,
+      -6.217248937900877e-17
+     ],
+     "candidate_best_gradient_valid": true,
+     "candidate_best_projected_gradient": {
+      "valid": true,
+      "linf": 6.217248937900877e-17,
+      "l2": 8.792517768629141e-17,
+      "values": [
+       -6.217248937900877e-17,
+       -6.217248937900877e-17
+      ]
+     },
+     "candidate_scalar_residual_error": 1.0947644252537633e-47,
+     "candidate_direct_log_likelihood": -4.831773044478697e-32,
+     "candidate_implied_log_likelihood": -4.831773044478697e-32,
+     "candidate_direct_log_likelihood_error": 0.0,
+     "candidate_start_agreement": {
+      "finite_start_count": 3,
+      "original_start_count": 2,
+      "supporting_original_start_indices": [
+       1,
+       2
+      ],
+      "duplicate_original_start_indices": [],
+      "minimum_supporting_original_starts": 2,
+      "support_tolerance_log_likelihood": 0.1,
+      "support_passed": true
+     },
+     "candidate_acceptance_status": "unresolved_optimization"
+    }
+   }
   }
  ]
 }
