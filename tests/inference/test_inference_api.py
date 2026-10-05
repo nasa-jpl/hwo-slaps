@@ -318,3 +318,30 @@ def test_custom_mask_case_records_round_trip(prepared_forecast, tmp_path):
     record["data"]["shape"] = [41, 40]
     with pytest.raises(ValueError, match="custom mask shape differs from the recorded case data shape"):
         CaseResult.from_mapping(record)
+
+
+@pytest.mark.parametrize("fixed_shape", [[], ["lens.mass.mass.ell_comp_1"], ["lens.mass.mass.ell_comp_1", "lens.mass.mass.ell_comp_2"]],
+                         ids=["both-free", "one-free", "both-fixed"])
+def test_free_circular_isothermal_refuses_only_the_origin_gradient(fixed_shape, prepared_forecast_factory):
+    prepared = prepared_forecast_factory({"scene": {"lens": {"mass": {"mass": {"ell_comps": [0.0, 0.0]}}}},
+                                           "forecast": {"nuisances": {"fixed": fixed_shape}}})
+    case = prepare_case(prepared, prepared.hypothesis(1e8, (0.4, -0.6)), prepared.observation,
+                        fit=FitSpec(mode="fixed_template"), use_jax=True)
+    for role in ("smooth", "subhalo"):
+        model = case.model(role)
+        point = (model.truth - model.lower) / (model.upper - model.lower)
+        objective = case.objective(role)
+        assert np.isfinite(case.log_likelihood(role, model.truth))
+        assert np.all(np.isfinite(objective.residual(point)))
+        if len(fixed_shape) == 2:
+            value, gradient = objective.value_and_gradient(point)
+            assert np.isfinite(value) and np.all(np.isfinite(gradient))
+            continue
+        with pytest.raises(ValueError, match="Isothermal gradient is undefined at exactly ell_comps"):
+            objective.value_and_gradient(point)
+        free_shape = next(index for index, name in enumerate(model.parameter_names) if "lens.mass.ell_comps" in name)
+        for physical_shape in (1e-8, 0.02):
+            permitted = point.copy()
+            permitted[free_shape] = (physical_shape - model.lower[free_shape]) / (model.upper[free_shape] - model.lower[free_shape])
+            value, gradient = objective.value_and_gradient(permitted)
+            assert np.isfinite(value) and np.all(np.isfinite(gradient))
