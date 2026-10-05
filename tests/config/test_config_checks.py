@@ -125,13 +125,25 @@ RUN = Table((
     Key("grid", GRID, "Pixel grid.", {}),
     Key("tags", ListOf(Text()), "Free tags.", []),
 ), rules=(Rule("name is not bad", refuse_bad_name),))
+SOURCE = Table((
+    Key("effective_radius", Real(min=0, min_open=True), "Effective radius.", 1, "arcsec"),
+    Key("centre", Pair(Real()), "Centre.", (0, 0), "arcsec"),
+))
 
 
 def test_table_read_fills_defaults_and_rejects_unknown_and_missing_keys():
     values = RUN.read({"tags": ["a"], "name": "x"}, "")
     assert values == {"name": "x", "grid": {"shape": [10, 10], "pixel_scale_arcsec": 0.05}, "tags": ["a"]}
     assert list(values) == ["name", "grid", "tags"]
-    assert RUN.read(values, "") == values
+    assert repr(RUN.read(values, "")) == repr(values)
+    omitted = SOURCE.read({}, "")
+    assert repr(omitted) == repr({"effective_radius": 1.0, "centre": [0.0, 0.0]})
+    assert repr(SOURCE.read(omitted, "")) == repr(omitted)
+    assert repr(SOURCE.read({"effective_radius": 1.0, "centre": [0.0, 0.0]}, "")) == repr(omitted)
+    for key in (Key("effective_radius", Real(min=0, min_open=True), "", -5.0),
+                Key("effective_radius", Real(), "", None)):
+        with pytest.raises(TypeError, match="default of key 'effective_radius'"):
+            Table((key,))
     first = RUN.read({"name": "x"}, "")
     first["grid"]["shape"].append(3)
     first["tags"].append("mutated")

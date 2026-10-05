@@ -440,6 +440,21 @@ def _path_check(check: Any) -> bool:
     return isinstance(check, FilePath)
 
 
+def _normal_default(key: Key) -> Key:
+    """``key`` with its default in read form (so ``read`` is a fixed point), checked against its domain.
+
+    A non-null container default (``{}`` for a table) is read through at read time instead,
+    so nested defaults fill in and nested required keys are reported at the user's path.
+    """
+    if key.default is REQUIRED or (key.default is not None and _is_container(key.check)):
+        return key
+    try:
+        default = key.check(deepcopy(key.default), key.name)
+    except ConfigError as error:
+        raise TypeError(f"default of key {key.name!r} fails its own check: {error}") from error
+    return dataclasses.replace(key, default=default)
+
+
 def _merge_by_name(base: Any, overlay: Any, check_of: Callable[[Any], Any]) -> Any:
     """Overlay ``overlay`` onto ``base``: containers merge recursively, everything else replaces."""
     if not (isinstance(base, Mapping) and isinstance(overlay, Mapping)):
@@ -474,7 +489,11 @@ class _Container:
 
 @dataclass(frozen=True, eq=False)
 class Table(_Container):
-    """A mapping with a fixed key set, read and merged key by key."""
+    """A mapping with a fixed key set, read and merged key by key.
+
+    Defaults are stored in read form, and a default outside its key's domain is a TypeError
+    when the table is built.
+    """
 
     keys: tuple[Key, ...]
     exactly_one: tuple[tuple[str, ...], ...] = ()
@@ -482,7 +501,7 @@ class Table(_Container):
     doc: str = ""
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "keys", tuple(self.keys))
+        object.__setattr__(self, "keys", tuple(_normal_default(key) for key in self.keys))
         object.__setattr__(self, "exactly_one", tuple(tuple(group) for group in self.exactly_one))
         object.__setattr__(self, "rules", tuple(self.rules))
         by_name = {key.name: key for key in self.keys}
@@ -679,7 +698,7 @@ def dataclass_table(cls: type, *, docs: Mapping[str, str],
     """The key table of a Python-constructed settings dataclass, from its fields and defaults.
 
     Supported field types: bool, int, float, str, Literal of strings, X | None, tuple[X, ...]
-    (a list) and tuple[X, X] (a pair). Defaults enter the table in their read form (tuples as
+    (a list) and tuple[X, X] (a pair). The table stores defaults in their read form (tuples as
     lists, integers of float fields as floats). ``docs`` names every init field; ``units`` some.
     """
     if not (isinstance(cls, type) and dataclasses.is_dataclass(cls)):
@@ -697,13 +716,7 @@ def dataclass_table(cls: type, *, docs: Mapping[str, str],
             default = field.default_factory()
         else:
             default = REQUIRED
-        where = f"{cls.__name__}.{field.name}"
-        check = _annotation_check(hints[field.name], where)
-        if default is not REQUIRED:
-            try:
-                default = check(default, where)
-            except ConfigError as error:
-                raise TypeError(f"default of {where} fails its own check: {error}") from error
+        check = _annotation_check(hints[field.name], f"{cls.__name__}.{field.name}")
         keys.append(Key(field.name, check, docs[field.name], default, units.get(field.name)))
     return Table(tuple(keys))
 
