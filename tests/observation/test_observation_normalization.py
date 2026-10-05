@@ -122,10 +122,12 @@ def test_captured_table_seds_survive_file_removal_in_real_renderer_transport(min
                         "wavelength_unit": "nm", "quantity": "fnu"}
     second = deepcopy(component)
     second.update(centre=[0.04, -0.06], intensity=0.3)
+    second["sed"]["quantity"] = "flambda"
     minimal_mapping["scene"]["source"]["light"]["second"] = second
     with prepare_forecast(minimal_mapping) as serial, prepare_forecast(
             minimal_mapping, execution=Execution(reference_workers=2)) as prepared:
         renderer = pickle.loads(pickle.dumps(prepared.renderer))
+        assert tuple(serial.scene.light_groups) == ("source:light", "source:second")
         expected = serial.renderer.mean_adu(serial.scene, serial.psfs.truth_kernels)
         expected_bank = serial.engine.evaluate(serial.positions.positions_yx, [1.0e8])[0]
         pooled_bank = prepared.engine.evaluate(prepared.positions.positions_yx, [1.0e8])[0]
