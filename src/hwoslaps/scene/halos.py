@@ -15,8 +15,8 @@ paper code:
   perturbers) is the 8fa6209 scalar order, including the kpc round trip of the NFW scale
   radius and the km/s round trip of the SIS velocity dispersion. PARITY P1-P4 and the
   401-mass sweep fixture pin it.
-- ``halo_lensing_traced`` (freed fits, numpy or JAX arrays) is the 8fa6209 ``*_xp`` order,
-  without those round trips. PARITY N1 pins it.
+- ``halo_lensing_traced`` (freed fits, numpy or JAX arrays) is the order of the 8fa6209
+  array-namespace twins of those functions, without the round trips. PARITY N1 pins it.
 
 The two agree to one or two ulp.
 """
@@ -278,7 +278,7 @@ def halo_lensing(model: HaloModel, mass_msun: float, geometry: LensingGeometry, 
 
 def halo_lensing_traced(model: HaloModel, mass_msun: Any, geometry: LensingGeometry, *, reduced_h: float,
                         xp: Any) -> Mapping[str, Any]:
-    """AutoLens keyword arguments (centre excluded) in the 8fa6209 ``*_xp`` operation order (a pinned convention).
+    """AutoLens keyword arguments (centre excluded) in the operation order of the 8fa6209 freed fits (pinned).
 
     ``mass_msun`` may be a numpy or JAX array or tracer; nothing is range-checked here (freed
     fits check their mass support before tracing).
