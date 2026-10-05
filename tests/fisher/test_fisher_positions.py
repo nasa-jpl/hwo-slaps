@@ -5,6 +5,8 @@ Oracles: hand coordinate and lattice-index lists, the 41621de ladder perimeter
 evaluated by hand, and trigonometry on the ring.
 """
 
+import pickle
+
 import numpy as np
 import pytest
 
@@ -81,10 +83,14 @@ def test_selected_and_aperture_sets_keep_geometry():
     assert sparse.domain_radius_arcsec == layout.domain_radius_arcsec == np.hypot(2.0, 2.0)
     assert sparse.centre_yx == layout.centre_yx
     np.testing.assert_array_equal(sparse.grid.y_coords, layout.grid.y_coords)
-    for values in (sparse.positions_yx, sparse.cell_areas_arcsec2, sparse.boundary, sparse.grid.y_coords,
-                   sparse.grid.indices):
-        with pytest.raises(ValueError, match="read-only"):
-            values[0] = values[1]
+    restored = pickle.loads(pickle.dumps(sparse))
+    np.testing.assert_array_equal(restored.grid.indices, sparse.grid.indices)
+    np.testing.assert_array_equal(restored.boundary, sparse.boundary)
+    for copy in (sparse, restored):
+        for values in (copy.positions_yx, copy.cell_areas_arcsec2, copy.boundary, copy.grid.y_coords,
+                       copy.grid.x_coords, copy.grid.indices):
+            with pytest.raises(ValueError, match="read-only"):
+                values[0] = values[1]
     given = np.array([[0.5, 0.5], [1.0, 1.0]])
     explicit = explicit_positions(given, (0.0, 0.0))
     given[0, 0] = 9.0

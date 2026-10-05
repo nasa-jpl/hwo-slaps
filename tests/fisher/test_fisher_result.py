@@ -5,6 +5,8 @@ bank finisher printed for the same primaries (run-directory script
 ``probes/sta_literals.py``, W1-STA ledger).
 """
 
+import pickle
+
 import numpy as np
 import pytest
 
@@ -110,7 +112,11 @@ def test_result_arrays_are_read_only():
     profiled[0, 0] = 99.0
     hat[0, 0] = 99.0
     assert forecast.fisher_profiled[0, 0] == 2.0 and forecast.amplitude_hat[0, 0] == 0.5
+    restored = pickle.loads(pickle.dumps(forecast))
+    assert restored.provenance == forecast.provenance and restored.psf_relation == forecast.psf_relation
     for name in ("masses_msun", "fisher_raw", "fisher_profiled", "amplitude_hat", "amplitude_spurious",
                  "positions_yx"):
-        with pytest.raises(ValueError, match="read-only"):
-            getattr(forecast, name)[0] = 0.0
+        np.testing.assert_array_equal(getattr(restored, name), getattr(forecast, name))
+        for copy in (forecast, restored):
+            with pytest.raises(ValueError, match="read-only"):
+                getattr(copy, name)[0] = 0.0

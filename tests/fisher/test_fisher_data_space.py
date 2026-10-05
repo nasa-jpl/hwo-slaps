@@ -4,6 +4,8 @@ Oracles: hand pixel counts and hand radii at unit pixel scale, hand arrays for
 the S/N rule, and explicit inverse-covariance algebra on a hand covariance.
 """
 
+import pickle
+
 import numpy as np
 import pytest
 
@@ -121,6 +123,19 @@ def test_design_stacks_masked_images_as_row_major_columns():
         build_data_space(mask, np.ones((3, 2)), None)
     with pytest.raises(ValueError, match="covers 3 pixels"):
         DataSpace(mask, Whitener.from_sigma(np.ones(3)))
+
+
+def test_data_space_mask_is_a_read_only_copy_also_after_pickling():
+    mask = np.array([[True, False], [True, True]])
+    space = build_data_space(mask, np.ones((2, 2)), np.eye(4))
+    restored = pickle.loads(pickle.dumps(space))
+    mask[0, 1] = True
+    for copy in (space, restored):
+        np.testing.assert_array_equal(copy.mask, [[True, False], [True, True]])
+        np.testing.assert_array_equal(copy.whitener.cholesky_factor, np.eye(3))
+        for values in (copy.mask, copy.whitener.cholesky_factor):
+            with pytest.raises(ValueError, match="read-only"):
+                values[0, 0] = values[0, 1]
 
 
 @pytest.mark.parametrize("build, kind", [

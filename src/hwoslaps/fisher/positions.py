@@ -84,6 +84,11 @@ class GridIndex:
         object.__setattr__(self, "indices", _frozen(indices.astype(np.int64)))
         object.__setattr__(self, "spacing_arcsec", _positive(self.spacing_arcsec, "spacing_arcsec"))
 
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Unpickle through the constructor checks; numpy restores arrays writeable."""
+        self.__dict__.update(state)
+        self.__post_init__()
+
     @property
     def shape(self) -> tuple[int, int]:
         """Lattice shape ``(ny, nx)``."""
@@ -151,6 +156,11 @@ class PositionSet:
         object.__setattr__(self, "positions_yx", _frozen(positions))
         object.__setattr__(self, "centre_yx", centre)
         object.__setattr__(self, "domain_radius_arcsec", domain)
+
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Unpickle through the constructor checks; numpy restores arrays writeable."""
+        self.__dict__.update(state)
+        self.__post_init__()
 
     def __len__(self) -> int:
         return int(self.positions_yx.shape[0])

@@ -128,6 +128,11 @@ class Whitener:
         else:
             raise ValueError(f"whitener mode must be 'diagonal' or 'dense', got {self.mode!r}")
 
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Unpickle through the constructor checks; numpy restores arrays writeable."""
+        self.__dict__.update(state)
+        self.__post_init__()
+
     @classmethod
     def from_sigma(cls, sigma: ArrayLike) -> Whitener:
         """Diagonal whitener from 1-D, finite, strictly positive standard deviations."""
@@ -268,6 +273,11 @@ class SignalBankResult:
             if any(present) and not all(present):
                 raise ValueError(f"{', '.join(group)} are given together or not at all")
 
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Unpickle through the constructor checks; numpy restores arrays writeable."""
+        self.__dict__.update(state)
+        self.__post_init__()
+
     @property
     def size(self) -> int:
         """Number of signals."""
@@ -350,6 +360,12 @@ class ProfileLikelihoodWorkspace:
         self.normal_pinv: np.ndarray = pseudo_inverse
         self.nuisance_rank: int = rank
         self.condition_number: float = condition
+
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Unpickle with the stored arrays read-only again; numpy restores them writeable."""
+        self.__dict__.update(state)
+        self.nuisance_whitened.setflags(write=False)
+        self.normal_pinv.setflags(write=False)
 
     def evaluate_bank(self, signals_whitened: ArrayLike, *, data_whitened: ArrayLike | None = None,
                       bias_whitened: ArrayLike | None = None) -> SignalBankResult:

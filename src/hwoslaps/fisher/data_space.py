@@ -147,6 +147,11 @@ class DataSpace:
         frozen.setflags(write=False)
         object.__setattr__(self, "mask", frozen)
 
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Unpickle through the constructor checks; numpy restores arrays writeable."""
+        self.__dict__.update(state)
+        self.__post_init__()
+
     @property
     def pixel_count(self) -> int:
         """Number of masked pixels."""

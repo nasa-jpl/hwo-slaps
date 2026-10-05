@@ -93,6 +93,11 @@ class ForecastResult:
             object.__setattr__(self, name, json_ready(mapping))
         object.__setattr__(self, "masses_msun", _frozen(masses))
 
+    def __setstate__(self, state: dict[str, object]) -> None:
+        """Unpickle through the constructor checks; numpy restores arrays writeable."""
+        self.__dict__.update(state)
+        self.__post_init__()
+
     @property
     def positions_yx(self) -> np.ndarray:
         """``(n_positions, 2)`` evaluated positions."""

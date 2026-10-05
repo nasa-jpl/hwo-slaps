@@ -7,6 +7,7 @@ of the pseudo-inverse cutoff, and literals printed by the 974cee9
 ``probes/sta_literals.py``, W1-STA ledger).
 """
 
+import pickle
 from dataclasses import fields
 
 import numpy as np
@@ -246,6 +247,29 @@ def test_significantly_negative_profiled_information_raises():
     rounding = space.evaluate_reductions(BankReductions(raw=np.array([1.0]), cross=np.array([[1.0 + 1e-12, 0.0]]),
                                                         finite=np.array([True])))
     assert rounding.fisher_profiled[0] == 0.0
+
+
+def mismatched_bank():
+    space = workspace([[1.0, 0.0], [0.5, 2.0], [0.0, 1.0]], np.array([0.0, 0.5]))
+    return space.evaluate_bank(np.array([[1.0, 2.0, 3.0]]), data_whitened=np.array([[0.5, 1.0, 1.5]]),
+                               bias_whitened=np.ones(3))
+
+
+@pytest.mark.parametrize("build, names", [
+    (lambda: workspace([[1.0, 0.0], [0.5, 2.0], [0.0, 1.0]], np.array([0.0, 0.5])),
+     ("nuisance_whitened", "normal_pinv")),
+    (mismatched_bank, BANK_FIELDS),
+    (lambda: Whitener.from_sigma([0.5, 2.0]), ("sigma",)),
+    (lambda: Whitener.from_covariance([[4.0, 1.0], [1.0, 3.0]]), ("cholesky_factor",)),
+], ids=["workspace", "bank", "diagonal-whitener", "dense-whitener"])
+def test_stored_arrays_stay_read_only_after_pickling(build, names):
+    stored = build()
+    restored = pickle.loads(pickle.dumps(stored))
+    for name in names:
+        np.testing.assert_array_equal(getattr(restored, name), getattr(stored, name), err_msg=name)
+        for copy in (stored, restored):
+            with pytest.raises(ValueError, match="read-only"):
+                getattr(copy, name).flat[0] = 1.0
 
 
 @pytest.mark.parametrize("field", ["signals", "data", "bias", "design"])
