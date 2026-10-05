@@ -18,11 +18,12 @@ POWER_LAW = {"kind": "power_law", "c0": 20.0, "mass_pivot_msun": 1.0e8,
 
 
 @pytest.mark.parametrize("defect", ["config", "truth_kernel", "injection", "redshift", "support", "noisy_anchor",
-                                  "identity_kernel", "covariance"])
+                                  "identity_kernel", "covariance", "model_sis", "model_concentration"])
 def test_prepare_case_refuses_incoherent_inputs_before_any_backend_object(defect, prepared_forecast_factory,
                                                                          tiny_gaussian_kernel, tmp_path, monkeypatch):
     from hwoslaps.inference import api
     from hwoslaps.optics.kernels import DetectorPSF, KernelBinding
+    from hwoslaps.scene.halos import HaloModel, FixedConcentration
 
     prepared = prepared_forecast_factory()
     trial = prepared.hypothesis(1.0e8, (0.4, -0.6))
@@ -30,7 +31,8 @@ def test_prepare_case_refuses_incoherent_inputs_before_any_backend_object(defect
     messages = {"config": "configuration digests differ", "truth_kernel": "truth kernel binding differs",
                 "injection": "injects another hypothesis", "redshift": "configured hypothesis redshift",
                 "support": "outside fit support", "noisy_anchor": "requires an expected observation",
-                "identity_kernel": "1x1 model kernel", "covariance": "dense forecast noise covariance"}
+                "identity_kernel": "1x1 model kernel", "covariance": "dense forecast noise covariance",
+                "model_sis": "trial halo model recipe differs", "model_concentration": "trial halo model recipe differs"}
     if defect == "config":
         observation = dataclasses.replace(observation, config_digest="ff" * 32)
     elif defect == "truth_kernel":
@@ -51,6 +53,10 @@ def test_prepare_case_refuses_incoherent_inputs_before_any_backend_object(defect
         prepared = prepared_forecast_factory({"psf": {"model": {"kind": "kernel", "path": str(path),
                                                                "pixel_scale_arcsec": 0.05}}})
         observation = prepared.observation
+    elif defect == "model_sis":
+        trial = dataclasses.replace(trial, model=HaloModel("SIS", None, None))
+    elif defect == "model_concentration":
+        trial = dataclasses.replace(trial, model=HaloModel("NFW", FixedConcentration(5.0), None))
     elif defect == "covariance":
         path = tmp_path / "covariance.npy"
         small = prepared_forecast_factory({"scene": {"grid": {"shape": [15, 15]}}})
@@ -208,7 +214,7 @@ def test_supplied_session_is_borrowed_and_left_active(prepared_forecast, tmp_pat
         validate_nonlinear(prepared_forecast, trial, observation, fit=fit, sampler=sampler, sampler_seed=7,
                            session=session, output_dir=tmp_path / "outputs", case_id="first")
         assert session.active and {child.pid for child in multiprocessing.active_children()} == children
-        with pytest.raises(ValueError, match="starts"):
+        with pytest.raises(ValueError, match="separated samples.*refinement needs"):
             validate_nonlinear(prepared_forecast, trial, observation, fit=fit, sampler=dataclasses.replace(sampler, n_live_smooth=20, n_eff=200, n_like_max=2000), sampler_seed=8,
                                refine=RefineSettings(original_start_count=1000000),
                                session=session, output_dir=tmp_path / "outputs", case_id="second")

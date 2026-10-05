@@ -107,6 +107,8 @@ def _check_inputs(prepared: PreparedForecast, trial: Halo, observation: Observat
     redshift = spec.lens.redshift if spec.subhalo_redshift is None else spec.subhalo_redshift
     if trial.redshift != redshift:
         raise ValueError(f"trial redshift {trial.redshift} differs from configured hypothesis redshift {redshift}")
+    if trial.model != spec.subhalo:
+        raise ValueError("trial halo model recipe differs from the configured hypothesis model")
     if trial.source_redshift != spec.source.redshift or trial.cosmology != prepared.scene.cosmology:
         raise ValueError("trial source redshift or cosmology differs from the prepared scene")
     support = support_half_widths(tuple(observation.grid.shape), observation.pixel_scale_arcsec, kernel.shape)
