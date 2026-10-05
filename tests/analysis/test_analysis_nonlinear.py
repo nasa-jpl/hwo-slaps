@@ -287,16 +287,23 @@ def test_detection_agreement_counts_and_exclusions(event, expected_counts, exclu
     assert table.excluded == exclusions
 
 
-def test_agreement_reports_input_differences_and_scene_namespace(case_factory):
+@pytest.mark.parametrize(("comparison", "configuration", "expected_mismatches"), [
+    ("15" * 32, "16" * 32, 2), ("15" * 32, CONFIG_DIGEST, 2), (COMPARISON_DIGEST, "16" * 32, 0),
+])
+@pytest.mark.parametrize("claimed_unsupported", [False, True])
+def test_agreement_reports_input_differences_and_scene_namespace(comparison, configuration, expected_mismatches,
+                                                                  claimed_unsupported, case_factory):
+
     case = case_factory(12., forecast_q=12.)
     names = (SCENE_PARAMETER, "source.light.light.intensity", "observation.background_offset_adu", "psf.zernikes[4]")
     reference = dataclasses.replace(case.forecast_reference, nuisance_names=names, mask_digest="14" * 32,
-                                    comparison_digest="15" * 32, config_digest="16" * 32)
-    case = dataclasses.replace(case, forecast_reference=reference)
+                                    comparison_digest=comparison, config_digest=configuration)
+    fitted = (SCENE_PARAMETER, "observation.background_offset_adu", "psf.zernikes[4]") if claimed_unsupported else (SCENE_PARAMETER,)
+    case = dataclasses.replace(case, forecast_reference=reference, fitted_parameters=fitted)
     unresolved = dataclasses.replace(case, subhalo=_role("subhalo", -94., RoleStatus.UNRESOLVED))
     table = detection_agreement([(value, classify_case(value, _rule())) for value in (case, unresolved)])
     assert (table.both, table.excluded) == (1, {"unresolved": 1})
-    assert table.mask_mismatches == 2 and table.configuration_mismatches == 2
+    assert table.mask_mismatches == 2 and table.configuration_mismatches == expected_mismatches
     assert table.unfitted_forecast_nuisances == {"source.light.light.intensity": 2,
                                               "observation.background_offset_adu": 2, "psf.zernikes[4]": 2}
 
