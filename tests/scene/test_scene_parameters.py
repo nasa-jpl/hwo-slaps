@@ -4,6 +4,7 @@ import dataclasses
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from hwoslaps.config.checks import ConfigError
@@ -71,7 +72,11 @@ def test_with_parameter_replaces_one_scalar_without_reading_files(rich_scene):
     ("source.light.disk.ell_comp_2", 0.9945, "scene.source.light.disk.ell_comps"),
     ("source.light.clumps.size_scale", 0.0, "scene.source.light.clumps.size_scale"),
     ("lens.mass.main.centre_y", math.nan, "scene.lens.mass.main.centre[0]"),
-], ids=["einstein-radius-below-zero", "ellipticity-pair-at-the-clamp", "zero-size-scale", "centre-not-a-number"])
+    ("lens.mass.main.einstein_radius", True, "scene.lens.mass.main.einstein_radius"),
+    ("source.light.clumps.size_scale", np.bool_(True), "scene.source.light.clumps.size_scale"),
+    ("lens.mass.main.centre_x", "0.1", "scene.lens.mass.main.centre[1]"),
+], ids=["einstein-radius-below-zero", "ellipticity-pair-at-the-clamp", "zero-size-scale", "centre-not-a-number",
+        "boolean-radius", "numpy-boolean-size", "numeric-text-centre"])
 def test_with_parameter_refuses_values_outside_the_domain(rich_scene, name, value, path):
     with pytest.raises(ConfigError) as error:
         with_parameter(rich_scene, name, value)
