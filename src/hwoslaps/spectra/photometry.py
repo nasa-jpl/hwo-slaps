@@ -113,10 +113,10 @@ def rate_from_ab(magnitude: float, bandpass: Bandpass, area_m2: float, *,
         return area * ab_to_fnu_jy(magnitude) * JANSKY_SI / PLANCK_J_S * _positive_integral(None, bandpass)
     if sed is None:
         raise ValueError("a reference-band magnitude requires an SED")
+    reference = _positive_log_integral(sed, reference_band)
     instrument = _log_integral(sed, bandpass)
     if instrument == -math.inf:
         return 0.0
-    reference = _positive_log_integral(sed, reference_band)
     rate = (math.log(area) + math.log(ab_to_fnu_jy(magnitude)) + math.log(JANSKY_SI) - math.log(PLANCK_J_S)
             + _positive_log_integral(None, reference_band) + instrument - reference)
     return _positive_from_log(rate, "reference-band detected rate")
@@ -139,6 +139,8 @@ def effective_wavelength_m(sed: SED, bandpass: Bandpass) -> float:
 
 
 def band_mean_throughput(bandpass: Bandpass, sed: SED | None = None) -> float:
-    numerator = _positive_log_integral(sed, bandpass)
     denominator = _positive_log_integral(sed, bandpass, response=False)
+    numerator = _log_integral(sed, bandpass)
+    if numerator == -math.inf:
+        return 0.0
     return _positive_from_log(numerator - denominator, "band mean throughput")

@@ -112,21 +112,29 @@ def test_grouped_monochromatic_scene_keeps_real_flux_and_nuisance_paths(minimal_
     np.testing.assert_allclose(jax.fisher_profiled, actual.fisher_profiled, rtol=5.0e-6)
 
 
-def test_captured_table_seds_survive_file_removal_in_real_renderer_transport(minimal_mapping, tmp_path):
-    from hwoslaps.fisher.api import prepare_forecast
+@pytest.mark.parametrize("workers", [1, 2])
+def test_captured_table_seds_survive_file_removal_in_real_renderer_transport(minimal_mapping, tmp_path, workers):
+    from hwoslaps.fisher.api import Execution, prepare_forecast
 
     path = tmp_path / "sed.npz"
     np.savez(path, wave=[400.0, 500.0, 600.0], shape=[0.5, 1.0, 0.8])
     component = minimal_mapping["scene"]["source"]["light"]["light"]
     component["sed"] = {"kind": "table", "path": str(path), "wavelength_key": "wave", "value_key": "shape",
                         "wavelength_unit": "nm", "quantity": "fnu"}
-    with prepare_forecast(minimal_mapping) as prepared:
+    second = deepcopy(component)
+    second.update(centre=[0.04, -0.06], intensity=0.3)
+    minimal_mapping["scene"]["source"]["light"]["second"] = second
+    with prepare_forecast(minimal_mapping, execution=Execution(reference_workers=workers)) as prepared:
         renderer = pickle.loads(pickle.dumps(prepared.renderer))
         expected = renderer.mean_adu(renderer.scene(), prepared.psfs.truth_kernels)
+        expected_bank = prepared.engine.evaluate(prepared.positions.positions_yx, [1.0e8])[0]
         path.unlink()
         actual = renderer.mean_adu(renderer.scene(), prepared.psfs.truth_kernels)
+        actual_bank = prepared.engine.evaluate(prepared.positions.positions_yx, [1.0e8])[0]
         np.testing.assert_array_equal(actual, expected)
-        assert tuple(renderer.loaded_seds) == ("source.light",)
+        np.testing.assert_array_equal(actual_bank.fisher_raw, expected_bank.fisher_raw)
+        np.testing.assert_array_equal(actual_bank.fisher_profiled, expected_bank.fisher_profiled)
+        assert tuple(renderer.loaded_seds) == ("source.light", "source.second")
         with pytest.raises(TypeError):
             renderer.loaded_seds["source.light"] = None
         with pytest.raises(FileNotFoundError):

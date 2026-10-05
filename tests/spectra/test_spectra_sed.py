@@ -18,11 +18,11 @@ def test_analytic_sed_shapes_follow_frequency_convention(mapping, expected):
     assert sed.knots_m().size == 0
 
 
-@pytest.mark.parametrize("frame", ["observed", "rest"])
-def test_table_flambda_conversion_and_observed_knots(spectral_file, frame):
+@pytest.mark.parametrize("frame,redshift", [("observed", 0.5), ("rest", 0.5), ("rest", 0.3), ("rest", 0.7)])
+def test_table_flambda_conversion_and_observed_knots(spectral_file, frame, redshift):
     table = spectral_file([300.0, 400.0, 500.0], 1.0 / (np.array([300.0, 400.0, 500.0]) / 1.0e9)**2)
-    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": "flambda", "frame": frame}, "sed"), redshift=0.5)
-    factor = 1.5 if frame == "rest" else 1.0
+    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": "flambda", "frame": frame}, "sed"), redshift=redshift)
+    factor = 1.0+redshift if frame == "rest" else 1.0
     observed = np.array([300.0, 400.0, 500.0]) / 1.0e9 * factor
     np.testing.assert_allclose(sed.knots_m(), observed, rtol=1.0e-15)
     np.testing.assert_allclose(sed.fnu(observed), 1.0, rtol=1.0e-12)
