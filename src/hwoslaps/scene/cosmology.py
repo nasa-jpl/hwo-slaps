@@ -3,10 +3,10 @@
 One ``Cosmology`` value serves a preparation; every consumer receives the same object, so the
 AutoGalaxy distance cache and the per-redshift-pair geometries are computed once.
 
-``LensingGeometry`` follows the 8fa6209 scalar operation order. Its Hubble rate omits
-radiation and massive neutrinos, ``H(z) = H0 sqrt(Om0 (1 + z)^3 + (1 - Om0))``, while the
+``LensingGeometry`` follows the scalar operation order of the RASTI-26-183 paper code. Its Hubble
+rate omits radiation and massive neutrinos, ``H(z) = H0 sqrt(Om0 (1 + z)^3 + (1 - Om0))``, while the
 distances of the same AutoGalaxy object include them (E(0.2) is low by 4.5e-4 for Planck15).
-This is the convention of the RASTI-26-183 paper path; ``Cosmology.to_mapping`` records it as
+This is the convention of the paper path; ``Cosmology.to_mapping`` records it as
 ``rho_crit_convention: "matter_lambda"``.
 """
 

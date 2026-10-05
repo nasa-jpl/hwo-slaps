@@ -9,13 +9,13 @@ Mass definitions: ``M200c`` (SIS and NFW, 200 rho_crit at the halo redshift, rho
 convention of ``scene.cosmology``) and ``point_mass`` (the total mass of a point lens).
 
 The lensing scales are evaluated in two operation orders, each a pinned convention of the
-paper code:
+RASTI-26-183 paper code:
 
 - ``halo_lensing`` (concrete masses: truth scenes, forecast engines, fixed-template fits,
-  perturbers) is the 8fa6209 scalar order, including the kpc round trip of the NFW scale
+  perturbers) is the scalar order, including the kpc round trip of the NFW scale
   radius and the km/s round trip of the SIS velocity dispersion. PARITY P1-P4 and the
   401-mass sweep fixture pin it.
-- ``halo_lensing_traced`` (freed fits, numpy or JAX arrays) is the order of the 8fa6209
+- ``halo_lensing_traced`` (freed fits, numpy or JAX arrays) is the order of the
   array-namespace twins of those functions, without the round trips. PARITY N1 pins it.
 
 The two agree to one or two ulp.
@@ -252,7 +252,7 @@ def _check_mass_domain(model: HaloModel, mass_msun: float) -> None:
 
 
 def halo_lensing(model: HaloModel, mass_msun: float, geometry: LensingGeometry, *, reduced_h: float) -> HaloLensing:
-    """Lensing scales of a halo of concrete mass, in the 8fa6209 scalar operation order (a pinned convention)."""
+    """Lensing scales of a halo of concrete mass, in the scalar operation order of the paper code (pinned)."""
     mass = _positive(mass_msun, "mass_msun")
     _check_mass_domain(model, mass)
     if model.type == "PointMass":
@@ -284,7 +284,7 @@ def halo_lensing(model: HaloModel, mass_msun: float, geometry: LensingGeometry, 
 
 def halo_lensing_traced(model: HaloModel, mass_msun: Any, geometry: LensingGeometry, *, reduced_h: float,
                         xp: Any) -> Mapping[str, Any]:
-    """AutoLens keyword arguments (centre excluded) in the operation order of the 8fa6209 freed fits (pinned).
+    """AutoLens keyword arguments (centre excluded), in the operation order of the paper's freed fits (pinned).
 
     ``mass_msun`` may be a numpy or JAX array or tracer; nothing is range-checked here (freed
     fits check their mass support before tracing).

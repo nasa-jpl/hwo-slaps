@@ -1,6 +1,6 @@
 """The AutoGalaxy light profile of an image asset (backend glue: importing it loads AutoGalaxy).
 
-Numerics moved unchanged from 8fa6209 ``lensing/image_source.ImageSource``: the numpy path
+The image-source numerics of the RASTI-26-183 paper code, unchanged: the numpy path
 interpolates with a linear ``RectBivariateSpline`` over the one-pixel zero pad, the array
 namespace path (JAX fits) with the explicit bilinear expression. Both are paper paths.
 """

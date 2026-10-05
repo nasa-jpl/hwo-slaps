@@ -14,7 +14,7 @@ The tracer receives the galaxies in this order and groups them into planes by re
 
 Every light image is the block mean of the light on the over-sampled grid (detected e-/s
 per pixel sample). A scene with one source light group and no lens light is rendered by
-``tracer.image_2d_from``, the 8fa6209 route the paper anchors pin.
+``tracer.image_2d_from``, the route of the RASTI-26-183 paper code that the paper anchors pin.
 """
 
 from __future__ import annotations
