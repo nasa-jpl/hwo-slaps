@@ -1,23 +1,9 @@
-"""Fixtures of the optics lane: the paper kernel digest format and small pupil and optics mappings.
+"""Fixtures of the optics lane: small pupil and optics mappings.
 
 Mappings are returned fresh by each fixture, so a test may edit its copy.
 """
 
-import hashlib
-
-import numpy as np
 import pytest
-
-
-def _paper_kernel_digest(values):
-    array = np.ascontiguousarray(np.asarray(values, dtype=np.float64))
-    return hashlib.sha256(f"{array.shape[0]}x{array.shape[1]}:".encode("ascii") + array.tobytes()).hexdigest()
-
-
-@pytest.fixture
-def paper_kernel_digest():
-    """``sha256(b"<ny>x<nx>:" + float64 C bytes)``, the kernel digest of the paper code and its parity manifest."""
-    return _paper_kernel_digest
 
 
 @pytest.fixture
