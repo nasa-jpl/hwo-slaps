@@ -340,6 +340,25 @@ def test_projected_gradient_ignores_outward_components_at_active_bounds(box_obje
     assert outcome.record["candidate_best_projected_gradient"]["values"] == [0.0, 0.0]
     assert outcome.projected_gradient_linf == 0.0
 
+    # A finite nuisance box retains a likelihood penalty absent from unrestricted projection.
+    from hwoslaps.fisher.statistics import ProfileLikelihoodWorkspace
+
+    workspace = ProfileLikelihoodWorkspace(np.array([[1.0], [0.0]]), np.zeros(1), ["common"])
+    unrestricted_q = workspace.evaluate_bank([[3.0, 4.0]]).q_asimov[0]
+    assert unrestricted_q == pytest.approx(16.0)
+    residual_half = lambda x: 0.5 * ((3.0 - x[0])**2 + 16.0)
+    residual_gradient = lambda x: np.array([x[0] - 3.0])
+    lower, upper = [-1.0], [1.0]
+    points = [[value] for value in np.linspace(-0.9, 0.9, len(ACCEPT_POINTS))]
+    bounded = refine(starts_from(points, lower, upper, -residual_half(np.asarray(points[0]))),
+                     box_objective(lower, upper, residual_half, residual_gradient),
+                     RefineSettings(maxiter=100, repeat_maxiter=100))
+    assert bounded.acceptance_status is RoleStatus.ACCEPTED
+    assert bounded.best_vector == (1.0,)
+    bounded_q = -2.0 * bounded.best_log_likelihood
+    assert bounded_q == pytest.approx(20.0), "finite nuisance box must retain its likelihood penalty"
+    assert bounded_q - unrestricted_q == pytest.approx(4.0)
+
 
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 def test_refinement_reproduces_the_8fa6209_records(case, tmp_path, box_objective):
