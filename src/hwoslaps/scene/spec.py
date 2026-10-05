@@ -31,7 +31,7 @@ from ..spectra.bandpass import BANDPASS_TABLE, BandpassSpec, parse_bandpass
 from ..spectra.sed import SED, SED_TABLE, SEDSpec, build_sed, parse_sed
 from .halos import HaloModel, MOLINE2017_MASS_RANGE_MSUN, halo_model_from_values, halo_model_table
 from .image_source import frozen_value
-from .perturbers import PERTURBERS_TABLE, PerturberSpec, perturbers_from_values
+from .perturbers import PERTURBERS_TABLE, PerturberSpec, check_population_context, perturbers_from_values
 from .profiles import PROFILE_TYPES
 from .subhalo import INJECTION_TABLE, InjectionSpec, injection_from_values
 
@@ -276,6 +276,8 @@ def _check_halos(values: Mapping[str, Any], path: str) -> None:
             _check_moline_mass(halo, halo["mass_msun"], f"{where}.mass_msun")
     if values["injection"] is not None:
         _check_moline_mass(values["subhalo"], values["injection"]["mass_msun"], f"{path}.injection.mass_msun")
+    check_population_context(values["perturbers"]["populations"], f"{path}.perturbers.populations",
+                             lens_redshift=lens_redshift, source_redshift=source_redshift)
 
 
 def _check_radius_reference(values: Mapping[str, Any], path: str) -> None:
