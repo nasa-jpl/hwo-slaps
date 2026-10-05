@@ -8,7 +8,9 @@ Coordinates are ``(y, x)`` in arcseconds. Layouts:
   radius in the closed annulus ``[inner, outer]``. Each node carries the cell
   area ``spacing * spacing`` and a boundary flag: an evaluated node is on the
   boundary when one of its four lattice neighbours is outside the lattice or
-  not evaluated, which on a full square is rows and columns 0 and -1.
+  not evaluated, which on a full square is rows and columns 0 and -1. A subset
+  keeps the flags only while it holds every boundary node of its layout, so a
+  reduction never reads an edge it did not evaluate as unclipped.
 - ``ring``: ``count`` positions at angles ``360 k / count`` degrees, measured
   from +x toward +y, at radius ``radius + offset`` about the lens centre.
 - ``explicit``: given positions, finite and without duplicate rows.
@@ -101,8 +103,9 @@ class GridIndex:
 class PositionSet:
     """Evaluated positions with their layout geometry; arrays are read-only.
 
-    Grid sets carry cell areas, boundary flags and the lattice index; ring and
-    explicit sets carry none of them.
+    Grid sets carry cell areas and the lattice index, and boundary flags while
+    they hold every boundary node of their layout (``boundary`` is None for a
+    subset that dropped one); ring and explicit sets carry none of them.
     """
 
     kind: Literal["grid", "ring", "explicit"]
@@ -122,19 +125,20 @@ class PositionSet:
         domain = float(self.domain_radius_arcsec)
         if not np.isfinite(domain) or domain < float(np.max(_radii(positions, centre))):
             raise ValueError(f"domain_radius_arcsec {self.domain_radius_arcsec!r} does not contain every position")
-        geometry = (self.cell_areas_arcsec2, self.boundary, self.grid)
         if self.kind != "grid":
-            if any(value is not None for value in geometry):
+            if any(value is not None for value in (self.cell_areas_arcsec2, self.boundary, self.grid)):
                 raise ValueError(f"a {self.kind} set has no cell areas, boundary or lattice")
         else:
-            if any(value is None for value in geometry):
-                raise ValueError("a grid set needs cell areas, boundary flags and its lattice")
+            if self.cell_areas_arcsec2 is None or self.grid is None:
+                raise ValueError("a grid set needs cell areas and its lattice")
             areas = np.asarray(self.cell_areas_arcsec2, dtype=float)
             if areas.shape != (count,) or not np.all(np.isfinite(areas)) or np.any(areas <= 0.0):
                 raise ValueError(f"cell_areas_arcsec2 must hold {count} positive finite areas")
-            boundary = np.asarray(self.boundary)
-            if boundary.dtype != bool or boundary.shape != (count,):
-                raise ValueError(f"boundary must be a boolean vector of length {count}")
+            if self.boundary is not None:
+                boundary = np.asarray(self.boundary)
+                if boundary.dtype != bool or boundary.shape != (count,):
+                    raise ValueError(f"boundary must be a boolean vector of length {count}")
+                object.__setattr__(self, "boundary", _frozen(boundary))
             lattice = self.grid
             if not isinstance(lattice, GridIndex) or lattice.indices.shape[0] != count:
                 raise ValueError(f"grid must be a GridIndex with {count} lattice indices")
@@ -143,7 +147,6 @@ class PositionSet:
             if not np.array_equal(nodes, positions):
                 raise ValueError("grid positions must be the lattice nodes their indices name")
             object.__setattr__(self, "cell_areas_arcsec2", _frozen(areas))
-            object.__setattr__(self, "boundary", _frozen(boundary))
         object.__setattr__(self, "positions_yx", _frozen(positions))
         object.__setattr__(self, "centre_yx", centre)
         object.__setattr__(self, "domain_radius_arcsec", domain)
@@ -163,7 +166,8 @@ class PositionSet:
         """The positions where ``keep`` is true, with their areas, boundary flags and lattice rows.
 
         The centre and the domain radius are kept, so a subset evaluates on the
-        radial domain of the full layout.
+        radial domain of the full layout. The boundary flags are kept only when
+        ``keep`` holds every boundary node.
         """
         mask = np.asarray(keep)
         if mask.dtype != bool or mask.shape != (len(self),):
@@ -174,13 +178,16 @@ class PositionSet:
         if self.grid is not None:
             lattice = GridIndex(self.grid.y_coords, self.grid.x_coords, self.grid.indices[mask],
                                 self.grid.spacing_arcsec)
+        boundary = None
+        if self.boundary is not None and not np.any(self.boundary & ~mask):
+            boundary = self.boundary[mask]
         return PositionSet(
             kind=self.kind,
             positions_yx=self.positions_yx[mask],
             centre_yx=self.centre_yx,
             domain_radius_arcsec=self.domain_radius_arcsec,
             cell_areas_arcsec2=None if self.cell_areas_arcsec2 is None else self.cell_areas_arcsec2[mask],
-            boundary=None if self.boundary is None else self.boundary[mask],
+            boundary=boundary,
             grid=lattice,
         )
 
@@ -193,7 +200,7 @@ class PositionSet:
                              f"about {tuple(centre_yx)}")
         if include_boundary:
             if self.boundary is None:
-                raise ValueError(f"a {self.kind} set has no boundary to include")
+                raise ValueError(f"this {self.kind} set has no boundary flags to include")
             inside = inside | self.boundary
         return self.select(inside)
 

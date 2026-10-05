@@ -10,13 +10,16 @@
   layouts only).
 - ``boundary_detectable``: a detection on any boundary node of the layout,
   selected or not. The detectable region then reaches the lattice edge, so the
-  area of a larger domain could be larger.
+  area of a larger domain could be larger. It exists only when the result
+  holds every boundary node of its layout; otherwise clipping is unknown and
+  it is None.
 
 Statistics, and the fitted amplitudes of mismatch metrics, must be finite at
 every selected and boundary position. An aperture estimand on a grid is
 ``summarize(result, q_threshold=T, selection=aperture_selection(result,
-centre_yx=c, radius_arcsec=r))``; the boundary flag then reports whether the
-lattice edge clipped the detections.
+centre_yx=c, radius_arcsec=r))`` on the full layout or on its
+``aperture(..., include_boundary=True)`` subset; the boundary flag then
+reports whether the lattice edge clipped the detections.
 """
 
 from __future__ import annotations

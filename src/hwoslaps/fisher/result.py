@@ -105,7 +105,7 @@ class ForecastResult:
 
     @property
     def boundary(self) -> np.ndarray | None:
-        """Boundary flag of each position (grid layouts)."""
+        """Boundary flag of each position (grid layouts holding every boundary node)."""
         return self.positions.boundary
 
     @property

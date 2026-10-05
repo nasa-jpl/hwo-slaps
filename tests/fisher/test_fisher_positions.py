@@ -67,6 +67,9 @@ def test_selected_and_aperture_sets_keep_geometry():
     exact = layout.aperture((0.0, 0.0), 1.0, include_boundary=False)
     assert len(exact) == 5
     assert exact.domain_radius_arcsec == layout.domain_radius_arcsec
+    assert exact.boundary is None
+    with pytest.raises(ValueError, match="no boundary flags"):
+        exact.aperture((0.0, 0.0), 1.0, include_boundary=True)
     assert len(layout.aperture((0.0, 0.0), np.nextafter(1.0, 0.0), include_boundary=False)) == 1
     sparse = layout.aperture((0.0, 0.0), 1.0, include_boundary=True)
     assert len(sparse) == 21

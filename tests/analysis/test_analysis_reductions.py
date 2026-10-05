@@ -34,7 +34,8 @@ def test_summary_reproduces_paper_rung_metrics():
     below[0, 0], below[1, 1], below[2, 2] = 50.0, 999.0, 7.0
     inside = below.copy()
     inside[2, 3], inside[1, 2] = 12.0, 30.0
-    ladder = forecast(lattice(1.0, 2.0), np.stack((below.reshape(-1), inside.reshape(-1))))
+    values = np.stack((below.reshape(-1), inside.reshape(-1)))
+    ladder = forecast(lattice(1.0, 2.0), values)
     selection = aperture_selection(ladder, centre_yx=(0.0, 0.0), radius_arcsec=1.0)
     summary = summarize(ladder, q_threshold=10.0, selection=selection)
     assert summary.selected_count == 5 and summary.metric == "q_asimov" and summary.q_threshold == 10.0
@@ -44,6 +45,17 @@ def test_summary_reproduces_paper_rung_metrics():
     np.testing.assert_array_equal(summary.detectable_fraction, [0.0, 2 / 5])
     np.testing.assert_array_equal(summary.boundary_detectable, [True, True])
     np.testing.assert_array_equal(summary.masses_msun, ladder.masses_msun)
+
+    disc = ladder.positions.within((0.0, 0.0), 1.0)
+    sparse = forecast(ladder.positions.aperture((0.0, 0.0), 1.0, include_boundary=True),
+                      values[:, disc | ladder.boundary])
+    sparse_summary = summarize(sparse, q_threshold=10.0,
+                               selection=aperture_selection(sparse, centre_yx=(0.0, 0.0), radius_arcsec=1.0))
+    for name in ("q_max", "detectable_count", "detectable_area_arcsec2", "detectable_fraction",
+                 "boundary_detectable"):
+        np.testing.assert_array_equal(getattr(sparse_summary, name), getattr(summary, name), err_msg=name)
+    disc_only = forecast(ladder.positions.aperture((0.0, 0.0), 1.0, include_boundary=False), values[:, disc])
+    assert summarize(disc_only, q_threshold=10.0).boundary_detectable is None
 
     small = forecast(lattice(0.5, 0.5), np.stack((np.arange(9.0), np.arange(9.0) + 5.0)))
     everything = summarize(small, q_threshold=10.0,
