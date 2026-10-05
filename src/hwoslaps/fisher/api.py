@@ -97,7 +97,7 @@ class PreparedForecast:
     def validate_identity(self) -> None:
         for side, binding in (("truth", self.psfs.truth_kernels), ("model", self.psfs.model_kernels)):
             recorded = self.record[side + "_kernels"]
-            if binding.to_mapping() != recorded:
+            if binding.to_mapping() != json_ready(recorded):
                 raise ValueError(f"the {side} kernel changed; prepare the forecast again")
             for index, kernel in enumerate(binding.kernels):
                 digest = array_digest(np.asarray(kernel.convolver().kernel.native))
