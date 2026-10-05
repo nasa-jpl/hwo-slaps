@@ -138,9 +138,15 @@ def test_prepared_kernel_buffers_cannot_change_identity(minimal_mapping, changed
 
     with prepare_forecast(minimal_mapping) as prepared:
         kernel = prepared.psfs.truth_kernels.single
-        buffer = kernel.kernel if changed == "kernel" else np.asarray(kernel.convolver().kernel.native)
-        buffer.setflags(write=True)
-        buffer[3, 3] += 0.01
+        if changed == "kernel":
+            buffer = kernel.kernel
+            buffer.setflags(write=True)
+            buffer[3, 3] += 0.01
+        else:
+            import autoarray as aa
+            buffer = np.array(kernel.convolver().kernel.native)
+            buffer[3, 3] += 0.01
+            kernel.convolver().kernel = aa.Array2D.no_mask(values=buffer, pixel_scales=kernel.pixel_scale_arcsec)
         with pytest.raises(ValueError, match="truth.*kernel.*changed"):
             forecast(prepared, masses_msun=[1.0e8])
         with pytest.raises(TypeError):
