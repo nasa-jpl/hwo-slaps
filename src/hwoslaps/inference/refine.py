@@ -15,8 +15,8 @@ accepted (``accepted_repeatable_profile``) only when all six gates hold:
 - ``incumbent``: the sampler maximum evaluates, the best is not worse than it, its direct value
   is consistent and equals the sampler's saved likelihood within the same tolerance.
 
-The gates certify a repeatable maximum, not stationarity; the projected gradient at the best is
-recorded beside them. numpy and scipy only.
+The gates certify that the maximum repeats; how far it lies from stationarity is recorded beside
+them as the projected gradient at the best. numpy and scipy only.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -122,39 +123,64 @@ def _check_start(start: RefineStart, objective: BoxObjective) -> None:
                          "the objective was not evaluated")
 
 
-def _run_start(start: RefineStart, objective: BoxObjective, settings: RefineSettings) -> dict[str, Any]:
-    z0 = np.asarray(start.normalized, dtype=float)
-    x0 = np.asarray(start.physical, dtype=float)
-    state = _empty_state()
-
+def _tracker(objective: BoxObjective, state: dict[str, Any], *,
+             count_failures: bool) -> Callable[[np.ndarray], tuple[float, np.ndarray]]:
+    """``objective.value_and_gradient`` counting its evaluations and keeping the best finite one in ``state``."""
     def tracked(z: np.ndarray) -> tuple[float, np.ndarray]:
         state["evaluation_count"] += 1
         try:
             value, gradient = objective.value_and_gradient(np.asarray(z, dtype=float))
         except Exception:
-            state["failed_evaluation_count"] += 1
+            if count_failures:
+                state["failed_evaluation_count"] += 1
             raise
         _record_best_finite(state, z, value, gradient, objective.to_physical(z))
         return value, gradient
+    return tracked
 
-    solver_result = None
-    exception = None
-    endpoint_z = None
-    endpoint_value = None
-    endpoint_gradient = None
-    start_value = None
+
+@dataclass(frozen=True)
+class _Solve:
+    first_value: Any
+    result: Any
+    endpoint_z: np.ndarray | None
+    endpoint_value: Any
+    endpoint_gradient: Any
+    exception: str | None
+
+    @property
+    def endpoint_gradient_finite(self) -> bool:
+        return self.endpoint_gradient is not None and bool(np.all(np.isfinite(np.asarray(self.endpoint_gradient))))
+
+    @property
+    def message(self) -> str | None:
+        return self.exception if self.result is None else str(self.result.message)
+
+
+def _solve(evaluate: Callable[[np.ndarray], tuple[float, np.ndarray]], z0: np.ndarray, *, maxiter: int,
+           ftol: float, gtol: float, maxls: int) -> _Solve:
+    """Evaluate ``z0``, run bounded L-BFGS-B from it and evaluate its endpoint."""
+    first_value = result = endpoint_z = endpoint_value = endpoint_gradient = exception = None
     try:
-        start_value, _ = tracked(z0)
-        start_value = float(start_value) if np.isfinite(start_value) else None
-        solver_result = scipy.optimize.minimize(
-            tracked, z0, method="L-BFGS-B", jac=True, bounds=[(0.0, 1.0)] * z0.size,
-            options={"maxiter": int(settings.maxiter), "ftol": float(settings.ftol), "gtol": float(settings.gtol),
-                     "maxls": int(settings.maxls)})
-        endpoint_z = np.asarray(solver_result.x, dtype=float)
-        endpoint_value, endpoint_gradient = tracked(endpoint_z)
-    except Exception as error:  # one start's numerical failure leaves that run without an endpoint
+        first_value, _ = evaluate(z0)
+        result = scipy.optimize.minimize(
+            evaluate, z0, method="L-BFGS-B", jac=True, bounds=[(0.0, 1.0)] * z0.size,
+            options={"maxiter": int(maxiter), "ftol": float(ftol), "gtol": float(gtol), "maxls": int(maxls)})
+        endpoint_z = np.asarray(result.x, dtype=float)
+        endpoint_value, endpoint_gradient = evaluate(endpoint_z)
+    except Exception as error:  # a numerical failure leaves the run without an endpoint
         exception = f"{type(error).__name__}: {error}"
-    endpoint_gradient_finite = endpoint_gradient is not None and bool(np.all(np.isfinite(endpoint_gradient)))
+    return _Solve(first_value=first_value, result=result, endpoint_z=endpoint_z, endpoint_value=endpoint_value,
+                  endpoint_gradient=endpoint_gradient, exception=exception)
+
+
+def _run_start(start: RefineStart, objective: BoxObjective, settings: RefineSettings) -> dict[str, Any]:
+    z0 = np.asarray(start.normalized, dtype=float)
+    x0 = np.asarray(start.physical, dtype=float)
+    state = _empty_state()
+    run = _solve(_tracker(objective, state, count_failures=True), z0, maxiter=settings.maxiter, ftol=settings.ftol,
+                 gtol=settings.gtol, maxls=settings.maxls)
+    first, result, endpoint_z = run.first_value, run.result, run.endpoint_z
     logger.info("refinement start %d: best half chi-square %r after %d evaluations", start.index,
                 state["best_half_chi2"], state["evaluation_count"])
     return {
@@ -162,15 +188,16 @@ def _run_start(start: RefineStart, objective: BoxObjective, settings: RefineSett
         "start_provenance": start.to_mapping(),
         "start_z": z0.tolist(),
         "start_x": x0.tolist(),
-        "start_half_chi2": start_value,
+        "start_half_chi2": None if first is None or not np.isfinite(first) else float(first),
         "solver_endpoint_z": None if endpoint_z is None else endpoint_z.tolist(),
         "solver_endpoint_x": None if endpoint_z is None else objective.to_physical(endpoint_z).tolist(),
-        "solver_endpoint_half_chi2": endpoint_value,
-        "solver_endpoint_chi2": None if endpoint_value is None else 2.0 * endpoint_value,
-        "solver_endpoint_gradient_z": np.asarray(endpoint_gradient).tolist() if endpoint_gradient_finite else None,
-        "solver_endpoint_gradient_valid": endpoint_gradient_finite,
+        "solver_endpoint_half_chi2": run.endpoint_value,
+        "solver_endpoint_chi2": None if run.endpoint_value is None else 2.0 * run.endpoint_value,
+        "solver_endpoint_gradient_z": np.asarray(run.endpoint_gradient).tolist() if run.endpoint_gradient_finite
+        else None,
+        "solver_endpoint_gradient_valid": run.endpoint_gradient_finite,
         "solver_endpoint_projected_gradient": None if endpoint_z is None
-        else _projected_gradient(endpoint_gradient, endpoint_z),
+        else _projected_gradient(run.endpoint_gradient, endpoint_z),
         "observed_best_z": state["best_z"],
         "observed_best_x": state["best_x"],
         "observed_best_half_chi2": state["best_half_chi2"],
@@ -182,13 +209,38 @@ def _run_start(start: RefineStart, objective: BoxObjective, settings: RefineSett
         else _projected_gradient(state["best_gradient"], state["best_z"]),
         "evaluation_count": state["evaluation_count"],
         "failed_evaluation_count": state["failed_evaluation_count"],
-        "success": None if solver_result is None else bool(solver_result.success),
-        "status": None if solver_result is None else int(solver_result.status),
-        "message": exception if solver_result is None else str(solver_result.message),
-        "nit": 0 if solver_result is None else int(solver_result.nit),
+        "success": None if result is None else bool(result.success),
+        "status": None if result is None else int(result.status),
+        "message": run.message,
+        "nit": 0 if result is None else int(result.nit),
         "nfev": state["evaluation_count"],
-        "njev": 0 if solver_result is None else int(solver_result.njev),
+        "njev": 0 if result is None else int(result.njev),
     }
+
+
+def _run_repeat(best_run: Mapping[str, Any], objective: BoxObjective,
+                settings: RefineSettings) -> tuple[dict[str, Any], _Solve, dict[str, Any]]:
+    """The tighter repeat from the global best: its tracked state, solver run and record. As in
+    8fa6209, its record counts no failed evaluation."""
+    state = _empty_state()
+    run = _solve(_tracker(objective, state, count_failures=False), np.asarray(best_run["observed_best_z"], dtype=float),
+                 maxiter=settings.repeat_maxiter, ftol=settings.repeat_ftol, gtol=settings.repeat_gtol,
+                 maxls=settings.maxls)
+    record = {
+        "start_z": best_run["observed_best_z"],
+        "solver_endpoint_z": None if run.endpoint_z is None else run.endpoint_z.tolist(),
+        "solver_endpoint_half_chi2": run.endpoint_value,
+        "solver_endpoint_gradient_valid": run.endpoint_gradient_finite,
+        "observed_best_half_chi2": state["best_half_chi2"],
+        "observed_best_z": state["best_z"],
+        "observed_best_gradient_valid": state["best_gradient_valid"],
+        "evaluation_count": state["evaluation_count"],
+        "failed_evaluation_count": state["failed_evaluation_count"],
+        "success": None if run.result is None else bool(run.result.success),
+        "status": None if run.result is None else int(run.result.status),
+        "message": run.message,
+    }
+    return state, run, record
 
 
 def _incumbent_record(incumbent: RefineStart, incumbent_run: Mapping[str, Any], best_half_chi2: float | None,
@@ -264,29 +316,7 @@ def refine(starts: Sequence[RefineStart], objective: BoxObjective, settings: Ref
     best_run = min(finite, key=lambda row: float(row["observed_best_half_chi2"]))
     best_z = np.asarray(best_run["observed_best_z"], dtype=float)
     best_half = float(best_run["observed_best_half_chi2"])
-    repeat_state = _empty_state()
-
-    def tracked_repeat(z: np.ndarray) -> tuple[float, np.ndarray]:
-        repeat_state["evaluation_count"] += 1
-        value, gradient = objective.value_and_gradient(np.asarray(z, dtype=float))
-        _record_best_finite(repeat_state, z, value, gradient, objective.to_physical(z))
-        return value, gradient
-
-    repeat_result = None
-    repeat_exception = None
-    repeat_endpoint_z = None
-    repeat_endpoint_value = None
-    repeat_endpoint_gradient = None
-    try:
-        tracked_repeat(best_z)
-        repeat_result = scipy.optimize.minimize(
-            tracked_repeat, best_z, method="L-BFGS-B", jac=True, bounds=[(0.0, 1.0)] * best_z.size,
-            options={"maxiter": int(settings.repeat_maxiter), "ftol": float(settings.repeat_ftol),
-                     "gtol": float(settings.repeat_gtol), "maxls": int(settings.maxls)})
-        repeat_endpoint_z = np.asarray(repeat_result.x, dtype=float)
-        repeat_endpoint_value, repeat_endpoint_gradient = tracked_repeat(repeat_endpoint_z)
-    except Exception as error:  # a failed repeat fails the repeat gate
-        repeat_exception = f"{type(error).__name__}: {error}"
+    repeat_state, repeat, repeat_record = _run_repeat(best_run, objective, settings)
     repeat_best = repeat_state["best_half_chi2"]
     if repeat_best is not None and float(repeat_best) < best_half:
         best_half = float(repeat_best)
@@ -305,7 +335,7 @@ def refine(starts: Sequence[RefineStart], objective: BoxObjective, settings: Ref
     incumbent_record = _incumbent_record(incumbent, runs[0], best_half, objective.direct_check, settings)
     gates = {
         "support": bool(support["support_passed"]),
-        "repeat": bool(repeat_result is not None and repeat_change is not None
+        "repeat": bool(repeat.result is not None and repeat_change is not None
                        and repeat_change <= settings.repeat_log_likelihood_tolerance),
         "finite_gradient": gradient_valid,
         "scalar_residual": bool(residual_error <= settings.scalar_residual_tolerance),
@@ -314,22 +344,6 @@ def refine(starts: Sequence[RefineStart], objective: BoxObjective, settings: Ref
     }
     status = RoleStatus.ACCEPTED if all(gates.values()) else RoleStatus.UNRESOLVED
     projected = _projected_gradient(best_gradient, best_z)
-    repeat_gradient_finite = (repeat_endpoint_gradient is not None
-                              and bool(np.all(np.isfinite(np.asarray(repeat_endpoint_gradient)))))
-    repeat_record = {
-        "start_z": best_run["observed_best_z"],
-        "solver_endpoint_z": None if repeat_endpoint_z is None else repeat_endpoint_z.tolist(),
-        "solver_endpoint_half_chi2": repeat_endpoint_value,
-        "solver_endpoint_gradient_valid": repeat_gradient_finite,
-        "observed_best_half_chi2": repeat_best,
-        "observed_best_z": repeat_state["best_z"],
-        "observed_best_gradient_valid": repeat_state["best_gradient_valid"],
-        "evaluation_count": repeat_state["evaluation_count"],
-        "failed_evaluation_count": repeat_state["failed_evaluation_count"],
-        "success": None if repeat_result is None else bool(repeat_result.success),
-        "status": None if repeat_result is None else int(repeat_result.status),
-        "message": repeat_exception if repeat_result is None else str(repeat_result.message),
-    }
     record = {
         "incumbent": incumbent_record,
         "start_provenance": start_records,
@@ -356,4 +370,4 @@ def refine(starts: Sequence[RefineStart], objective: BoxObjective, settings: Ref
     return RefineOutcome(acceptance_status=status, best_log_likelihood=direct if math.isfinite(direct) else None,
                          best_vector=tuple(float(value) for value in best_x), gates=gates,
                          record=record, projected_gradient_linf=projected["linf"],
-                         repeat_converged=None if repeat_result is None else bool(repeat_result.success))
+                         repeat_converged=None if repeat.result is None else bool(repeat.result.success))
