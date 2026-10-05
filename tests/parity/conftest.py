@@ -9,6 +9,18 @@ import numpy as np
 import pytest
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity"
+_NAME_MAP = {
+    "lens.centre_y": "lens.mass.mass.centre_y", "lens.centre_x": "lens.mass.mass.centre_x",
+    "lens.einstein_radius": "lens.mass.mass.einstein_radius", "lens.ell_comp_1": "lens.mass.mass.ell_comp_1",
+    "lens.ell_comp_2": "lens.mass.mass.ell_comp_2", "source.centre_y": "source.light.light.centre_y",
+    "source.centre_x": "source.light.light.centre_x", "source.ell_comp_1": "source.light.light.ell_comp_1",
+    "source.ell_comp_2": "source.light.light.ell_comp_2", "source.intensity": "source.light.light.intensity",
+    "source.effective_radius": "source.light.light.effective_radius",
+    "observation.background_offset_adu": "observation.background_offset_adu",
+    "psf.segment_hexikes[0][1]": "psf.segment_hexikes[0][1]", "psf.segment_hexikes[0][2]": "psf.segment_hexikes[0][2]",
+    "psf.segment_hexikes[3][1]": "psf.segment_hexikes[3][1]", "psf.segment_hexikes[3][2]": "psf.segment_hexikes[3][2]",
+    "psf.global_zernikes[4]": "psf.zernikes[4]", "psf.global_zernikes[5]": "psf.zernikes[5]",
+}
 
 
 @pytest.fixture(scope="session")
@@ -31,16 +43,11 @@ def paper_digest():
 
 
 @pytest.fixture(scope="session")
-def final_name(manifest):
-    def mapped(name):
-        if name.startswith("lens."):
-            return "lens.mass.mass." + name.removeprefix("lens.")
-        if name.startswith("source."):
-            return "source.light.light." + name.removeprefix("source.")
-        return name.replace("psf.global_zernikes", "psf.zernikes")
-
-    return {scene: {name: mapped(name) for name in entry.get("profiled_nuisance_names", ())}
-            for scene, entry in manifest["scenes"].items()}
+def final_name():
+    image = dict(_NAME_MAP, **{"source.intensity": "source.light.light.flux_scale",
+                              "source.effective_radius": "source.light.light.size_scale"})
+    return {"p1_optical_matched": _NAME_MAP, "p2_delta_knowledge_error": _NAME_MAP,
+            "p3_image_source_kernel": image, "p4_subhalo_sis": _NAME_MAP, "p4_subhalo_pointmass": _NAME_MAP}
 
 
 @pytest.fixture(scope="module")
