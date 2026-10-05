@@ -64,6 +64,7 @@ def test_zero_amplitude_keeps_the_truth_and_still_loads_the_prior(p1_truth, tmp_
     truth = _optics(p1_truth)
     error = draw_knowledge_error(truth, WavefrontDrawSpec(DRIFT, 0.0, SEED, "combined"))
     assert error.model == truth.coefficients and error.draw.coefficients.is_empty
+    assert truth.with_coefficients(error.model).kernel().kernel.tobytes() == truth.kernel().kernel.tobytes()
     assert error.draw.prior_digest == load_prior(DRIFT)[1]
     missing = ModeWeightPriorSpec("path", None, tmp_path / "missing.yaml", None)
     with pytest.raises(FileNotFoundError):
@@ -161,3 +162,16 @@ def test_obscured_segmented_pupil_draws(p1_truth):
     with pytest.raises(ValueError, match=f"segment {first} has {pixels} illuminated pixels, fewer than its 10"):
         draw_wavefront(WavefrontBasis(coarse, reference_wavelength_m=5e-7),
                        WavefrontDrawSpec(STATIC, 20.0, SEED, "segment"))
+
+
+def test_draws_depend_only_on_pupil_prior_amplitude_and_seed(p1_truth):
+    truth = _optics(p1_truth)
+    other_truth = _optics({**p1_truth, "wavefront": {"zernikes": {4: 15.0}}})
+    spec = WavefrontDrawSpec(DRIFT, 10.0, SEED, "combined")
+    reference = draw_knowledge_error(truth, spec).draw.coefficients
+    # A draw from the global NumPy stream would differ between these two calls.
+    assert draw_knowledge_error(other_truth, spec).draw.coefficients == reference
+    assert draw_wavefront(truth.basis, WavefrontDrawSpec(DRIFT, 10.0, SEED + 1, "combined")).coefficients != reference
+    low, high = (draw_knowledge_error(truth, WavefrontDrawSpec(DRIFT, 10.0, seed, "combined"))
+                 for seed in (2 ** 53, 2 ** 53 + 1))
+    assert low.draw.coefficients != high.draw.coefficients and low.digest() != high.digest()
