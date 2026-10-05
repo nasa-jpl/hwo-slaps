@@ -1,0 +1,69 @@
+{
+  "inputs": {
+    "nfw": {
+      "concentration_model": "moline2017_eq7",
+      "h": 0.6774,
+      "mass_msun": 1000000000.0,
+      "x_sub": 1.0,
+      "z_lens": 0.2,
+      "z_source": 2.5
+    },
+    "point_mass": {
+      "mass_msun": 100000000.0,
+      "z_lens": 0.2,
+      "z_source": 2.5
+    },
+    "sis": {
+      "mass_msun": 100000000.0,
+      "z_lens": 0.2,
+      "z_source": 2.5
+    }
+  },
+  "integration_image_summary": {
+    "nfw": {
+      "peak": 0.005199895355223192,
+      "shape": [
+        64,
+        64
+      ],
+      "total_flux": 1.1716211914897896
+    },
+    "pointmass": {
+      "peak": 0.00520150789054747,
+      "shape": [
+        64,
+        64
+      ],
+      "total_flux": 1.1675722619447675
+    },
+    "sis": {
+      "peak": 0.0053582348047118795,
+      "shape": [
+        64,
+        64
+      ],
+      "total_flux": 1.2059113165985031
+    }
+  },
+  "metadata": {
+    "cosmology": "Planck15",
+    "note": "Integration image summary anchors were generated from deterministic 64x64 runs with global_seed=11.",
+    "schema_version": 1
+  },
+  "scalars": {
+    "nfw": {
+      "c200": 16.792762422153395,
+      "kappa_s": 0.010834592063120383,
+      "rho_s_kg_m3": 1.7226087179376064e-21,
+      "rs_kpc": 1.173435850980323,
+      "scale_radius_arcsec": 0.3446002502650483
+    },
+    "point_mass": {
+      "theta_e_arcsec": 0.03155671024570937
+    },
+    "sis": {
+      "sigma_v_km_s": 4.848880319858515,
+      "theta_e_arcsec": 0.0005823699028684742
+    }
+  }
+}
