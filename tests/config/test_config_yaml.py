@@ -58,6 +58,7 @@ def test_yaml_scalars_follow_the_yaml_1_2_core_schema(text, expected, tmp_path):
 
 
 def test_written_yaml_reads_back_identically(tmp_path):
+    centre = [0.4, -0.8]
     mapping = {
         "run_name": "1e8",
         "labels": ["010", "true", "null", ".inf", "1.0", "", "yes", "~", "0o17", "Moliné"],
@@ -65,6 +66,8 @@ def test_written_yaml_reads_back_identically(tmp_path):
         "floats": [1e-08, 1e20, -0.0, 100000000.0, 0.1],
         "flags": [True, False, None],
         "nested": {"grid": {"shape": [500, 500], "pixel_scale_arcsec": 0.00716}},
+        "lens_centre": centre,
+        "subhalo_centre": centre,
     }
     text = dump_yaml(mapping)
     path = tmp_path / "effective.yaml"
@@ -73,6 +76,7 @@ def test_written_yaml_reads_back_identically(tmp_path):
     assert repr(read) == repr(mapping)
     assert list(read) == list(mapping)
     assert "run_name: '1e8'" in text and "\n- yes\n" in text
+    assert "\nlens_centre:\n- 0.4\n- -0.8\nsubhalo_centre:\n- 0.4\n- -0.8\n" in text
 
 
 @pytest.mark.parametrize("content, fragment", [

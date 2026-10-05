@@ -194,7 +194,14 @@ _Loader.add_constructor("tag:yaml.org,2002:float", _Loader.construct_core_float)
 
 @_core_schema
 class _Dumper(yaml.SafeDumper):
-    """Quotes every string the YAML 1.2 loader would read as null, a boolean or a number."""
+    """Quotes every string the YAML 1.2 loader would read as null, a boolean or a number.
+
+    Writes every value in full: a list or mapping shared by two keys is written twice,
+    never as an anchor and alias, so editing one key of a written file leaves the other alone.
+    """
+
+    def ignore_aliases(self, data):
+        return True
 
 
 def _load(stream: Any) -> Any:
