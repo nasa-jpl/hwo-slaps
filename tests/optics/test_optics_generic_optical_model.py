@@ -75,13 +75,13 @@ def test_wavelength_overlay_switches_the_real_config_alternative(minimal_mapping
     mapping = copy.deepcopy(minimal_mapping)
     mapping["psf"] = {"truth": copy.deepcopy(p1_truth)}
     base = parse_config(mapping)
-    sampled = base.replace({"psf": {"truth": {"wavelength_samples": 1}},
+    sampled = base.replace({"psf": {"truth": {"wavelength_nm": None, "wavelength_samples": 1}},
                             "instrument": {"bandpass": {"kind": "top_hat", "min_nm": 450., "max_nm": 550.,
                                                          "throughput": 1.}},
                             "scene": {"source": {"light": {"light": {"sed": {"kind": "flat_fnu"}}}}}})
     assert sampled.psf.truth.wavelength_m is None and sampled.psf.truth.wavelength_samples == 1
     assert base.psf.truth.wavelength_m == 500. / 1e9 and base.psf.truth.wavelength_samples is None
-    back = sampled.replace({"psf": {"truth": {"wavelength_nm": 500.}}})
+    back = sampled.replace({"psf": {"truth": {"wavelength_samples": None, "wavelength_nm": 500.}}})
     assert back.psf.truth == base.psf.truth
 
 
