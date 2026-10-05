@@ -3,7 +3,9 @@
 :func:`summarize` reduces a result over a selection of its positions, per mass:
 
 - ``q_max``: the largest statistic in the selection; for ``q_mismatch`` and
-  ``q_spurious`` a value whose fitted amplitude is not positive counts as 0.
+  ``q_spurious`` a value whose fitted amplitude is not positive counts as 0, so
+  ``q_max`` is below the raw maximum wherever the largest value comes from a
+  negative fit.
 - ``detectable_count`` and ``detectable_fraction``: the detections in the
   selection and their share of the selected positions.
 - ``detectable_area_arcsec2``: the number of those detections times the cell
