@@ -14,7 +14,7 @@ from ..config.checks import Key, Real, Table, Text, Variants
 from ..identity import mapping_digest
 from .tables import TABLE_TABLE, SpectralTable, TableSpec, read_table
 
-__all__ = ["SED_TABLE", "FlatFlambda", "FlatFnu", "PowerLawSED", "SED", "SEDSpec", "TableSED", "build_sed", "parse_sed"]
+__all__ = ["SED_TABLE", "FlatFlambda", "FlatFnu", "PowerLawSED", "SED", "SEDSpec", "TableSED", "build_sed", "parse_sed", "sed_spec_mapping"]
 
 _REFERENCE_WAVELENGTH_M = 1.0e-6
 
@@ -60,6 +60,16 @@ def parse_sed(mapping: Mapping[str, Any], path: str) -> SEDSpec:
     if values["kind"] == "power_law":
         return PowerLawSED(values["index"])
     return TableSED(TableSpec.from_values(values), values["quantity"], values["frame"])
+
+
+def sed_spec_mapping(spec: SEDSpec) -> dict[str, Any]:
+    if isinstance(spec, FlatFnu):
+        return {"kind": "flat_fnu"}
+    if isinstance(spec, FlatFlambda):
+        return {"kind": "flat_flambda"}
+    if isinstance(spec, PowerLawSED):
+        return {"kind": "power_law", "index": spec.index}
+    return {"kind": "table", **spec.table.to_mapping(), "quantity": spec.quantity, "frame": spec.frame}
 
 
 @dataclass(frozen=True, eq=False)

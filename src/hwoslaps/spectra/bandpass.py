@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .sed import SED
 
 __all__ = ["BANDPASS_TABLE", "Bandpass", "BandpassSpec", "ConstantFactor", "ProductBand", "TableBand", "TableFactor",
-           "TopHatBand", "bandpass_nodes", "bin_integrals", "build_bandpass", "integrate_dlnlambda", "parse_bandpass"]
+           "TopHatBand", "bandpass_nodes", "bandpass_spec_mapping", "bin_integrals", "build_bandpass", "integrate_dlnlambda", "parse_bandpass"]
 
 _POSITIVE = Real(min=0.0, min_open=True)
 _LABEL = Key("label", Nullable(Text()), "bandpass label", None)
@@ -110,6 +110,21 @@ def parse_bandpass(mapping: Mapping[str, Any], path: str) -> BandpassSpec:
     if values["kind"] == "table":
         return TableBand(TableSpec.from_values(values), tuple(values["support_nm"]), values["power"], values["label"])
     return ProductBand(tuple(values["support_nm"]), tuple(_factor(item) for item in values["factors"]), values["label"])
+
+
+def bandpass_spec_mapping(spec: BandpassSpec | TableFactor | ConstantFactor) -> dict[str, Any]:
+    if isinstance(spec, TopHatBand):
+        return {"kind": "top_hat", "min_nm": spec.min_nm, "max_nm": spec.max_nm,
+                "throughput": spec.throughput, "label": spec.label}
+    if isinstance(spec, ConstantFactor):
+        return {"kind": "constant", "value": spec.value}
+    if isinstance(spec, (TableBand, TableFactor)):
+        values = {"kind": "table", **spec.table.to_mapping(), "power": spec.power, "label": spec.label}
+        if isinstance(spec, TableBand):
+            values["support_nm"] = list(spec.support_nm)
+        return values
+    return {"kind": "product", "support_nm": list(spec.support_nm), "label": spec.label,
+            "factors": [bandpass_spec_mapping(item) for item in spec.factors]}
 
 
 def _integrand(values: ArrayLike, wavelengths_m: ArrayLike) -> tuple[np.ndarray, np.ndarray]:
@@ -212,6 +227,11 @@ class Bandpass:
 
     def digest(self) -> str:
         return mapping_digest({"wavelengths": array_digest(self.wavelengths_m), "throughput": array_digest(self.throughput)})
+
+    def to_mapping(self) -> dict[str, Any]:
+        return {"input": None if self.source_spec is None else bandpass_spec_mapping(self.source_spec),
+                "support_m": list(self.support_m), "label": self.label, "digest": self.digest(),
+                "file_digests": dict(self.file_digests)}
 
 
 def build_bandpass(spec: BandpassSpec) -> Bandpass:

@@ -31,6 +31,10 @@ class TableSpec:
     value_key: str
     wavelength_unit: WavelengthUnit
 
+    def to_mapping(self) -> dict[str, Any]:
+        return {"path": str(self.path), "wavelength_key": self.wavelength_key,
+                "value_key": self.value_key, "wavelength_unit": self.wavelength_unit}
+
     @classmethod
     def from_values(cls, values: Mapping[str, Any]) -> TableSpec:
         return cls(Path(values["path"]), values["wavelength_key"], values["value_key"], values["wavelength_unit"])
