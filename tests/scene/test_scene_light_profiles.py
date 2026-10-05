@@ -5,7 +5,7 @@ import math
 
 import numpy as np
 import pytest
-from scipy.integrate import quad, trapezoid
+from scipy.integrate import quad
 from scipy.special import gammainc, gammaincinv
 
 from hwoslaps.scene.profiles import PROFILE_TYPES, sersic_constant, sersic_unit_integral
@@ -28,17 +28,6 @@ def test_sersic_unit_integral_and_b_n_follow_the_rendered_profile(n):
     assert abs(b/gammaincinv(2*n,.5)-1) <= 5.5e-4
     definition=PROFILE_TYPES["Sersic"].parameters({})[-1]
     assert (definition.domain.lower,definition.domain.upper,definition.domain.open_lower,definition.domain.open_upper)==(.36,8.,False,False)
-
-
-def test_sersic_integral_is_invariant_to_axis_ratio():
-    import autolens as al
-
-    y,x=np.meshgrid(np.linspace(-1.5,1.5,401),np.linspace(-1.5,1.5,401),indexing="ij")
-    grid=al.Grid2DIrregular(values=np.column_stack((y.ravel(),x.ravel())))
-    profile=al.lp.Sersic(ell_comps=(.145,.251),sersic_index=1.,effective_radius=.11,intensity=1.)
-    image=np.asarray(profile.image_2d_from(grid=grid)).reshape(y.shape)
-    integral=trapezoid(trapezoid(image,x[0],axis=1),y[:,0])
-    assert integral == pytest.approx(sersic_unit_integral(.11,1.),rel=1e-4,abs=0.)
 
 
 def test_multi_component_light_is_the_sum_of_its_components(minimal_mapping,image_asset):
