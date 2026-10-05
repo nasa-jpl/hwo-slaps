@@ -16,6 +16,7 @@ import numpy as np
 
 from ..config.checks import Integer, Key, Real, Table
 from ..identity import array_digest
+from ..instrument import check_finite_number
 from .expected import Exposure, Plane, convolve_light
 from .noise import draw_noisy_adu
 
@@ -84,7 +85,8 @@ class Observation:
     ``light_rate_by_plane_e_per_s`` holds it per plane, ``"source"`` always and ``"lens"``
     with lens light, and without lens light its ``"source"`` entry is the total itself.
     ``noise_map_adu`` comes from the expected image for both kinds. ``sampling`` is the
-    within-pixel variation of each light group's light (``native_sampling_variation``).
+    within-pixel variation of each fiducial smooth-scene light group, measured once by the
+    preparation caller and retained for injected observations and noise draws.
     """
 
     kind: Literal["expected", "noisy"]
@@ -125,7 +127,9 @@ class Observation:
                              f"{sorted(self.psfs.group_index)}")
         object.__setattr__(self, "light_rate_by_plane_e_per_s",
                            types.MappingProxyType(dict(self.light_rate_by_plane_e_per_s)))
-        object.__setattr__(self, "sampling", types.MappingProxyType(dict(self.sampling)))
+        sampling = {key: check_finite_number(f"sampling[{key!r}]", value, positive=False)
+                    for key, value in self.sampling.items()}
+        object.__setattr__(self, "sampling", types.MappingProxyType(sampling))
 
     @property
     def pixel_scale_arcsec(self) -> float:
@@ -165,15 +169,13 @@ class Observation:
 
 
 def observe(scene: Scene, kernels: KernelBinding, exposure: Exposure, *, config_digest: str | None,
-            photometry: PhotometryRecord | None) -> Observation:
+            photometry: PhotometryRecord | None, sampling: Mapping[str, float]) -> Observation:
     """The expected observation of ``scene`` through the truth kernels ``kernels``.
 
-    No random generator is used. ``sampling`` records the scene's within-pixel light
-    variation per light group, measured once here.
+    No random generator is used. The caller supplies ``sampling`` measured on the fiducial
+    smooth scene once during preparation. It is recorded without another light evaluation,
+    including when ``scene`` contains an injected subhalo.
     """
-    from ..scene.builder import native_sampling_variation
-
-    sampling = native_sampling_variation(scene)
     by_plane = convolve_light(scene.light_images, scene.light_groups, kernels, scene.pixel_scale_arcsec)
     total = by_plane["lens"] + by_plane["source"] if "lens" in by_plane else by_plane["source"]
     expected = exposure.mean_adu(total)
