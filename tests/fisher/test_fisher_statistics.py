@@ -67,12 +67,12 @@ BACKGROUND_FREE = ([[1.0, 1.0], [-1.0, 1.0], [0.0, 1.0]], None, [[1.0, 1.0, 1.0]
 def test_profiled_information_matches_closed_forms(design, precision, signals, expected, max_zero_q):
     signals = np.asarray(signals)
     bank = workspace(design, None if precision is None else np.asarray(precision)).evaluate_bank(signals)
+    if max_zero_q is not None:
+        assert np.all(bank.q_asimov < max_zero_q), "free constant background must absorb the signal"
     raw = np.sum(signals * signals, axis=1)
     np.testing.assert_allclose(bank.fisher_raw, raw, rtol=1e-15)
     np.testing.assert_allclose(bank.fisher_profiled, expected, rtol=1e-12, atol=1e-12)
     np.testing.assert_array_equal(bank.q_asimov, bank.fisher_profiled)
-    if max_zero_q is not None:
-        assert np.all(bank.q_asimov < max_zero_q), "free constant background must absorb the signal"
     positive = np.asarray(expected) > 1e-9
     np.testing.assert_allclose(bank.sigma_amplitude[positive], 1.0 / np.sqrt(np.asarray(expected)[positive]),
                                rtol=1e-12)
