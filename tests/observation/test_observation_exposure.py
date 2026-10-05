@@ -34,6 +34,36 @@ def test_detector_response_matches_hand_equations(count, read_variance):
     assert exposure.rate_from_adu(28.0) == 7.0
 
 
+def test_detector_moments_follow_the_paper_operation_order():
+    # The P1 and P3 block of the parity anchors, on rates whose sums round in binary.
+    t, sky, dark, read, gain = 900.0, 1.0, 0.002, 0.2, 1.0
+    exposure = Exposure(Detector(gain, read, dark), exposure_time_s=t, sky_rate_e_per_s=sky)
+    rate = np.append(np.linspace(0.0, 3.0, 101), -1e-12)
+    sky_e, dark_e = sky * t, dark * t
+    mean = ((rate * t + sky_e) + dark_e) / gain
+    counts = (np.maximum(rate, 0.0) * t + dark_e) + sky_e
+    variance = counts + 1 * read**2
+    # The other associations give other bytes on these rates, so the comparisons below see the order.
+    assert np.any(((rate * t + dark_e) + sky_e) / gain != mean)
+    assert np.any((rate * t + (sky_e + dark_e)) / gain != mean)
+    assert np.any((np.maximum(rate, 0.0) * t + sky_e) + dark_e != counts)
+
+    np.testing.assert_array_equal(exposure.mean_adu(rate), mean)
+    np.testing.assert_array_equal(exposure.counts_e(rate), counts)
+    np.testing.assert_array_equal(exposure.variance_e2(rate), variance)
+    np.testing.assert_array_equal(exposure.noise_map_adu(rate), np.sqrt(variance) / gain)
+    assert exposure.background_adu == (sky_e + dark_e) / gain
+    assert exposure.blank_variance_e2 == variance[0]
+
+    # The HWO reference block (A5 1.1): the engine order gives 9.100559691926973 e-^2, the 41621de
+    # derivation's (sky + dark) * t + r**2 gives 9.100559691926971.
+    reference = Exposure(Detector(1.0, 0.28284271247461906, 0.002), exposure_time_s=2000.0,
+                         sky_rate_e_per_s=0.002510279845963486)
+    assert (0.002510279845963486 + 0.002) * 2000.0 + 0.28284271247461906**2 == 9.100559691926971
+    assert reference.blank_variance_e2 == 9.100559691926973
+    assert float(reference.variance_e2(0.0)) == 9.100559691926973
+
+
 @pytest.mark.parametrize("count, read_sigma", [(1, 3.0), (4, 6.0)])
 def test_noise_draw_is_numpy_poisson_then_normal(count, read_sigma):
     exposure = Exposure(Detector(2.0, 3.0, 0.1), exposure_time_s=7.0, sky_rate_e_per_s=0.5,
