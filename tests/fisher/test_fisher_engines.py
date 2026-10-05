@@ -168,11 +168,17 @@ def test_dense_covariance_uses_host_projection_and_matches_reference(minimal_map
     np.testing.assert_allclose(actual.fisher_profiled, expected.fisher_profiled, rtol=5.0e-6)
 
 
-def test_jax_engine_refuses_off_plane_hypothesis(minimal_mapping):
+@pytest.mark.parametrize("geometry", ["off_plane_hypothesis", "other_plane_perturber"])
+def test_jax_engine_refuses_geometry_it_cannot_render(minimal_mapping, geometry):
     from hwoslaps.fisher.api import Execution, prepare_forecast
 
-    minimal_mapping["scene"]["subhalo"]["redshift"] = 0.3
-    with pytest.raises(ValueError, match="lens-plane subhalo"):
+    if geometry == "off_plane_hypothesis":
+        minimal_mapping["scene"]["subhalo"] = {"type": "NFW", "redshift": 0.3,
+                                                 "concentration": {"kind": "fixed", "value": 10.0}}
+    else:
+        minimal_mapping["scene"]["perturbers"] = {"halos": [{"type": "PointMass", "redshift": 0.3,
+                                                            "mass_msun": 1.0e8, "centre": [0.1, 0.7]}]}
+    with pytest.raises(ValueError, match="two-plane scene"):
         prepare_forecast(minimal_mapping, execution=Execution(engine="jax"))
 
 
