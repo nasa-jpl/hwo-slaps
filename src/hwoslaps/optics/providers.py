@@ -560,7 +560,11 @@ def build_psf_provider(spec: PsfTruthSpec, *, pixel_scale_arcsec: float,
                        bandpass_support_m: tuple[float, float] | None = None) -> PSFProvider:
     """The truth provider at the scene pixel scale; evaluates no kernel (a kernel file is read)."""
     scale = _scene_pixel_scale(pixel_scale_arcsec)
+    if bandpass_support_m is not None and not isinstance(spec, KernelCubeSpec):
+        raise ValueError("bandpass_support_m checks only a tabulated kernel cube")
     if isinstance(spec, KernelFileSpec):
+        if wavelengths_m is not None:
+            raise ValueError("a fixed kernel has no spectral information; supplied wavelength nodes cannot be honoured")
         return _kernel_provider(spec, scale, "psf.truth")
     if isinstance(spec, KernelCubeSpec):
         if wavelengths_m is not None:

@@ -227,6 +227,13 @@ def test_kernel_provider_limits(kernel_file):
         provider.kernel(5e-7)
     with pytest.raises(ValueError, match="no wavefront basis"):
         provider.kernel(coefficients=WavefrontCoefficients.empty())
+    with pytest.raises(ValueError, match="no spectral information"):
+        provider.kernels([5e-7])
+    spec = KernelFileSpec(Path(kernel_file), None, 0.03, True, None)
+    with pytest.raises(ValueError, match="no spectral information"):
+        build_psf_provider(spec, pixel_scale_arcsec=0.03, wavelengths_m=(5e-7,))
+    with pytest.raises(ValueError, match="only a tabulated"):
+        build_psf_provider(spec, pixel_scale_arcsec=0.03, bandpass_support_m=(4e-7, 6e-7))
     assert provider.to_mapping() == {"provider": "kernel", "kernel": psf.kernel_identity().to_mapping(),
                                      "source": dict(psf.source)}
 
