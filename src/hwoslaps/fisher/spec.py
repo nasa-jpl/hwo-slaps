@@ -17,7 +17,7 @@ from ..optics.pupils import parse_pupil
 from ..optics.wavefront import (WAVEFRONT_SELECTION_TABLE, WavefrontSelection,
                                parse_wavefront_selection, select_modes)
 from ..scene.image_source import frozen_value
-from ..scene.parameters import match_parameters, scene_parameters
+from ..scene.parameters import match_parameters, scene_parameter_names
 from ..scene.profiles import ParameterKind
 from ..scene.spec import SceneSpec, parse_scene
 
@@ -226,8 +226,7 @@ def parse_forecast(mapping: Mapping[str, Any], path: str = "forecast") -> Foreca
 
 def check_nuisance_spec(scene: SceneSpec, spec: NuisanceSpec, *, model_has_basis: bool) -> None:
     """Refuse unresolved parameter names and wavefront nuisances without a model basis."""
-    parameters = scene_parameters(scene)
-    names = tuple(parameter.name for parameter in parameters)
+    names = scene_parameter_names(scene)
     match_parameters(names, spec.fixed, path="forecast.nuisances.fixed")
     kinds = get_args(ParameterKind)
     for key in spec.steps:

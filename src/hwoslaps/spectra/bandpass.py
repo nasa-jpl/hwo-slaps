@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from .sed import SED
 
 __all__ = ["BANDPASS_TABLE", "Bandpass", "BandpassSpec", "ConstantFactor", "ProductBand", "TableBand", "TableFactor",
-           "TopHatBand", "bin_integrals", "build_bandpass", "integrate_dlnlambda", "parse_bandpass"]
+           "TopHatBand", "bandpass_nodes", "bin_integrals", "build_bandpass", "integrate_dlnlambda", "parse_bandpass"]
 
 _POSITIVE = Real(min=0.0, min_open=True)
 _LABEL = Key("label", Nullable(Text()), "bandpass label", None)
@@ -148,6 +148,16 @@ def bin_integrals(values: np.ndarray, wavelengths_m: np.ndarray, edges_m: ArrayL
     return np.asarray(result)
 
 
+def bandpass_nodes(support_m: tuple[float, float], count: int) -> np.ndarray:
+    """Midpoints of equal wavelength bins, shared with the optical sampling checks."""
+    if not (0.0 < support_m[0] < support_m[1]) or not np.all(np.isfinite(support_m)):
+        raise ValueError("bandpass support must be positive, finite and ordered")
+    if isinstance(count, (bool, np.bool_)) or not isinstance(count, Integral) or count < 1:
+        raise ValueError("wavelength node count must be an integer >= 1")
+    edges = np.linspace(*support_m, int(count) + 1)
+    return (edges[1:] + edges[:-1]) / 2.0
+
+
 @dataclass(frozen=True, eq=False)
 class Bandpass:
     support_m: tuple[float, float]
@@ -178,10 +188,7 @@ class Bandpass:
         return np.asarray(np.interp(wavelengths, self.wavelengths_m, self.throughput, left=0.0, right=0.0))
 
     def nodes(self, count: int) -> np.ndarray:
-        if isinstance(count, (bool, np.bool_)) or not isinstance(count, Integral) or count < 1:
-            raise ValueError("wavelength node count must be an integer >= 1")
-        edges = np.linspace(*self.support_m, int(count) + 1)
-        return (edges[1:] + edges[:-1]) / 2.0
+        return bandpass_nodes(self.support_m, count)
 
     def bin_edges(self, nodes_m: ArrayLike) -> np.ndarray:
         nodes = np.asarray(nodes_m, dtype=float)

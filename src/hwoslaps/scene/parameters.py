@@ -16,9 +16,10 @@ from fnmatch import fnmatchcase
 
 from ..config.checks import ConfigError
 from .profiles import PROFILE_TYPES, ParameterDef
+from .image_source import frozen_value
 from .spec import LIGHT_COMPONENT_TABLE, MASS_COMPONENT_TABLE, ComponentSpec, GalaxySpec, SceneSpec, component_from_values
 
-__all__ = ["SceneParameter", "match_parameters", "scene_parameters", "with_parameter"]
+__all__ = ["SceneParameter", "match_parameters", "scene_parameter_names", "scene_parameters", "with_parameter"]
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,12 @@ def scene_parameters(spec: SceneSpec) -> tuple[SceneParameter, ...]:
                                              float(value if definition.index is None else value[definition.index]),
                                              definition))
     return tuple(parameters)
+
+
+def scene_parameter_names(spec: SceneSpec) -> tuple[str, ...]:
+    """Registry-ordered names, including amplitudes that photometry has yet to resolve."""
+    return tuple(_name(component, definition) for _, component in _components(spec)
+                 for definition in PROFILE_TYPES[component.type].parameters(component.values))
 
 
 def with_parameter(spec: SceneSpec, name: str, value: float) -> SceneSpec:
@@ -84,8 +91,9 @@ def _replaced(spec: SceneSpec, galaxy: GalaxySpec, component: ComponentSpec, def
             rule.check(values, path)
         except ConfigError as error:
             raise ConfigError(error.path, f"{label}: {error.message}") from None
-    replacement = component_from_values(component.name, component.plane, component.role,
-                                        {"type": component.type, **values})
+    if component.flux is not None and definition.key == PROFILE_TYPES[component.type].amplitude_key:
+        raise ConfigError(path, "resolve the configured flux before changing its amplitude")
+    replacement = dataclasses.replace(component, values=frozen_value(values))
     role_components = tuple(replacement if item is component else item for item in getattr(galaxy, component.role))
     new_galaxy = dataclasses.replace(galaxy, **{component.role: role_components})
     return dataclasses.replace(spec, **{galaxy.plane: new_galaxy})
