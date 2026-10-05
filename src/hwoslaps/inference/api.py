@@ -78,7 +78,8 @@ class PreparedCase:
             raise ValueError("refinement requires a prepared JAX analysis")
         if role not in self._objectives:
             checked = any(component.profile_class in {"hwoslaps.inference.light_profiles:Exponential",
-                                                       "hwoslaps.inference.light_profiles:Sersic"}
+                                                       "hwoslaps.inference.light_profiles:Sersic",
+                                                       "hwoslaps.inference.mass_profiles:PowerLaw"}
                           for galaxy in model.galaxies for _, component in galaxy.components)
             objective = jax_objective(self.analysis, self.autofit_models[role], model.lower, model.upper,
                                       check_gradient_domain=checked)

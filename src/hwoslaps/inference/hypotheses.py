@@ -193,6 +193,11 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
             path = "hwoslaps.scene.image_profile:ImageLightProfile"
         elif layout.profile_class == "CartesianPowerLawMultipole":
             path = "hwoslaps.scene.multipole_profile:CartesianPowerLawMultipole"
+        elif (use_jax and component.type == "PowerLaw"
+              and _ellipticity_box_reaches_origin(component, parameters, free, fit)
+              and _bounds(component, parameters["slope"], free, fit)[0] <= 2.0
+                  <= _bounds(component, parameters["slope"], free, fit)[1]):
+            path = "hwoslaps.inference.mass_profiles:PowerLaw"
         elif use_jax and (component.type == "Sersic" or (component.type == "Exponential"
                           and _ellipticity_box_reaches_origin(component, parameters, free, fit))):
             path = f"hwoslaps.inference.light_profiles:{component.type}"
