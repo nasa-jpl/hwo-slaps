@@ -504,3 +504,76 @@ def test_circular_powerlaw_one_sided_values_classify_the_shape_differential(slop
             print(f"PowerLaw gamma2 primitive value={value} gradient={gradient}")
             assert math.isfinite(value) and np.all(np.isfinite(gradient))
     finally:prepared.close()
+
+
+@pytest.mark.parametrize("ell,slope",[((0.,0.),2.),((.05,.02),2.),((-.02,.04),2.08)])
+def test_powerlaw_adapter_preserves_parent_bits_and_all_regular_direction_derivatives(ell,slope):
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from jax.experimental import checkify
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.mass_profiles import PowerLaw
+
+    ensure_jax_x64()
+    points=np.array([[.13,.21],[-.27,.15],[.41,-.31],[-.11,-.38]])
+    grid=al.Grid2DIrregular(values=points)
+    params=np.array([.03,-.02,*ell,.8,slope])
+    weights=np.array([[.7,-.3],[-1.,.2],[.4,.9],[-.2,.5]])
+    def values(cls,p,xp):
+        profile=cls(centre=(p[0],p[1]),ell_comps=(p[2],p[3]),einstein_radius=p[4],slope=p[5])
+        return xp.asarray(profile.deflections_yx_2d_from(grid=grid,xp=xp).array)
+    np.testing.assert_array_equal(values(PowerLaw,params,np),values(al.mp.PowerLaw,params,np))
+    np.testing.assert_array_equal(jax.jit(lambda p:values(PowerLaw,p,jnp))(params),
+                                  jax.jit(lambda p:values(al.mp.PowerLaw,p,jnp))(params))
+    error,gradient=jax.jit(checkify.checkify(jax.grad(lambda p:jnp.sum(jnp.asarray(weights)*values(PowerLaw,p,jnp)))))(params)
+    error.throw();assert np.all(np.isfinite(gradient))
+    expected=[]
+    for i in range(6):
+        step=np.zeros(6);step[i]=1e-6
+        expected.append(np.sum(weights*(values(al.mp.PowerLaw,params+step,np)-values(al.mp.PowerLaw,params-step,np)))/(2e-6))
+    np.testing.assert_allclose(gradient,expected,rtol=1e-6,atol=1e-8)
+    if ell!=(0.,0.):
+        parent=jax.jit(jax.grad(lambda p:jnp.sum(jnp.asarray(weights)*values(al.mp.PowerLaw,p,jnp))))(params)
+        np.testing.assert_array_equal(gradient,parent)
+    else:
+        # Independent m=2 potential from linearizing A2kappa at gamma2:
+        # psi2=-theta/3*r*(e2*cos2phi+e1*sin2phi).
+        y,x=(points-params[:2]).T;phi=np.arctan2(y,x);a=-params[4]/3
+        harmonic=[]
+        for e1,e2 in ((1.,0.),(0.,1.)):
+            ar=a*(e2*np.cos(2*phi)+e1*np.sin(2*phi))
+            ap=-2*a*(e2*np.sin(2*phi)-e1*np.cos(2*phi))
+            harmonic.append(np.sum(weights*np.column_stack((ar*np.sin(phi)+ap*np.cos(phi),
+                                                             ar*np.cos(phi)-ap*np.sin(phi)))))
+        np.testing.assert_allclose(np.asarray(gradient)[2:4],harmonic,rtol=1e-12,atol=0.)
+        # Source/ray-coordinate directions also remain the parent derivative.
+        profile=PowerLaw(centre=tuple(params[:2]),ell_comps=ell,einstein_radius=params[4],slope=slope)
+        parent_profile=al.mp.PowerLaw(centre=tuple(params[:2]),ell_comps=ell,einstein_radius=params[4],slope=slope)
+        def ray_value(cls_profile,ray):
+            moving=al.Grid2DIrregular(values=ray,xp=jnp)
+            return jnp.sum(jnp.asarray(weights)*cls_profile.deflections_yx_2d_from(grid=moving,xp=jnp).array)
+        error,actual=jax.jit(checkify.checkify(jax.grad(lambda ray:ray_value(profile,ray))))(points)
+        error.throw()
+        expected=jax.jit(jax.grad(lambda ray:ray_value(parent_profile,ray)))(points)
+        np.testing.assert_array_equal(actual,expected)
+
+
+def test_powerlaw_regular_circle_refuses_singular_mass_centre_geometry_gradient():
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from jax.experimental import checkify
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.mass_profiles import PowerLaw
+
+    ensure_jax_x64()
+    grid=al.Grid2DIrregular(values=np.array([[.03,-.02]]))
+    def value(ell,cls=PowerLaw):
+        profile=cls(centre=(.03,-.02),ell_comps=(ell[0],ell[1]),einstein_radius=.8,slope=2.)
+        return profile.deflections_yx_2d_from(grid=grid,xp=jnp).array
+    ell=jnp.zeros(2)
+    np.testing.assert_array_equal(jax.jit(value)(ell),jax.jit(lambda e:value(e,al.mp.PowerLaw))(ell))
+    error,derivative=jax.jit(checkify.checkify(jax.jacrev(value)))(ell)
+    with pytest.raises(Exception,match="exactly coincident mass-centre sample with active geometry"):
+        error.throw()
