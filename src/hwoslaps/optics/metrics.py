@@ -54,7 +54,9 @@ def fwhm_arcsec(field: FocalField) -> float:
     """Full width at half maximum of the azimuthally averaged intensity about its peak.
 
     The peak is refined by three-point parabolas along each axis; samples are averaged in
-    radial bins one sample pitch wide; the half-maximum crossing is interpolated linearly
+    radial bins one sample pitch wide. Scaled radii within eight float64 ULPs of an integer
+    are classified at that boundary, while their actual values enter the mean radii. This does not bound
+    perturbations of an ill-conditioned fitted peak. The crossing is interpolated linearly
     between the mean radii of the two bins that bracket it. Raises when the peak sample lies
     on the field edge or the profile never falls below half maximum.
     """

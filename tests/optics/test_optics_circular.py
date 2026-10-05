@@ -48,6 +48,18 @@ def test_airy_fwhm_and_encircled_energy():
         encircled_energy(field, [7 * lambda_over_d])
 
 
+@pytest.mark.parametrize("coordinate_ulps", [-8, -4, 0, 4, 8])
+def test_fwhm_integer_bin_edges_keep_actual_mean_radii(coordinate_ulps):
+    coordinate = 1.0 + coordinate_ulps*np.spacing(1.0)
+    x, y = np.meshgrid([-coordinate, 0.0, coordinate], [-coordinate, 0.0, coordinate])
+    image = np.array([[1., 2., 1.], [2., 4., 2.], [1., 2., 1.]])/16
+    field = FocalField(image, x, y, 1.0, 5e-7)
+    # Independently enumerated bins: centre alone, then four axes and four diagonals.
+    # Half-height interpolation is (4-2)/(4-1.5)=0.8; use the actual coordinate radius.
+    expected = 0.8*coordinate*(1+math.sqrt(2))
+    np.testing.assert_array_max_ulp(fwhm_arcsec(field), expected, maxulp=4)
+
+
 def test_fwhm_retains_a_real_fractional_peak():
     sigma = 1.1
     centre = np.array([0.27, -0.13])
