@@ -51,17 +51,19 @@ def observation_value(noisy=False, include_lens=False):
     return observed.draw(11) if noisy else observed
 
 
-def case_value():
+def case_value(custom_mask=False):
     from hwoslaps.inference.result import CaseResult, ObservationRecord, RoleFit
-    from hwoslaps.inference.settings import FitSpec, SamplerSettings
+    from hwoslaps.inference.settings import FitSpec, PixelMask, SamplerSettings
     from hwoslaps.scene.cosmology import Cosmology, parse_cosmology
     from hwoslaps.scene.halos import HaloModel, make_halo
     halo = make_halo(HaloModel("PointMass", None, None), 1e8, (0.1, -0.2), redshift=0.2,
                      source_redshift=0.6, cosmology=Cosmology(parse_cosmology({"name": "Planck15"})))
     smooth = RoleFit("smooth", "search", "success", -3.0, -3.0, ("x",), 1, None, None, {"x": 0.25}, None, None, 0.1)
     subhalo = RoleFit("subhalo", "truth_anchor", "success", -1.0, -1.0, (), 0, None, None, None, 0.0, None, 0.1)
+    fit = (FitSpec("fixed_template", mask=PixelMask(np.array([[True, False, True], [False, True, False]])))
+           if custom_mask else FitSpec("fixed_template"))
     return CaseResult("case", halo, ObservationRecord("expected", None, "c" * 64, "d" * 64, halo),
-                      {"kind": "expected"}, FitSpec("fixed_template"), SamplerSettings(), 19, None,
+                      {"kind": "expected", "shape": [2, 3]}, fit, SamplerSettings(), 19, None,
                       {"smooth": "s", "subhalo": "h"}, smooth, subhalo, 4.0, 4.0, None, None, None,
                       ("x",), "e" * 64, {"version": "synthetic"})
 
@@ -107,8 +109,9 @@ def test_observation_round_trip_preserves_bytes_sampling_and_kernel_sharing(tmp_
 
 
 @pytest.mark.backend
-def test_case_round_trip_preserves_typed_result(tmp_path):
-    original = case_value()
+@pytest.mark.parametrize("custom_mask", [False, True])
+def test_case_round_trip_preserves_typed_result(tmp_path, custom_mask):
+    original = case_value(custom_mask)
     loaded = load_case(save_case(original, tmp_path / "case.json"))
     assert original.to_mapping() == loaded.to_mapping()
 
