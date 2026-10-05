@@ -67,3 +67,16 @@ def test_config_seed_does_not_supply_detector_seed(minimal_mapping):
     minimal_mapping["seed"] = 983
     other_config_seed = simulate(minimal_mapping, subhalo=None, noise_seed=19)
     np.testing.assert_array_equal(first.data_adu, other_config_seed.data_adu)
+
+
+def test_standalone_simulation_needs_no_forecast_section(minimal_mapping):
+    from hwoslaps.config.checks import ConfigError
+    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.simulation import simulate
+
+    del minimal_mapping["forecast"]
+    expected = simulate(minimal_mapping, subhalo=None, noise_seed=None)
+    assert expected.kind == "expected"
+    assert expected.sampling["source"] >= 0.0
+    with pytest.raises(ConfigError, match="forecast"):
+        prepare_forecast(minimal_mapping)
