@@ -3,6 +3,8 @@
 Run with one BLAS thread and no existing JAX compilation cache. Every repeat runs
 in a new process with a fresh cache. B5 is B3 with Exponential lens light and a
 second Exponential source; its exact component parameters are recorded below.
+NPZ files hold the numeric comparison arrays; JSON records their configuration,
+provenance and measured stages. Product artifact persistence has its own format.
 """
 from __future__ import annotations
 
@@ -54,8 +56,8 @@ def measure(args):
     from hwoslaps.fisher.engines.base import BankAccumulator
     import hwoslaps.fisher.api as forecast_api
 
-    mapping, directory = workload_mapping(args.workload)
     start = perf_counter()
+    mapping, directory = workload_mapping(args.workload)
     config = resolve_config(mapping, base_dir=directory)
     seconds = {"config_load": perf_counter() - start}
     _, engine, masses, workers = WORKLOADS[args.workload]
@@ -142,7 +144,7 @@ def measure(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--workload", choices=WORKLOADS, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--gpu", action="store_true")
