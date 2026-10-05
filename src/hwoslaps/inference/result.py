@@ -255,6 +255,18 @@ class RoleFit:
                    runtime_s=float(mapping["runtime_s"]))
 
 
+def _finite_reference_number(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"forecast reference {name} must be a finite real number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"forecast reference {name} must be a finite real number") from error
+    if not math.isfinite(number):
+        raise ValueError(f"forecast reference {name} must be a finite real number")
+    return number
+
+
 @dataclass(frozen=True)
 class ForecastReference:
     """Where a compared forecast q came from: its metric, node, configuration, mask and kernel.
@@ -278,8 +290,11 @@ class ForecastReference:
     def __post_init__(self) -> None:
         if self.metric not in ("q_asimov", "q_mismatch"):
             raise ValueError(f"metric must be q_asimov or q_mismatch, got {self.metric!r}")
+        object.__setattr__(self, "q", _finite_reference_number(self.q, "q"))
         if (self.amplitude is None) != (self.metric == "q_asimov"):
             raise ValueError("amplitude is recorded for q_mismatch and only for it")
+        if self.amplitude is not None:
+            object.__setattr__(self, "amplitude", _finite_reference_number(self.amplitude, "amplitude"))
         object.__setattr__(self, "position_yx_arcsec", tuple(float(v) for v in self.position_yx_arcsec))
         object.__setattr__(self, "nuisance_names", tuple(self.nuisance_names))
 
@@ -295,14 +310,18 @@ class ForecastReference:
         if len(kernels) != 1:
             raise ValueError("a nonlinear forecast reference requires one distinct model kernel")
         metric = result.detection_metric
+        q = _finite_reference_number(getattr(result, metric)[mass_index, position_index],
+                                     f"{metric} at node ({mass_index}, {position_index})")
+        amplitude = None if metric == "q_asimov" else _finite_reference_number(
+            result.amplitude_hat[mass_index, position_index], f"amplitude at node ({mass_index}, {position_index})")
         covariance = provenance["noise_covariance"]
-        return cls(q=float(getattr(result, metric)[mass_index, position_index]), metric=metric,
+        return cls(q=q, metric=metric,
                    mass_msun=float(result.masses_msun[mass_index]),
                    position_yx_arcsec=tuple(result.positions_yx[position_index]),
                    config_digest=provenance["config_digest"], mask_digest=provenance["mask"]["digest"],
                    nuisance_names=tuple(provenance["nuisance_names"]),
                    model_kernel=KernelIdentity.from_mapping(kernels[0]["identity"]),
-                   amplitude=None if metric == "q_asimov" else float(result.amplitude_hat[mass_index, position_index]),
+                   amplitude=amplitude,
                    comparison_digest=provenance["comparison_digest"],
                    noise_model="diagonal" if covariance is None else f"covariance:{covariance}")
 
@@ -318,12 +337,12 @@ class ForecastReference:
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> ForecastReference:
         check_record_keys(mapping, cls)
-        return cls(q=float(mapping["q"]), metric=mapping["metric"], mass_msun=float(mapping["mass_msun"]),
+        return cls(q=mapping["q"], metric=mapping["metric"], mass_msun=float(mapping["mass_msun"]),
                    position_yx_arcsec=tuple(mapping["position_yx_arcsec"]),
                    config_digest=mapping["config_digest"], mask_digest=mapping["mask_digest"],
                    nuisance_names=tuple(mapping["nuisance_names"]),
                    model_kernel=KernelIdentity.from_mapping(mapping["model_kernel"]),
-                   amplitude=_optional_float(mapping["amplitude"]),
+                   amplitude=mapping["amplitude"],
                    comparison_digest=mapping["comparison_digest"], noise_model=mapping["noise_model"])
 
 
