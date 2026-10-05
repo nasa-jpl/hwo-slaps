@@ -11,7 +11,7 @@ import pytest
 
 from hwoslaps.config.checks import ConfigError
 from hwoslaps.inference.settings import (
-    DEFAULT_BOX_RULES, BoxRule, FitSpec, MassSupport, PriorWidths, RefineSettings, SamplerSettings,
+    DEFAULT_BOX_RULES, BoxRule, FitSpec, MassSupport, PixelMask, PriorWidths, RefineSettings, SamplerSettings,
 )
 
 N1_FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity" / "n1_nonlinear_likelihood.npz"
@@ -173,3 +173,55 @@ def test_settings_round_trip_and_rule_overrides_merge_field_by_field():
     assert sampler.to_mapping()["n_eff"] == 200.0 and isinstance(sampler.to_mapping()["n_eff"], float)
     refine = RefineSettings(original_start_count=2, maxiter=50, start_separation_posterior_sigma=2.0)
     assert RefineSettings.from_mapping(refine.to_mapping()) == refine
+
+
+@pytest.mark.parametrize("shape", [None, "forecast", (1, 1), (3, 5), (2, 4), (40, 40), (0, 3)])
+def test_fit_records_round_trip_named_and_custom_pixel_masks(shape):
+    import json
+
+    if shape is None or shape == "forecast":
+        mask = "all_pixels_minus_psf_border" if shape is None else "forecast_mask_minus_psf_border"
+    else:
+        mask = PixelMask((np.arange(np.prod(shape)).reshape(shape) % 3 == 0).astype(bool))
+    fit = FitSpec(mode="fixed_template", mask=mask)
+    record = json.loads(json.dumps(fit.to_record()))
+    restored = FitSpec.from_record(record)
+    assert restored == fit and restored.to_record() == record
+    if isinstance(mask, str):
+        assert fit.to_record() == fit.to_mapping()
+    else:
+        np.testing.assert_array_equal(restored.mask.values, mask.values)
+        assert not restored.mask.values.flags.writeable
+        with pytest.raises(ConfigError) as caught:
+            FitSpec.from_mapping(record)
+        assert caught.value.path == "fit.mask"
+
+
+@pytest.mark.parametrize(("defect", "path"), [("keys", "fit.mask"), ("name", "fit.mask.name"),
+    ("encoding", "fit.mask.encoding"), ("shape", "fit.mask.shape"), ("base64", "fit.mask.values"),
+    ("length", "fit.mask.values"), ("padding", "fit.mask.values"), ("digest", "fit.mask.digest")])
+def test_custom_mask_records_refuse_malformed_payloads(defect, path):
+    import base64
+
+    record = PixelMask(np.ones((3, 5), dtype=bool)).to_record()
+    if defect == "keys":
+        record["unknown"] = None
+    elif defect == "name":
+        record["name"] = "all_pixels_minus_psf_border"
+    elif defect == "encoding":
+        record["encoding"] = "pickle"
+    elif defect == "shape":
+        record["shape"] = [True, 15]
+    elif defect == "base64":
+        record["values"] = "@@@"
+    elif defect == "length":
+        record["values"] = base64.b64encode(b"\x01").decode()
+    elif defect == "padding":
+        packed = bytearray(base64.b64decode(record["values"]))
+        packed[-1] |= 128
+        record["values"] = base64.b64encode(packed).decode()
+    else:
+        record["digest"] = "ff" * 32
+    with pytest.raises(ConfigError) as caught:
+        PixelMask.from_record(record)
+    assert caught.value.path == path

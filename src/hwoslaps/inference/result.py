@@ -17,10 +17,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ..fisher.result import is_detection
 from ..identity import KernelIdentity, json_ready
-from .settings import FitSpec, RefineSettings, SamplerSettings
+from .settings import FitSpec, PixelMask, RefineSettings, SamplerSettings
 
 if TYPE_CHECKING:
     from ..scene.halos import Halo
+    from ..fisher.result import ForecastResult
     from .recovery import SubhaloRecovery
 
 __all__ = [
@@ -254,6 +255,18 @@ class RoleFit:
                    runtime_s=float(mapping["runtime_s"]))
 
 
+def _finite_reference_number(value: Any, name: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"forecast reference {name} must be a finite real number")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"forecast reference {name} must be a finite real number") from error
+    if not math.isfinite(number):
+        raise ValueError(f"forecast reference {name} must be a finite real number")
+    return number
+
+
 @dataclass(frozen=True)
 class ForecastReference:
     """Where a compared forecast q came from: its metric, node, configuration, mask and kernel.
@@ -277,10 +290,40 @@ class ForecastReference:
     def __post_init__(self) -> None:
         if self.metric not in ("q_asimov", "q_mismatch"):
             raise ValueError(f"metric must be q_asimov or q_mismatch, got {self.metric!r}")
+        object.__setattr__(self, "q", _finite_reference_number(self.q, "q"))
         if (self.amplitude is None) != (self.metric == "q_asimov"):
             raise ValueError("amplitude is recorded for q_mismatch and only for it")
+        if self.amplitude is not None:
+            object.__setattr__(self, "amplitude", _finite_reference_number(self.amplitude, "amplitude"))
         object.__setattr__(self, "position_yx_arcsec", tuple(float(v) for v in self.position_yx_arcsec))
         object.__setattr__(self, "nuisance_names", tuple(self.nuisance_names))
+
+    @classmethod
+    def from_result(cls, result: ForecastResult, *, mass_index: int, position_index: int) -> ForecastReference:
+        """The fitted node's statistic and comparison inputs, copied from forecast provenance."""
+        for index, count, label in ((mass_index, len(result.masses_msun), "mass_index"),
+                                    (position_index, len(result.positions_yx), "position_index")):
+            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < count:
+                raise ValueError(f"{label} must lie in 0..{count - 1}, got {index!r}")
+        provenance = result.provenance
+        kernels = provenance["model_kernels"]["kernels"]
+        if len(kernels) != 1:
+            raise ValueError("a nonlinear forecast reference requires one distinct model kernel")
+        metric = result.detection_metric
+        q = _finite_reference_number(getattr(result, metric)[mass_index, position_index],
+                                     f"{metric} at node ({mass_index}, {position_index})")
+        amplitude = None if metric == "q_asimov" else _finite_reference_number(
+            result.amplitude_hat[mass_index, position_index], f"amplitude at node ({mass_index}, {position_index})")
+        covariance = provenance["noise_covariance"]
+        return cls(q=q, metric=metric,
+                   mass_msun=float(result.masses_msun[mass_index]),
+                   position_yx_arcsec=tuple(result.positions_yx[position_index]),
+                   config_digest=provenance["config_digest"], mask_digest=provenance["mask"]["digest"],
+                   nuisance_names=tuple(provenance["nuisance_names"]),
+                   model_kernel=KernelIdentity.from_mapping(kernels[0]["identity"]),
+                   amplitude=amplitude,
+                   comparison_digest=provenance["comparison_digest"],
+                   noise_model="diagonal" if covariance is None else f"covariance:{covariance}")
 
     def detected(self, *, q_threshold: float) -> bool:
         """``q >= q_threshold`` with a positive amplitude where one is recorded (the forecast rule)."""
@@ -294,12 +337,12 @@ class ForecastReference:
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> ForecastReference:
         check_record_keys(mapping, cls)
-        return cls(q=float(mapping["q"]), metric=mapping["metric"], mass_msun=float(mapping["mass_msun"]),
+        return cls(q=mapping["q"], metric=mapping["metric"], mass_msun=float(mapping["mass_msun"]),
                    position_yx_arcsec=tuple(mapping["position_yx_arcsec"]),
                    config_digest=mapping["config_digest"], mask_digest=mapping["mask_digest"],
                    nuisance_names=tuple(mapping["nuisance_names"]),
                    model_kernel=KernelIdentity.from_mapping(mapping["model_kernel"]),
-                   amplitude=_optional_float(mapping["amplitude"]),
+                   amplitude=mapping["amplitude"],
                    comparison_digest=mapping["comparison_digest"], noise_model=mapping["noise_model"])
 
 
@@ -386,7 +429,7 @@ class CaseResult:
     def to_mapping(self) -> dict[str, Any]:
         return finite_json({
             "case_id": self.case_id, "hypothesis": self.hypothesis.to_mapping(),
-            "observation": self.observation.to_mapping(), "data": self.data, "fit": self.fit.to_mapping(),
+            "observation": self.observation.to_mapping(), "data": self.data, "fit": self.fit.to_record(),
             "sampler": self.sampler.to_mapping(), "sampler_seed": self.sampler_seed,
             "refine": None if self.refine is None else self.refine.to_mapping(), "models": self.models,
             "smooth": self.smooth.to_mapping(), "subhalo": self.subhalo.to_mapping(),
@@ -403,13 +446,14 @@ class CaseResult:
         from .recovery import SubhaloRecovery
 
         check_record_keys(mapping, cls)
-        if not isinstance(mapping["fit"]["mask"], str):
-            raise ValueError("this case was fitted with a custom PixelMask, which is recorded by digest only "
-                             "and cannot be rebuilt from the record")
+        fit = FitSpec.from_record(mapping["fit"])
+        if isinstance(fit.mask, PixelMask) and "shape" in mapping["data"]:
+            if tuple(mapping["data"]["shape"]) != fit.mask.values.shape:
+                raise ValueError("custom mask shape differs from the recorded case data shape")
         refine, recovery, reference = mapping["refine"], mapping["recovery"], mapping["forecast_reference"]
         return cls(case_id=mapping["case_id"], hypothesis=_halo_from_mapping(mapping["hypothesis"]),
                    observation=ObservationRecord.from_mapping(mapping["observation"]), data=dict(mapping["data"]),
-                   fit=FitSpec.from_mapping(mapping["fit"]), sampler=SamplerSettings.from_mapping(mapping["sampler"]),
+                   fit=fit, sampler=SamplerSettings.from_mapping(mapping["sampler"]),
                    sampler_seed=int(mapping["sampler_seed"]),
                    refine=None if refine is None else RefineSettings.from_mapping(refine),
                    models=dict(mapping["models"]), smooth=RoleFit.from_mapping(mapping["smooth"]),

@@ -10,6 +10,8 @@ only and exists only through the Python API).
 
 from __future__ import annotations
 
+import base64
+import binascii
 import dataclasses
 import math
 from collections.abc import Mapping
@@ -287,6 +289,42 @@ class PixelMask:
     def digest(self) -> str:
         return array_digest(self.values)
 
+    def to_record(self) -> dict[str, Any]:
+        packed = np.packbits(self.values.reshape(-1), bitorder="little")
+        return {"name": "custom_minus_psf_border", "shape": list(self.values.shape),
+                "encoding": "packbits-little-base64", "values": base64.b64encode(packed.tobytes()).decode("ascii"),
+                "digest": self.digest}
+
+    @classmethod
+    def from_record(cls, mapping: Mapping[str, Any], *, path: str = "fit.mask") -> PixelMask:
+        keys = {"name", "shape", "encoding", "values", "digest"}
+        if not isinstance(mapping, Mapping) or set(mapping) != keys:
+            raise ConfigError(path, f"mask record keys must be {sorted(keys)}")
+        if mapping["name"] != "custom_minus_psf_border":
+            raise ConfigError(_path(path, "name"), "must be custom_minus_psf_border")
+        if mapping["encoding"] != "packbits-little-base64":
+            raise ConfigError(_path(path, "encoding"), "must be packbits-little-base64")
+        shape = mapping["shape"]
+        if not isinstance(shape, (tuple, list)) or len(shape) != 2 or any(
+                isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 0 for value in shape):
+            raise ConfigError(_path(path, "shape"), "must be two nonnegative integer dimensions")
+        if not isinstance(mapping["values"], str):
+            raise ConfigError(_path(path, "values"), "must be base64 text")
+        try:
+            packed = base64.b64decode(mapping["values"], validate=True)
+        except (ValueError, binascii.Error) as error:
+            raise ConfigError(_path(path, "values"), "invalid base64 mask") from error
+        count = math.prod(shape)
+        if len(packed) != (count + 7) // 8:
+            raise ConfigError(_path(path, "values"), "byte length differs from the recorded mask shape")
+        bits = np.unpackbits(np.frombuffer(packed, dtype=np.uint8), bitorder="little")
+        if np.any(bits[count:]):
+            raise ConfigError(_path(path, "values"), "mask padding bits must be zero")
+        mask = cls(bits[:count].astype(bool).reshape(tuple(shape)))
+        if mask.digest != mapping["digest"]:
+            raise ConfigError(_path(path, "digest"), "mask digest differs from the decoded raw boolean values")
+        return mask
+
     def __eq__(self, other: object) -> bool:
         return isinstance(other, PixelMask) and self.digest == other.digest
 
@@ -327,7 +365,10 @@ class FitSpec:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any], *, path: str = "fit") -> FitSpec:
-        values = _FIT_SPEC.read(mapping, path)
+        return cls._from_values(_FIT_SPEC.read(mapping, path), path)
+
+    @classmethod
+    def _from_values(cls, values: Mapping[str, Any], path: str) -> FitSpec:
         support = values["mass_support"]
         return cls(mode=values["mode"], mask=values["mask"],
                    prior_widths=PriorWidths.from_mapping(values["prior_widths"], path=_path(path, "prior_widths")),
@@ -340,6 +381,20 @@ class FitSpec:
         return {"mode": self.mode, "mask": mask, "prior_widths": self.prior_widths.to_mapping(),
                 "mass_support": None if self.mass_support is None else self.mass_support.to_mapping(),
                 "h1": self.h1, "anchor_chi2_tolerance": self.anchor_chi2_tolerance}
+
+
+    def to_record(self) -> dict[str, Any]:
+        record = self.to_mapping()
+        if isinstance(self.mask, PixelMask):
+            record["mask"] = self.mask.to_record()
+        return record
+
+    @classmethod
+    def from_record(cls, mapping: Mapping[str, Any], *, path: str = "fit") -> FitSpec:
+        expected = {key.name for key in _FIT_RECORD_SPEC.keys}
+        if not isinstance(mapping, Mapping) or set(mapping) != expected:
+            raise ConfigError(path, f"fit record keys must be {sorted(expected)}")
+        return cls._from_values(_FIT_RECORD_SPEC.read(mapping, path), path)
 
 
 _FIT_SPEC = Table((
@@ -357,6 +412,16 @@ _FIT_SPEC = Table((
 ), rules=(Rule("mass_support is required with mode freed and refused otherwise", _check_mass_support),))
 
 _FIT_CHECKS = {key.name: key.check for key in _FIT_SPEC.keys}
+
+
+def _record_mask(value: Any, path: str) -> str | PixelMask:
+    if isinstance(value, Mapping):
+        return PixelMask.from_record(value, path=path)
+    return Text(choices=MASK_NAMES)(value, path)
+
+
+_FIT_RECORD_SPEC = dataclasses.replace(_FIT_SPEC, keys=tuple(
+    dataclasses.replace(key, check=_record_mask) if key.name == "mask" else key for key in _FIT_SPEC.keys))
 
 
 # ------------------------------------------------------------------ sampler

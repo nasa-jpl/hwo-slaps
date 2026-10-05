@@ -9,22 +9,47 @@ pytestmark = pytest.mark.backend
 P1 = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity" / "engine" / "p1_optical_matched.yaml"
 
 
-def test_nuisance_order_follows_registry_and_fixed_patterns(minimal_mapping):
+@pytest.mark.parametrize("light_type", ["Exponential", "Image"])
+def test_nuisance_order_follows_registry_and_fixed_patterns(light_type, minimal_mapping, image_asset):
     from hwoslaps.config.checks import ConfigError
-    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
-    expected = ("lens.mass.mass.centre_y", "lens.mass.mass.centre_x", "lens.mass.mass.einstein_radius",
-                "lens.mass.mass.ell_comp_1", "lens.mass.mass.ell_comp_2", "source.light.light.centre_y",
-                "source.light.light.centre_x", "source.light.light.ell_comp_1", "source.light.light.ell_comp_2",
-                "source.light.light.intensity", "source.light.light.effective_radius", "observation.background_offset_adu")
-    with prepare_forecast(minimal_mapping) as prepared:
+    lens_names = ("lens.mass.mass.centre_y", "lens.mass.mass.centre_x", "lens.mass.mass.einstein_radius",
+                  "lens.mass.mass.ell_comp_1", "lens.mass.mass.ell_comp_2")
+    if light_type == "Image":
+        minimal_mapping["scene"]["source"]["light"]["light"] = {
+            "type": "Image", "asset_path": str(image_asset), "centre": [-0.03, 0.08],
+            "total_flux": 1.0, "rotation_deg": 12.0}
+        source_names = ("source.light.light.centre_y", "source.light.light.centre_x",
+                        "source.light.light.flux_scale", "source.light.light.size_scale",
+                        "source.light.light.rotation_deg")
+        minimal_mapping["forecast"]["nuisances"] = {"priors": {"source.light.light.flux_scale": 0.02}}
+    else:
+        source_names = ("source.light.light.centre_y", "source.light.light.centre_x",
+                        "source.light.light.ell_comp_1", "source.light.light.ell_comp_2",
+                        "source.light.light.intensity", "source.light.light.effective_radius")
+    expected = lens_names + source_names + ("observation.background_offset_adu",)
+    with prepare_forecast(minimal_mapping, execution=Execution(engine="reference")) as prepared:
         assert prepared.nuisances.names == expected
+        if light_type == "Image":
+            amplitude = prepared.nuisances.names.index("source.light.light.flux_scale")
+            assert prepared.nuisances.parameters[amplitude].prior_sigma == 0.02
+            np.testing.assert_array_equal(prepared.nuisances.prior_precision,
+                                          [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2500.0, 0.0, 0.0, 0.0])
     minimal_mapping["forecast"]["nuisances"] = {"fixed": ["lens.mass.*", "source.light.*.centre_*"], "background_offset": False}
-    with prepare_forecast(minimal_mapping) as prepared:
-        assert prepared.nuisances.names == expected[7:11]
+    with prepare_forecast(minimal_mapping, execution=Execution(engine="reference")) as prepared:
+        assert prepared.nuisances.names == source_names[2:]
+    if light_type == "Exponential":
+        minimal_mapping["forecast"]["nuisances"] = {"fixed": ["*"], "background_offset": False, "wavefront": None}
+        with prepare_forecast(minimal_mapping, execution=Execution(engine="reference")) as prepared:
+            assert prepared.nuisances.names == ()
+            assert prepared.nuisances.images.shape == (0, *prepared.mask.shape)
+            assert prepared.nuisances.prior_precision.shape == (0,)
+            result = forecast(prepared, masses_msun=[1.0e8])
+            np.testing.assert_array_equal(result.fisher_profiled, result.fisher_raw)
     minimal_mapping["forecast"]["nuisances"]["fixed"] = ["typo.*"]
     with pytest.raises(ConfigError, match="matches no parameter"):
-        prepare_forecast(minimal_mapping)
+        prepare_forecast(minimal_mapping, execution=Execution(engine="reference"))
 
 
 def test_steps_resolve_by_name_kind_and_default(minimal_mapping):
