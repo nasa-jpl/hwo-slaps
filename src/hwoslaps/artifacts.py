@@ -65,6 +65,7 @@ def _npz(path, members) -> Path:
                 buffer = io.BytesIO()
                 np.lib.format.write_array(buffer, array, allow_pickle=False)
                 info = zipfile.ZipInfo(name + ".npy", date_time=(1980, 1, 1, 0, 0, 0))
+                info.create_system = 3
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, buffer.getvalue())
     return _publish(path, write)
@@ -136,7 +137,7 @@ def save_forecast(result: ForecastResult, path) -> Path:
     layout = {"kind": positions.kind, "centre_yx": positions.centre_yx,
               "domain_radius_arcsec": positions.domain_radius_arcsec,
               "spacing_arcsec": None if positions.grid is None else positions.grid.spacing_arcsec}
-    members = {"schema_version": np.asarray(2), "artifact_kind": np.asarray("forecast"),
+    members = {"schema_version": np.asarray(2, dtype=np.int64), "artifact_kind": np.asarray("forecast"),
                "masses_msun": result.masses_msun, "positions_yx": positions.positions_yx,
                "positions_json": np.asarray(canonical_json(layout)),
                "config_json": np.asarray(json.dumps(json_ready(result.config), separators=(",", ":"), allow_nan=False)),
