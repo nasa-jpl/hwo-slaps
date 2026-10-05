@@ -425,8 +425,7 @@ def _powerlaw_boundary_case(mapping, tmp_path, slope, *, free_slope=False, fixed
     mapping["scene"]["source"]["light"]["light"]["ell_comps"]=[.14516129,.25142673]
     fixed=["lens.mass.mass.centre_*","source.light.*"]
     if not free_slope:fixed.append("lens.mass.mass.slope")
-    if not fixed_shape:fixed.append("lens.mass.mass.einstein_radius")
-    else:fixed.append("lens.mass.mass.ell_comp_*")
+    if fixed_shape:fixed.append("lens.mass.mass.ell_comp_*")
     mapping["forecast"]["nuisances"]={"fixed":fixed,"background_offset":False}
     prepared=prepare_forecast(parse_config(mapping))
     try:
