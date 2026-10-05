@@ -8,10 +8,12 @@ from the profile registry, halo keys from ``scene.halos``, the injection from
   avoid ``redshift``, ``subhalo``, the prefix ``perturber`` and the layout suffixes
   ``_multipole_m3``, ``_multipole_m4``;
 - halo redshifts lie in (0, source redshift), and ``moline2017_eq7`` is used only at the
-  lens redshift and inside its calibrated mass range.
+  lens redshift and inside its calibrated mass range;
+- a placement with ``radius: einstein_radius`` has exactly one lens mass component with an
+  Einstein radius.
 
 Angles and positions are arcsec in (y, x) order on the image plane with the origin at the
-grid centre.
+grid centre; placements are about the lens centre.
 """
 
 from __future__ import annotations
@@ -221,6 +223,16 @@ def _check_halos(values: Mapping[str, Any], path: str) -> None:
         _check_moline_mass(values["subhalo"], values["injection"]["mass_msun"], f"{path}.injection.mass_msun")
 
 
+def _check_radius_reference(values: Mapping[str, Any], path: str) -> None:
+    injection = values["injection"]
+    if injection is None or injection["position"].get("radius") != "einstein_radius":
+        return
+    count = len(_einstein_radii((component["type"], component) for component in values["lens"]["mass"].values()))
+    if count != 1:
+        raise ConfigError(f"{path}.injection.position.radius",
+                          f"einstein_radius needs exactly one lens mass component with an Einstein radius, found {count}")
+
+
 SCENE_TABLE = Table(
     (
         Key("grid", _GRID_TABLE, "image grid"),
@@ -236,6 +248,8 @@ SCENE_TABLE = Table(
         Rule("component names unique within a galaxy and not reserved", _check_component_names),
         Rule("halo redshifts in (0, source.redshift); moline2017_eq7 only at the lens redshift and in its mass range",
              _check_halos),
+        Rule("radius: einstein_radius needs exactly one lens mass component with an Einstein radius",
+             _check_radius_reference),
     ),
     doc="The lensing scene.",
 )
