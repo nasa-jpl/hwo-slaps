@@ -26,7 +26,7 @@ from numpy.typing import ArrayLike
 
 from ..identity import array_digest, file_digest
 
-__all__ = ["ASSET_FORMAT_VERSION", "ImageAsset", "load_image_asset", "prepare_image_asset"]
+__all__ = ["ASSET_FORMAT_VERSION", "ImageAsset", "frozen_value", "load_image_asset", "prepare_image_asset"]
 
 ASSET_FORMAT_VERSION = 1
 _ASSET_MEMBERS = {"sb", "pixel_scale_arcsec", "metadata_json"}
@@ -36,11 +36,16 @@ _MEMO_LIMIT = 8
 _MEMO: OrderedDict[str, ImageAsset] = OrderedDict()
 
 
-def _frozen(value: Any) -> Any:
+def frozen_value(value: Any) -> Any:
+    """A read-only copy of a JSON-like value, at every depth.
+
+    Mappings become read-only mapping proxies, lists and tuples become tuples. Scene component
+    values and asset metadata are frozen this way.
+    """
     if isinstance(value, Mapping):
-        return types.MappingProxyType({key: _frozen(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return tuple(_frozen(item) for item in value)
+        return types.MappingProxyType({key: frozen_value(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(frozen_value(item) for item in value)
     return value
 
 
@@ -80,7 +85,7 @@ def _validated(sb: np.ndarray, pixel_scale: float, metadata: Any, digest: str, s
     if not isinstance(metadata.get("provenance"), Mapping):
         raise ValueError(f"{source}: metadata provenance must be a JSON object")
     sb.setflags(write=False)
-    return ImageAsset(sb=sb, pixel_scale_arcsec=pixel_scale, metadata=_frozen(metadata), digest=digest)
+    return ImageAsset(sb=sb, pixel_scale_arcsec=pixel_scale, metadata=frozen_value(metadata), digest=digest)
 
 
 def _read(path: str, digest: str) -> ImageAsset:

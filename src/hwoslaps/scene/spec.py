@@ -28,6 +28,7 @@ import numpy as np
 
 from ..config.checks import ConfigError, Integer, Key, Named, Nullable, Real, Rule, Shape, Table, Variants
 from .halos import HaloModel, MOLINE2017_MASS_RANGE_MSUN, halo_model_from_values, halo_model_table
+from .image_source import frozen_value
 from .perturbers import PERTURBERS_TABLE, PerturberSpec, perturbers_from_values
 from .profiles import PROFILE_TYPES
 from .subhalo import INJECTION_TABLE, InjectionSpec, injection_from_values
@@ -57,9 +58,10 @@ class GridSpec:
 
 @dataclass(frozen=True)
 class ComponentSpec:
-    """One named mass or light component; ``values`` are its keys as read by the registry entry's table.
+    """One named mass or light component with its keys as read by the registry entry's table.
 
-    ``sed`` and ``flux`` are the photometric light keys of W2-SPECTRA and are None here.
+    ``values`` are read-only at every depth (``image_source.frozen_value``). ``sed`` and ``flux``
+    are the photometric light keys of W2-SPECTRA and are None here.
     """
 
     name: str
@@ -257,15 +259,10 @@ SCENE_TABLE = Table(
 )
 
 
-def _frozen(values: Mapping[str, Any]) -> Mapping[str, Any]:
-    return types.MappingProxyType({key: tuple(value) if isinstance(value, list) else value
-                                   for key, value in values.items()})
-
-
 def component_from_values(name: str, plane: Plane, role: Role, values: Mapping[str, Any]) -> ComponentSpec:
     """The ``ComponentSpec`` of one component's values as read by its role's table (``type`` included)."""
     rest = {key: value for key, value in values.items() if key != "type"}
-    return ComponentSpec(name=name, plane=plane, role=role, type=values["type"], values=_frozen(rest), sed=None,
+    return ComponentSpec(name=name, plane=plane, role=role, type=values["type"], values=frozen_value(rest), sed=None,
                          flux=None)
 
 
