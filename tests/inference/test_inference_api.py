@@ -234,3 +234,26 @@ def test_off_plane_hypothesis_jax_likelihood_and_gradient(redshift, mode, prepar
         value, gradient = jax_case.objective("subhalo").value_and_gradient((vector - model.lower) / (model.upper - model.lower))
         assert np.isfinite(value) and np.all(np.isfinite(gradient))
         assert value == pytest.approx(0.5 * numpy_case.chi_squared("subhalo", vector), rel=1e-10, abs=1e-10)
+
+
+def test_custom_mask_case_records_round_trip(prepared_forecast, tmp_path):
+    from hwoslaps.inference.settings import PixelMask
+    from hwoslaps.simulation import simulate
+
+    mask = np.ones((40, 40), dtype=bool)
+    mask[12:15, 17:23] = False
+    trial = prepared_forecast.hypothesis(1e8, (0.4, -0.6))
+    result = validate_nonlinear(prepared_forecast, trial, simulate(prepared_forecast, subhalo=trial, noise_seed=None),
+                                fit=FitSpec(mode="fixed_template", mask=PixelMask(mask), h1="truth_anchor"),
+                                sampler=SamplerSettings(n_live_smooth=20, n_like_max=80),
+                                sampler_seed=7, output_dir=tmp_path)
+    record = json.loads(json.dumps(result.to_mapping()))
+    restored = CaseResult.from_mapping(record)
+    np.testing.assert_array_equal(restored.fit.mask.values, mask)
+    assert restored.to_mapping() == record
+    assert restored.fit.mask.digest == result.fit.mask.digest
+    assert not restored.fit.mask.values.flags.writeable
+    # A valid mask codec for another detector shape is still an invalid case record.
+    record["data"]["shape"] = [41, 40]
+    with pytest.raises(ValueError, match="custom mask shape differs from the recorded case data shape"):
+        CaseResult.from_mapping(record)

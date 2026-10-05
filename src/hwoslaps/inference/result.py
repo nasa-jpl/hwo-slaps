@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ..fisher.result import is_detection
 from ..identity import KernelIdentity, json_ready
-from .settings import FitSpec, RefineSettings, SamplerSettings
+from .settings import FitSpec, PixelMask, RefineSettings, SamplerSettings
 
 if TYPE_CHECKING:
     from ..scene.halos import Halo
@@ -410,7 +410,7 @@ class CaseResult:
     def to_mapping(self) -> dict[str, Any]:
         return finite_json({
             "case_id": self.case_id, "hypothesis": self.hypothesis.to_mapping(),
-            "observation": self.observation.to_mapping(), "data": self.data, "fit": self.fit.to_mapping(),
+            "observation": self.observation.to_mapping(), "data": self.data, "fit": self.fit.to_record(),
             "sampler": self.sampler.to_mapping(), "sampler_seed": self.sampler_seed,
             "refine": None if self.refine is None else self.refine.to_mapping(), "models": self.models,
             "smooth": self.smooth.to_mapping(), "subhalo": self.subhalo.to_mapping(),
@@ -427,13 +427,14 @@ class CaseResult:
         from .recovery import SubhaloRecovery
 
         check_record_keys(mapping, cls)
-        if not isinstance(mapping["fit"]["mask"], str):
-            raise ValueError("this case was fitted with a custom PixelMask, which is recorded by digest only "
-                             "and cannot be rebuilt from the record")
+        fit = FitSpec.from_record(mapping["fit"])
+        if isinstance(fit.mask, PixelMask) and "shape" in mapping["data"]:
+            if tuple(mapping["data"]["shape"]) != fit.mask.values.shape:
+                raise ValueError("custom mask shape differs from the recorded case data shape")
         refine, recovery, reference = mapping["refine"], mapping["recovery"], mapping["forecast_reference"]
         return cls(case_id=mapping["case_id"], hypothesis=_halo_from_mapping(mapping["hypothesis"]),
                    observation=ObservationRecord.from_mapping(mapping["observation"]), data=dict(mapping["data"]),
-                   fit=FitSpec.from_mapping(mapping["fit"]), sampler=SamplerSettings.from_mapping(mapping["sampler"]),
+                   fit=fit, sampler=SamplerSettings.from_mapping(mapping["sampler"]),
                    sampler_seed=int(mapping["sampler_seed"]),
                    refine=None if refine is None else RefineSettings.from_mapping(refine),
                    models=dict(mapping["models"]), smooth=RoleFit.from_mapping(mapping["smooth"]),
