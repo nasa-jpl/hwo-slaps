@@ -185,7 +185,7 @@ class Bandpass:
 
     def bin_edges(self, nodes_m: ArrayLike) -> np.ndarray:
         nodes = np.asarray(nodes_m, dtype=float)
-        if nodes.ndim != 1 or nodes.size == 0 or not np.all(np.isfinite(nodes)) or np.any(np.diff(nodes) <= 0.0):
+        if nodes.ndim != 1 or nodes.size == 0 or not np.all(np.isfinite(nodes)) or np.any(nodes <= 0.0) or np.any(np.diff(nodes) <= 0.0):
             raise ValueError("wavelength nodes must be a nonempty strictly increasing finite vector")
         interior = (nodes[1:] + nodes[:-1]) / 2.0
         return np.concatenate(([self.support_m[0]], np.clip(interior, *self.support_m), [self.support_m[1]]))
@@ -216,6 +216,8 @@ def build_bandpass(spec: BandpassSpec) -> Bandpass:
     curves, knots, files = [], [], {}
     for factor in factors:
         if isinstance(factor, (TableBand, TableFactor)):
+            if isinstance(factor.power, (bool, np.bool_)) or not isinstance(factor.power, Integral) or factor.power < 1:
+                raise ValueError("a table response power must be an integer >= 1")
             table = read_table(factor.table)
             if table.wavelengths_m[0] > support[0] or table.wavelengths_m[-1] < support[1]:
                 raise ValueError(f"{factor.table.path}: table does not cover bandpass support {support}")
@@ -231,9 +233,9 @@ def build_bandpass(spec: BandpassSpec) -> Bandpass:
             if isinstance(factor, TopHatBand) and (factor.min_nm > support_nm[0] or factor.max_nm < support_nm[1]):
                 raise ValueError("a top-hat factor must contain the product support")
             curves.append((factor, None))
-    wavelengths = np.unique(np.concatenate((np.exp(np.linspace(np.log(support[0]), np.log(support[1]), 10001)), knots,
-                                           support)))
-    wavelengths[0], wavelengths[-1] = support
+    dense = np.exp(np.linspace(np.log(support[0]), np.log(support[1]), 10001))
+    dense[0], dense[-1] = support
+    wavelengths = np.unique(np.concatenate((dense, knots)))
     throughput = np.ones_like(wavelengths)
     for factor, table in curves:
         if table is not None:

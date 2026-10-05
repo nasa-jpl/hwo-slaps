@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Real as _Number
 from types import MappingProxyType
 from typing import Any, Literal, Mapping
 
@@ -68,8 +69,11 @@ class SED:
     table: SpectralTable | None = None
 
     def __post_init__(self) -> None:
-        if isinstance(self.redshift, (bool, np.bool_)) or not np.isfinite(self.redshift) or self.redshift < 0.0:
+        if isinstance(self.redshift, (bool, np.bool_)) or not isinstance(self.redshift, _Number) or not np.isfinite(self.redshift) or self.redshift < 0.0:
             raise ValueError("SED redshift must be finite and non-negative")
+        if isinstance(self.spec, PowerLawSED) and (isinstance(self.spec.index, (bool, np.bool_))
+                or not isinstance(self.spec.index, _Number) or not np.isfinite(self.spec.index)):
+            raise ValueError("power-law index must be a finite real number")
         if isinstance(self.spec, TableSED) != (self.table is not None):
             raise ValueError("a tabulated SED owns its loaded spectral table")
         if self.table is not None and np.any(self.table.values < 0.0):
