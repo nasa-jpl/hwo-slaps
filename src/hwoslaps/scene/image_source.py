@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import math
+import io
 import types
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -24,7 +25,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..identity import array_digest, file_digest
+from ..identity import array_digest, read_file_snapshot
 
 __all__ = ["ASSET_FORMAT_VERSION", "ImageAsset", "frozen_value", "load_image_asset", "prepare_image_asset"]
 
@@ -88,9 +89,9 @@ def _validated(sb: np.ndarray, pixel_scale: float, metadata: Any, digest: str, s
     return ImageAsset(sb=sb, pixel_scale_arcsec=pixel_scale, metadata=frozen_value(metadata), digest=digest)
 
 
-def _read(path: str, digest: str) -> ImageAsset:
+def _read(path: str, digest: str, content: bytes) -> ImageAsset:
     try:
-        with np.load(path, allow_pickle=False) as data:
+        with np.load(io.BytesIO(content), allow_pickle=False) as data:
             members = {name: np.array(data[name]) for name in data.files}
     except (OSError, EOFError, ValueError) as error:
         raise ValueError(f"{path}: not a readable .npz image asset ({error})") from error
@@ -114,11 +115,11 @@ def _read(path: str, digest: str) -> ImageAsset:
 def load_image_asset(path: Any) -> ImageAsset:
     """Load and validate an asset file; repeated loads of unchanged content return one object."""
     location = str(path)
-    digest = file_digest(location)
+    content, digest = read_file_snapshot(location)
     if digest in _MEMO:
         _MEMO.move_to_end(digest)
         return _MEMO[digest]
-    asset = _read(location, digest)
+    asset = _read(location, digest, content)
     _MEMO[digest] = asset
     while len(_MEMO) > _MEMO_LIMIT:
         _MEMO.popitem(last=False)

@@ -28,7 +28,7 @@ from numpy.typing import ArrayLike
 
 __all__ = [
     "KernelIdentity", "array_digest", "canonical_json", "file_digest", "json_ready",
-    "mapping_digest", "text_digest",
+    "mapping_digest", "read_file_snapshot", "text_digest",
 ]
 
 _BLOCK_BYTES = 1 << 20
@@ -122,6 +122,13 @@ def file_digest(path: str | os.PathLike[str]) -> str:
         for block in iter(lambda: stream.read(_BLOCK_BYTES), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def read_file_snapshot(path: str | os.PathLike[str]) -> tuple[bytes, str]:
+    """The file bytes and the SHA-256 of those same bytes, for decoding one input."""
+    with open(path, "rb") as stream:
+        content = stream.read()
+    return content, hashlib.sha256(content).hexdigest()
 
 
 _KERNEL_IDENTITY_KEYS = ("sha256", "shape", "pixel_scale_arcsec")

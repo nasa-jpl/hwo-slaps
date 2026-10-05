@@ -18,6 +18,7 @@ from ..config.schema import ConfigSource, EngineConfig, resolve_config
 from ..identity import array_digest, file_digest, json_ready
 from ..observation.normalization import resolve_observing
 from ..observation.observation import Observation, observe
+from ..optics.optical_psf import OpticalPSF
 from ..scene.builder import Scene, build_scene, native_sampling_variation
 from ..scene.cosmology import Cosmology
 from ..scene.critical_curve import effective_einstein_radius
@@ -161,6 +162,27 @@ def _constant(renderer: SceneRenderer, scene: Scene, binding: Any) -> float | np
     return offset + renderer.exposure.signal_adu(renderer.light_rate(scene, binding, planes=("lens",)))
 
 
+def _validate_loaded_files(manifest: Mapping[str, str], assets: Mapping[str, Any], psfs: PsfPair) -> None:
+    def check(path: str, digest: str) -> None:
+        if manifest.get(path) != digest:
+            raise ValueError(f"referenced file {path} changed while being loaded; prepare the forecast again")
+
+    for path, asset in assets.items():
+        check(path, asset.digest)
+    for binding in (psfs.truth_kernels, psfs.model_kernels):
+        for kernel in binding.kernels:
+            if kernel.source["kind"] == "file":
+                check(kernel.source["path"], kernel.source["file_sha256"])
+    draws = []
+    if isinstance(psfs.truth, OpticalPSF) and psfs.truth.draw is not None:
+        draws.append(psfs.truth.draw)
+    if psfs.model.knowledge_error is not None:
+        draws.append(psfs.model.knowledge_error.draw)
+    for draw in draws:
+        if draw.spec.prior.kind == "path":
+            check(str(draw.spec.prior.path), draw.prior_digest)
+
+
 def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution(),
                      base_dir: PathLike[str] | None = None) -> PreparedForecast:
     resolved = deepcopy(resolve_config(config, base_dir=base_dir))
@@ -168,9 +190,10 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
         raise ConfigError("forecast", "a forecast section is required to prepare a forecast")
     if not isinstance(execution, Execution):
         raise TypeError("execution must be an Execution")
-    config_digest = resolved.digest()
-    comparison_digest = resolved.comparison_digest()
-    file_digests = resolved.file_digests()
+    identity = resolved.capture_identity()
+    config_digest = identity["config_digest"]
+    comparison_digest = identity["comparison_digest"]
+    file_digests = identity["file_digests"]
     cosmology = Cosmology(resolved.cosmology)
     truth = truth_provider(resolved)
     setup = resolve_observing(resolved.scene, resolved.instrument, resolved.observation, truth=truth)
@@ -187,7 +210,8 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
     positions = _positions(resolved.forecast.positions, smooth)
     mask = _mask(resolved.forecast.mask, smooth, observation, psfs)
     covariance_path = resolved.forecast.noise_covariance
-    covariance = None if covariance_path is None else load_noise_covariance(covariance_path, mask.size)
+    covariance = None if covariance_path is None else load_noise_covariance(
+        covariance_path, mask.size, file_sha256=file_digests[str(covariance_path)])
     data_space = build_data_space(mask, observation.noise_map_adu, covariance)
     parameters = resolve_nuisances(setup.scene, resolved.forecast.nuisances, psfs)
     design = build_nuisance_design(parameters, renderer=renderer, smooth_scene=smooth, psfs=psfs)
@@ -214,9 +238,16 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
                                            for kernel in psfs.model_kernels.kernels],
               "nuisance_names": list(design.names), "mask_digest": data_space.digest(),
               "pixel_count": data_space.pixel_count, "sampling": dict(observation.sampling)}
+    _validate_loaded_files(file_digests, assets, psfs)
     engine = make_engine(execution.engine, context, execution)
-    return PreparedForecast(resolved, smooth, psfs, observation, positions, renderer, data_space,
-                            design, workspace, mean_model, engine, execution, frozen_value(record))
+    prepared = PreparedForecast(resolved, smooth, psfs, observation, positions, renderer, data_space,
+                                design, workspace, mean_model, engine, execution, frozen_value(record))
+    try:
+        prepared.validate_identity()
+    except BaseException:
+        prepared.close()
+        raise
+    return prepared
 
 
 def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str, Any]:
