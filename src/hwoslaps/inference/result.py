@@ -21,6 +21,7 @@ from .settings import FitSpec, RefineSettings, SamplerSettings
 
 if TYPE_CHECKING:
     from ..scene.halos import Halo
+    from ..fisher.result import ForecastResult
     from .recovery import SubhaloRecovery
 
 __all__ = [
@@ -281,6 +282,29 @@ class ForecastReference:
             raise ValueError("amplitude is recorded for q_mismatch and only for it")
         object.__setattr__(self, "position_yx_arcsec", tuple(float(v) for v in self.position_yx_arcsec))
         object.__setattr__(self, "nuisance_names", tuple(self.nuisance_names))
+
+    @classmethod
+    def from_result(cls, result: ForecastResult, *, mass_index: int, position_index: int) -> ForecastReference:
+        """The fitted node's statistic and comparison inputs, copied from forecast provenance."""
+        for index, count, label in ((mass_index, len(result.masses_msun), "mass_index"),
+                                    (position_index, len(result.positions_yx), "position_index")):
+            if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < count:
+                raise ValueError(f"{label} must lie in 0..{count - 1}, got {index!r}")
+        provenance = result.provenance
+        kernels = provenance["model_kernels"]["kernels"]
+        if len(kernels) != 1:
+            raise ValueError("a nonlinear forecast reference requires one distinct model kernel")
+        metric = result.detection_metric
+        covariance = provenance["noise_covariance"]
+        return cls(q=float(getattr(result, metric)[mass_index, position_index]), metric=metric,
+                   mass_msun=float(result.masses_msun[mass_index]),
+                   position_yx_arcsec=tuple(result.positions_yx[position_index]),
+                   config_digest=provenance["config_digest"], mask_digest=provenance["mask"]["digest"],
+                   nuisance_names=tuple(provenance["nuisance_names"]),
+                   model_kernel=KernelIdentity.from_mapping(kernels[0]["identity"]),
+                   amplitude=None if metric == "q_asimov" else float(result.amplitude_hat[mass_index, position_index]),
+                   comparison_digest=provenance["comparison_digest"],
+                   noise_model="diagonal" if covariance is None else f"covariance:{covariance}")
 
     def detected(self, *, q_threshold: float) -> bool:
         """``q >= q_threshold`` with a positive amplitude where one is recorded (the forecast rule)."""
