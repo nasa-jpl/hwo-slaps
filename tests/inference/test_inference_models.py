@@ -387,3 +387,24 @@ def test_centred_sersic_fixed_geometry_keeps_finite_index_derivative(n):
     error.throw()
     db=2-4/(405*n*n)-92/(25515*n**3)-393/(1148175*n**4)+4*2194697/(30690717750*n**5)
     assert float(derivative)==pytest.approx(math.exp(sersic_constant(n))*db,rel=1e-12,abs=0.)
+
+
+@pytest.mark.parametrize("n",[.5,2.5])
+def test_fixed_sersic_source_geometry_still_checks_moving_traced_rays(n):
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from jax.experimental import checkify
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.light_profiles import Sersic
+
+    ensure_jax_x64()
+    source=Sersic(centre=(-.03,.08),ell_comps=(0.,0.),intensity=1.,effective_radius=.12,sersic_index=n)
+    def value(ray):
+        grid=al.Grid2DIrregular(values=ray[None,:],xp=jnp)
+        return jnp.sum(source.image_2d_from(grid=grid,xp=jnp).array)
+    error,gradient=jax.jit(checkify.checkify(jax.grad(value)))(jnp.array([-.03,.08]))
+    if n>=1:
+        with pytest.raises(Exception,match="zero-radius source-centre sample for n >= 1"):error.throw()
+    else:
+        error.throw();np.testing.assert_array_equal(gradient,np.zeros(2))
