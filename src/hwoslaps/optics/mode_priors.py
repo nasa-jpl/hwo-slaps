@@ -5,7 +5,8 @@ the weights are normalized to unit sum of squares, and ``segment_variance_fracti
 splits a combined draw's budget between the sides. The weights scale coefficients of the
 sequentially orthonormalized aperture bases of ``optics.aperture_basis``, not raw HCIPy
 modes, and exact-RMS conditioning of each draw makes the realized variance fractions
-differ from the squared weights (by up to 15% per mode for the JWST drift table).
+differ from the squared weights: on the global side of the JWST drift table by about 15%
+in the most affected modes and by 0.075 summed over its 52 modes.
 
 Priors come packaged (``jwst_wss_static_v1``, ``jwst_wss_drift_v1``, derived from JWST
 wavefront sensing by ``scripts/derive_jwst_mode_weight_tables.py``), from a YAML table

@@ -47,6 +47,12 @@ def test_noll_radial_order(noll, order):
     assert noll_radial_order(noll) == order
 
 
+@pytest.mark.parametrize("noll", [0, -1, True, 1.0])
+def test_noll_radial_order_refuses_what_is_not_a_noll_index(noll):
+    with pytest.raises(ValueError, match="a Noll index is an integer >= 1"):
+        noll_radial_order(noll)
+
+
 @pytest.mark.parametrize("alpha", [0.0, 1.0, 2.0])
 def test_power_law_weights_follow_radial_order_with_unit_norm_per_side(alpha):
     prior = power_law_prior(alpha, global_nolls=(4, 11), segment_nolls=(1, 6), segment_variance_fraction=0.5)
@@ -185,6 +191,17 @@ def test_draw_sample_variances_follow_the_squared_weights():
     # Exact-norm conditioning moves the variances away from the squared weights by up to 15%
     # (the carried tolerance); the 4000-draw sampling error is about 1.5%.
     np.testing.assert_allclose(np.var(draws, axis=0), expected, rtol=0.15, atol=0.0)
+
+
+def test_exact_norm_conditioning_moves_the_drift_prior_variance_fractions():
+    prior, _ = load_prior(_packaged("jwst_wss_drift_v1"))
+    rng = np.random.default_rng(107)
+    draws = np.array([list(draw_global_orthonormal(rng, prior, 1.0).values()) for _ in range(50_000)])
+    # Unit-norm draws and unit-norm weights: both sets of variance fractions sum to one.
+    realized = np.mean(draws ** 2, axis=0)
+    naive = np.array(list(prior.global_weights.values())) ** 2
+    # The 974cee9 band for the summed difference; 200000 draws give 0.0753 (seed 107) and 0.0748 (seed 108).
+    assert 0.05 <= np.sum(np.abs(realized - naive)) <= 0.10
 
 
 def test_prior_files_never_resolve_through_the_working_directory_or_the_repository(tmp_path, monkeypatch):
