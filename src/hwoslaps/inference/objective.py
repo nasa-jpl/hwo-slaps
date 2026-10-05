@@ -16,7 +16,7 @@ import numpy as np
 
 from .starts import prior_box
 
-__all__ = ["BoxObjective", "ScalarCheck", "jax_objective", "guard_isothermal_origin"]
+__all__ = ["BoxObjective", "ScalarCheck", "jax_objective", "guard_circular_mass_gradient"]
 
 if TYPE_CHECKING:
     from .fit_model import FitModel
@@ -119,7 +119,7 @@ def jax_objective(analysis: Any, model: Any, lower: Sequence[float], upper: Sequ
                         residual=residual, direct_check=direct_check)
 
 
-def guard_isothermal_origin(objective: BoxObjective, model: FitModel) -> BoxObjective:
+def guard_circular_mass_gradient(objective: BoxObjective, model: FitModel) -> BoxObjective:
     """Refuse only undefined free Isothermal shape gradients at exactly circular shape.
 
     Resolve each constructor element to its canonical physical-vector index (including
