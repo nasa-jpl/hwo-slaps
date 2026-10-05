@@ -31,7 +31,7 @@ def _direct_lens(redshift=0.2):
 
 
 @pytest.mark.parametrize("source", ["exponential", "image"])
-def test_registry_components_equal_direct_autolens_construction(scene_mapping, planck15, image_asset, source):
+def test_registry_expansion_equals_direct_autolens_construction(scene_mapping, planck15, image_asset, source):
     import autolens as al
 
     from hwoslaps.scene.image_profile import ImageLightProfile
@@ -55,7 +55,7 @@ def test_registry_components_equal_direct_autolens_construction(scene_mapping, p
     assert list(scene.light_images) == list(scene.light_groups) == ["source"]
 
 
-def test_lens_light_renders_on_the_image_plane(scene_mapping, planck15):
+def test_lens_light_image_is_the_sum_of_plane_images(scene_mapping, planck15):
     import autolens as al
 
     smooth_source = build_scene(parse_scene(scene_mapping), planck15, subhalo=None).light_images["source"]

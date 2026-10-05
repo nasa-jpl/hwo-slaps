@@ -98,7 +98,7 @@ def test_lens_plane_halos_add_their_analytic_deflections(scene_mapping, planck15
                                             ("subhalo", 0.1)],
                          ids=["perturber-behind-the-lens", "perturber-in-front", "subhalo-behind-the-lens",
                               "subhalo-in-front"])
-def test_off_plane_halos_follow_the_two_plane_lens_equation(scene_mapping, planck15, role, redshift):
+def test_off_plane_halo_follows_the_two_plane_lens_equation(scene_mapping, planck15, role, redshift):
     import autolens as al
 
     mass = 1.0e10
@@ -142,7 +142,7 @@ def test_off_plane_halos_follow_the_two_plane_lens_equation(scene_mapping, planc
 
 @pytest.mark.backend
 @pytest.mark.parametrize("model", [POINT_MASS, SIS, NFW], ids=["point-mass", "sis", "nfw"])
-def test_halos_sum_in_the_assembly_order(scene_mapping, planck15, model):
+def test_subhalo_and_perturbers_sum_in_the_assembly_order(scene_mapping, planck15, model):
     import autolens as al
 
     scene_mapping["perturbers"] = {"halos": [{"type": "NFW", "concentration": {"kind": "moline2017_eq7", "x_sub": 1.0},
