@@ -1,7 +1,6 @@
 """Prepared-state lifecycle and public mass/position semantics."""
 
 from copy import deepcopy
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -31,12 +30,12 @@ def test_prepared_configuration_cannot_relabel_cached_science(minimal_mapping):
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
     config = resolve_config(minimal_mapping)
-    component = replace(config.scene.source.light[0], values=dict(config.scene.source.light[0].values))
-    config = replace(config, scene=replace(config.scene, source=replace(config.scene.source, light=(component,))))
+    component = config.scene.source.light[0]
     with prepare_forecast(config) as prepared:
         before = forecast(prepared, masses_msun=[1.0e8])
         digest = prepared.record["config_digest"]
-        component.values["intensity"] = 100.0
+        altered = prepared.config.replace({"scene": {"source": {"light": {component.name: {"intensity": 100.0}}}}})
+        assert altered.scene.source.light[0].values["intensity"] == 100.0
         copy = prepared.config.to_mapping()
         copy["scene"]["source"]["light"][component.name]["intensity"] = 200.0
         minimal_mapping["scene"]["source"]["light"][component.name]["intensity"] = 300.0
@@ -107,3 +106,27 @@ def test_execution_does_not_enter_configuration_digest(minimal_mapping):
     with prepare_forecast(minimal_mapping) as reference, prepare_forecast(minimal_mapping, execution=Execution(engine="jax")) as jax:
         assert reference.record["config_digest"] == jax.record["config_digest"]
         assert reference.record["comparison_digest"] == jax.record["comparison_digest"]
+
+
+@pytest.mark.parametrize("amplitude", [0.0, 1.0])
+def test_small_knowledge_error_has_matched_limit_and_quadratic_spurious_response(amplitude):
+    from hwoslaps.config.schema import load_config
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    path = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity" / "engine" / "p2_delta_knowledge_error.yaml"
+    config = load_config(path)
+    altered = config.replace({"psf": {"model": {"draw": {"amplitude_rms_nm": amplitude}}}})
+    with prepare_forecast(altered) as prepared:
+        result = forecast(prepared, masses_msun=[1.0e8], positions=[[0.0, 0.4]])
+    if amplitude == 0.0:
+        matched = config.replace({"psf": {"model": {"kind": "matched"}}})
+        with prepare_forecast(matched) as prepared:
+            expected = forecast(prepared, masses_msun=[1.0e8], positions=[[0.0, 0.4]])
+        np.testing.assert_allclose(result.q_mismatch, expected.q_asimov, rtol=1.0e-10)
+        np.testing.assert_allclose(result.amplitude_hat, 1.0, rtol=1.0e-10)
+        np.testing.assert_allclose(result.q_spurious, 0.0, atol=1.0e-20)
+    elif amplitude == 1.0:
+        half = config.replace({"psf": {"model": {"draw": {"amplitude_rms_nm": 0.5}}}})
+        with prepare_forecast(half) as prepared:
+            expected = forecast(prepared, masses_msun=[1.0e8], positions=[[0.0, 0.4]])
+        np.testing.assert_allclose(result.q_spurious / expected.q_spurious, 4.0, rtol=0.15)
