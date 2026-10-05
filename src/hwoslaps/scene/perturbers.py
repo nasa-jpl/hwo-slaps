@@ -182,10 +182,15 @@ def draw_population(spec: HaloPopulationSpec, *, seed: int, index: int,
         with np.errstate(over="ignore", invalid="ignore"):
             if spatial.kind == "uniform_disk":
                 radius = spatial.radius_arcsec * np.sqrt(radial)
+                inner, outer = 0.0, spatial.radius_arcsec
             elif spatial.kind == "uniform_annulus":
                 radius = np.sqrt(spatial.inner_arcsec**2 + radial * (spatial.outer_arcsec**2 - spatial.inner_arcsec**2))
+                inner, outer = spatial.inner_arcsec, spatial.outer_arcsec
             else:
                 raise ValueError(f"unsupported spatial law {spatial.kind!r}")
+            if not np.all(np.isfinite(radius)) or np.any(radius < inner) or np.any(radius > outer):
+                raise ValueError("population radial inverse CDF produced nonfinite or out-of-domain radii; "
+                                 "use radii whose squared-radius arithmetic is representable")
             phi = 2 * np.pi * stream_rng(seed, "scene.perturbers.angle", index).random(count)
             positions = np.column_stack((radius * np.sin(phi), radius * np.cos(phi))) + np.asarray(lens_centre_yx)
     except OverflowError as error:
