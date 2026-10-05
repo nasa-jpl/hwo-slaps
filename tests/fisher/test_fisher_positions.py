@@ -30,7 +30,7 @@ def test_grid_lattice_is_row_major_about_the_lens_centre(centre, spacing, half_w
     np.testing.assert_array_equal(layout.positions_yx, expected)
     np.testing.assert_array_equal(layout.grid.indices[: len(coords_x) + 1],
                                   [(0, j) for j in range(len(coords_x))] + [(1, 0)])
-    np.testing.assert_array_equal(layout.cell_areas_arcsec2, np.full(count, spacing * spacing))
+    np.testing.assert_array_equal(layout.cell_areas_arcsec2, np.full(count, float(spacing) ** 2))
     assert layout.grid.spacing_arcsec == spacing
     assert layout.centre_yx == centre
     corner = max(float(np.hypot(y - centre[0], x - centre[1])) for y, x in expected)
@@ -143,6 +143,9 @@ def test_position_sets_hold_every_position_inside_their_domain():
     with pytest.raises(ValueError, match="lattice nodes their indices name"):
         PositionSet("grid", layout.positions_yx, layout.centre_yx, layout.domain_radius_arcsec,
                     layout.cell_areas_arcsec2, layout.boundary, lattice)
+    with pytest.raises(ValueError, match=r"spacing_arcsec\*\*2"):
+        PositionSet("grid", layout.positions_yx, layout.centre_yx, layout.domain_radius_arcsec,
+                    np.full(len(layout), 2.0), layout.boundary, layout.grid)
     with pytest.raises(ValueError, match="no cell areas, boundary or lattice"):
         PositionSet("explicit", layout.positions_yx, layout.centre_yx, layout.domain_radius_arcsec,
                     layout.cell_areas_arcsec2, None, None)

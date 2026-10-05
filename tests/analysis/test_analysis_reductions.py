@@ -65,6 +65,11 @@ def test_summary_reproduces_paper_rung_metrics():
     np.testing.assert_array_equal(everything.detectable_fraction, [0.0, 4 / 9])
     np.testing.assert_array_equal(everything.boundary_detectable, [False, True])
 
+    counts = range(10, 15)
+    paper_scale = forecast(lattice(0.05, 0.1), np.stack([np.arange(25.0) + count - 10 for count in counts]))
+    rung_areas = summarize(paper_scale, q_threshold=15.0).detectable_area_arcsec2
+    assert rung_areas.tobytes() == np.array([count * float(0.05) ** 2 for count in counts]).tobytes()
+
 
 def test_mismatch_q_max_zeroes_non_positive_amplitudes():
     positions = explicit_positions([[0.0, 0.1], [0.1, 0.0], [0.1, 0.1]], (0.0, 0.0))

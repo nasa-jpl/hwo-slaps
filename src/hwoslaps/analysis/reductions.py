@@ -6,8 +6,8 @@
   ``q_spurious`` a value whose fitted amplitude is not positive counts as 0.
 - ``detectable_count`` and ``detectable_fraction``: the detections in the
   selection and their share of the selected positions.
-- ``detectable_area_arcsec2``: the summed cell areas of those detections (grid
-  layouts only).
+- ``detectable_area_arcsec2``: the number of those detections times the cell
+  area ``spacing**2`` (grid layouts only, whose cells are uniform).
 - ``boundary_detectable``: a detection on any boundary node of the layout,
   selected or not. The detectable region then reaches the lattice edge, so the
   area of a larger domain could be larger. It exists only when the result
@@ -74,16 +74,17 @@ def summarize(result: ForecastResult, *, q_threshold: float, metric: Metric | No
         if not np.all(np.isfinite(amplitude[:, consumed])):
             raise ValueError(f"the fitted amplitude of {chosen} is not finite at a selected or boundary position")
         effective = np.where(amplitude > 0, values, 0.0)
-    areas = result.cell_areas_arcsec2
+    count = np.count_nonzero(detected[:, selected], axis=1)
+    grid = result.positions.grid
     return ForecastSummary(
         masses_msun=result.masses_msun,
         q_threshold=float(q_threshold),
         metric=chosen,
         selected_count=int(np.count_nonzero(selected)),
         q_max=np.max(effective[:, selected], axis=1),
-        detectable_count=np.count_nonzero(detected[:, selected], axis=1),
+        detectable_count=count,
         detectable_fraction=np.mean(detected[:, selected], axis=1),
-        detectable_area_arcsec2=None if areas is None else np.sum(detected[:, selected] * areas[selected], axis=1),
+        detectable_area_arcsec2=None if grid is None else count * grid.spacing_arcsec ** 2,
         boundary_detectable=None if boundary is None else np.any(detected[:, boundary], axis=1),
     )
 

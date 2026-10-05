@@ -6,7 +6,7 @@ Coordinates are ``(y, x)`` in arcseconds. Layouts:
   floor(half_width / spacing + 1e-9)`` and offsets ``spacing * (-n_half, ...,
   n_half)`` per axis, nodes in row-major order, optionally only those with
   radius in the closed annulus ``[inner, outer]``. Each node carries the cell
-  area ``spacing * spacing`` and a boundary flag: an evaluated node is on the
+  area ``spacing**2`` and a boundary flag: an evaluated node is on the
   boundary when one of its four lattice neighbours is outside the lattice or
   not evaluated, which on a full square is rows and columns 0 and -1. A subset
   keeps the flags only while it holds every boundary node of its layout, so a
@@ -129,16 +129,6 @@ class PositionSet:
             if any(value is not None for value in (self.cell_areas_arcsec2, self.boundary, self.grid)):
                 raise ValueError(f"a {self.kind} set has no cell areas, boundary or lattice")
         else:
-            if self.cell_areas_arcsec2 is None or self.grid is None:
-                raise ValueError("a grid set needs cell areas and its lattice")
-            areas = np.asarray(self.cell_areas_arcsec2, dtype=float)
-            if areas.shape != (count,) or not np.all(np.isfinite(areas)) or np.any(areas <= 0.0):
-                raise ValueError(f"cell_areas_arcsec2 must hold {count} positive finite areas")
-            if self.boundary is not None:
-                boundary = np.asarray(self.boundary)
-                if boundary.dtype != bool or boundary.shape != (count,):
-                    raise ValueError(f"boundary must be a boolean vector of length {count}")
-                object.__setattr__(self, "boundary", _frozen(boundary))
             lattice = self.grid
             if not isinstance(lattice, GridIndex) or lattice.indices.shape[0] != count:
                 raise ValueError(f"grid must be a GridIndex with {count} lattice indices")
@@ -146,6 +136,17 @@ class PositionSet:
                                      lattice.x_coords[lattice.indices[:, 1]]))
             if not np.array_equal(nodes, positions):
                 raise ValueError("grid positions must be the lattice nodes their indices name")
+            if self.cell_areas_arcsec2 is None:
+                raise ValueError("a grid set needs cell areas")
+            areas = np.asarray(self.cell_areas_arcsec2, dtype=float)
+            if areas.shape != (count,) or np.any(areas != lattice.spacing_arcsec ** 2):
+                raise ValueError(f"cell_areas_arcsec2 must hold {count} cell areas equal to the lattice "
+                                 "spacing_arcsec**2")
+            if self.boundary is not None:
+                boundary = np.asarray(self.boundary)
+                if boundary.dtype != bool or boundary.shape != (count,):
+                    raise ValueError(f"boundary must be a boolean vector of length {count}")
+                object.__setattr__(self, "boundary", _frozen(boundary))
             object.__setattr__(self, "cell_areas_arcsec2", _frozen(areas))
         object.__setattr__(self, "positions_yx", _frozen(positions))
         object.__setattr__(self, "centre_yx", centre)
@@ -252,7 +253,7 @@ def grid_positions(centre_yx: tuple[float, float], *, spacing_arcsec: float, hal
         positions_yx=np.column_stack((yy[evaluated], xx[evaluated])),
         centre_yx=(cy, cx),
         domain_radius_arcsec=float(np.max(_radii(lattice_nodes, (cy, cx)))),
-        cell_areas_arcsec2=np.full(count, spacing * spacing),
+        cell_areas_arcsec2=np.full(count, spacing ** 2),
         boundary=(evaluated & ~interior)[evaluated],
         grid=GridIndex(y_coords, x_coords, np.argwhere(evaluated), spacing),
     )
