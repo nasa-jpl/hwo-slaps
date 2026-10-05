@@ -17,7 +17,7 @@ from fnmatch import fnmatchcase
 from ..config.checks import ConfigError
 from .profiles import PROFILE_TYPES, ParameterDef
 from .image_source import frozen_value
-from .spec import LIGHT_COMPONENT_TABLE, MASS_COMPONENT_TABLE, ComponentSpec, GalaxySpec, SceneSpec, component_from_values
+from .spec import LIGHT_COMPONENT_TABLE, MASS_COMPONENT_TABLE, ComponentSpec, GalaxySpec, SceneSpec
 
 __all__ = ["SceneParameter", "match_parameters", "scene_parameter_names", "scene_parameters", "with_parameter"]
 
