@@ -18,8 +18,21 @@ from .config.checks import ConfigError, Key, Nullable, Real, Rule, Table, Text
 
 __all__ = [
     "CROSS_RULES", "DETECTOR_TABLE", "Detector", "INSTRUMENT_TABLE", "Instrument", "InstrumentSpec",
-    "build_instrument", "parse_instrument",
+    "build_instrument", "check_finite_number", "parse_instrument",
 ]
+
+
+def check_finite_number(name: str, value: Any, *, positive: bool) -> float:
+    """``value`` as a float when it is a finite number, > 0 if ``positive`` and >= 0 otherwise.
+
+    Booleans are refused. A value outside the domain raises a ValueError whose message starts
+    with ``name``; ``Detector`` and ``Exposure`` check their number fields with it.
+    """
+    valid = (isinstance(value, _Number) and not isinstance(value, (bool, np.bool_))
+             and math.isfinite(value) and (value > 0 if positive else value >= 0))
+    if not valid:
+        raise ValueError(f"{name} must be a finite number {'> 0' if positive else '>= 0'}, got {value!r}")
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -38,13 +51,7 @@ class Detector:
     def __post_init__(self) -> None:
         for name, positive in (("gain_e_per_adu", True), ("read_noise_e", False),
                                ("dark_current_e_per_s", False)):
-            value = getattr(self, name)
-            valid = (isinstance(value, _Number) and not isinstance(value, (bool, np.bool_))
-                     and math.isfinite(value) and (value > 0 if positive else value >= 0))
-            if not valid:
-                bound = "> 0" if positive else ">= 0"
-                raise ValueError(f"{name} must be a finite number {bound}, got {value!r}")
-            object.__setattr__(self, name, float(value))
+            object.__setattr__(self, name, check_finite_number(name, getattr(self, name), positive=positive))
 
     def to_mapping(self) -> dict[str, float]:
         return {field.name: getattr(self, field.name) for field in fields(self)}

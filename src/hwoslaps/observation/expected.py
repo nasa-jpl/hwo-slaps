@@ -11,13 +11,12 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from numbers import Integral
-from numbers import Real as _Number
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import numpy as np
 from numpy.typing import ArrayLike
 
-from ..instrument import Detector
+from ..instrument import Detector, check_finite_number
 
 if TYPE_CHECKING:
     from ..optics.kernels import DetectorPSF, KernelBinding
@@ -28,14 +27,6 @@ __all__ = ["Exposure", "Plane", "convolve_light"]
 Plane = Literal["lens", "source"]
 _PLANE_ORDER: tuple[Plane, ...] = ("lens", "source")
 _ROUND_OFF_FRACTION = 1.0e-10
-
-
-def _finite_number(name: str, value: Any, *, positive: bool) -> float:
-    valid = (isinstance(value, _Number) and not isinstance(value, (bool, np.bool_))
-             and math.isfinite(value) and (value > 0 if positive else value >= 0))
-    if not valid:
-        raise ValueError(f"{name} must be a finite number {'> 0' if positive else '>= 0'}, got {value!r}")
-    return float(value)
 
 
 @dataclass(frozen=True)
@@ -59,10 +50,8 @@ class Exposure:
     def __post_init__(self) -> None:
         if not isinstance(self.detector, Detector):
             raise ValueError(f"detector must be a Detector, got {self.detector!r}")
-        object.__setattr__(self, "exposure_time_s",
-                           _finite_number("exposure_time_s", self.exposure_time_s, positive=True))
-        object.__setattr__(self, "sky_rate_e_per_s",
-                           _finite_number("sky_rate_e_per_s", self.sky_rate_e_per_s, positive=False))
+        for name, positive in (("exposure_time_s", True), ("sky_rate_e_per_s", False)):
+            object.__setattr__(self, name, check_finite_number(name, getattr(self, name), positive=positive))
         count = self.exposure_count
         if not isinstance(count, Integral) or isinstance(count, (bool, np.bool_)) or count < 1:
             raise ValueError(f"exposure_count must be an integer >= 1, got {count!r}")
