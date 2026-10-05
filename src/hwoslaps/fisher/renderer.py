@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass, replace
+import types
 
 import numpy as np
 
-from ..identity import json_ready
 from ..observation.expected import Exposure, convolve_light
 from ..optics.kernels import KernelBinding, convolve_real_space
 from ..scene.builder import Scene, build_scene
 from ..scene.cosmology import Cosmology
 from ..scene.halos import Halo
 from ..scene.image_source import ImageAsset, frozen_value
-from ..scene.spec import SceneSpec, parse_scene
+from ..scene.spec import SceneSpec
 
 
 @dataclass(frozen=True)
@@ -69,14 +69,26 @@ class SceneRenderer:
     def __reduce__(self):
         # Scene values and asset metadata are mapping proxies; workers receive their
         # values, and restore the same frozen types without reading an asset file.
-        assets = {path: (asset.sb, asset.pixel_scale_arcsec, json_ready(asset.metadata), asset.digest)
+        assets = {path: (asset.sb, asset.pixel_scale_arcsec, _transport_value(asset.metadata, frozen=False), asset.digest)
                   for path, asset in self.assets.items()}
-        return (_restore_renderer, (self.spec.to_mapping(), self.cosmology, self.perturbers, self.exposure, assets))
+        return (_restore_renderer, (_transport_value(self.spec, frozen=False), self.cosmology, self.perturbers, self.exposure, assets))
 
 
-def _restore_renderer(mapping, cosmology, perturbers, exposure, records):
+def _transport_value(value, *, frozen):
+    if is_dataclass(value):
+        return replace(value, **{item.name: _transport_value(getattr(value, item.name), frozen=frozen)
+                                 for item in fields(value)})
+    if isinstance(value, Mapping):
+        copied = {key: _transport_value(item, frozen=frozen) for key, item in value.items()}
+        return types.MappingProxyType(copied) if frozen else copied
+    if isinstance(value, (list, tuple)):
+        return tuple(_transport_value(item, frozen=frozen) for item in value)
+    return value
+
+
+def _restore_renderer(spec, cosmology, perturbers, exposure, records):
     assets = {path: ImageAsset(samples, scale, frozen_value(metadata), digest)
               for path, (samples, scale, metadata, digest) in records.items()}
     for asset in assets.values():
         asset.sb.setflags(write=False)
-    return SceneRenderer(parse_scene(mapping), cosmology, perturbers, exposure, assets=assets)
+    return SceneRenderer(_transport_value(spec, frozen=True), cosmology, perturbers, exposure, assets=assets)
