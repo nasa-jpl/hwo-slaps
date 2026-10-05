@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.abc
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 import sys
 
@@ -10,11 +11,18 @@ BACKENDS = frozenset(("autolens", "autogalaxy", "autoarray", "autofit", "autocon
 CORE_MARKERS = "not backend and not xtx_gpu and not xtx_multi_gpu"
 
 
-class BackendBlocker(importlib.abc.MetaPathFinder):
+class BackendBlocker(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split(".", 1)[0] in BACKENDS:
-            raise ImportError(f"the core lane forbids backend import {fullname!r}")
+            return ModuleSpec(fullname, self, is_package=True)
         return None
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        raise ModuleNotFoundError(f"the core lane forbids backend import {module.__name__!r}",
+                                  name=module.__name__)
 
 
 def main(argv=None) -> int:
@@ -36,7 +44,11 @@ def main(argv=None) -> int:
     sys.meta_path.insert(0, blocker)
     try:
         import pytest
-        return pytest.main([*resolved, "-m", CORE_MARKERS])
+        result = pytest.main([*resolved, "-m", CORE_MARKERS])
+        loaded = [name for name in sys.modules if name.split(".", 1)[0] in BACKENDS]
+        if loaded:
+            raise RuntimeError(f"a forbidden backend loaded during the core lane: {loaded}")
+        return result
     finally:
         sys.meta_path.remove(blocker)
 
