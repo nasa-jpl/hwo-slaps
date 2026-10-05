@@ -31,7 +31,7 @@ def _visible_gpus():
 
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
-    """Skip GPU-owned contracts that the visible devices cannot run.
+    """Skip GPU tests the visible cards cannot run.
 
     Runs after marker deselection, so a lane that deselects GPU tests never imports JAX.
     """
