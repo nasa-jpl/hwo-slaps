@@ -146,7 +146,11 @@ class HaloModel:
 
 @dataclass(frozen=True)
 class HaloLensing:
-    """AutoLens keyword arguments of a halo's profile (centre excluded) and derived scalars."""
+    """AutoLens keyword arguments of a halo's profile (centre excluded) and derived scalars.
+
+    ``derived`` holds ``reduced_h`` for every type: the H0 / 100 of the cosmology, which a
+    ``moline2017_eq7`` relation without its own ``h`` uses.
+    """
 
     parameters: Mapping[str, float]
     derived: Mapping[str, float]
@@ -254,7 +258,8 @@ def halo_lensing(model: HaloModel, mass_msun: float, geometry: LensingGeometry, 
     if model.type == "PointMass":
         theta_squared = (4 * G_SI * (mass * MSUN_KG) * (geometry.d_deflector_source_mpc * MPC_TO_M)) / (
             C_M_S**2 * (geometry.d_deflector_mpc * MPC_TO_M) * (geometry.d_source_mpc * MPC_TO_M))
-        return HaloLensing({"einstein_radius": float(np.sqrt(theta_squared) * ARCSEC_PER_RAD)}, {})
+        return HaloLensing({"einstein_radius": float(np.sqrt(theta_squared) * ARCSEC_PER_RAD)},
+                           {"reduced_h": float(reduced_h)})
     m200_kg = mass * MSUN_KG
     r200_m = ((3 * m200_kg) / (4 * np.pi * 200 * geometry.rho_crit_kg_m3)) ** (1 / 3)
     if model.type == "SIS":
@@ -262,7 +267,8 @@ def halo_lensing(model: HaloModel, mass_msun: float, geometry: LensingGeometry, 
         theta_rad = 4.0 * np.pi * ((velocity_dispersion_km_s * 1000.0) / C_M_S) ** 2 * (
             geometry.d_deflector_source_mpc / geometry.d_source_mpc)
         return HaloLensing({"einstein_radius": float(theta_rad) * ARCSEC_PER_RAD},
-                           {"r200_kpc": float(r200_m * M_TO_KPC), "velocity_dispersion_km_s": velocity_dispersion_km_s})
+                           {"reduced_h": float(reduced_h), "r200_kpc": float(r200_m * M_TO_KPC),
+                            "velocity_dispersion_km_s": velocity_dispersion_km_s})
     c200 = float(concentration(model.concentration, mass, geometry.z_deflector, reduced_h))
     scale_radius_kpc = float((r200_m / c200) * M_TO_KPC)
     f_c = np.log(1 + c200) - c200 / (1 + c200)
@@ -272,8 +278,8 @@ def halo_lensing(model: HaloModel, mass_msun: float, geometry: LensingGeometry, 
     scale_radius_arcsec = (scale_radius_m / (geometry.d_deflector_mpc * MPC_TO_M)) * ARCSEC_PER_RAD
     return HaloLensing(
         {"kappa_s": float(kappa_s), "scale_radius": float(scale_radius_arcsec)},
-        {"concentration": c200, "r200_kpc": float(r200_m * M_TO_KPC), "scale_radius_kpc": scale_radius_kpc,
-         "rho_s_kg_m3": float(rho_s)})
+        {"reduced_h": float(reduced_h), "concentration": c200, "r200_kpc": float(r200_m * M_TO_KPC),
+         "scale_radius_kpc": scale_radius_kpc, "rho_s_kg_m3": float(rho_s)})
 
 
 def halo_lensing_traced(model: HaloModel, mass_msun: Any, geometry: LensingGeometry, *, reduced_h: float,

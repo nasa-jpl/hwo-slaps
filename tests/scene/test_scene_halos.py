@@ -191,6 +191,7 @@ def test_halo_records_round_trip_and_pickle(model, planck15):
     record = json.loads(json.dumps(halo.to_mapping()))
     assert Halo.from_mapping(record) == halo
     assert record["lensing"]["parameters"] == dict(halo.lensing().parameters)
+    assert record["lensing"]["derived"]["reduced_h"] == 0.6774
     restored = pickle.loads(pickle.dumps(halo))
     assert restored == halo and restored.lensing() == halo.lensing() and restored.geometry == halo.geometry
     heavier = dataclasses.replace(halo, mass_msun=4.0e8)
