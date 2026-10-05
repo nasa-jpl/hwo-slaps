@@ -1,0 +1,36 @@
+run_name: paper_parity_p3
+seed: 11
+cosmology: {name: Planck15}
+scene:
+  grid: {shape: [100, 100], pixel_scale_arcsec: 0.03, over_sample_size: 4}
+  lens:
+    redshift: 0.2
+    mass:
+      mass: {type: Isothermal, centre: [0.0, 0.0], einstein_radius: 1.0, ell_comps: [0.1, 0.0]}
+  source:
+    redshift: 0.6
+    light:
+      light: {type: Image, asset_path: ../source_image.npz, centre: [-0.03, 0.08],
+              rotation_deg: 30.0, total_flux: 0.29, flux_scale: 1.0, size_scale: 1.0}
+  subhalo:
+    type: NFW
+    concentration: {kind: moline2017_eq7, x_sub: 1.0, h: null}
+    redshift: null
+psf:
+  truth: {kind: kernel, path: ../detector_kernel.npy, pixel_scale_arcsec: 0.03, normalize: true}
+  model: {kind: matched}
+instrument:
+  detector: {gain_e_per_adu: 1.0, read_noise_e: 0.2, dark_current_e_per_s: 0.002}
+observation:
+  exposure_time_s: 900.0
+  sky: {rate_e_per_s: 1.0}
+forecast:
+  positions: {kind: grid, spacing_arcsec: 0.6, half_width_arcsec: 1.2, annulus: null}
+  mask: {kind: all_pixels}
+  nuisances:
+    fixed: [source.light.light.rotation_deg]
+    steps: {position: 0.001, einstein_radius: 0.001, ellipticity: 0.001, amplitude: 0.01, size: 0.01}
+    priors: {}
+    background_offset: true
+    wavefront: null
+  noise_covariance: null
