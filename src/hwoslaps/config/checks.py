@@ -369,6 +369,10 @@ class Nullable:
         return None if value is None else self.check(value, path)
 
 
+def _either(texts: Sequence[str]) -> str:
+    return " or ".join(texts) if len(texts) == 2 else ", ".join(texts[:-1]) + ", or " + texts[-1]
+
+
 @dataclass(frozen=True, init=False)
 class Union:
     checks: tuple[Any, ...]
@@ -382,8 +386,7 @@ class Union:
         return any(check.accepts(value) for check in self.checks)
 
     def describe(self) -> str:
-        texts = [check.describe() for check in self.checks]
-        return " or ".join(texts) if len(texts) == 2 else ", ".join(texts[:-1]) + ", or " + texts[-1]
+        return _either([check.describe() for check in self.checks])
 
     def member(self, value: Any) -> Any:
         return next((check for check in self.checks if check.accepts(value)), None)
@@ -776,6 +779,8 @@ def _value_text(check: Any, child: str) -> str:
         return f"{prefix}{inner.describe()}, see `{child}[i]`"
     if isinstance(inner, MapOf) and _is_container(inner.value):
         return f"{prefix}{inner.describe()}, see `{child}.<key>`"
+    if isinstance(inner, Union):
+        return prefix + _either([_value_text(member, child) for member in inner.checks])
     return check.describe()
 
 
@@ -801,29 +806,37 @@ def _table_block(table: Table, path: str, heading: str, lead: Sequence[str]) -> 
     return "\n".join(lines)
 
 
-def _render(check: Any, path: str, blocks: list[tuple[str, str]]) -> None:
+def _render(check: Any, path: str, blocks: list[tuple[str, str]], seen: set[tuple[str, int]]) -> None:
+    """Append the blocks of ``check`` at ``path``; a table shared by several variants is written once."""
     check = _unwrap(check)
+    if isinstance(check, (Table, Variants)):
+        if (path, id(check)) in seen:
+            return
+        seen.add((path, id(check)))
     if isinstance(check, Table):
         blocks.append((path, _table_block(check, path, path or "top level", ())))
-        _render_children(check, path, blocks)
+        _render_children(check, path, blocks, seen)
     elif isinstance(check, Variants):
         for kind, table in check.tables.items():
             selected = f"Selected by `{check.discriminator}: {kind}`" + (
                 " (the default)." if kind == check.default else ".")
             heading = f"{path} ({check.discriminator}: {kind})"
             blocks.append((heading, _table_block(table, path, heading, (selected, check.doc))))
-            _render_children(table, path, blocks)
+            _render_children(table, path, blocks, seen)
     elif isinstance(check, Named):
-        _render(check.item, f"{path}.<name>", blocks)
+        _render(check.item, f"{path}.<name>", blocks, seen)
     elif isinstance(check, ListOf):
-        _render(check.item, f"{path}[i]", blocks)
+        _render(check.item, f"{path}[i]", blocks, seen)
     elif isinstance(check, MapOf):
-        _render(check.value, f"{path}.<key>", blocks)
+        _render(check.value, f"{path}.<key>", blocks, seen)
+    elif isinstance(check, Union):
+        for member in check.checks:
+            _render(member, path, blocks, seen)
 
 
-def _render_children(table: Table, path: str, blocks: list[tuple[str, str]]) -> None:
+def _render_children(table: Table, path: str, blocks: list[tuple[str, str]], seen: set[tuple[str, int]]) -> None:
     for key in table.keys:
-        _render(key.check, _join(path, key.name), blocks)
+        _render(key.check, _join(path, key.name), blocks, seen)
 
 
 def render_reference(documents: Sequence[tuple[str, Any]], *, section: str | None = None) -> str:
@@ -832,8 +845,9 @@ def render_reference(documents: Sequence[tuple[str, Any]], *, section: str | Non
     ``section`` keeps the headings at or below that dotted path.
     """
     blocks: list[tuple[str, str]] = []
+    seen: set[tuple[str, int]] = set()
     for name, check in documents:
-        _render(check, name, blocks)
+        _render(check, name, blocks, seen)
     if section is not None:
         blocks = [(path, text) for path, text in blocks
                   if path == section or path.startswith((f"{section}.", f"{section} (", f"{section}["))]

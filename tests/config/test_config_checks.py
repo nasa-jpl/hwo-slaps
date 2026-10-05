@@ -446,6 +446,74 @@ Selected by `kind: kernel`.
 """
 
 
+SPIDERS = Table((Key("count", Integer(min=0), "Spider count.", 0),))
+PUPIL = Variants("kind", {
+    "circular": Table((Key("spiders", SPIDERS, "Spiders.", {}),)),
+    "hex": Table((Key("spiders", SPIDERS, "Spiders.", {}), Key("rings", Integer(min=1), "Rings.", 2))),
+})
+DRAW = Table((
+    Key("prior", Union(Text(choices=("none",)), Table((Key("packaged", Text(), "Packaged prior."),))),
+        "Mode prior.", "none"),
+    Key("modes", Named(Table((Key("weight", Real(), "Weight.", 1),))), "Modes.", {}),
+    Key("factors", ListOf(Table((Key("path", FilePath((".dat",)), "Table file."),))), "Factors.", []),
+))
+
+PUPIL_BLOCKS = """\
+## pupil (kind: circular)
+
+Selected by `kind: circular`.
+
+| key | value | default | unit | meaning |
+|---|---|---|---|---|
+| `spiders` | mapping, see `pupil.spiders` | `{}` |  | Spiders. |
+
+## pupil.spiders
+
+| key | value | default | unit | meaning |
+|---|---|---|---|---|
+| `count` | integer >= 0 | `0` |  | Spider count. |
+
+## pupil (kind: hex)
+
+Selected by `kind: hex`.
+
+| key | value | default | unit | meaning |
+|---|---|---|---|---|
+| `spiders` | mapping, see `pupil.spiders` | `{}` |  | Spiders. |
+| `rings` | integer >= 1 | `2` |  | Rings. |
+"""
+DRAW_BLOCK = """\
+## draw
+
+| key | value | default | unit | meaning |
+|---|---|---|---|---|
+| `prior` | one of: none or mapping, see `draw.prior` | `none` |  | Mode prior. |
+| `modes` | named components, see `draw.modes.<name>` | `{}` |  | Modes. |
+| `factors` | list, each mapping, see `draw.factors[i]` | `[]` |  | Factors. |
+"""
+PRIOR_BLOCK = """\
+## draw.prior
+
+| key | value | default | unit | meaning |
+|---|---|---|---|---|
+| `packaged` | non-empty text | required |  | Packaged prior. |
+"""
+MODES_BLOCK = """\
+## draw.modes.<name>
+
+| key | value | default | unit | meaning |
+|---|---|---|---|---|
+| `weight` | number | `1.0` |  | Weight. |
+"""
+FACTORS_BLOCK = """\
+## draw.factors[i]
+
+| key | value | default | unit | meaning |
+|---|---|---|---|---|
+| `path` | path to an existing .dat file | required |  | Table file. |
+"""
+
+
 def test_reference_rendering_of_a_small_schema():
     documents = [("observation", OBSERVATION)]
     assert render_reference(documents) == "\n".join((OBSERVATION_BLOCK, SKY_BLOCK, MATCHED_BLOCK, KERNEL_BLOCK))
@@ -453,3 +521,8 @@ def test_reference_rendering_of_a_small_schema():
     assert render_reference(documents, section="observation.model") == "\n".join((MATCHED_BLOCK, KERNEL_BLOCK))
     with pytest.raises(ConfigError, match="unknown section 'observation.skies'"):
         render_reference(documents, section="observation.skies")
+    assert render_reference([("pupil", PUPIL)]) == PUPIL_BLOCKS
+    shapes = [("draw", DRAW)]
+    assert render_reference(shapes) == "\n".join((DRAW_BLOCK, PRIOR_BLOCK, MODES_BLOCK, FACTORS_BLOCK))
+    assert render_reference(shapes, section="draw.modes") == MODES_BLOCK
+    assert render_reference(shapes, section="draw.factors") == FACTORS_BLOCK
