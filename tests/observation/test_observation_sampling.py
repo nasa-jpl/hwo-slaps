@@ -241,7 +241,7 @@ def _print_table(cases):
 
 
 def test_reference_grid_resolves_the_most_compact_cases():
-    for name in ("Exponential r_e 0.5 px", "Sersic n4 r_e 0.5 px", "Image P3 asset"):
+    for name in ("Exponential r_e 0.5 px", "Image P3 asset"):
         light = _unlensed_lights()[name]
         (coarse,) = _unlensed_cases(name, light, PHASES[0], fwhms=(0.5,))
         (finer,) = _unlensed_cases(name, light, PHASES[0], fwhms=(0.5,), factor=2 * REFERENCE_FACTOR)
@@ -274,3 +274,67 @@ def test_subhalo_template_meets_the_budget_below_the_threshold():
         assert case.variation <= MAX_NATIVE_SAMPLING_VARIATION, case
         assert case.passes, case
         assert case.residuals_within_budget, case
+
+
+# A compact n4 cusp is unresolved on the old full-frame16/32 mesh (the
+# information-error change is0.0261949). Refine only [29,35]^2 in native-pixel
+# coordinates, with exactly the same boundaries/weights when replacing it.
+_COMPACT_CENTRAL_START = 29
+_COMPACT_CENTRAL_STOP = 35
+
+
+def _independent_compact_sersic_samples(factor, light, start=0, stop=64):
+    """Point values from A3's analytic profile, without a production renderer/helper."""
+    coordinates = start + (np.arange((stop - start) * factor) + 0.5) / factor
+    y = (32.0 - coordinates[:, None]) * PIXEL
+    x = (coordinates[None, :] - 32.0) * PIXEL
+    e1, e2 = light["ell_comps"]
+    e = math.hypot(e1, e2)
+    q = (1.0 - e) / (1.0 + e)
+    phi = 0.5 * math.atan2(e1, e2)
+    xr, yr = x * math.cos(phi) + y * math.sin(phi), -x * math.sin(phi) + y * math.cos(phi)
+    radius = np.sqrt(q * xr ** 2 + yr ** 2 / q)
+    n = 4.0
+    b = 2*n - 1/3 + 4/(405*n) + 46/(25515*n*n) + 131/(1148175*n**3) - 2194697/(30690717750*n**4)
+    return light["intensity"] * np.exp(-b * ((radius / light["effective_radius"]) ** (1/n) - 1))
+
+
+def _compact_central_response(image, fwhm, factor):
+    start, stop = _COMPACT_CENTRAL_START, _COMPACT_CENTRAL_STOP
+    assert image.shape == ((stop - start) * factor,) * 2
+    centres = np.arange(64) + 0.5
+    samples = start + (np.arange((stop - start) * factor) + 0.5) / factor
+    matrix = _pixel_gaussian(centres[:, None] - samples[None, :], fwhm) / factor
+    return matrix @ image @ matrix.T
+
+
+def test_compact_sersic_reference_converges_with_independent_central_refinement():
+    light = _unlensed_lights()["Sersic n4 r_e 0.5 px"]
+    scene = build_scene(parse_scene(_unlensed_mapping(light, PHASES[0])), COSMOLOGY, subhalo=None)
+    engine = EXPOSURE.signal_adu(_engine_rate(np.asarray(scene.light_images["lens"]), "lens", 0.5))
+    variation = float(native_sampling_variation(scene)["lens"])
+    assert variation > MAX_NATIVE_SAMPLING_VARIATION
+    outside = {}
+    old = {}
+    for factor in (16, 32):
+        points = _independent_compact_sersic_samples(factor, light)
+        reference = _reference_rate(points, 0.5, factor)
+        old[factor] = reference
+        low, high = _COMPACT_CENTRAL_START * factor, _COMPACT_CENTRAL_STOP * factor
+        outside[factor] = reference - _compact_central_response(points[low:high, low:high], 0.5, factor)
+    central = {factor: _compact_central_response(_independent_compact_sersic_samples(
+        factor, light, _COMPACT_CENTRAL_START, _COMPACT_CENTRAL_STOP), 0.5, factor) for factor in (128, 256)}
+
+    def metrics(reference):
+        return np.array(_information_metrics(engine, EXPOSURE.signal_adu(reference), EXPOSURE.noise_map_adu(reference)))
+
+    old_change = np.abs(metrics(old[16]) - metrics(old[32]))
+    outer_change = np.abs(metrics(outside[16] + central[256]) - metrics(outside[32] + central[256]))
+    central_change = np.abs(metrics(outside[32] + central[128]) - metrics(outside[32] + central[256]))
+    estimate = outer_change + central_change
+    final = metrics(outside[32] + central[256])
+    print(f"compact n4 old16/32 change={old_change}; outside16/32={outer_change}; "
+          f"central128/256={central_change}; summed={estimate}; final eps/rho={final}")
+    assert old_change[0] > BUDGET / 10, "old full-frame16 reference unexpectedly resolves the new cusp"
+    assert np.all(estimate <= BUDGET / 10), (outer_change, central_change, estimate)
+    assert final[0] > BUDGET, "compact above-threshold n4 must remain a resolved sampling refusal"
