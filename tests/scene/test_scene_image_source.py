@@ -182,7 +182,7 @@ SIGMA_PIXELS = 6.0
 def _galaxy_frame(bin_factor=1):
     """A circular Gaussian (sigma 6 binned pixels, peak 1) at binned pixel (50, 46) of a 96 x 96 binned frame,
     on a constant 0.37 offset with Gaussian noise of 0.01 and a bright blob in a corner. The input
-    has bin_factor - 1 extra rows and columns at the bottom and right, which binning crops.
+    has bin_factor - 1 extra last rows and last columns, which binning crops.
 
     Centring then crops binned rows 5-95 and columns 0-92 and pads two rows: a 93 x 93 asset
     whose corner blob, if kept, would sit at rows 0-2, columns 3-6."""
@@ -207,7 +207,7 @@ def test_prepare_image_asset_recovers_a_synthetic_galaxy(bin_factor):
     assert record["background"] == pytest.approx(0.37, abs=0.005)
     assert record["caller"] == {"catalog_id": "synthetic"} and record["bin_factor"] == bin_factor
     assert record["input_shape"] == (97 * bin_factor - 1, 97 * bin_factor - 1)
-    assert record["bin_crop"] == {"bottom_rows": bin_factor - 1, "right_columns": bin_factor - 1}
+    assert record["bin_crop"] == {"last_rows": bin_factor - 1, "last_columns": bin_factor - 1}
     rows, cols = np.indices(asset.sb.shape, dtype=float)
     middle = ((asset.sb.shape[0] - 1) / 2.0, (asset.sb.shape[1] - 1) / 2.0)
     assert abs((rows * asset.sb).sum() / asset.sb.sum() - middle[0]) <= 0.5

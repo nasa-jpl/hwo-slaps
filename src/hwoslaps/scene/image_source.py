@@ -139,14 +139,14 @@ def _border_values(image: np.ndarray, border_fraction: float) -> np.ndarray:
 
 
 def _binned(image: np.ndarray, factor: int) -> tuple[np.ndarray, dict[str, int]]:
-    bottom_rows, right_columns = image.shape[0] % factor, image.shape[1] % factor
-    kept_y, kept_x = image.shape[0] - bottom_rows, image.shape[1] - right_columns
+    last_rows, last_columns = image.shape[0] % factor, image.shape[1] % factor
+    kept_y, kept_x = image.shape[0] - last_rows, image.shape[1] - last_columns
     if kept_y == 0 or kept_x == 0:
         raise ValueError(f"bin_factor {factor} exceeds an image side {image.shape}")
     cropped = image[:kept_y, :kept_x]
     binned = (np.array(cropped, copy=True) if factor == 1
               else cropped.reshape(kept_y // factor, factor, kept_x // factor, factor).mean(axis=(1, 3)))
-    return binned, {"bottom_rows": int(bottom_rows), "right_columns": int(right_columns)}
+    return binned, {"last_rows": int(last_rows), "last_columns": int(last_columns)}
 
 
 def _footprint(image: np.ndarray, threshold: float) -> tuple[np.ndarray, int]:
@@ -205,12 +205,13 @@ def prepare_image_asset(image: ArrayLike, *, half_light_radius_arcsec: float | N
     """An asset from a galaxy image: bin, subtract the border background, keep the main footprint,
     centre on the flux centroid, set the scale, normalize to unit integral.
 
-    Row 0 of ``image`` is its bottom row (+y upward, the FITS convention). Exactly one of
-    ``half_light_radius_arcsec`` (the scale then puts the circular half-light radius there) and
-    ``pixel_scale_arcsec`` is given. The background is the 3-sigma-clipped median of the border
-    frame of width ``ceil(border_fraction * min(shape))``, and the footprint is the largest
-    8-connected region above ``footprint_sigma`` times the clipped border RMS, dilated by two
-    pixels.
+    Row 0 of ``image`` is its bottom row (+y upward, the FITS convention). Binning first removes
+    the last ``shape % bin_factor`` rows and columns (the top rows and right columns), recorded
+    as ``bin_crop`` in the provenance. Exactly one of ``half_light_radius_arcsec`` (the scale
+    then puts the circular half-light radius there) and ``pixel_scale_arcsec`` is given. The
+    background is the 3-sigma-clipped median of the border frame of width
+    ``ceil(border_fraction * min(shape))``, and the footprint is the largest 8-connected region
+    above ``footprint_sigma`` times the clipped border RMS, dilated by two pixels.
     """
     from astropy.stats import sigma_clipped_stats
 
