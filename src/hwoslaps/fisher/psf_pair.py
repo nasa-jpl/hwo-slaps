@@ -75,6 +75,8 @@ def truth_provider(config: EngineConfig, *, bandpass: Bandpass | None = None) ->
 
 def validate_loaded_psf_files(provider: PSFProvider, binding: KernelBinding, manifest: Mapping[str, str]) -> None:
     """The provider's loaded kernel and truth-draw files must match the input manifest."""
+    for path, digest in provider.file_digests.items():
+        validate_loaded_file(path, digest, manifest)
     for kernel in binding.kernels:
         if kernel.source["kind"] == "file":
             validate_loaded_file(kernel.source["path"], kernel.source["file_sha256"], manifest)

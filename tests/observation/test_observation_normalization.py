@@ -210,3 +210,44 @@ def test_optical_truth_area_resolves_pinned_paper_photometry(minimal_mapping):
     assert setup.instrument.collecting_area_m2 == pytest.approx(33.606448937520405, rel=1.0e-12)
     assert setup.photometry.components["source.light"]["rate_e_per_s"] == pytest.approx(8.951505744562876, rel=1.0e-12)
     assert setup.exposure.sky_rate_e_per_s == pytest.approx(0.002510279845963486, rel=1.0e-12)
+
+
+@pytest.mark.parametrize("product", ["forecast", "simulation"])
+def test_single_node_cube_loaded_b_after_captured_a_is_refused_when_disk_returns_to_a(
+        minimal_mapping, tiny_gaussian_kernel, tmp_path, product):
+    import sys
+    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.identity import file_digest, read_file_snapshot
+    from hwoslaps.simulation import simulate
+
+    path = tmp_path / "cube.npz"
+    np.savez(path, kernels=tiny_gaussian_kernel[None, ...], wavelengths_m=np.array([5.0e-7]))
+    original = path.read_bytes()
+    different = tiny_gaussian_kernel.copy()
+    different[3, 3] *= 1.4
+    different /= different.sum()
+    minimal_mapping["psf"] = {"truth": {"kind": "kernel_cube", "path": str(path),
+        "pixel_scale_arcsec": 0.05, "normalize": False}}
+    previous = sys.getprofile()
+    transitions = []
+    def publish_and_restore(frame, event, returned):
+        if event != "return":
+            return
+        if not transitions and frame.f_code is file_digest.__code__ and Path(frame.f_locals["path"]) == path:
+            np.savez(path, kernels=different[None, ...], wavelengths_m=np.array([5.0e-7]))
+            transitions.append("published_b")
+        elif transitions == ["published_b"] and frame.f_code is read_file_snapshot.__code__ and Path(frame.f_locals["path"]) == path:
+            sys.setprofile(previous)
+            path.write_bytes(original)
+            transitions.append("restored_a")
+    sys.setprofile(publish_and_restore)
+    try:
+        with pytest.raises(ValueError, match=str(path)):
+            if product == "forecast":
+                prepare_forecast(minimal_mapping)
+            else:
+                simulate(minimal_mapping, subhalo=None, noise_seed=None)
+        assert transitions == ["published_b", "restored_a"]
+    finally:
+        sys.setprofile(previous)
+        path.write_bytes(original)
