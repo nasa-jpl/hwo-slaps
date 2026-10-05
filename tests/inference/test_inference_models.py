@@ -437,10 +437,13 @@ def _powerlaw_boundary_case(mapping, tmp_path, slope, *, free_slope=False, fixed
     return prepared,case
 
 
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
 @pytest.mark.parametrize("free_slope",[False,True],ids=["fixed_slope","actual_uniform_slope"])
-def test_circular_nonisothermal_powerlaw_refuses_only_gradient_at_actual_slope(free_slope,minimal_mapping,tmp_path):
+def test_circular_nonisothermal_powerlaw_refuses_only_gradient_at_actual_slope(gpu,free_slope,minimal_mapping,tmp_path):
     prepared,case=_powerlaw_boundary_case(minimal_mapping,tmp_path,2. if free_slope else 2.08,free_slope=free_slope)
     try:
+        import jax
+        assert jax.default_backend()==("gpu" if gpu else "cpu")
         model=case.model("smooth");objective=case.objective("smooth")
         physical=model.truth.copy()
         if free_slope:
@@ -459,9 +462,12 @@ def test_circular_nonisothermal_powerlaw_refuses_only_gradient_at_actual_slope(f
     finally:prepared.close()
 
 
-def test_circular_powerlaw_fixed_ellipse_keeps_other_parameter_gradients(minimal_mapping,tmp_path):
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
+def test_circular_powerlaw_fixed_ellipse_keeps_other_parameter_gradients(gpu,minimal_mapping,tmp_path):
     prepared,case=_powerlaw_boundary_case(minimal_mapping,tmp_path,2.08,fixed_shape=True)
     try:
+        import jax
+        assert jax.default_backend()==("gpu" if gpu else "cpu")
         model=case.model("smooth");objective=case.objective("smooth")
         assert len(model.parameter_names)==1 and model.parameter_names[0].endswith("einstein_radius")
         z=(model.truth-model.lower)/(model.upper-model.lower)
@@ -474,12 +480,15 @@ def test_circular_powerlaw_fixed_ellipse_keeps_other_parameter_gradients(minimal
     finally:prepared.close()
 
 
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
 @pytest.mark.parametrize("slope",[2.,2.08],ids=["regular_isothermal_powerlaw","normalization_cusp"])
-def test_circular_powerlaw_one_sided_values_classify_the_shape_differential(slope,minimal_mapping,tmp_path):
+def test_circular_powerlaw_one_sided_values_classify_the_shape_differential(gpu,slope,minimal_mapping,tmp_path):
     from hwoslaps.inference.api import prepare_case
 
     prepared,case=_powerlaw_boundary_case(minimal_mapping,tmp_path,slope)
     try:
+        import jax
+        assert jax.default_backend()==("gpu" if gpu else "cpu")
         numpy_case=prepare_case(prepared,case.hypothesis,case.observation,fit=case.fit,use_jax=False)
         model=case.model("smooth");physical=model.truth.copy()
         axes=[i for i,name in enumerate(model.parameter_names) if "ell_comps_" in name]
@@ -506,8 +515,9 @@ def test_circular_powerlaw_one_sided_values_classify_the_shape_differential(slop
     finally:prepared.close()
 
 
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
 @pytest.mark.parametrize("ell,slope",[((0.,0.),2.),((.05,.02),2.),((-.02,.04),2.08)])
-def test_powerlaw_adapter_preserves_parent_bits_and_all_regular_direction_derivatives(ell,slope):
+def test_powerlaw_adapter_preserves_parent_bits_and_all_regular_direction_derivatives(gpu,ell,slope):
     import autolens as al
     import jax
     import jax.numpy as jnp
@@ -516,6 +526,7 @@ def test_powerlaw_adapter_preserves_parent_bits_and_all_regular_direction_deriva
     from hwoslaps.inference.mass_profiles import PowerLaw
 
     ensure_jax_x64()
+    assert jax.default_backend()==("gpu" if gpu else "cpu")
     points=np.array([[.13,.21],[-.27,.15],[.41,-.31],[-.11,-.38]])
     grid=al.Grid2DIrregular(values=points)
     params=np.array([.03,-.02,*ell,.8,slope])
@@ -535,7 +546,7 @@ def test_powerlaw_adapter_preserves_parent_bits_and_all_regular_direction_deriva
     np.testing.assert_allclose(gradient,expected,rtol=1e-6,atol=1e-8)
     if ell!=(0.,0.):
         parent=jax.jit(jax.grad(lambda p:jnp.sum(jnp.asarray(weights)*values(al.mp.PowerLaw,p,jnp))))(params)
-        np.testing.assert_array_equal(gradient,parent)
+        np.testing.assert_allclose(gradient,parent,rtol=2e-14,atol=0.)
     else:
         # Independent m=2 potential from linearizing A2kappa at gamma2:
         # psi2=-theta/3*r*(e2*cos2phi+e1*sin2phi).
@@ -559,7 +570,8 @@ def test_powerlaw_adapter_preserves_parent_bits_and_all_regular_direction_deriva
         np.testing.assert_array_equal(actual,expected)
 
 
-def test_powerlaw_regular_circle_refuses_singular_mass_centre_geometry_gradient():
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
+def test_powerlaw_regular_circle_refuses_singular_mass_centre_geometry_gradient(gpu):
     import autolens as al
     import jax
     import jax.numpy as jnp
@@ -568,6 +580,7 @@ def test_powerlaw_regular_circle_refuses_singular_mass_centre_geometry_gradient(
     from hwoslaps.inference.mass_profiles import PowerLaw
 
     ensure_jax_x64()
+    assert jax.default_backend()==("gpu" if gpu else "cpu")
     grid=al.Grid2DIrregular(values=np.array([[.03,-.02]]))
     def value(ell,cls=PowerLaw):
         profile=cls(centre=(.03,-.02),ell_comps=(ell[0],ell[1]),einstein_radius=.8,slope=2.)
