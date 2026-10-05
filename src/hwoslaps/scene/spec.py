@@ -34,14 +34,14 @@ from .subhalo import INJECTION_TABLE, InjectionSpec, injection_from_values
 
 __all__ = [
     "ComponentSpec", "GalaxySpec", "GridSpec", "LIGHT_COMPONENT_TABLE", "LightGroup", "MASS_COMPONENT_TABLE",
-    "RESERVED_COMPONENT_NAMES", "SCENE_TABLE", "SceneSpec", "component_from_values", "parse_scene",
+    "SCENE_TABLE", "SceneSpec", "component_from_values", "parse_scene",
     "pixel_centres_yx",
 ]
 
 Plane = Literal["lens", "source"]
 Role = Literal["mass", "light"]
 
-RESERVED_COMPONENT_NAMES = ("redshift", "subhalo")
+_RESERVED_NAMES = ("redshift", "subhalo")
 _RESERVED_PREFIX = "perturber"
 _LAYOUT_SUFFIXES = ("_multipole_m3", "_multipole_m4")
 
@@ -187,9 +187,9 @@ def _check_component_names(values: Mapping[str, Any], path: str) -> None:
                 if name in seen:
                     raise ConfigError(where, f"name already used by {galaxy}.{seen[name]}.{name}; component names "
                                              "are unique within a galaxy")
-                if name in RESERVED_COMPONENT_NAMES or name.startswith(_RESERVED_PREFIX) or name.endswith(
+                if name in _RESERVED_NAMES or name.startswith(_RESERVED_PREFIX) or name.endswith(
                         _LAYOUT_SUFFIXES):
-                    raise ConfigError(where, f"reserved name: component names avoid {', '.join(RESERVED_COMPONENT_NAMES)}, "
+                    raise ConfigError(where, f"reserved name: component names avoid {', '.join(_RESERVED_NAMES)}, "
                                              f"the prefix {_RESERVED_PREFIX!r} and the suffixes "
                                              f"{', '.join(_LAYOUT_SUFFIXES)}")
                 seen[name] = role

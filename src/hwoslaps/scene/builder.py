@@ -1,13 +1,16 @@
 """Scene builder: the AutoLens tracer of a scene and its light images per light group.
 
 Plane assembly rule, shared by the truth scene and the fit models (``inference.hypotheses``):
-1. The lens galaxy holds, in order, the lens mass components (each with its layout
+1. The galaxy ``lens`` holds, in order, the lens mass components (each with its layout
    companions), the lens light components, the perturbers at the lens redshift as
    ``perturber_<index>``, then the subhalo as ``subhalo`` when it is at the lens redshift.
    AutoLens sums a galaxy's deflections in attribute order, so this is the summation order.
-2. Halos at another redshift follow: one galaxy per distinct perturber redshift in ascending
-   redshift (components ``perturber_<index>``), then an off-plane subhalo in its own galaxy.
-3. The source galaxy is last.
+2. Halos at another redshift follow: one galaxy ``perturbers_<k>`` per distinct perturber
+   redshift in ascending redshift (components ``perturber_<index>``), then an off-plane
+   subhalo as component ``subhalo`` of the galaxy ``subhalo_plane``. No galaxy is named
+   ``subhalo``: AutoLens re-traces the centre of a galaxy of that name from the image plane.
+3. The galaxy ``source`` is last.
+The tracer receives the galaxies in this order and groups them into planes by redshift.
 
 Every light image is the block mean of the light on the over-sampled grid (detected e-/s
 per pixel sample). A scene with one source light group and no lens light is rendered by
@@ -141,45 +144,41 @@ def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, 
     if subhalo is not None:
         _check_halo(subhalo, spec, cosmology, "the subhalo")
 
-    lens_redshift = spec.lens.redshift
-    light_profiles: dict[str, tuple[Any, ...]] = {}
-    lens_attributes: dict[str, Any] = {}
-    for component in spec.lens.mass:
-        lens_attributes.update(instantiate(component, assets=assets))
-    lens_light: dict[str, Any] = {}
-    for component in spec.lens.light:
-        lens_light.update(instantiate(component, assets=assets))
-    lens_attributes.update(lens_light)
-    off_plane: dict[float, dict[str, Any]] = {}
-    for index, halo in enumerate(perturbers):
-        target = lens_attributes if halo.redshift == lens_redshift else off_plane.setdefault(halo.redshift, {})
-        target[f"perturber_{index}"] = halo.autolens_profile()
-    if subhalo is not None and subhalo.redshift == lens_redshift:
-        lens_attributes["subhalo"] = subhalo.autolens_profile()
+    def profiles_of(components: Sequence[ComponentSpec]) -> dict[str, Any]:
+        profiles: dict[str, Any] = {}
+        for component in components:
+            profiles.update(instantiate(component, assets=assets))
+        return profiles
 
-    lens_galaxy = al.Galaxy(redshift=lens_redshift, **lens_attributes)
-    galaxies = [lens_galaxy]
-    galaxies += [al.Galaxy(redshift=redshift, **halos) for redshift, halos in sorted(off_plane.items())]
-    if subhalo is not None and subhalo.redshift != lens_redshift:
-        galaxies.append(al.Galaxy(redshift=subhalo.redshift, subhalo=subhalo.autolens_profile()))
-    source_light: dict[str, Any] = {}
-    for component in spec.source.light:
-        source_light.update(instantiate(component, assets=assets))
-    source_galaxy = al.Galaxy(redshift=spec.source.redshift, **source_light)
-    galaxies.append(source_galaxy)
+    lens_redshift = spec.lens.redshift
+    lens_light, source_light = profiles_of(spec.lens.light), profiles_of(spec.source.light)
+    attributes: dict[str, dict[str, Any]] = {"lens": {**profiles_of(spec.lens.mass), **lens_light}}
+    redshifts = {"lens": lens_redshift}
+    off_plane = sorted({halo.redshift for halo in perturbers} - {lens_redshift})
+    for k, redshift in enumerate(off_plane):
+        attributes[f"perturbers_{k}"], redshifts[f"perturbers_{k}"] = {}, redshift
+    for index, halo in enumerate(perturbers):
+        galaxy = "lens" if halo.redshift == lens_redshift else f"perturbers_{off_plane.index(halo.redshift)}"
+        attributes[galaxy][f"perturber_{index}"] = halo.autolens_profile()
+    if subhalo is not None and subhalo.redshift == lens_redshift:
+        attributes["lens"]["subhalo"] = subhalo.autolens_profile()
+    elif subhalo is not None:
+        attributes["subhalo_plane"] = {"subhalo": subhalo.autolens_profile()}
+        redshifts["subhalo_plane"] = subhalo.redshift
+    attributes["source"], redshifts["source"] = source_light, spec.source.redshift
+    galaxies = {name: al.Galaxy(redshift=redshifts[name], **profiles) for name, profiles in attributes.items()}
 
     grid = _over_sampled_grid(spec.grid)
-    tracer = al.Tracer(galaxies=galaxies, cosmology=cosmology.autogalaxy())
+    tracer = al.Tracer(galaxies=list(galaxies.values()), cosmology=cosmology.autogalaxy())
     groups = spec.light_groups()
-    if lens_light:
-        light_profiles["lens"] = tuple(lens_light.values())
+    light_profiles = {"lens": tuple(lens_light.values())} if lens_light else {}
     light_profiles["source"] = tuple(source_light.values())
     if list(groups) == ["source"]:
         images = {"source": _read_only(tracer.image_2d_from(grid=grid))}
     else:
         traced = tracer.traced_grid_2d_list_from(grid=grid)
-        images = {key: _read_only(galaxy.image_2d_from(grid=traced[tracer.plane_redshifts.index(galaxy.redshift)]))
-                  for key, galaxy in (("lens", lens_galaxy), ("source", source_galaxy))}
+        images = {plane: _read_only(galaxies[plane].image_2d_from(
+            grid=traced[tracer.plane_redshifts.index(redshifts[plane])])) for plane in ("lens", "source")}
     for key, image in images.items():
         if not np.all(np.isfinite(image)):
             raise ValueError(f"the {key} light image has non-finite values")
