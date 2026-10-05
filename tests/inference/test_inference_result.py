@@ -53,33 +53,33 @@ def _estimate(log10_mass):
 
 
 RECORDS = {
-    "search-role-refined": _role(),
-    "failed-role": _role(status="failed", log_likelihood=None, sampler=_sampler_record(failed=True),
+    "search-role-refined": lambda: _role(),
+    "failed-role": lambda: _role(status="failed", log_likelihood=None, sampler=_sampler_record(failed=True),
                          refinement=None, box_edge_margins=None, error="RuntimeError: boom"),
-    "anchor-role": _role(strategy="truth_anchor", sampler=None, refinement=None, anchor_chi2=3.0e-12,
+    "anchor-role": lambda: _role(strategy="truth_anchor", sampler=None, refinement=None, anchor_chi2=3.0e-12,
                          box_edge_margins=None),
-    "sampler-only-role": _role(role="smooth", refinement=None),
-    "unresolved-refinement": _refinement(RoleStatus.UNRESOLVED),
-    "recovery-sampler-and-refined": SubhaloRecovery(
+    "sampler-only-role": lambda: _role(role="smooth", refinement=None),
+    "unresolved-refinement": lambda: _refinement(RoleStatus.UNRESOLVED),
+    "recovery-sampler-and-refined": lambda: SubhaloRecovery(
         sampler=_estimate(8.93), refined=_estimate(8.95), log10_mass_quantiles=(8.89, 8.94, 8.99),
         centre_y_quantiles=(0.38, 0.39, 0.40), centre_x_quantiles=(-0.83, -0.82, -0.81),
         support=MassSupport(6.0, 9.7), pdf_converged=True, sample_count=4000),
-    "recovery-unconverged": SubhaloRecovery(
+    "recovery-unconverged": lambda: SubhaloRecovery(
         sampler=_estimate(8.93), refined=None, log10_mass_quantiles=None, centre_y_quantiles=None,
         centre_x_quantiles=None, support=MassSupport(6.0, 9.7), pdf_converged=False, sample_count=12),
-    "forecast-reference-mismatch": ForecastReference(
+    "forecast-reference-mismatch": lambda: ForecastReference(
         q=16.0, metric="q_mismatch", mass_msun=1.0e9, position_yx_arcsec=(0.4, -0.8), config_digest="01" * 32,
         mask_digest="02" * 32, nuisance_names=("lens.mass.einstein_radius", "background"), model_kernel=KERNEL,
         amplitude=-2.0, comparison_digest="03" * 32, noise_model="covariance:" + "04" * 32),
-    "observation-noisy": ObservationRecord(kind="noisy", noise_seed=11, config_digest="05" * 32,
-                                           data_digest="06" * 32, subhalo=None),
+    "observation-noisy": lambda: ObservationRecord(kind="noisy", noise_seed=11, config_digest="05" * 32,
+                                                   data_digest="06" * 32, subhalo=None),
 }
 
 
 @pytest.mark.parametrize("name", RECORDS)
 def test_case_records_round_trip_through_json(name):
     """Every INFA record type stores as plain JSON (no NaN or inf) and reads back to an equal value."""
-    value = RECORDS[name]
+    value = RECORDS[name]()
     text = json.dumps(value.to_mapping(), allow_nan=False)
     restored = type(value).from_mapping(json.loads(text))
     assert restored == value
@@ -97,15 +97,15 @@ def test_record_storage_writes_non_finite_numbers_as_null_and_refuses_unknown_ke
         SamplerRecord.from_mapping({key: value for key, value in mapping["sampler"].items() if key != "seed"})
 
 
-@pytest.mark.parametrize(("role", "status"), [
-    (_role(status="failed", log_likelihood=None, refinement=None), RoleStatus.FAILED),
-    (_role(strategy="truth_anchor", sampler=None, refinement=None), RoleStatus.ZERO_RESIDUAL_ANCHOR),
-    (_role(refinement=None), RoleStatus.SAMPLER_ONLY),
-    (_role(refinement=_refinement(RoleStatus.UNRESOLVED)), RoleStatus.UNRESOLVED),
-    (_role(), RoleStatus.ACCEPTED),
+@pytest.mark.parametrize(("build", "status"), [
+    (lambda: _role(status="failed", log_likelihood=None, refinement=None), RoleStatus.FAILED),
+    (lambda: _role(strategy="truth_anchor", sampler=None, refinement=None), RoleStatus.ZERO_RESIDUAL_ANCHOR),
+    (lambda: _role(refinement=None), RoleStatus.SAMPLER_ONLY),
+    (lambda: _role(refinement=_refinement(RoleStatus.UNRESOLVED)), RoleStatus.UNRESOLVED),
+    (lambda: _role(), RoleStatus.ACCEPTED),
 ], ids=["failed", "anchor", "sampler-only", "unresolved", "accepted"])
-def test_role_acceptance_status_follows_the_role_outcome(role, status):
-    assert role.acceptance_status is status
+def test_role_acceptance_status_follows_the_role_outcome(build, status):
+    assert build().acceptance_status is status
 
 
 @pytest.mark.parametrize(("metric", "q", "amplitude", "detected"), [
