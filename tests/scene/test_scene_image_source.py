@@ -237,3 +237,38 @@ def test_prepare_image_asset_refuses_unusable_inputs(image, keywords, fragment):
               "non-finite": lambda: np.where(np.indices((96, 96))[0] == 50, np.inf, _galaxy_frame())}
     with pytest.raises(ValueError, match=fragment):
         prepare_image_asset(frames[image](), **{"half_light_radius_arcsec": 0.12, **keywords})
+
+
+@pytest.mark.backend
+def test_image_rotation_is_a_profiled_parameter(tmp_path):
+    """rotation_deg (kind orientation) differentiates the rendered morphology by its angle."""
+    import autolens as al
+
+    from hwoslaps.scene.builder import render_component_unlensed
+    from hwoslaps.scene.spec import GridSpec, component_from_values
+
+    definitions = PROFILE_TYPES["Image"].parameters({})
+    assert (definitions[-1].name, definitions[-1].kind, definitions[-1].step_mode) == (
+        "rotation_deg", "orientation", "additive")
+
+    sigma_u, sigma_v, scale = 0.07, 0.035, 0.001
+    axis = (np.arange(601) - 300) * scale
+    vv, uu = np.meshgrid(axis, axis, indexing="ij")
+    sb = np.exp(-0.5 * ((uu / sigma_u) ** 2 + (vv / sigma_v) ** 2))
+    path = _write(tmp_path / "ellipse.npz", sb=sb / (scale**2 * sb.sum()), pixel_scale=np.asarray(scale))
+    grid = GridSpec(shape=(60, 60), pixel_scale_arcsec=0.01, over_sample_size=4)
+
+    def rendered(rotation_deg):
+        values = {"type": "Image", "asset_path": str(path), "centre": [0.0, 0.0], "rotation_deg": rotation_deg,
+                  "total_flux": 1.0, "flux_scale": 1.0, "size_scale": 1.0}
+        return render_component_unlensed(component_from_values("blob", "source", "light", values), grid)
+
+    numerical = (rendered(30.1) - rendered(29.9)) / 0.2
+    samples = np.asarray(al.Grid2D.uniform(shape_native=(60, 60), pixel_scales=0.01, over_sample_size=4).over_sampled)
+    theta = math.radians(30.0)
+    u = samples[:, 1] * math.cos(theta) + samples[:, 0] * math.sin(theta)
+    v = -samples[:, 1] * math.sin(theta) + samples[:, 0] * math.cos(theta)
+    brightness = np.exp(-0.5 * ((u / sigma_u) ** 2 + (v / sigma_v) ** 2)) / (2.0 * math.pi * sigma_u * sigma_v)
+    per_degree = brightness * u * v * (1.0 / sigma_v**2 - 1.0 / sigma_u**2) * math.pi / 180.0
+    analytic = per_degree.reshape(-1, 16).mean(axis=1).reshape(60, 60)
+    assert np.max(np.abs(numerical - analytic)) <= 1.0e-3 * np.max(np.abs(analytic))
