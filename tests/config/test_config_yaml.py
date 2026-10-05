@@ -80,6 +80,7 @@ def test_written_yaml_reads_back_identically(tmp_path):
     pytest.param("a: [1, 2\nb: 3\n", ".yaml:", id="syntax-error"),
     pytest.param("- 1\n- 2\n", "the document must be a mapping, got list", id="list-document"),
     pytest.param("", "the document must be a mapping, got NoneType", id="empty-document"),
+    pytest.param("4\n", "the document must be a mapping, got int", id="scalar-document"),
     pytest.param("a: 1\nb: 2\na: 3\n", ".yaml:3: duplicate key 'a'", id="duplicate-key"),
     pytest.param("scene:\n  light:\n    intensity: 1.0\n    intensity: 2.0\n", ".yaml:4: duplicate key 'intensity'",
                  id="nested-duplicate-key"),
