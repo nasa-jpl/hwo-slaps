@@ -366,3 +366,24 @@ def test_isothermal_single_m4_has_seven_mass_priors(prepared_forecast_factory):
     converted=autofit_model(_models(prepared,free=free).smooth)
     assert converted.prior_count==7
     assert converted.galaxies.lens.mass_multipole_m4.slope==2.
+
+
+@pytest.mark.parametrize("n",[.36,.5,.75,1.,2.5,4.,8.])
+def test_centred_sersic_fixed_geometry_keeps_finite_index_derivative(n):
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from jax.experimental import checkify
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.light_profiles import Sersic
+    from hwoslaps.scene.profiles import sersic_constant
+
+    ensure_jax_x64()
+    grid=al.Grid2DIrregular(values=np.array([[-.03,.08]]))
+    def value(index):
+        profile=Sersic(centre=(-.03,.08),ell_comps=(0.,0.),intensity=1.,effective_radius=.12,sersic_index=index)
+        return jnp.sum(profile.image_2d_from(grid=grid,xp=jnp).array)
+    error,derivative=jax.jit(checkify.checkify(jax.grad(value)))(n)
+    error.throw()
+    db=2-4/(405*n*n)-92/(25515*n**3)-393/(1148175*n**4)+4*2194697/(30690717750*n**5)
+    assert float(derivative)==pytest.approx(math.exp(sersic_constant(n))*db,rel=1e-12,abs=0.)
