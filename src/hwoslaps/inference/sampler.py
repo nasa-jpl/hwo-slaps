@@ -15,6 +15,7 @@ import time
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -85,6 +86,8 @@ def _named_search(identity: str, *, role: str, n_live: int, settings: SamplerSet
         raise ValueError(f"role must be smooth or subhalo, got {role!r}")
     if isinstance(n_live, bool) or not isinstance(n_live, int) or n_live < 1:
         raise ValueError(f"n_live must be at least 1, got {n_live!r}")
+    if isinstance(seed, bool) or not isinstance(seed, Integral) or seed < 0:
+        raise ValueError(f"seed must be an integer >= 0, got {seed!r}")
     return af.Nautilus(path_prefix=str(case_dir), name=f"{role}_{identity[:16]}",
                        **_search_keywords(settings, n_live=n_live, seed=seed))
 

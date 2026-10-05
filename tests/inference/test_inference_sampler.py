@@ -137,11 +137,15 @@ def test_failure_inside_search_fit_is_recorded_and_construction_errors_raise(lig
         assert (record.log_likelihood_max, record.log_evidence, record.likelihood_calls) == (None, None, None)
         assert record.effective["n_like_max"] == 200 and record.requested == settings.to_mapping()
         assert record.output_path.startswith(record.name + "/") and record.seed == 7
-        for case_dir, n_live, message in ((Path("relative"), 20, "case_dir must be absolute"),
-                                          (tmp_path, 0, "n_live must be at least 1")):
+        for case_dir, n_live, seed, message in ((Path("relative"), 20, 7, "case_dir must be absolute"),
+                                                (tmp_path, 0, 7, "n_live must be at least 1"),
+                                                (tmp_path, 20, -1, "seed must be an integer"),
+                                                (tmp_path, 20, 7.5, "seed must be an integer"),
+                                                (tmp_path, 20, 7.0, "seed must be an integer"),
+                                                (tmp_path, 20, True, "seed must be an integer")):
             with pytest.raises(ValueError, match=message):
                 run_search(fit_model=light_model, model=autofit_model(light_model), analysis=analysis,
-                           role="smooth", n_live=n_live, settings=settings, seed=7, case_dir=case_dir,
+                           role="smooth", n_live=n_live, settings=settings, seed=seed, case_dir=case_dir,
                            case_id="case", data_identity=DATA, session=session)
 
 
