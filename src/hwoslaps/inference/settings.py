@@ -194,13 +194,18 @@ DEFAULT_BOX_RULES: tuple[tuple[str, BoxRule], ...] = (
     ("lens.amplitude", BoxRule(0.5, fractional=True)),
     ("lens.einstein_radius", BoxRule(0.01)),
     ("lens.ellipticity", BoxRule(0.02, clip=(-0.9, 0.9))),
+    ("lens.multipole", BoxRule(0.01)),
     ("lens.orientation", BoxRule(5.0)),
     ("lens.position", BoxRule(0.005)),
+    ("lens.sersic_index", BoxRule(0.3, fractional=True)),
+    ("lens.shear", BoxRule(0.01)),
     ("lens.size", BoxRule(0.3, fractional=True)),
+    ("lens.slope", BoxRule(0.05)),
     ("source.amplitude", BoxRule(0.5, fractional=True)),
     ("source.ellipticity", BoxRule(0.05, clip=(-0.9, 0.9))),
     ("source.orientation", BoxRule(5.0)),
     ("source.position", BoxRule(0.01)),
+    ("source.sersic_index", BoxRule(0.3, fractional=True)),
     ("source.size", BoxRule(0.3, fractional=True)),
 )
 """Box rules keyed ``<galaxy>.<parameter kind>``, sorted by key. The widths are those of 41621de
