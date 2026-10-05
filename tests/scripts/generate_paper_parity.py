@@ -19,6 +19,9 @@ copy ``tests/fixtures/paper_parity`` back to the checkout::
         --gpu 0
 
 ``--work`` holds per-lane scratch results and may be deleted afterwards.
+``--kernel-anchor`` instead writes only ``k1_paper_kernel.json`` (the K1 anchor: the paper's HWO
+reference truth kernels at 999x999 and 51x51, from ``configs/psf_states/science_hwo35.yaml``),
+in one reference-lane child, and touches no other file.
 
 The parent process writes the scene inputs (engine YAML, synthetic source
 asset and detector kernel) into ``--out`` and then runs one child per lane
@@ -644,6 +647,50 @@ def _versions():
     return versions
 
 
+K1_FIXTURE = "k1_paper_kernel.json"
+K1_STATE = "configs/psf_states/science_hwo35.yaml"
+K1_SHAPES = ((999, 999), (51, 51))
+"""The paper's HWO reference truth state and the two supports it was used at: the Fisher
+ladders (999 x 999, ``scripts/run_ladder.py`` KERNEL_SHAPE_NATIVE) and the nonlinear fits
+(51 x 51, the state file's own ``kernel.shape_native``)."""
+
+
+def kernel_anchor(paper_tree, out, gpu):
+    """Write the K1 anchor: the paper truth kernels at both supports, from the 41621de code."""
+    from hwoslaps.psf import generate_psf_system
+    from hwoslaps.psf.utils import pyauto_kernel_native
+
+    state_path = paper_tree / K1_STATE
+    with state_path.open(encoding="utf-8") as stream:
+        config = yaml.safe_load(stream)
+    kernels = {}
+    for shape in K1_SHAPES:
+        rung = copy.deepcopy(config)
+        rung["psf"]["kernel"]["shape_native"] = list(shape)
+        psf = generate_psf_system(rung["psf"], full_config=rung)
+        values = np.asarray(pyauto_kernel_native(psf.kernel), dtype=np.float64)
+        kernels[f"{shape[0]}x{shape[1]}"] = {
+            "shape": list(values.shape), "sha256": _kernel_sha256(psf.kernel),
+            "peak": float(values.max()), "sum": float(values.sum()), "total_rms_nm": float(psf.total_rms_nm)}
+    record = {
+        "description": "K1: the HWO reference truth PSF of RASTI-26-183 (science_hwo35) at the Fisher "
+                       "and nonlinear-fit supports, from generate_psf_system of the paper commit",
+        "paper_commit": PAPER_COMMIT,
+        "paper_tag": PAPER_TAG,
+        "generator": "tests/scripts/generate_paper_parity.py --kernel-anchor",
+        "digest_format": "sha256 of b'<ny>x<nx>:' followed by the float64 C-order kernel bytes",
+        "state": K1_STATE,
+        "state_sha256": _file_sha256(state_path),
+        "pixel_scale_arcsec": config["lensing"]["grid"]["pixel_scale"],
+        "psf": config["psf"],
+        "provenance_note": config["provenance_note"],
+        "kernels": kernels,
+        "versions": _versions(),
+        "environment": {name: os.environ.get(name) for name in _lane_environment("reference", gpu)},
+    }
+    (out / K1_FIXTURE).write_text(json.dumps(record, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def run_lane(lane, paper_tree, out, work, gpu, scenes):
     _check_lane_environment(lane, gpu)
     _enter_backend_harness()
@@ -763,6 +810,8 @@ def main():
     parser.add_argument("--gpu", type=int, required=True)
     parser.add_argument("--scenes", nargs="+", default=list(SCENES) + [NONLINEAR_SCENE])
     parser.add_argument("--lane", choices=LANES, help="internal: run one lane in this process")
+    parser.add_argument("--kernel-anchor", action="store_true",
+                        help=f"write only {K1_FIXTURE} (the K1 anchor), in the reference lane")
     args = parser.parse_args()
     paper_tree = args.paper_tree.resolve()
     out = args.out.resolve()
@@ -770,6 +819,12 @@ def main():
     unknown = set(args.scenes) - set(SCENES) - {NONLINEAR_SCENE}
     if unknown:
         raise ValueError(f"unknown scenes {sorted(unknown)}")
+    if args.lane is not None and args.kernel_anchor:
+        _check_lane_environment(args.lane, args.gpu)
+        _enter_backend_harness()
+        _import_paper(paper_tree)
+        kernel_anchor(paper_tree, out, args.gpu)
+        return 0
     if args.lane is not None:
         run_lane(args.lane, paper_tree, out, work, args.gpu, args.scenes)
         return 0
@@ -778,10 +833,16 @@ def main():
             raise RuntimeError(f"pin {name}=1 before running the generator")
     if (paper_tree / ".git").exists() or not (paper_tree / "src" / "hwoslaps").is_dir():
         raise ValueError("--paper-tree must be an extracted git archive of 41621de")
-    write_inputs(out)
     base = {key: value for key, value in os.environ.items()
             if key not in ("PYTHONPATH", "HWOSLAPS_FISHER_GRID_WORKERS", "JAX_PLATFORMS",
                            "JAX_ENABLE_X64", "CUDA_VISIBLE_DEVICES", "NUMBA_DISABLE_JIT")}
+    if args.kernel_anchor:
+        command = [sys.executable, str(Path(__file__).resolve()), "--paper-tree", str(paper_tree),
+                   "--out", str(out), "--work", str(work), "--gpu", str(args.gpu),
+                   "--lane", "reference", "--kernel-anchor"]
+        subprocess.run(command, env={**base, **_lane_environment("reference", args.gpu)}, check=True)
+        return 0
+    write_inputs(out)
     for lane in LANES:
         command = [sys.executable, str(Path(__file__).resolve()), "--paper-tree", str(paper_tree),
                    "--out", str(out), "--work", str(work), "--gpu", str(args.gpu),
