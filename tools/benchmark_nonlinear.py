@@ -98,8 +98,9 @@ def run_fit_case(name: str, work_dir: Path, *, config_path: Path | None = None) 
             if fitted.refinement is None or fitted.refinement.best_vector is None:
                 raise RuntimeError(f"{name} {role} did not produce a refined finite maximum: {fitted.error}")
             point = np.asarray(fitted.refinement.record["candidate_best_z"], dtype=float)
+            objective = case.objective(role)
             timings[f"{role}_objective_value_and_gradient_seconds_median"] = _median(
-                lambda: case.objective(role).value_and_gradient(point), 50)
+                lambda: objective.value_and_gradient(point), 50)
         return result, {"case_wall_seconds": wall, **timings, "results": fit_engine_results(result)}
     finally:
         prepared.close()
