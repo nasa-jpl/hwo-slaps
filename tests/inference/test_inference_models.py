@@ -303,13 +303,16 @@ def _image_profile(params):
                              sb=_image_samples(),total_flux=1.7,flux_scale=params[2],size_scale=params[3])
 
 
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
 @pytest.mark.parametrize("size",[.85,1.2])
-def test_image_jax_retains_the_complete_zero_pad_rotation_matrix(size):
+def test_image_jax_retains_the_complete_zero_pad_rotation_matrix(gpu,size):
     import autolens as al
+    import jax
     import jax.numpy as jnp
     from hwoslaps.inference.backend import ensure_jax_x64
 
     ensure_jax_x64()
+    assert jax.default_backend()==("gpu" if gpu else "cpu")
     rows=np.array([2.25,0.,7.,-.5,7.5,-1.,8.,-1.01,8.01,3.3])
     cols=np.array([4.6,0.,9.,4.2,5.1,2.,7.,3.,6.,10.01])
     theta=np.deg2rad(37.3);u=(cols-4.5)*.2*size;v=(rows-3.5)*.2*size
@@ -327,13 +330,15 @@ def test_image_jax_retains_the_complete_zero_pad_rotation_matrix(size):
     np.testing.assert_array_equal(actual[7:],np.zeros(3))
 
 
-def test_image_persistent_jit_rotation_gradient_and_warm_transfer_contract():
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
+def test_image_persistent_jit_rotation_gradient_and_warm_transfer_contract(gpu):
     import autolens as al
     import jax
     import jax.numpy as jnp
     from hwoslaps.inference.backend import ensure_jax_x64
 
     ensure_jax_x64()
+    assert jax.default_backend()==("gpu" if gpu else "cpu")
     params=np.array([.13,-.21,1.15,.92,37.3])
     grid=al.Grid2D.uniform(shape_native=(3,3),pixel_scales=.11,origin=(.13,-.21))
     def image(p):return _image_profile(p).image_2d_from(grid=grid,xp=jnp).array
