@@ -235,6 +235,14 @@ def test_cross_section_rules(row, path, minimal_mapping):
     ("mask", {"kind": "all_pixels", "snr_min": 1}, "forecast.mask.snr_min"),
     ("nuisances", {"fixed": ["lens.*", "lens.*"]}, "forecast.nuisances.fixed[1]"),
     ("nuisances", {"steps": {"position": 0}}, "forecast.nuisances.steps.position"),
+    pytest.param("nuisances", {"priors": {"lens.mass.mass.centre_y": 0.0}},
+                 "forecast.nuisances.priors.lens.mass.mass.centre_y", id="scalar_prior_zero"),
+    pytest.param("nuisances", {"priors": {"lens.mass.mass.centre_y": -0.1}},
+                 "forecast.nuisances.priors.lens.mass.mass.centre_y", id="scalar_prior_negative"),
+    pytest.param("nuisances", {"priors": {"lens.mass.mass.centre_y": float("inf")}},
+                 "forecast.nuisances.priors.lens.mass.mass.centre_y", id="scalar_prior_infinite"),
+    pytest.param("nuisances", {"priors": {"lens.mass.mass.centre_y": float("nan")}},
+                 "forecast.nuisances.priors.lens.mass.mass.centre_y", id="scalar_prior_nan"),
     ("nuisances", {"priors": {"lens.mass.mass.centre_y": -1}}, "forecast.nuisances.priors.lens.mass.mass.centre_y"),
     ("nuisances", {"wavefront": {"modes": {"zernikes": {"nolls": [1]}}}}, "forecast.nuisances.wavefront.modes.zernikes.nolls"),
     ("nuisances", {"wavefront": {"modes": {"zernikes": {"nolls": [4]}}, "step_nm": {"segment_hexikes": 1}}},
@@ -250,6 +258,10 @@ def test_forecast_inputs_reject_invalid_layout_mask_and_nuisance_values(section,
         scale = "step_nm" if ".step_nm." in path else "prior_sigma_nm"
         control["forecast"]["nuisances"]["wavefront"][scale] = {"segment_hexikes": 1.0}
         parse_config(control)
+    if section == "nuisances" and "priors" in value:
+        control = deepcopy(candidate)
+        control["forecast"]["nuisances"] = {"priors": {"lens.mass.mass.centre_y": 0.02}}
+        assert parse_config(control).forecast.nuisances.priors["lens.mass.mass.centre_y"] == 0.02
     candidate["forecast"][section] = value
     with pytest.raises(ConfigError) as error:
         parse_config(candidate)
