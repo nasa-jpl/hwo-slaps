@@ -130,3 +130,18 @@ def test_small_knowledge_error_has_matched_limit_and_quadratic_spurious_response
         with prepare_forecast(half) as prepared:
             expected = forecast(prepared, masses_msun=[1.0e8], positions=[[0.0, 0.4]])
         np.testing.assert_allclose(result.q_spurious / expected.q_spurious, 4.0, rtol=0.15)
+
+
+@pytest.mark.parametrize("changed", ["kernel", "convolver"])
+def test_prepared_kernel_buffers_cannot_change_identity(minimal_mapping, changed):
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    with prepare_forecast(minimal_mapping) as prepared:
+        kernel = prepared.psfs.truth_kernels.single
+        buffer = kernel.kernel if changed == "kernel" else np.asarray(kernel.convolver().kernel.native)
+        buffer.setflags(write=True)
+        buffer[3, 3] += 0.01
+        with pytest.raises(ValueError, match="truth.*kernel.*changed"):
+            forecast(prepared, masses_msun=[1.0e8])
+        with pytest.raises(TypeError):
+            prepared.record["config_digest"] = "changed"

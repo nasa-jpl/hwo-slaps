@@ -96,3 +96,18 @@ def test_padded_fft_convolution_matches_direct_real_space():
     full = np.fft.irfft2(np.fft.rfft2(image, s=shape) * np.fft.rfft2(kernel, s=shape), s=shape)
     actual = full[1:12, 1:14]
     np.testing.assert_allclose(actual, convolve2d(image, kernel, mode="same"), rtol=1.0e-12, atol=1.0e-12)
+
+
+def test_image_evaluator_refuses_reference_convention_drift(image_asset):
+    from hwoslaps.fisher.engines.jax_profiles import build_light_evaluator
+    from hwoslaps.scene.image_source import load_image_asset
+    from hwoslaps.scene.image_profile import ImageLightProfile
+
+    class ShiftedConvention(ImageLightProfile):
+        def image_2d_from(self, grid, **kwargs):
+            return 1.01 * super().image_2d_from(grid=grid, **kwargs)
+
+    profile = ShiftedConvention.from_asset(load_image_asset(image_asset), centre=(0.0, 0.0), rotation_deg=0.0,
+                                          total_flux=1.0, flux_scale=1.0, size_scale=1.0)
+    with pytest.raises(ValueError, match="convention drift"):
+        build_light_evaluator(profile, np.array([[0.0, 0.0], [0.01, 0.02], [-0.01, 0.0]]))
