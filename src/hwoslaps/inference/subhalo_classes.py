@@ -72,7 +72,8 @@ def mass_mapping(hypothesis: Halo, cosmology: Cosmology, support: MassSupport) -
         if 10.0 ** support.log10_mass_min < low or 10.0 ** support.log10_mass_max > high:
             raise ValueError(f"moline2017_eq7 support must lie in [{low:g}, {high:g}] Msun")
     return SubhaloMassMapping(model=hypothesis.model.type, concentration=hypothesis.model.concentration,
-                              h=cosmology.reduced_h,
+                              h=(hypothesis.model.concentration.h if isinstance(hypothesis.model.concentration, Moline2017)
+                                 and hypothesis.model.concentration.h is not None else cosmology.reduced_h),
                               geometry=cosmology.geometry(hypothesis.redshift, hypothesis.source_redshift),
                               support=support)
 

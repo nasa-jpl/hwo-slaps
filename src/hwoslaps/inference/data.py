@@ -10,6 +10,7 @@ import numpy as np
 
 from ..fisher.data_space import psf_border_mask
 from ..identity import KernelIdentity, array_digest
+from ..scene.image_source import frozen_value
 from ..observation.observation import Observation
 from ..optics.kernels import DetectorPSF, make_convolver
 from .settings import OBJECTIVE_VERSION
@@ -23,6 +24,9 @@ class FitData:
     kind: Literal["expected", "noisy"]
     mask: np.ndarray
     record: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "record", frozen_value(self.record))
 
     @property
     def pixel_count(self) -> int:

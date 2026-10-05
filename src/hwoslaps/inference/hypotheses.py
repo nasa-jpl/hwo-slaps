@@ -61,6 +61,9 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
     profile_type = PROFILE_TYPES[component.type]
     profiles = []
     for layout in profile_type.layout(component.values):
+        ranks = {argument.name: min((list(parameters).index(element.parameter)
+                                    for element in argument.elements if isinstance(element, ParameterRef)),
+                                   default=len(parameters)) for argument in layout.arguments}
         arguments = []
         for argument in layout.arguments:
             elements = []
@@ -88,6 +91,7 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
             path = "hwoslaps.scene.image_profile:ImageLightProfile"
         else:
             path = f"autolens:{'mp' if component.role == 'mass' else 'lp'}.{layout.profile_class}"
+        arguments.sort(key=lambda argument: ranks.get(argument.name, len(parameters)))
         profiles.append((component.name + layout.suffix, FitComponent(path, tuple(arguments))))
     return profiles
 

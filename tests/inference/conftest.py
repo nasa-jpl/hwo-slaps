@@ -86,3 +86,29 @@ def make_light_model():
 @pytest.fixture
 def light_model():
     return make_light_model()
+
+
+@pytest.fixture
+def prepared_forecast_factory(minimal_mapping):
+    """Real reference preparations on a 40x40 grid; typed overrides go through cfg.replace."""
+    from hwoslaps.config.schema import parse_config
+    from hwoslaps.fisher.api import Execution, prepare_forecast
+
+    config = parse_config(minimal_mapping).replace({"scene": {"grid": {"shape": [40, 40]},
+                  "source": {"light": {"light": {"ell_comps": [0.14516129, 0.25142673]}}}}})
+    opened = []
+
+    def build(overrides=None):
+        selected = config if overrides is None else config.replace(overrides)
+        prepared = prepare_forecast(selected, execution=Execution(engine="reference"))
+        opened.append(prepared)
+        return prepared
+
+    yield build
+    for prepared in opened:
+        prepared.close()
+
+
+@pytest.fixture
+def prepared_forecast(prepared_forecast_factory):
+    return prepared_forecast_factory()
