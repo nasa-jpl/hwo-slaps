@@ -69,7 +69,13 @@ def fwhm_arcsec(field: FocalField) -> float:
         intensity[row - 1, column], intensity[row, column], intensity[row + 1, column])
     radius = np.hypot(field.x_arcsec - centre_x, field.y_arcsec - centre_y).ravel()
     values = intensity.ravel()
-    bins = np.floor(radius / pitch).astype(int)
+    scaled_radius = radius / pitch
+    integer_radius = np.rint(scaled_radius)
+    # Stabilize bin membership at a rounded integer; keep true radii for the means.
+    roundoff = 8 * np.spacing(np.maximum(integer_radius, 1.0))
+    classified_radius = np.where(np.abs(scaled_radius - integer_radius) <= roundoff,
+                                 integer_radius, scaled_radius)
+    bins = np.floor(classified_radius).astype(int)
     counts = np.bincount(bins)
     filled = counts > 0
     mean_radius = np.bincount(bins, weights=radius)[filled] / counts[filled]
