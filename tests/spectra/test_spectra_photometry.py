@@ -5,7 +5,7 @@ import math
 import numpy as np
 import pytest
 
-from hwoslaps.spectra.bandpass import bin_integrals, build_bandpass, parse_bandpass
+from hwoslaps.spectra.bandpass import bin_integrals, build_bandpass, integrate_dlnlambda, parse_bandpass
 from hwoslaps.spectra.photometry import (
     ab_scale_jy, ab_to_fnu_jy, detected_flux_per_m2, effective_wavelength_m, rate_from_ab,
     sky_rate_e_per_s_per_pixel, synthetic_ab_mag,
@@ -54,7 +54,23 @@ def test_photon_weighted_effective_wavelength_closed_forms(kind):
     sed = build_sed(parse_sed({"kind": kind}, "sed"), redshift=0.0)
     low, high = 450.0 / 1.0e9, 550.0 / 1.0e9
     expected = (high-low)/math.log(high/low) if kind == "flat_fnu" else (2.0/3.0) * (high**3-low**3)/(high**2-low**2)
-    assert effective_wavelength_m(sed, response) == pytest.approx(expected, rel=1.0e-9, abs=0.0)
+    actual = effective_wavelength_m(sed, response)
+    assert actual == pytest.approx(expected, rel=1.0e-9, abs=0.0)
+    errors, means = [], []
+    for count in (1001, 10001, 100001):
+        wavelengths = np.exp(np.linspace(math.log(low), math.log(high), count))
+        wavelengths[[0, -1]] = [low, high]
+        shape = np.ones_like(wavelengths) if kind == "flat_fnu" else (wavelengths/1.0e-6)**2
+        mean = integrate_dlnlambda(wavelengths*shape, wavelengths)/integrate_dlnlambda(shape, wavelengths)
+        means.append(mean)
+        errors.append(abs(mean/expected-1.0))
+    # For h=log(high/low)/(N-1), the leading relative errors are
+    # h²/12 (flat fnu) and 5h²/12 (flat flambda), from the exponential
+    # trapezoid factor (kh/2)*coth(kh/2). Keep the prescribed N=10001.
+    print("EFFECTIVE_WAVELENGTH_CONVERGENCE", kind, errors)
+    assert errors[0] > errors[1] > errors[2]
+    assert errors[0]/errors[1] == pytest.approx(100.0, rel=1.0e-3, abs=0.0)
+    assert actual == pytest.approx(means[1], rel=1.0e-13, abs=0.0)
 
 
 @pytest.mark.parametrize("frame", ["observed", "rest"])
