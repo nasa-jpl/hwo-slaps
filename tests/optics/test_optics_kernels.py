@@ -1,6 +1,11 @@
-"""Detector kernel values, kernel files, kernel sharing and the convolution bridge (optics.kernels)."""
+"""Detector kernel values, kernel files, kernel sharing, the convolution bridge and BLAS pinning (optics.kernels)."""
 
 import hashlib
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -147,3 +152,33 @@ def test_real_space_convolution_is_a_true_convolution_with_signed_kernels():
     np.testing.assert_allclose(convolve_real_space(point, kernel, SCALE)[8:13, 9:16], kernel, rtol=0.0, atol=1e-14)
     with pytest.raises(ValueError, match="odd sides"):
         convolve_real_space(image, kernel[:4], SCALE)
+
+
+CHILD = """
+import json, sys
+from threadpoolctl import threadpool_info
+from hwoslaps.optics.kernels import deterministic_blas
+assert "scipy.linalg" not in sys.modules
+
+def blas():
+    return [library["num_threads"] for library in threadpool_info() if library["user_api"] == "blas"]
+
+with deterministic_blas():
+    import hcipy  # loads SciPy's BLAS, which HCIPy's matrix Fourier transform calls
+    inside = blas()
+print(json.dumps({"inside": inside, "after": blas()}))
+"""
+
+
+@pytest.mark.backend
+def test_deterministic_blas_pins_libraries_loaded_inside_the_block():
+    import hwoslaps
+
+    environment = {**os.environ, "PYTHONPATH": str(Path(hwoslaps.__file__).resolve().parents[1]),
+                   **{name: "4" for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")}}
+    completed = subprocess.run([sys.executable, "-c", CHILD], env=environment, capture_output=True, text=True,
+                               check=True)
+    threads = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert len(threads["after"]) == len(threads["inside"]) >= 1
+    assert max(threads["after"]) > 1, "the libraries must default to more than one thread for the test to bite"
+    assert set(threads["inside"]) == {1}, threads

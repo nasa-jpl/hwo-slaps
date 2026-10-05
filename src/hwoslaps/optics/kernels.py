@@ -48,7 +48,12 @@ def deterministic_blas() -> Iterator[None]:
     propagation and the basis QR factorizations (16 threads move the paper
     999 x 999 kernel by 5e-18), so every optics computation that feeds kernel bytes
     runs inside this block. The caller's limits are restored on exit.
+
+    threadpoolctl limits only libraries that are already loaded, and HCIPy's matrix Fourier
+    transform calls SciPy's own BLAS (``scipy.linalg.blas.zgemm``), so SciPy's BLAS is loaded
+    first.
     """
+    import scipy.linalg  # noqa: F401
     from threadpoolctl import threadpool_limits
 
     with threadpool_limits(limits=1):
