@@ -101,6 +101,7 @@ def test_population_streams_are_isolated(scene_mapping, population_block):
     # Marginal KS tests alone cannot detect two producer quantities using one child stream.
     assert abs(spearmanr(masses, radius).statistic) < 0.05
     assert abs(spearmanr(radius, angle).statistic) < 0.05
+    assert abs(spearmanr(masses, angle).statistic) < 0.05, "mass-angle streams are aliased"
 
 
 @pytest.mark.parametrize("edit, path", [
@@ -158,10 +159,16 @@ def test_zero_draw_and_listed_then_population_realization(scene_mapping, populat
     assert [halo.redshift for halo in actual] == [0.4, mixed.lens.redshift, mixed.lens.redshift, 0.3]
 
 
-@pytest.mark.parametrize("slope", [-1e308, 1e308])
-def test_unrepresentable_population_powers_refuse_invalid_output(scene_mapping, population_block, slope):
+@pytest.mark.parametrize("slope, spatial, message", [
+    (-1e308, None, "inverse CDF"),
+    (1e308, None, "inverse CDF"),
+    (-1., {"kind": "uniform_annulus", "inner_arcsec": 1e-200, "outer_arcsec": 2e-200}, "radial inverse CDF"),
+], ids=["mass-underflow", "mass-overflow", "annulus-underflow"])
+def test_unrepresentable_population_draws_refuse_invalid_output(scene_mapping, population_block, slope, spatial, message):
     block = copy.deepcopy(population_block)
     block["mass_function"].update(count=3, slope=slope)
+    if spatial is not None:
+        block["spatial"] = spatial
     spec = _scene(scene_mapping, [block]).perturbers.populations[0]
-    with pytest.raises(ValueError, match="inverse CDF"):
+    with pytest.raises(ValueError, match=message):
         draw_population(spec, seed=11, index=0, lens_centre_yx=(0., 0.))
