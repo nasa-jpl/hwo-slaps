@@ -229,3 +229,13 @@ def test_kernel_provider_limits(kernel_file):
         provider.kernel(coefficients=WavefrontCoefficients.empty())
     assert provider.to_mapping() == {"provider": "kernel", "kernel": psf.kernel_identity().to_mapping(),
                                      "source": dict(psf.source)}
+
+
+@pytest.mark.parametrize("scale", [float("nan"), float("inf"), 0.0, -0.03, True, "0.03"])
+def test_builders_refuse_a_scene_pixel_scale_that_is_not_finite_and_positive(kernel_file, scale):
+    spec = KernelFileSpec(Path(kernel_file), None, 0.03, True, None)
+    truth = build_psf_provider(spec, pixel_scale_arcsec=0.03)
+    with pytest.raises(ValueError, match="pixel_scale_arcsec must be finite and positive"):
+        build_psf_provider(spec, pixel_scale_arcsec=scale)
+    with pytest.raises(ValueError, match="pixel_scale_arcsec must be finite and positive"):
+        build_model_psf(MatchedModel(), truth, pixel_scale_arcsec=scale)

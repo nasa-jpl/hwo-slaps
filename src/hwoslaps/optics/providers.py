@@ -13,6 +13,7 @@ is the one place the model PSF of a relation is built.
 from __future__ import annotations
 
 import math
+import numbers
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -286,10 +287,15 @@ def _kernel_files(psf: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]
     return [(section, psf[section]) for section in ("truth", "model") if psf[section]["kind"] == "kernel"]
 
 
+def _same_pixel_scale(first: float, second: float) -> bool:
+    """Whether two pixel scales are one sampling within ``PIXEL_SCALE_ATOL_ARCSEC`` (never for NaN)."""
+    return abs(first - second) <= PIXEL_SCALE_ATOL_ARCSEC
+
+
 def _check_kernel_pixel_scales(root: Mapping[str, Any], path: str) -> None:
     scale = root["scene"]["grid"]["pixel_scale_arcsec"]
     for section, kernel_file in _kernel_files(root["psf"]):
-        if abs(kernel_file["pixel_scale_arcsec"] - scale) > PIXEL_SCALE_ATOL_ARCSEC:
+        if not _same_pixel_scale(kernel_file["pixel_scale_arcsec"], scale):
             raise ConfigError(f"psf.{section}.pixel_scale_arcsec",
                               f"the kernel is sampled at {kernel_file['pixel_scale_arcsec']!r} arcsec but "
                               f"scene.grid.pixel_scale_arcsec is {scale!r}; kernels are never resampled")
@@ -315,8 +321,15 @@ CROSS_RULES: tuple[Rule, ...] = (
 """Rules spanning ``psf`` and ``scene``; ``config.schema`` runs them on the read root values."""
 
 
+def _scene_pixel_scale(value: Any) -> float:
+    """The scene pixel scale a builder receives: a finite positive real number (bool refused)."""
+    if isinstance(value, bool) or not isinstance(value, numbers.Real) or not (math.isfinite(value) and value > 0.0):
+        raise ValueError(f"pixel_scale_arcsec must be finite and positive, got {value!r}")
+    return float(value)
+
+
 def _require_pixel_scale(psf: DetectorPSF, pixel_scale_arcsec: float, what: str) -> None:
-    if abs(psf.pixel_scale_arcsec - pixel_scale_arcsec) > PIXEL_SCALE_ATOL_ARCSEC:
+    if not _same_pixel_scale(psf.pixel_scale_arcsec, pixel_scale_arcsec):
         raise ValueError(f"{what} is sampled at {psf.pixel_scale_arcsec!r} arcsec, the scene at "
                          f"{pixel_scale_arcsec!r} arcsec; kernels are never resampled")
 
@@ -330,11 +343,9 @@ def _kernel_provider(spec: KernelFileSpec, pixel_scale_arcsec: float, what: str)
 
 def build_psf_provider(spec: PsfTruthSpec, *, pixel_scale_arcsec: float) -> PSFProvider:
     """The truth provider at the scene pixel scale; evaluates no kernel (a kernel file is read)."""
-    if not (isinstance(pixel_scale_arcsec, (int, float)) and not isinstance(pixel_scale_arcsec, bool)
-            and math.isfinite(pixel_scale_arcsec) and pixel_scale_arcsec > 0.0):
-        raise ValueError(f"pixel_scale_arcsec must be finite and positive, got {pixel_scale_arcsec!r}")
+    scale = _scene_pixel_scale(pixel_scale_arcsec)
     if isinstance(spec, KernelFileSpec):
-        return _kernel_provider(spec, pixel_scale_arcsec, "psf.truth")
+        return _kernel_provider(spec, scale, "psf.truth")
     if not isinstance(spec, OpticalSpec):
         raise ValueError(f"a truth PSF is an OpticalSpec or a KernelFileSpec, got {type(spec).__name__}")
     pupil = build_pupil(spec.pupil)
@@ -346,8 +357,8 @@ def build_psf_provider(spec: PsfTruthSpec, *, pixel_scale_arcsec: float) -> PSFP
             raise ValueError("a drawn truth wavefront excludes listed wavefront coefficients")
         draw = draw_wavefront(basis, spec.draw)
         coefficients = draw.coefficients
-    return OpticalPSF(spec, pupil=pupil, basis=basis, pixel_scale_arcsec=pixel_scale_arcsec,
-                      coefficients=coefficients, draw=draw)
+    return OpticalPSF(spec, pupil=pupil, basis=basis, pixel_scale_arcsec=scale, coefficients=coefficients,
+                      draw=draw)
 
 
 def _optical_truth(truth: PSFProvider, relation: str) -> OpticalPSF:
@@ -358,13 +369,14 @@ def _optical_truth(truth: PSFProvider, relation: str) -> OpticalPSF:
 
 def build_model_psf(spec: PsfModelSpec, truth: PSFProvider, *, pixel_scale_arcsec: float) -> ModelPSF:
     """The model PSF of ``spec`` relative to ``truth``, both at the scene pixel scale."""
-    if abs(truth.pixel_scale_arcsec - pixel_scale_arcsec) > PIXEL_SCALE_ATOL_ARCSEC:
+    scale = _scene_pixel_scale(pixel_scale_arcsec)
+    if not _same_pixel_scale(truth.pixel_scale_arcsec, scale):
         raise ValueError(f"the truth PSF is sampled at {truth.pixel_scale_arcsec!r} arcsec, the scene at "
-                         f"{pixel_scale_arcsec!r} arcsec")
+                         f"{scale!r} arcsec")
     if isinstance(spec, MatchedModel):
         return ModelPSF(truth, "matched", None)
     if isinstance(spec, KernelFileSpec):
-        return ModelPSF(_kernel_provider(spec, pixel_scale_arcsec, "psf.model"), "kernel", None)
+        return ModelPSF(_kernel_provider(spec, scale, "psf.model"), "kernel", None)
     if isinstance(spec, WavefrontModel):
         optical = _optical_truth(truth, "wavefront")
         if (spec.wavefront is None) == (spec.offset is None):
