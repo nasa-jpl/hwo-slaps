@@ -90,14 +90,14 @@ class LightGroup:
     components: tuple[str, ...]
 
 
-def _einstein_radii(components: Any) -> list[float]:
+def _einstein_radii(components: Any) -> tuple[float, ...]:
     """Einstein-radius parameter values of mass components given as (type, values) pairs."""
     radii = []
     for type_name, values in components:
         for definition in PROFILE_TYPES[type_name].parameters(values):
             if definition.kind == "einstein_radius":
                 radii.append(values[definition.key])
-    return radii
+    return tuple(radii)
 
 
 @dataclass(frozen=True)
@@ -118,9 +118,13 @@ class SceneSpec:
                 return tuple(component.values["centre"])
         raise ValueError("no lens mass component has a centre")
 
+    def einstein_radii(self) -> tuple[float, ...]:
+        """The Einstein-radius parameters of the lens mass components, in declaration order."""
+        return _einstein_radii((component.type, component.values) for component in self.lens.mass)
+
     def einstein_radius(self) -> float:
         """The Einstein radius of the single lens mass component that has one."""
-        radii = _einstein_radii((component.type, component.values) for component in self.lens.mass)
+        radii = self.einstein_radii()
         if len(radii) != 1:
             raise ValueError(f"the lens has {len(radii)} mass components with an Einstein radius; exactly one is "
                              "needed to place by radius: einstein_radius")

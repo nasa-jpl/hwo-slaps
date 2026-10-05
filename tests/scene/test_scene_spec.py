@@ -123,8 +123,9 @@ def test_light_groups_follow_the_planes_lens_first(scene_mapping):
 
 
 def test_einstein_radius_needs_exactly_one_lens_component_with_one(scene_mapping):
-    scene_mapping["lens"]["mass"]["second"] = dict(scene_mapping["lens"]["mass"]["main"], centre=[0.5, 0.5])
+    scene_mapping["lens"]["mass"]["second"] = dict(scene_mapping["lens"]["mass"]["main"], centre=[0.5, 0.5],
+                                                   einstein_radius=0.3)
     spec = parse_scene(scene_mapping)
     with pytest.raises(ValueError, match="2 mass components with an Einstein radius"):
         spec.einstein_radius()
-    assert spec.lens_centre == (0.0, 0.0)
+    assert spec.einstein_radii() == (0.8, 0.3) and spec.lens_centre == (0.0, 0.0)

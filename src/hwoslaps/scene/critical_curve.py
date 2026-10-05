@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from .cosmology import Cosmology
-from .profiles import PROFILE_TYPES, instantiate
+from .profiles import instantiate
 
 if TYPE_CHECKING:
     from .spec import SceneSpec
@@ -52,9 +52,7 @@ def effective_einstein_radius(spec: SceneSpec, cosmology: Cosmology) -> float:
     import autolens as al
     from autogalaxy.operate.lens_calc import LensCalc
 
-    radii = [component.values[definition.key] for component in spec.lens.mass
-             for definition in PROFILE_TYPES[component.type].parameters(component.values)
-             if definition.kind == "einstein_radius"]
+    radii = spec.einstein_radii()
     if not radii:
         raise ValueError("no lens mass component has an Einstein radius to size the critical-curve grid")
     centre = spec.lens_centre
