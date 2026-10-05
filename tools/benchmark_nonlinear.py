@@ -167,6 +167,9 @@ def main() -> int:
     parser.add_argument("--work-dir", type=Path)
     parser.add_argument("--config", type=Path)
     args = parser.parse_args()
+    import importlib.util
+    from autoconf import conf
+    conf.instance.push(str(Path(importlib.util.find_spec("autoarray").origin).parent / "config"), keep_first=True)
     reference = json.loads(args.baseline.read_text())["workloads"][args.case]["summary"]
     with tempfile.TemporaryDirectory(prefix="nonlinear-benchmark-", dir=args.work_dir) as space:
         if args.case == "B4L":
