@@ -73,6 +73,10 @@ def test_truncated_nfw_class_traces_under_jax():
     import jax.numpy as jnp
     from hwoslaps.inference.backend import ensure_jax_x64
     from hwoslaps.inference.subhalo_classes import TruncatedNFWSph
+    from hwoslaps.inference.subhalo_classes import TNFWM200SubhaloSph, mass_mapping
+    from hwoslaps.scene.halos import FixedConcentration
+    from scipy.integrate import quad
+    from dataclasses import replace
 
     ensure_jax_x64()
     grid = al.Grid2DIrregular(values=POINTS)
@@ -91,6 +95,74 @@ def test_truncated_nfw_class_traces_under_jax():
     derivative = jax.jit(jax.jacfwd(lambda kappa: values(TruncatedNFWSph, kappa, jnp)))(0.03)
     for actual, parent in zip(derivative, expected, strict=True):
         np.testing.assert_allclose(actual, parent / 0.03, rtol=1e-13, atol=0.)
+
+    def projected_density(x, kappa):
+        def density(z):
+            radius = np.hypot(x, z)
+            return 100. / ((100. + radius**2) * radius * (1. + radius)**2)
+
+        def radial_derivative(z):
+            radius = np.hypot(x, z)
+            return -density(z) * (2 * radius / (100. + radius**2) + 1 / radius + 2 / (1 + radius)) * x / radius
+
+        return tuple(2 * kappa * quad(function, 0., np.inf, epsabs=1e-12, epsrel=1e-12)[0]
+                     for function in (density, radial_derivative))
+
+    for radius in (0.8, 1., 1.2):
+        point_grid = al.Grid2DIrregular(values=[[radius, 0.]])
+
+        def geometry_values(profile_class, arguments, xp):
+            scale, centre_y, centre_x = arguments
+            profile = profile_class(centre=(centre_y, centre_x), kappa_s=0.03,
+                                    scale_radius=scale, truncation_radius=10 * scale)
+            return xp.concatenate((profile.deflections_yx_2d_from(grid=point_grid, xp=xp).array.reshape(-1),
+                                   profile.convergence_2d_from(grid=point_grid, xp=xp).array.reshape(-1)))
+
+        arguments = np.array([1., 0., 0.])
+        parent = geometry_values(al.mp.NFWTruncatedSph, arguments, np)
+        np.testing.assert_array_equal(geometry_values(TruncatedNFWSph, arguments, np), parent)
+        np.testing.assert_allclose(jax.jit(lambda value: geometry_values(TruncatedNFWSph, value, jnp))(arguments),
+                                   parent, rtol=1e-13, atol=0.)
+        kappa, radial_derivative = projected_density(radius, 0.03)
+        assert parent[2] == pytest.approx(kappa, rel=1e-12)
+        alpha = parent[0]
+        # Axisymmetric alpha'(R)=2*kappa(R)-alpha(R)/R fixes scale and centre derivatives.
+        expected_gradient = np.array([[2 * (alpha - radius * kappa), -(2 * kappa - alpha / radius), 0.],
+                                      [0., 0., -alpha / radius],
+                                      [-radius * radial_derivative, -radial_derivative, 0.]])
+        actual_gradient = jax.jit(jax.jacfwd(lambda value: geometry_values(TruncatedNFWSph, value, jnp)))(arguments)
+        np.testing.assert_allclose(actual_gradient, expected_gradient, rtol=1e-10, atol=1e-12,
+                                   err_msg=f"TNFW scale/centre derivatives at radius/scale={radius}")
+        step = 1e-3
+        finite_difference = np.column_stack([
+            (geometry_values(al.mp.NFWTruncatedSph, arguments + step * direction, np) -
+             geometry_values(al.mp.NFWTruncatedSph, arguments - step * direction, np)) / (2 * step)
+            for direction in np.eye(3)])
+        np.testing.assert_allclose(actual_gradient, finite_difference, rtol=1e-5, atol=1e-9)
+
+    halo = replace(_halo("TNFW", truncation=TauTruncation(10.)), position_yx_arcsec=(0., 0.),
+                   model=HaloModel("TNFW", FixedConcentration(12.), TauTruncation(10.)))
+    mapping = mass_mapping(halo, halo.cosmology, MassSupport(6., 10.))
+    scales = jax.jit(lambda mass: jnp.asarray(_profile_scales("TNFW", mapping, mass)))(8.)
+    kappa_s, scale, _ = (float(value) for value in scales)
+    for ratio in (0.8, 1., 1.2):
+        point_grid = al.Grid2DIrregular(values=[[ratio * scale, 0.]])
+
+        def freed_values(mass):
+            profile = TNFWM200SubhaloSph(centre=(0., 0.), log10_m200=mass, mass_mapping=mapping)
+            return jnp.concatenate((profile.deflections_yx_2d_from(grid=point_grid, xp=jnp).array.reshape(-1),
+                                    profile.convergence_2d_from(grid=point_grid, xp=jnp).array.reshape(-1)))
+
+        parent = al.mp.NFWTruncatedSph(centre=(0., 0.), kappa_s=kappa_s, scale_radius=1., truncation_radius=10.)
+        dimensionless_grid = al.Grid2DIrregular(values=[[ratio, 0.]])
+        alpha = float(parent.deflections_yx_2d_from(grid=dimensionless_grid).array[0, 0]) * scale
+        kappa, radial_derivative = projected_density(ratio, kappa_s)
+        np.testing.assert_allclose(jax.jit(freed_values)(8.), [alpha, 0., kappa], rtol=1e-12, atol=1e-14)
+        # Fixed concentration and tau give kappa_s and theta_s proportional to M**(1/3).
+        expected_mass_gradient = np.log(10.) / 3 * np.array([3 * alpha - 2 * ratio * scale * kappa,
+                                                           0., kappa - ratio * radial_derivative])
+        np.testing.assert_allclose(jax.jit(jax.jacfwd(freed_values))(8.), expected_mass_gradient,
+                                   rtol=1e-10, atol=1e-12, err_msg=f"TNFW log-mass derivative at radius/scale={ratio}")
 
 
 @pytest.mark.parametrize("mode", ["fixed_template", "local_search", "freed"])
