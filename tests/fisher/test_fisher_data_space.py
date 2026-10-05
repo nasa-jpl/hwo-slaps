@@ -117,6 +117,8 @@ def test_design_stacks_masked_images_as_row_major_columns():
         assert empty.whiten(empty.design([])).shape == (4, 0)
     with pytest.raises(ValueError, match="differs from the mask shape"):
         space.flatten(np.ones((3, 2)))
+    with pytest.raises(ValueError, match="sigma_adu shape"):
+        build_data_space(mask, np.ones((3, 2)), None)
     with pytest.raises(ValueError, match="covers 3 pixels"):
         DataSpace(mask, Whitener.from_sigma(np.ones(3)))
 

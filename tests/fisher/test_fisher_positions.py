@@ -78,6 +78,14 @@ def test_selected_and_aperture_sets_keep_geometry():
     assert sparse.domain_radius_arcsec == layout.domain_radius_arcsec == np.hypot(2.0, 2.0)
     assert sparse.centre_yx == layout.centre_yx
     np.testing.assert_array_equal(sparse.grid.y_coords, layout.grid.y_coords)
+    for values in (sparse.positions_yx, sparse.cell_areas_arcsec2, sparse.boundary, sparse.grid.y_coords,
+                   sparse.grid.indices):
+        with pytest.raises(ValueError, match="read-only"):
+            values[0] = values[1]
+    given = np.array([[0.5, 0.5], [1.0, 1.0]])
+    explicit = explicit_positions(given, (0.0, 0.0))
+    given[0, 0] = 9.0
+    assert explicit.positions_yx[0, 0] == 0.5
     translated = grid_positions((0.25, -0.25), spacing_arcsec=0.5, half_width_arcsec=1.0, annulus=None)
     off_centre = translated.within((0.25, 0.25), 0.75).reshape(5, 5)
     expected = np.zeros((5, 5), dtype=bool)
