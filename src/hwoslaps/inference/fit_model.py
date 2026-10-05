@@ -321,6 +321,6 @@ def autofit_model(model: FitModel) -> Any:
     collection = af.Collection(galaxies=af.Collection(**galaxies))
     paths = [".".join(path) for path in collection.unique_prior_paths]
     if collection.prior_count != len(model.parameter_names) or paths != list(model.parameter_names):
-        raise RuntimeError(f"AutoFit built {collection.prior_count} free priors {paths}; the fit model declares "
+        raise RuntimeError(f"AutoFit built {collection.prior_count} free priors {paths}; the fit model frees "
                            f"{list(model.parameter_names)}")
     return collection

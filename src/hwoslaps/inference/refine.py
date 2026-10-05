@@ -246,8 +246,8 @@ def _run_repeat(best_run: Mapping[str, Any], objective: BoxObjective,
 def _incumbent_record(incumbent: RefineStart, incumbent_run: Mapping[str, Any], best_half_chi2: float | None,
                       direct_check: Callable[[np.ndarray, float], ScalarCheck] | None,
                       settings: RefineSettings) -> dict[str, Any]:
-    """The sampler maximum against the retained best: evaluated, not better than the best,
-    directly consistent, and equal to the sampler's saved likelihood."""
+    """The sampler maximum against the retained best: it must evaluate, be no better than the best,
+    be directly consistent, and equal the sampler's saved likelihood."""
     tolerance = settings.scalar_residual_tolerance
     half = incumbent_run.get("start_half_chi2")
     evaluated = half is not None and np.isfinite(float(half))

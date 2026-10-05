@@ -70,9 +70,9 @@ def test_incoherent_fit_models_are_refused(build, message):
 
 
 @pytest.mark.backend
-def test_autofit_model_builds_the_declared_free_priors():
-    """The AutoFit collection has the declared prior paths in vector order, the truth vector lands on
-    the declared attributes, and a constructor argument left unassigned is refused."""
+def test_autofit_model_builds_the_fit_model_free_priors():
+    """The AutoFit collection has the fit model's prior paths in vector order, the truth vector lands on
+    the attributes the fit model names, and a constructor argument left unassigned is refused."""
     model = _model()
     collection = autofit_model(model)
     assert [".".join(path) for path in collection.unique_prior_paths] == list(model.parameter_names)
