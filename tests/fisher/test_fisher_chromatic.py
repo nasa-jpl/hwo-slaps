@@ -82,7 +82,8 @@ def test_chromatic_wavefront_nuisance_is_the_derivative_of_the_forward_model(min
         wavefront={"modes":{"zernikes":{"nolls":[4,5]}},"step_nm":1.,"prior_sigma_nm":5.})
     with prepare_forecast(mapping) as prepared:
         provider=prepared.psfs.model.provider
-        band=prepared.observation.instrument.bandpass
+        from hwoslaps.spectra.bandpass import build_bandpass,parse_bandpass
+        band=build_bandpass(parse_bandpass(mapping["instrument"]["bandpass"],"band"))
         for noll in (4,5):
             mode=WavefrontMode("zernikes",noll);value=provider.coefficients.value(mode)
             bindings=[]
