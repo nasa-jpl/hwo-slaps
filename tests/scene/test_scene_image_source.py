@@ -4,6 +4,8 @@ import hashlib
 import json
 import math
 import pickle
+import multiprocessing
+import os
 
 import numpy as np
 import pytest
@@ -198,10 +200,36 @@ def test_image_profile_matches_lenstronomy_interpolation():
 
 @pytest.mark.backend
 def test_image_profile_survives_pickling():
+    from hwoslaps.fisher.engines.reference import ordered_process_map
+
     profile = _profile(rotation_deg=10.0, flux_scale=1.3, size_scale=1.2)
     points = [(0.3, -0.2), (0.1, -0.1)]
     before = _evaluate(profile, points)
-    np.testing.assert_array_equal(_evaluate(pickle.loads(pickle.dumps(profile)), points), before)
+    payload = pickle.dumps(profile)
+    np.testing.assert_array_equal(_evaluate(pickle.loads(payload), points), before)
+    previous_children = {child.pid for child in multiprocessing.active_children()}
+    child_pid, start_method, actual_class, values = list(ordered_process_map(
+        _spawn_image_profile_evaluation, [(payload, points)], workers=1,
+        initializer=_spawn_image_profile_initializer, initargs=()))[0]
+    assert child_pid != os.getpid() and start_method == "spawn"
+    assert actual_class == "hwoslaps.scene.image_profile.ImageLightProfile"
+    assert np.all(np.isfinite(values))
+    np.testing.assert_array_equal(values, before)
+    assert {child.pid for child in multiprocessing.active_children()} <= previous_children
+
+
+def _spawn_image_profile_initializer():
+    pass
+
+
+def _spawn_image_profile_evaluation(arguments):
+    from hwoslaps.scene.image_profile import ImageLightProfile
+
+    payload, points = arguments
+    profile = pickle.loads(payload)
+    assert type(profile) is ImageLightProfile
+    return (os.getpid(), multiprocessing.get_start_method(),
+            type(profile).__module__ + "." + type(profile).__name__, _evaluate(profile, points))
 
 
 SIGMA_PIXELS = 6.0
