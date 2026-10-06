@@ -119,7 +119,10 @@ PARSE_ROWS = {
     "model-list": ({"model": []}, "psf.model"),
     "model-kernel-path-required": ({"model": {"kind": "kernel", "pixel_scale_arcsec": 0.03}}, "psf.model.path"),
     "matched-refuses-kernel-payload": ({"model": {"kind": "matched", "path": "ignored.npy"}}, "psf.model.path"),
-    "kernel-refuses-draw-payload": ({"model": {"kind": "kernel", "draw": DRAW}}, "psf.model.draw"),
+    "kernel-refuses-draw-payload": ({"model": {"kind": "kernel", "draw": DRAW, "pixel_scale_arcsec": 0.03,
+                                               "path": str(Path(__file__).resolve().parents[1] /
+                                                           "fixtures/paper_parity/detector_kernel.npy")}},
+                                    "psf.model.draw"),
     "draw-refuses-kernel-payload": ({"model": {"kind": "knowledge_error", "draw": DRAW, "path": "ignored.npy"}},
                                     "psf.model.path"),
 }
