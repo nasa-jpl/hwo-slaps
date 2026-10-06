@@ -68,9 +68,12 @@ hwoslaps forecast examples/hwo_reference/instrument.yaml examples/hwo_reference/
 combined family, seed 20260835. `fit_kernel_51.yaml` supplies the paper nonlinear
 fit support. A batch pairs this fit arm with its larger forecast arm through `forecast_arm`.
 
-Budget: CPU smoke 120 s; full GPU 600 s. Measured runtime: pending. Sampling per group:
-pending; the run record stores actual observation values. A budget overrun is reported
-without changing physical inputs.
+Budget: CPU smoke 120 s; full GPU 600 s. On XTX on 2026-10-06, the CPU smoke reached its
+120 s external limit before completing. The full run completed in 55.3556 s with one
+NVIDIA B200 visible, Python 3.11 and BLAS threads 1. Its actual sampling record was
+`source:disk = 0.024480394447703214` and its 500 nm captured fraction was
+0.9999453026734084. These diagnostics do not establish forecast convergence.
+A budget overrun is reported without changing physical inputs.
 
 References: [Liu et al., EAC concepts](https://arxiv.org/abs/2602.11046),
 [Stark et al., ETC comparison](https://arxiv.org/abs/2502.18556),
