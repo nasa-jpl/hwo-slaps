@@ -1,0 +1,5 @@
+# Reference: all-pixel forecasts over the paper's 61 x 61 position lattice.
+forecast:
+  positions: {kind: grid, spacing_arcsec: 0.05, half_width_arcsec: 1.5}
+  mask: {kind: all_pixels}
+  nuisances: {}

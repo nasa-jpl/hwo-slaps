@@ -1,0 +1,33 @@
+# Illustrative: deterministic members of the minimal scene; these draws describe no survey.
+name: population_example
+seed: 7
+config: [../../configs/minimal.yaml]
+population:
+  seed: 3
+  count: 8
+  variables:
+    r_eff: {kind: lognormal, median: 0.15, sigma_ln: 0.35}
+    theta_e: {kind: uniform, low: 0.7, high: 1.1}
+    z_source: {kind: truncated_normal, mean: 0.8, std: 0.25, low: 0.4, high: 1.5}
+  bind:
+    scene.source.light.disk.effective_radius: r_eff
+    scene.lens.mass.main.einstein_radius: theta_e
+    scene.source.redshift: z_source
+arms:
+  - {name: matched}
+  # With an optical truth overlay, a knowledge-error study can add:
+  # - name: ke_10nm
+  #   overrides: {psf: {model: {kind: knowledge_error,
+  #                draw: {prior: {packaged: jwst_wss_drift_v1}, amplitude_rms_nm: 10.0, seed: 0}}}}
+  #   directions: 8
+  # Pair a smaller-support nonlinear arm with its forecast arm via forecast_arm.
+forecast:
+  masses_msun: [1.0e8, 1.0e9]
+nonlinear:
+  injected:
+    trials: {kind: explicit, explicit: [{members: 0, mass_msun: 1.0e9, position_yx: [1.0, 0.0]}]}
+    inject: true
+    noise: true
+    fit: {mode: fixed_template}
+    sampler: {n_live_smooth: 50, n_live_subhalo_fixed: 50}
+execution: {engine: reference, devices: cpu}
