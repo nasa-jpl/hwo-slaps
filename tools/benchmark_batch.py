@@ -14,6 +14,7 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+import signal
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
@@ -34,9 +35,107 @@ def _spec(config, cpu):
 
 
 def _arrays(result):
+    import numpy as np
     from hwoslaps.identity import array_digest
-    names = ('masses_msun', 'positions_yx', 'fisher_raw', 'fisher_profiled', 'amplitude_hat', 'amplitude_spurious')
-    return {name: None if getattr(result, name) is None else array_digest(getattr(result, name)) for name in names}
+    names = ('masses_msun', 'positions_yx', 'fisher_raw', 'fisher_profiled', 'sigma_amplitude', 'q_asimov',
+             'degradation', 'amplitude_hat', 'q_mismatch', 'z_mismatch', 'amplitude_spurious', 'q_spurious', 'z_spurious',
+             'z_asimov', 'cell_areas_arcsec2', 'boundary')
+    required = set(names[:7])
+    arrays = {}
+    for name in names:
+        value = getattr(result, name)
+        if value is None:
+            if name in required:
+                raise RuntimeError(f'B7 missing required science array {name}')
+            arrays[name] = None
+        else:
+            if name in ('masses_msun', 'positions_yx', 'fisher_raw', 'fisher_profiled') and not np.all(np.isfinite(value)):
+                raise RuntimeError(f'B7 nonfinite science array {name}')
+            arrays[name] = array_digest(value)
+    return arrays
+
+
+def _worker_records(output):
+    records = []
+    for path in (output / 'run/sessions').glob('*/workers.jsonl'):
+        for line in path.read_text().splitlines(keepends=True):
+            if line.endswith('\n'):
+                records.append(json.loads(line))
+    return records
+
+
+def _owned_phase(command, environment, log, output, deadline, device):
+    from hwoslaps.batch.processes import boot_id, group_members, signal_owned, worker_record
+    from hwoslaps.batch.runner import OWNER_ENV
+    identity = os.urandom(32).hex()
+    environment = {**environment, OWNER_ENV: identity}
+    boot = boot_id()
+    process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE, stdout=log,
+                               stderr=subprocess.STDOUT, start_new_session=True)
+    own = {'slot': 0, 'device': device, 'pid': process.pid, 'process_group': process.pid,
+           'session_id': process.pid, 'identity': identity, 'identity_env': OWNER_ENV,
+           'uid': os.getuid(), 'start_time': None, 'boot_id': boot}
+    try:
+        own = worker_record(process.pid, slot=0, device=device, identity=identity, identity_env=OWNER_ENV)
+        process.stdin.write(b'go\n')
+        process.stdin.close()
+        code = process.wait(timeout=max(0., deadline - time.monotonic()))
+        records = [own, *_worker_records(output)]
+        if any(group_members(record) for record in records):
+            raise RuntimeError('B7 phase returned while owned processes remained')
+        if code != 0:
+            raise subprocess.CalledProcessError(code, command)
+    except BaseException as original:
+        process.stdin.close()
+        errors = []
+        blocked = set()
+        def owned_live(record):
+            key = (record['pid'], record['identity'])
+            if key in blocked:
+                return False
+            try:
+                return bool(group_members(record))
+            except Exception as error:
+                blocked.add(key)
+                errors.append(str(error))
+                return False
+        def pinned_signal(record, number):
+            key = (record['pid'], record['identity'])
+            if key in blocked:
+                return
+            try:
+                signal_owned(record, number)
+            except Exception as error:
+                blocked.add(key)
+                errors.append(str(error))
+        records = [own, *_worker_records(output)]
+        for record in records:
+            pinned_signal(record, signal.SIGTERM)
+        grace = time.monotonic() + 35.
+        while time.monotonic() < grace:
+            process.poll()
+            records = [own, *_worker_records(output)]
+            if not any(owned_live(record) for record in records):
+                break
+            time.sleep(.05)
+        kill_deadline = time.monotonic() + 5.
+        while True:
+            records = [own, *_worker_records(output)]
+            for record in records:
+                pinned_signal(record, signal.SIGKILL)
+            if not any(owned_live(record) for record in records):
+                break
+            if time.monotonic() >= kill_deadline:
+                errors.append('verified phase/worker descendants did not drain before the cleanup bound')
+                break
+            time.sleep(.05)
+        try:
+            process.wait(timeout=5.)
+        except subprocess.TimeoutExpired:
+            errors.append('phase remains after ownership-safe cleanup; inspect recorded identities')
+        if errors:
+            raise RuntimeError('B7 ownership cleanup failed: ' + '; '.join(errors)) from original
+        raise
 
 
 def _phase(args):
@@ -49,16 +148,24 @@ def _phase(args):
         from hwoslaps.fisher.api import forecast, prepare_forecast
         rows = []
         start = time.perf_counter()
+        oracle_s = 0.
         for job in plan.jobs:
             preparation_start = time.perf_counter()
             with prepare_forecast(job.config, execution=spec.execution.forecast) as prepared:
                 preparation_s = time.perf_counter() - preparation_start
+                import jax
+                devices_now = jax.devices()
+                if len(devices_now) != 1 or devices_now[0].platform != ('cpu' if args.cpu else 'gpu'):
+                    raise RuntimeError('B7 actual prepared engine is on the wrong assigned device')
                 run_start = time.perf_counter()
                 result = forecast(prepared, masses_msun=job.parameters['masses_msun'])
                 forecast_s = time.perf_counter() - run_start
+                oracle_start = time.perf_counter()
+                arrays = _arrays(result)
+                oracle_s += time.perf_counter() - oracle_start
                 rows.append({'job_id': job.job_id, 'config_digest': job.config_digest,
-                             'prepare_s': preparation_s, 'forecast_s': forecast_s, 'arrays': _arrays(result)})
-        wall_s = time.perf_counter() - start
+                             'prepare_s': preparation_s, 'forecast_s': forecast_s, 'arrays': arrays})
+        wall_s = time.perf_counter() - start - oracle_s
         worker_start_s = 0.
         devices = []
         report = None
@@ -104,10 +211,14 @@ def main(argv=None):
     if any(os.environ.get(key) != '1' for key in THREADS):
         parser.error('every BLAS thread variable must equal1')
     if args.phase:
+        if sys.stdin.readline() != 'go\n':
+            parser.error('benchmark phase requires its owning controller bootstrap')
         return _phase(args)
     if args.output_dir.exists() and any(args.output_dir.iterdir()):
         parser.error('output directory must be missing or empty')
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    from hwoslaps.batch.processes import require_process_support
+    require_process_support()
     environment = dict(os.environ)
     if args.cpu:
         environment.update(CUDA_VISIBLE_DEVICES='', JAX_PLATFORMS='cpu', JAX_ENABLE_X64='1')
@@ -118,20 +229,46 @@ def main(argv=None):
         tokens = [token.strip() for token in visible.split(',')]
         if not all(tokens) or args.device >= len(tokens):
             parser.error('device index lies outside the assigned visible allocation')
-        environment.update(CUDA_VISIBLE_DEVICES=tokens[args.device], JAX_PLATFORMS='cuda', JAX_ENABLE_X64='1')
-    for phase in ('direct', 'batch'):
-        command = [sys.executable, str(Path(__file__).resolve()), '--phase', phase, '--config', str(args.config),
-                   '--output-dir', str(args.output_dir)] + (['--cpu'] if args.cpu else [])
-        with (args.output_dir / (phase + '.log')).open('wb') as log:
-            subprocess.run(command, env=environment, stdout=log, stderr=subprocess.STDOUT, check=True)
+        environment.pop('JAX_PLATFORMS', None)
+        environment.update(CUDA_VISIBLE_DEVICES=tokens[args.device], JAX_ENABLE_X64='1',
+                           XLA_PYTHON_CLIENT_PREALLOCATE='true', XLA_PYTHON_CLIENT_MEM_FRACTION='.7500')
+    deadline = time.monotonic() + 540.  # Reserve the remaining minute for verified cleanup.
+    try:
+        for phase in ('direct', 'batch'):
+            command = [sys.executable, str(Path(__file__).resolve()), '--phase', phase, '--config', str(args.config),
+                       '--output-dir', str(args.output_dir)] + (['--cpu'] if args.cpu else [])
+            with (args.output_dir / (phase + '.log')).open('wb') as log:
+                _owned_phase(command, environment, log, args.output_dir, deadline,
+                             'cpu' if args.cpu else environment['CUDA_VISIBLE_DEVICES'])
+    except BaseException as error:
+        from hwoslaps.artifacts import write_json
+        write_json(args.output_dir / 'failure.json', {'schema': 1, 'workload': 'B7',
+                   'error_type': type(error).__name__, 'message': str(error), 'budget_certified': False})
+        raise
     direct = json.loads((args.output_dir / 'direct.json').read_text())
     batch = json.loads((args.output_dir / 'batch.json').read_text())
+    if len(direct['rows']) != 4 or len(batch['rows']) != 4 or len({row['config_digest'] for row in direct['rows']}) != 4:
+        from hwoslaps.artifacts import write_json
+        write_json(args.output_dir / 'failure.json', {'schema': 1, 'workload': 'B7', 'budget_certified': False,
+                   'message': 'B7 requires exactly four distinct complete forecast configurations'})
+        return 3
+    if len({row['job_id'] for row in direct['rows']}) != 4 or len({row['job_id'] for row in batch['rows']}) != 4:
+        from hwoslaps.artifacts import write_json
+        write_json(args.output_dir / 'failure.json', {'schema': 1, 'workload': 'B7', 'budget_certified': False,
+                   'message': 'B7 requires four unique completed job rows'})
+        return 3
     if [row['job_id'] for row in direct['rows']] != [row['job_id'] for row in batch['rows']]:
-        raise RuntimeError('B7 direct and batch selected different jobs')
+        from hwoslaps.artifacts import write_json
+        write_json(args.output_dir / 'failure.json', {'schema': 1, 'workload': 'B7', 'budget_certified': False,
+                   'message': 'B7 direct and batch selected different jobs'})
+        return 3
     paired = []
     for expected, actual in zip(direct['rows'], batch['rows'], strict=True):
         if actual['arrays'] != expected['arrays'] or actual['config_digest'] != expected['config_digest']:
-            raise RuntimeError(f"B7 actual output arrays or configuration differ: {actual['job_id']}")
+            from hwoslaps.artifacts import write_json
+            write_json(args.output_dir / 'failure.json', {'schema': 1, 'workload': 'B7', 'budget_certified': False,
+                       'message': f"B7 actual output arrays or configuration differ: {actual['job_id']}"})
+            return 3
         paired.append({'job_id': actual['job_id'], 'direct_forecast_s': expected['forecast_s'],
                        'batch_forecast_s': actual['forecast_s'], 'ratio': actual['forecast_s'] / expected['forecast_s']})
     record = {'schema': 1, 'workload': 'B7', 'lane': direct['lane'], 'direct_wall_s': direct['wall_s'],
@@ -144,7 +281,7 @@ def main(argv=None):
     from hwoslaps.artifacts import write_json
     write_json(args.output_dir / 'comparison.json', record)
     print(json.dumps(record, sort_keys=True))
-    return 0
+    return 0 if args.cpu or record['budget_certified'] else 3
 
 
 if __name__ == '__main__':
