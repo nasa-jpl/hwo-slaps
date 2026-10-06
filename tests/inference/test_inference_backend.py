@@ -228,7 +228,7 @@ X64_CHILD = textwrap.dedent("""
 
 
 @pytest.mark.xtx_gpu
-def test_jax_analysis_enables_x64_and_returns_float64():
+def test_jax_analysis_enables_x64_and_returns_float64(record_property):
     """A fresh process from x64 off: both real analyses keep x64 on and return finite float64 Fitness."""
     environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
     lane = os.path.dirname(os.path.abspath(__file__))
@@ -236,7 +236,10 @@ def test_jax_analysis_enables_x64_and_returns_float64():
     completed = subprocess.run([sys.executable, "-c", X64_CHILD, lane, expected_path, expected_sha], env=environment, capture_output=True,
                                text=True, check=True, timeout=600)
     report = json.loads(completed.stdout.strip().splitlines()[-1])
-    assert report.pop("binding") == {"backend_path": expected_path, "backend_sha256": expected_sha}
+    binding = report.pop("binding")
+    assert binding == {"backend_path": expected_path, "backend_sha256": expected_sha}
+    for name, value in binding.items():
+        record_property(name, value)
     assert report == {"before": False, "analyses": [
         {"after": True, "dtype": "float64", "finite": True},
         {"after": True, "dtype": "float64", "finite": True},
@@ -315,7 +318,7 @@ GUARD_CHILD = textwrap.dedent("""
 
 @pytest.mark.xtx_gpu
 @pytest.mark.parametrize("fault", ["ineffective_enable", "missing_apis"])
-def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault):
+def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault, record_property):
     """Real installed guards refuse before any delegating real analysis construction."""
     environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
     lane = os.path.dirname(os.path.abspath(__file__))
@@ -323,7 +326,10 @@ def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault
     completed = subprocess.run([sys.executable, "-c", GUARD_CHILD, lane, fault, expected_path, expected_sha], env=environment,
                                capture_output=True, text=True, check=True, timeout=90)
     report = json.loads(completed.stdout.strip().splitlines()[-1])
-    assert report.pop("binding") == {"backend_path": expected_path, "backend_sha256": expected_sha}
+    binding = report.pop("binding")
+    assert binding == {"backend_path": expected_path, "backend_sha256": expected_sha}
+    for name, value in binding.items():
+        record_property(name, value)
     assert report["before"] is False and report["analysis_constructions"] == 0
     assert report["error_type"] == "RuntimeError"
     if fault == "ineffective_enable":
