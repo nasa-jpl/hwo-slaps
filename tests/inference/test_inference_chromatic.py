@@ -60,7 +60,8 @@ def test_chromatic_truth_is_fit_with_one_actual_model_kernel(minimal_mapping,mod
         np.testing.assert_allclose(tracer.image_2d_from(grid=prepared.scene.grid).native,
             sum(prepared.scene.light_images.values()),rtol=1.e-12,atol=1.e-13*max(image.max() for image in prepared.scene.light_images.values()))
         assert case.data.record["truth_kernels"]
-        assert case.data.record["model_kernel"]==prepared.psfs.model_kernels.single.kernel_identity().to_mapping()
+        from hwoslaps.identity import json_ready
+        assert json_ready(case.data.record["model_kernel"])==prepared.psfs.model_kernels.single.kernel_identity().to_mapping()
         assert np.isfinite(case.log_likelihood("smooth",case.truth_vector("smooth")))
         assert np.isfinite(case.log_likelihood("subhalo",case.truth_vector("subhalo")))
         prepared.validate_identity()

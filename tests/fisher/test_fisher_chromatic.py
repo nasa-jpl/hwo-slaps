@@ -150,3 +150,25 @@ def test_monochromatic_model_mode_binds_each_group_at_its_mean_wavelength(minima
                 maxima[mode].append(np.max(np.abs(result.amplitude_spurious)))
     assert 3<maxima["mean"][1]/maxima["mean"][0]<5
     assert 1.5<maxima["fixed"][1]/maxima["fixed"][0]<2.5
+
+
+def test_chromatic_spawn_keeps_captured_shared_table_colours_and_kernel_groups(minimal_mapping,tmp_path):
+    from hwoslaps.fisher.api import Execution,prepare_forecast
+    path=tmp_path/"shared-sed.npz";np.savez(path,wave=[400.,500.,600.],value=[.5,1.,.8])
+    mapping=chromatic_mapping(minimal_mapping,relation="knowledge_error")
+    for component,quantity in (("light","fnu"),("blue","flambda")):
+        mapping["scene"]["source"]["light"][component]["sed"]={"kind":"table","path":str(path),
+            "wavelength_key":"wave","value_key":"value","wavelength_unit":"nm","quantity":quantity}
+    with prepare_forecast(mapping) as serial,prepare_forecast(mapping,execution=Execution(reference_workers=2)) as pooled:
+        assert len(pooled.psfs.truth_kernels.kernels)==3
+        positions=serial.positions.positions_yx
+        expected=serial.engine.evaluate(positions,[1.e8])[0]
+        first=pooled.engine.evaluate(positions,[1.e8])[0]
+        path.unlink()
+        # Engine transport itself uses the already captured runtime map and kernels;
+        # public forecast still honestly refuses the now-missing configured file.
+        removed=pooled.engine.evaluate(positions,[1.e8])[0]
+        for name in ("q_asimov","fisher_raw","fisher_profiled","amplitude_hat","amplitude_spurious"):
+            np.testing.assert_array_equal(getattr(first,name),getattr(expected,name))
+            np.testing.assert_array_equal(getattr(removed,name),getattr(expected,name))
+        with pytest.raises(FileNotFoundError):pooled.validate_identity()
