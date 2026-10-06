@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from pathlib import Path
 import multiprocessing
 import os
 import subprocess
@@ -184,39 +186,161 @@ def test_make_analysis_uses_the_given_cosmology_and_writes_no_autolens_class(raw
     assert all(vars(al.AnalysisImaging)[name] is value for name, value in before.items())
 
 
+def _backend_binding_args():
+    path = Path(__file__).resolve().parents[2] / "src/hwoslaps/inference/backend.py"
+    return str(path.resolve()), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 X64_CHILD = textwrap.dedent("""
     import json, sys
     import numpy as np
     import jax
     import autogalaxy as ag
     from autofit.non_linear.fitness import Fitness
-    from hwoslaps.inference.backend import make_analysis
+    from hwoslaps.inference import backend
+    make_analysis = backend.make_analysis
     from hwoslaps.inference.fit_model import autofit_model
     sys.path.insert(0, sys.argv[1])
     from conftest import make_light_model, make_raw_imaging
+    import hashlib
+    from pathlib import Path
+    loaded = Path(backend.__file__).resolve()
+    binding = {"backend_path": str(loaded), "backend_sha256": hashlib.sha256(loaded.read_bytes()).hexdigest()}
+    assert binding == {"backend_path": str(Path(sys.argv[2]).resolve()), "backend_sha256": sys.argv[3]}
+    print(json.dumps({"binding": binding}), flush=True)
     kernel = np.exp(-(np.mgrid[-3:4, -3:4].astype(float) ** 2).sum(axis=0) / 2.0)
     fit_model = make_light_model()
     before = bool(jax.config.jax_enable_x64)
-    analysis = make_analysis(make_raw_imaging(kernel / kernel.sum()), cosmology=ag.cosmo.Planck15(), use_jax=True)
-    fitness = Fitness(model=autofit_model(fit_model), analysis=analysis, paths=None, fom_is_log_likelihood=True,
-                      resample_figure_of_merit=-1.0e99, use_jax_vmap=True, batch_size=4)
     lower, upper = np.asarray(fit_model.lower), np.asarray(fit_model.upper)
     vectors = lower + np.random.default_rng(20261005).random((4, lower.size)) * (upper - lower)
-    values = np.asarray(fitness.call_wrap(vectors))
-    json.dump({"before": before, "after": bool(jax.config.jax_enable_x64), "dtype": str(values.dtype),
-               "finite": bool(np.all(np.isfinite(values)))}, sys.stdout)
+    reports = []
+    for iteration in (1, 2):
+        analysis = make_analysis(make_raw_imaging(kernel / kernel.sum()), cosmology=ag.cosmo.Planck15(), use_jax=True)
+        fitness = Fitness(model=autofit_model(fit_model), analysis=analysis, paths=None, fom_is_log_likelihood=True,
+                          resample_figure_of_merit=-1.0e99, use_jax_vmap=True, batch_size=4)
+        values = np.asarray(fitness.call_wrap(vectors))
+        report = {"after": bool(jax.config.jax_enable_x64), "dtype": str(values.dtype),
+                  "finite": bool(np.all(np.isfinite(values)))}
+        reports.append(report)
+        print(json.dumps({"iteration": iteration, "before": before, **report}), flush=True)
+    json.dump({"before": before, "analyses": reports, "binding": binding}, sys.stdout)
 """)
 
 
 @pytest.mark.xtx_gpu
-def test_jax_analysis_enables_x64_and_returns_float64():
-    """A fresh process without JAX_ENABLE_X64: make_analysis turns x64 on before any traced evaluation."""
+def test_jax_analysis_enables_x64_and_returns_float64(record_property):
+    """A fresh process from x64 off: both real analyses keep x64 on and return finite float64 Fitness."""
     environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
     lane = os.path.dirname(os.path.abspath(__file__))
-    completed = subprocess.run([sys.executable, "-c", X64_CHILD, lane], env=environment, capture_output=True,
+    expected_path, expected_sha = _backend_binding_args()
+    completed = subprocess.run([sys.executable, "-c", X64_CHILD, lane, expected_path, expected_sha], env=environment, capture_output=True,
                                text=True, check=True, timeout=600)
     report = json.loads(completed.stdout.strip().splitlines()[-1])
-    assert report == {"before": False, "after": True, "dtype": "float64", "finite": True}
+    binding = report.pop("binding")
+    assert binding == {"backend_path": expected_path, "backend_sha256": expected_sha}
+    for name, value in binding.items():
+        record_property(name, value)
+    assert report == {"before": False, "analyses": [
+        {"after": True, "dtype": "float64", "finite": True},
+        {"after": True, "dtype": "float64", "finite": True},
+    ]}
+
+
+GUARD_CHILD = textwrap.dedent("""
+    import json, sys
+    import numpy as np
+    import jax
+    import autofit as af
+    import autolens as al
+    import autogalaxy as ag
+    from autofit.non_linear import fitness as fitness_module
+    from hwoslaps.inference import backend
+    sys.path.insert(0, sys.argv[1])
+    from conftest import make_raw_imaging
+    mode = sys.argv[2]
+    import hashlib
+    from pathlib import Path
+    loaded = Path(backend.__file__).resolve()
+    binding = {"backend_path": str(loaded), "backend_sha256": hashlib.sha256(loaded.read_bytes()).hexdigest()}
+    assert binding == {"backend_path": str(Path(sys.argv[3]).resolve()), "backend_sha256": sys.argv[4]}
+    original_update = jax.config.update
+    original_fitness = fitness_module.Fitness
+    original_instance = af.Model.instance_from_vector
+    original_analysis = backend.ANALYSIS_CLASS
+    constructions = []
+    jax.config.update("jax_enable_x64", False)
+    before = bool(jax.config.jax_enable_x64)
+
+    class ObservedAnalysis(original_analysis):
+        def __init__(self, *args, **kwargs):
+            constructions.append(True)
+            super().__init__(*args, **kwargs)
+
+    class DelegatingFitness(original_fitness):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    def delegating_instance(self, *args, **kwargs):
+        return original_instance(self, *args, **kwargs)
+
+    def ineffective_update(name, value, *args, **kwargs):
+        if name == "jax_enable_x64":
+            return None
+        return original_update(name, value, *args, **kwargs)
+
+    backend.ANALYSIS_CLASS = ObservedAnalysis
+    if mode == "ineffective_enable":
+        jax.config.update = ineffective_update
+    elif mode == "missing_apis":
+        fitness_module.Fitness = DelegatingFitness
+        af.Model.instance_from_vector = delegating_instance
+    else:
+        raise ValueError(mode)
+    error_type, message = None, None
+    try:
+        kernel = np.exp(-(np.mgrid[-3:4, -3:4].astype(float) ** 2).sum(axis=0) / 2.0)
+        analysis = backend.make_analysis(make_raw_imaging(kernel / kernel.sum()),
+                                         cosmology=ag.cosmo.Planck15(), use_jax=True)
+    except RuntimeError as error:
+        error_type, message = type(error).__name__, str(error)
+    finally:
+        flag = bool(jax.config.jax_enable_x64)
+        jax.config.update = original_update
+        fitness_module.Fitness = original_fitness
+        af.Model.instance_from_vector = original_instance
+        backend.ANALYSIS_CLASS = original_analysis
+        jax.config.update("jax_enable_x64", before)
+    json.dump({"binding": binding, "before": before, "after": flag, "error_type": error_type, "error": message,
+               "analysis_constructions": len(constructions),
+               "versions": {"autofit": str(af.__version__), "autolens": str(al.__version__)}}, sys.stdout)
+""")
+
+
+@pytest.mark.xtx_gpu
+@pytest.mark.parametrize("fault", ["ineffective_enable", "missing_apis"])
+def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault, record_property):
+    """Real installed guards refuse before any delegating real analysis construction."""
+    environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
+    lane = os.path.dirname(os.path.abspath(__file__))
+    expected_path, expected_sha = _backend_binding_args()
+    completed = subprocess.run([sys.executable, "-c", GUARD_CHILD, lane, fault, expected_path, expected_sha], env=environment,
+                               capture_output=True, text=True, check=True, timeout=90)
+    report = json.loads(completed.stdout.strip().splitlines()[-1])
+    binding = report.pop("binding")
+    assert binding == {"backend_path": expected_path, "backend_sha256": expected_sha}
+    for name, value in binding.items():
+        record_property(name, value)
+    assert report["before"] is False and report["analysis_constructions"] == 0
+    assert report["error_type"] == "RuntimeError"
+    if fault == "ineffective_enable":
+        assert report["after"] is False
+        assert report["error"] == "JAX 64-bit mode could not be enabled"
+    else:
+        assert report["after"] is True
+        for name in ("Fitness.use_jax_vmap", "Fitness.batch_size", "Model.instance_from_vector(xp=...)"):
+            assert name in report["error"]
+        for package, version in report["versions"].items():
+            assert version and f"{package} {version}" in report["error"]
 
 
 @pytest.mark.xtx_gpu
