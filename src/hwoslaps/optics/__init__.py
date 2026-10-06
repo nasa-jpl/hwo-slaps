@@ -7,6 +7,7 @@ _PUBLIC_API = {
     "PSFProvider": ("providers", "PSFProvider"),
     "OpticalPSF": ("optical_psf", "OpticalPSF"),
     "KernelPSF": ("providers", "KernelPSF"),
+    "KernelCubePSF": ("providers", "KernelCubePSF"),
     "ModelPSF": ("providers", "ModelPSF"),
     "build_psf_provider": ("providers", "build_psf_provider"),
     "build_model_psf": ("providers", "build_model_psf"),

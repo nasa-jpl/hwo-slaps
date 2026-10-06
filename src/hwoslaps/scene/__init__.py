@@ -18,6 +18,7 @@ _PUBLIC_API = {
     "PROFILE_TYPES": ("profiles", "PROFILE_TYPES"),
     "ParameterKind": ("profiles", "ParameterKind"),
     "scene_parameters": ("parameters", "scene_parameters"),
+    "scene_parameter_names": ("parameters", "scene_parameter_names"),
     "with_parameter": ("parameters", "with_parameter"),
     "ImageAsset": ("image_source", "ImageAsset"),
     "load_image_asset": ("image_source", "load_image_asset"),
