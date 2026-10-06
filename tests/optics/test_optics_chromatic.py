@@ -170,4 +170,6 @@ def test_unrepresentable_log_measure_is_a_numeric_error_instead_of_zero_response
     sed=build_sed(parse_sed({"kind":"power_law","index":index},"sed"),redshift=0.)
     with np.errstate(over="ignore"),pytest.raises(ValueError) as caught:
         sed_weights(band,sed,band.nodes(1))
+    from hwoslaps.spectra.sed import SED
+    print("log-shape owner",SED.log_fnu.__code__.co_filename,"case",low_nm,high_nm,index,type(caught.value).__name__)
     assert not isinstance(caught.value,NoSpectralResponse)
