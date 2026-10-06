@@ -46,6 +46,10 @@ def _start(script, tmp_path, name):
                   'session_id': process.pid, 'identity': identity, 'identity_env': OWNER_ENV,
                   'uid': os.getuid(), 'start_time': None, 'boot_id': generation_boot}
         record = worker_record(process.pid, slot=0, device='cpu', identity=identity, identity_env=OWNER_ENV)
+        with (tmp_path / (name + '.ownership.json')).open('w', encoding='utf-8') as metadata:
+            metadata.write(json.dumps(record) + '\n')
+            metadata.flush()
+            os.fsync(metadata.fileno())
         process.stdin.write(b'go\n')
         process.stdin.close()
         return process, record, log
