@@ -30,7 +30,7 @@ def test_catalog_row_is_member_index_and_identity_hashes_decoded_bytes(format,tm
     with pytest.raises(ValueError):catalog._columns["zl"][0]=.9
 
 
-@pytest.mark.parametrize("failure",["missing","nan","length","object","text_bytes","dimension"])
+@pytest.mark.parametrize("failure",["missing","nan","length","object","text_bytes","dimension","float_overflow"])
 def test_npz_catalog_refuses_malformed_typed_columns(failure,tmp_path):
     path=tmp_path/"bad.npz"
     columns={"redshift":np.array([.2,.3]),"name":np.array(["a","b"])}
@@ -40,8 +40,12 @@ def test_npz_catalog_refuses_malformed_typed_columns(failure,tmp_path):
     if failure=="object":columns["redshift"]=np.array([{"x":1}],dtype=object)
     if failure=="text_bytes":columns["name"]=np.array([b"a",b"b"])
     if failure=="dimension":columns["redshift"]=np.array([[.2,.3]])
+    if failure == "float_overflow":
+        columns["redshift"] = np.array([.2, np.longdouble("1e400")], dtype=np.longdouble)
+        assert np.all(np.isfinite(columns["redshift"]))
     np.savez(path,**columns)
-    with pytest.raises(PopulationError,match="bad.npz"):
+    expected = r"bad\.npz, column redshift, row 1.*finite Python float" if failure == "float_overflow" else "bad.npz"
+    with pytest.raises(PopulationError, match=expected):
         sample_population(catalog_spec(path),1,seed=2)
 
 
