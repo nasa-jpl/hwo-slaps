@@ -12,12 +12,12 @@ from typing import Any
 import numpy as np
 from scipy.special import ndtr, ndtri
 
-from ..config.checks import ConfigError, Key, Nullable, Real, Table, Text
+from ..config.checks import AnyValue, ConfigError, Key, ListOf, Nullable, Real, Table, Text, Union, Variants
 from ..identity import json_ready
 
 __all__ = ["PopulationError", "Reference", "Constant", "Choice", "Uniform", "LogUniform", "Normal",
            "TruncatedNormal", "LogNormal", "TruncatedLogNormal", "Distribution", "parse_distribution",
-           "open_uniforms", "read_value", "resolve_value", "finite_value"]
+           "open_uniforms", "read_value", "resolve_value", "finite_value", "REFERENCE_TABLE", "VALUE_CHECK", "DISTRIBUTION_TABLE"]
 
 
 class PopulationError(ValueError):
@@ -268,19 +268,31 @@ Distribution = Constant | Choice | Uniform | LogUniform | Normal | TruncatedNorm
 _LAWS = {law.kind: law for law in (Constant, Choice, Uniform, LogUniform, Normal, TruncatedNormal, LogNormal, TruncatedLogNormal)}
 
 
+REFERENCE_TABLE = Table((Key("var", Text(pattern=r"[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?"),
+                                  "earlier variable, optionally indexed"),))
+VALUE_CHECK = Union((Real(), REFERENCE_TABLE))
+
+_DISTRIBUTION_TABLES = {}
+for _kind, _law in _LAWS.items():
+    _keys = []
+    for _item in fields(_law):
+        if _item.name == "weights":
+            _keys.append(Key("weights", Nullable(ListOf(Real(min=0.0))), "choice weights", None))
+        elif _law is Constant:
+            _keys.append(Key("value", AnyValue(), "constant JSON-shaped value"))
+        elif _law is Choice:
+            _keys.append(Key("values", ListOf(AnyValue(), min_length=1), "choice values"))
+        else:
+            _keys.append(Key(_item.name, VALUE_CHECK, "finite numeric parameter or earlier reference"))
+    _DISTRIBUTION_TABLES[_kind] = Table(tuple(_keys))
+DISTRIBUTION_TABLE = Variants("kind", _DISTRIBUTION_TABLES)
+
+
 def parse_distribution(mapping: Mapping[str, Any], path: str) -> Distribution:
-    if not isinstance(mapping, Mapping) or not isinstance(mapping.get("kind"), str) or mapping["kind"] not in _LAWS:
-        raise PopulationError(f"{path}.kind: unsupported distribution kind")
-    law = _LAWS[mapping["kind"]]
-    keys = []
-    for item in fields(law):
-        check = (lambda value, where: value) if law in {Constant, Choice} else read_value
-        keys.append(Key(item.name, check, item.name, None) if item.name == "weights"
-                    else Key(item.name, check, item.name))
     try:
-        values = Table((Key("kind", Text(choices = (law.kind,)), "distribution kind"), * keys)).read(mapping, path)
-        values.pop("kind")
-        return law( ** values)
+        values = DISTRIBUTION_TABLE.read(mapping, path)
+        law = _LAWS[values.pop("kind")]
+        return law(**values)
     except (ConfigError, PopulationError) as error:
         raise PopulationError(f"{path}: {error}") from None
 
