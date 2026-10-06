@@ -243,6 +243,11 @@ def test_aperture_mask_is_a_closed_disc_about_the_centre(selection_observation):
     expected = np.zeros((41, 41), dtype=bool)
     expected[20, 20] = expected[19, 20] = expected[21, 20] = expected[20, 19] = expected[20, 21] = True
     np.testing.assert_array_equal(aperture_mask(observation, centre_yx=(0, 0), radius_arcsec=.05), expected)
+    np.testing.assert_array_equal(aperture_mask(observation, centre_yx=(0, 0), radius_arcsec=.07), expected)
+    diagonal = np.zeros((41, 41), dtype=bool)
+    diagonal[19:22, 19:22] = True
+    np.testing.assert_array_equal(aperture_mask(observation, centre_yx=(0, 0),
+                                               radius_arcsec=math.sqrt(2) * .05), diagonal)
     offcentre = np.zeros((41, 41), dtype=bool)
     offcentre[18, 18] = True
     np.testing.assert_array_equal(aperture_mask(observation, centre_yx=(.1, -.1), radius_arcsec=.01), offcentre)
