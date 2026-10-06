@@ -90,30 +90,66 @@ for extra, checkout in (("lensing", "PyAutoLens"), ("optics", "hcipy")):
     subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", str(directory)], check=True)
 PY
 fi
-python - "$TASK_SOURCE/tools/patches/autoarray-2026.5.14.2" <<'PY'
+python - "$TASK_SOURCE/tools/patches/autoarray-2026.5.14.2" "$CONDA_PREFIX" <<'PY'
 import hashlib
 import importlib.metadata
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import sys
-if importlib.metadata.version("autoarray") != "2026.5.14.2":
+import sysconfig
+prefix = Path(sys.prefix).resolve(strict=True)
+if prefix != Path(sys.argv[2]).resolve(strict=True) or not Path(sys.executable).resolve(strict=True).is_relative_to(prefix):
+    raise RuntimeError("the patch interpreter does not belong to the selected conda environment")
+distributions = [dist for dist in importlib.metadata.distributions()
+                 if dist.metadata["Name"].lower().replace("_", "-") == "autoarray"]
+if len(distributions) != 1:
+    raise RuntimeError("autoarray must have exactly one distribution in the selected environment")
+distribution = distributions[0]
+if distribution.version != "2026.5.14.2":
     raise RuntimeError("the autoarray patches require version 2026.5.14.2")
+site = Path(distribution.locate_file("")).resolve(strict=True)
+install_roots = {Path(sysconfig.get_path(name)).resolve(strict=True) for name in ("purelib", "platlib")}
+if site not in install_roots or not site.is_relative_to(prefix):
+    raise RuntimeError("autoarray distribution metadata is outside the selected environment install root")
+direct_url = distribution.read_text("direct_url.json")
+if direct_url is not None and json.loads(direct_url).get("dir_info", {}).get("editable", False):
+    raise RuntimeError("refusing to patch an editable autoarray checkout")
+files = distribution.files
+if files is None:
+    raise RuntimeError("autoarray distribution has no installed-file ownership record")
+owned_files = {str(filename) for filename in files}
+metadata_files = [Path(distribution.locate_file(filename)).resolve(strict=True) for filename in files
+                  if filename.name in ("METADATA", "PKG-INFO")]
+if len(metadata_files) != 1 or not metadata_files[0].is_relative_to(site):
+    raise RuntimeError("autoarray distribution metadata has an ambiguous or external origin")
 spec = importlib.util.find_spec("autoarray")
-if spec is None or spec.origin is None:
-    raise RuntimeError("autoarray is not installed in the selected environment")
-site = Path(spec.origin).resolve().parent.parent
+package = site / "autoarray"
+init = package / "__init__.py"
+if (spec is None or spec.origin is None or "autoarray/__init__.py" not in owned_files
+        or init.resolve(strict=True) != init
+        or Path(spec.origin).resolve(strict=True) != init
+        or tuple(Path(location).resolve(strict=True) for location in (spec.submodule_search_locations or ())) != (package,)):
+    raise RuntimeError("autoarray module is shadowed or does not belong to the selected environment distribution")
 patches = Path(sys.argv[1])
 expected = {}
 for line in (patches / "SHA256SUMS").read_text().splitlines():
     digest, state, filename = line.split()
     expected.setdefault(filename, {})[state] = digest
-for filename, digests in expected.items():
-    actual = hashlib.sha256((site / filename).read_bytes()).hexdigest()
-    if actual not in digests.values():
-        raise RuntimeError(f"{filename}: unexpected SHA-256 {actual}; refusing to patch")
+targets = {}
 for filename, digests in expected.items():
     target = site / filename
+    resolved = target.resolve(strict=True)
+    if (filename not in owned_files or resolved != target or not resolved.is_relative_to(package)
+            or not resolved.is_relative_to(prefix)):
+        raise RuntimeError(f"{filename}: patch target is not owned by the selected environment distribution")
+    actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    if actual not in digests.values():
+        raise RuntimeError(f"{filename}: unexpected SHA-256 {actual}; refusing to patch")
+    targets[filename] = resolved
+for filename, digests in expected.items():
+    target = targets[filename]
     if hashlib.sha256(target.read_bytes()).hexdigest() == digests["patched"]:
         continue
     diff = patches / (target.stem + ".diff")

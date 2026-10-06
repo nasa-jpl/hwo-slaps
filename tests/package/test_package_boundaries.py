@@ -1,5 +1,7 @@
 """The scientific dependency graph and the installed wheel's real command boundary."""
 import ast
+import configparser
+from email.parser import Parser
 import os
 from pathlib import Path
 import shutil
@@ -78,15 +80,23 @@ def test_wheel_contains_priors_console_script_and_backend_free_command(tmp_path)
     for filename in ("pyproject.toml", "README.md", "LICENSE"):
         shutil.copy2(ROOT / filename, project / filename)
     wheels = tmp_path / "wheels"
-    subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps", "--wheel-dir",
-                    str(wheels), str(project)], check=True, capture_output=True, timeout=120)
+    build_environment = dict(os.environ, PIP_CACHE_DIR=str(tmp_path / "pip-cache"))
+    subprocess.run([sys.executable, "-m", "pip", "wheel", "--no-build-isolation", "--no-deps", "--no-index", "--wheel-dir",
+                    str(wheels), str(project)], env=build_environment, check=True, capture_output=True, timeout=120)
     wheel, = wheels.glob("hwoslaps-*.whl")
     installed = tmp_path / "installed"
     with zipfile.ZipFile(wheel) as archive:
         assert not any(name.startswith(("studies/", "scratch/")) for name in archive.namelist())
         archive.extractall(installed)
     info, = installed.glob("hwoslaps-*.dist-info")
-    assert "hwoslaps = hwoslaps.cli:main" in (info / "entry_points.txt").read_text()
+    entries = configparser.ConfigParser()
+    entries.read(info / "entry_points.txt")
+    assert dict(entries["console_scripts"]) == {"hwoslaps": "hwoslaps.cli:main"}
+    console_target = entries["console_scripts"]["hwoslaps"]
+    metadata = Parser().parsestr((info / "METADATA").read_text())
+    assert metadata["Name"] == "hwoslaps"
+    metadata_version = metadata["Version"]
+    assert metadata_version
     assert (installed / "hwoslaps/optics/priors/jwst_wss_static_v1.yaml").read_bytes() == (
         SOURCE / "hwoslaps/optics/priors/jwst_wss_static_v1.yaml").read_bytes()
     assert (installed / "hwoslaps/optics/priors/jwst_wss_drift_v1.yaml").read_bytes() == (
@@ -96,13 +106,24 @@ def test_wheel_contains_priors_console_script_and_backend_free_command(tmp_path)
     environment = dict(os.environ, PYTHONPATH=str(installed))
     config = ROOT / "configs/minimal.yaml"
     origin = "\nimport hwoslaps; from pathlib import Path; assert Path(hwoslaps.__file__).resolve().is_relative_to(Path(" + repr(str(installed)) + ").resolve()), hwoslaps.__file__"
-    program = BLOCKER + origin + "\nfrom hwoslaps.cli import main; result=main(['validate', " + repr(str(config)) + "])" + NO_BACKENDS + "; raise SystemExit(result)"
+    program = (BLOCKER + origin + "\nassert hwoslaps.__version__ == " + repr(metadata_version)
+               + "\nfrom importlib.metadata import EntryPoint\nimport sys\nsys.argv = "
+               + repr(["hwoslaps", "validate", str(config)])
+               + "\nresult = EntryPoint(name='hwoslaps', value=" + repr(console_target)
+               + ", group='console_scripts').load()()" + NO_BACKENDS + "; raise SystemExit(result)")
     completed = subprocess.run([sys.executable, "-c", program], cwd=foreign, env=environment,
                                check=True, capture_output=True, text=True, timeout=30)
     assert "valid, digest" in completed.stdout
-    version = subprocess.run([sys.executable, "-c", BLOCKER + origin + "\nprint(hwoslaps.__version__)"],
-                             cwd=foreign, env=environment, check=True, capture_output=True, text=True, timeout=30)
-    assert version.stdout.strip() == "1.0.0"
+    startup = tmp_path / "startup"
+    startup.mkdir()
+    # A failed startup origin check must terminate Python; ordinary sitecustomize exceptions are ignored.
+    guard = BLOCKER + origin + "\nassert hwoslaps.__version__ == " + repr(metadata_version)
+    (startup / "sitecustomize.py").write_text("try:\n" + "\n".join("    " + line for line in guard.splitlines())
+                                              + "\nexcept BaseException as error:\n    raise SystemExit(str(error)) from error\n")
+    module_environment = dict(environment, PYTHONPATH=os.pathsep.join((str(startup), str(installed))))
+    module = subprocess.run([sys.executable, "-m", "hwoslaps", "validate", str(config)], cwd=foreign,
+                            env=module_environment, check=True, capture_output=True, text=True, timeout=30)
+    assert "valid, digest" in module.stdout
 
 
 @pytest.mark.backend
