@@ -180,6 +180,42 @@ def test_worker_death_is_a_job_failure(tiny_batch_spec, tmp_path):
         _cleanup(process, identity, log, root)
 
 
+def test_controller_sigterm_restores_handler_and_drains_actual_workers(tiny_batch_spec, tmp_path):
+    spec = tiny_batch_spec(execution={'workers_per_device': 1},
+        forecast_positions={'kind': 'grid', 'spacing_arcsec': .01, 'half_width_arcsec': .6})
+    root = tmp_path / 'term'
+    restored = tmp_path / 'handler-restored.json'
+    program = f'''
+import json, signal
+from pathlib import Path
+from hwoslaps.batch import load_batch_spec, run_batch
+previous = signal.getsignal(signal.SIGTERM)
+try:
+    run_batch(load_batch_spec(sys.argv[3]), sys.argv[5])
+except KeyboardInterrupt:
+    Path({str(restored)!r}).write_text(json.dumps(signal.getsignal(signal.SIGTERM) == previous))
+    raise SystemExit(130)
+raise AssertionError('real work must still be active when TERM is sent')
+'''
+    process, identity, log = _controller(spec, root, tmp_path, 'termed', program=program)
+    try:
+        _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
+        workers = _worker_records(root)
+        assert workers and any(group_members(record) for record in workers)
+        descriptor = open_pidfd(process.pid)
+        try:
+            signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+        finally:
+            os.close(descriptor)
+        assert process.wait(timeout=90.) == 130
+        assert json.loads(restored.read_text()) is True
+        report = json.loads((root / 'sessions/1/report.json').read_text())
+        assert report['interrupted'] is True and report['cleanup_error'] is None
+        assert not any(group_members(record) for record in _worker_records(root))
+    finally:
+        _cleanup(process, identity, log, root)
+
+
 @pytest.mark.parametrize('erase_records,change_job', [(False, True), (True, True), (True, False)])
 def test_changed_job_during_recovery_is_a_conflict(tiny_batch_spec, tmp_path, erase_records, change_job):
     from hwoslaps.batch import BatchConflict, parse_batch
