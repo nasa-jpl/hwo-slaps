@@ -1,5 +1,6 @@
 """Actual worker outputs, cache neutrality and resumable completion authority."""
 from collections import Counter
+from copy import deepcopy
 from dataclasses import replace
 import json
 from pathlib import Path
@@ -139,6 +140,63 @@ def test_second_controller_is_locked_out(tiny_batch_spec, tmp_path):
         with pytest.raises(BatchLocked):
             run_batch(tiny_batch_spec(), root)
     assert not (root / 'sessions').exists()
+
+
+def test_resume_refuses_malformed_completion_and_worker_records(tiny_batch_spec, tmp_path):
+    spec = tiny_batch_spec(population={'count': 1}, execution={'workers_per_device': 1})
+    root = tmp_path / 'malformed'
+    first = run_batch(spec, root)
+    assert first.counts['completed'] == 1 and first.counts['failed'] == 0
+    marker_path = root / 'members/system_000000/base/forecast/complete.json'
+    marker_bytes = marker_path.read_bytes()
+    marker = json.loads(marker_bytes)
+    artifact = marker_path.parent / marker['artifacts']['forecast']['path']
+    artifact_bytes = artifact.read_bytes()
+    for defect, expected in [('invalid_json', 'invalid JSON'), ('schema', 'schema/kind'),
+                             ('run', 'invalid run directory'), ('escape', 'escapes its claimed run'),
+                             ('size', 'invalid recorded byte size'), ('sha', 'invalid recorded SHA-256'),
+                             ('record', 'invalid artifact record')]:
+        changed = deepcopy(marker)
+        if defect == 'schema':
+            changed['schema'] = 2
+        elif defect == 'run':
+            changed['run'] = '../outside'
+        elif defect == 'escape':
+            changed['artifacts']['forecast']['path'] = '../outside.npz'
+        elif defect == 'size':
+            changed['artifacts']['forecast']['bytes'] = True
+        elif defect == 'sha':
+            changed['artifacts']['forecast']['sha256'] = 'not-a-digest'
+        elif defect == 'record':
+            del changed['artifacts']['forecast']['sha256']
+        try:
+            marker_path.write_text('{invalid' if defect == 'invalid_json' else json.dumps(changed))
+            with pytest.raises(BatchConflict, match=expected):
+                run_batch(spec, root)
+        finally:
+            marker_path.write_bytes(marker_bytes)
+        assert artifact.read_bytes() == artifact_bytes
+    worker_path = root / 'sessions/1/workers.jsonl'
+    worker_bytes = worker_path.read_bytes()
+    record = json.loads(worker_bytes)
+    for defect, expected in [('invalid_json', 'invalid worker record'), ('shape', 'invalid worker record'),
+                             ('name', 'invalid ownership metadata name'), ('pid', 'invalid worker pid')]:
+        changed = deepcopy(record)
+        if defect == 'shape':
+            changed['unknown'] = 1
+        elif defect == 'name':
+            changed['identity_env'] = 'A_FOREIGN_METADATA_NAME'
+        elif defect == 'pid':
+            changed['pid'] = True
+        try:
+            worker_path.write_text('{invalid\n' if defect == 'invalid_json' else json.dumps(changed) + '\n')
+            with pytest.raises(BatchConflict, match=expected):
+                run_batch(spec, root)
+        finally:
+            worker_path.write_bytes(worker_bytes)
+        assert marker_path.read_bytes() == marker_bytes and artifact.read_bytes() == artifact_bytes
+    resumed = run_batch(spec, root, verify=True)
+    assert resumed.counts['skipped'] == 1 and resumed.counts['completed'] == 0
 
 
 def test_batch_nonlinear_job_equals_direct_api(tiny_batch_spec, tmp_path):
