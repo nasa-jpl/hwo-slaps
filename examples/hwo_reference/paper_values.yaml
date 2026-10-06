@@ -1,0 +1,7 @@
+# Reference overlay: literal source amplitude and sky rate from the paper observing preset.
+scene:
+  source:
+    light:
+      disk: {intensity: 0.003174147284617635, flux: null, sed: null}
+observation:
+  sky: {rate_e_per_s: 0.002510279845963486, ab_mag_per_arcsec2: null}

@@ -1,0 +1,3 @@
+# Illustrative model arm: each light group's photon-weighted mean wavelength.
+psf:
+  model: {kind: monochromatic, wavelength_nm: null}
