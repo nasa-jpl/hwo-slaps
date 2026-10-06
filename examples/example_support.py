@@ -61,13 +61,15 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
     from hwoslaps.analysis.reductions import summarize
     from hwoslaps.artifacts import save_forecast, save_observation, write_json
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+    from hwoslaps.identity import file_digest
     from hwoslaps.provenance import capture_provenance
     from hwoslaps.simulation import simulate
 
     started = time.perf_counter() if started_at is None else started_at
-    lane = require_lane(engine)
-    environment = capture_provenance(command=command)
     with prepare_forecast(config, execution=Execution(engine=engine)) as prepared:
+        # Let the actual backend install its startup settings before querying JAX devices.
+        lane = require_lane(engine)
+        environment = capture_provenance(command=command)
         output = new_output(output)
         result = forecast(prepared, masses_msun=masses)
         summary = summarize(result, q_threshold=q_threshold)
@@ -91,6 +93,8 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
     elapsed = time.perf_counter() - started
     record = {
         "command": list(command), "execution": lane, "environment": environment,
+        "engine": result.provenance["engine"],
+        "forecast_sha256": file_digest(output / "forecast.npz"),
         "elapsed_s": elapsed,
         "timing_scope": "main entry through product writes and engine close; final record and printing excluded",
         "budget_s": budget_s, "within_budget": elapsed <= budget_s,

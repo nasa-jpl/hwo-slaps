@@ -9,6 +9,10 @@ The matched arm forecasts 1e8 and 1e9 solar masses. One noisy injected `fixed_te
 nonlinear job runs on member 0. Compact sampler settings illustrate the workflow and
 establish no posterior-convergence claim.
 
+Batch execution requires Linux with readable `/proc` and pidfd support for owned worker
+cleanup. Planning, imports and metadata readers remain portable. Use the supported Linux
+science environment for the run command below.
+
 ```bash
 hwoslaps batch plan examples/population/batch.yaml
 hwoslaps batch run examples/population/batch.yaml -o out/population --devices cpu --select 'members/system_000000/*'

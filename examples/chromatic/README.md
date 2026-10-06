@@ -45,6 +45,11 @@ change of the monochromatic maximum spurious q must be at most 1e-2 times the ma
 reference maximum q. A zero model-arm reference maximum leaves its relative check
 unresolved and fails the gate.
 
+The reader binds each companion record to the forecast file hash, actual engine/device and
+repeated scientific inputs. The report's `passed` field covers numerical convergence;
+`all_products_within_budget` separately records the six runtime-budget results. A numerical
+pass does not waive an exceeded runtime budget.
+
 Budgets: 600 s per GPU product. Measured runtimes, wavelength convergence, support
 convergence, per-group sampling and captured fractions: pending. Chromatic accuracy is
 claimed only where both gates pass. A nonlinear chromatic fit requires one model kernel:
