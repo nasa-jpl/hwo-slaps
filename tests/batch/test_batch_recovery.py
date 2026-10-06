@@ -54,7 +54,8 @@ def _controller(spec, root, tmp_path, label, extra=(), program=None):
     else:
         script += program
     path = tmp_path / (label + '.py')
-    path.write_text(script)
+    path.write_text('if __name__ == "__main__":\n' +
+                    ''.join('    ' + line for line in script.splitlines(keepends=True)))
     log = (tmp_path / (label + '.log')).open('wb')
     command = [sys.executable, str(path), 'batch', 'run', str(source), '-o', str(root), *extra]
     process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE, stdout=log,

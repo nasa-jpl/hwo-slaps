@@ -27,7 +27,9 @@ def _wait(predicate, timeout=90.):
 
 def _start(script, tmp_path, name):
     path = tmp_path / (name + '.py')
-    path.write_text('import sys\nif sys.stdin.readline() != "go\\n": raise SystemExit(2)\n' + script)
+    path.write_text('import sys\nif __name__ == "__main__":\n' +
+                    '    if sys.stdin.readline() != "go\\n": raise SystemExit(2)\n' +
+                    ''.join('    ' + line for line in script.splitlines(keepends=True)))
     environment = dict(os.environ)
     identity = os.urandom(32).hex()
     environment[OWNER_ENV] = identity
