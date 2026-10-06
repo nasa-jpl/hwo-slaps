@@ -1,20 +1,31 @@
-"""Spectral shapes, system throughput and photon-counting AB photometry."""
+"""Public engine values and operations, imported when requested."""
+from importlib import import_module
 
-from .bandpass import (
-    Bandpass, BandpassSpec, ConstantFactor, ProductBand, TableBand, TableFactor, TopHatBand,
-    bandpass_nodes, bin_integrals, build_bandpass, integrate_dlnlambda, parse_bandpass,
-)
-from .photometry import (
-    ab_scale_jy, ab_to_fnu_jy, band_mean_throughput, detected_flux_per_m2, effective_wavelength_m,
-    fnu_jy_to_ab, rate_from_ab, sky_rate_e_per_s_per_pixel, synthetic_ab_mag,
-)
-from .sed import FlatFlambda, FlatFnu, PowerLawSED, SED, SEDSpec, TableSED, build_sed, parse_sed
-from .tables import SpectralTable, TableSpec, parse_table, read_table
+_PUBLIC_API = {
+    "Bandpass": ("bandpass", "Bandpass"),
+    "build_bandpass": ("bandpass", "build_bandpass"),
+    "SED": ("sed", "SED"),
+    "build_sed": ("sed", "build_sed"),
+    "integrate_dlnlambda": ("bandpass", "integrate_dlnlambda"),
+    "ab_to_fnu_jy": ("photometry", "ab_to_fnu_jy"),
+    "fnu_jy_to_ab": ("photometry", "fnu_jy_to_ab"),
+    "rate_from_ab": ("photometry", "rate_from_ab"),
+    "sky_rate_e_per_s_per_pixel": ("photometry", "sky_rate_e_per_s_per_pixel"),
+    "synthetic_ab_mag": ("photometry", "synthetic_ab_mag"),
+    "effective_wavelength_m": ("photometry", "effective_wavelength_m"),
+    "band_mean_throughput": ("photometry", "band_mean_throughput"),
+}
+__all__ = list(_PUBLIC_API)
 
-__all__ = [
-    "Bandpass", "BandpassSpec", "ConstantFactor", "FlatFlambda", "FlatFnu", "PowerLawSED", "ProductBand",
-    "SED", "SEDSpec", "SpectralTable", "TableBand", "TableFactor", "TableSED", "TableSpec", "TopHatBand",
-    "ab_scale_jy", "ab_to_fnu_jy", "band_mean_throughput", "bandpass_nodes", "bin_integrals", "build_bandpass", "build_sed",
-    "detected_flux_per_m2", "effective_wavelength_m", "fnu_jy_to_ab", "integrate_dlnlambda", "parse_bandpass",
-    "parse_sed", "parse_table", "rate_from_ab", "read_table", "sky_rate_e_per_s_per_pixel", "synthetic_ab_mag",
-]
+
+def __getattr__(name):
+    if name not in _PUBLIC_API:
+        raise AttributeError(name)
+    module, member = _PUBLIC_API[name]
+    value = getattr(import_module(f".{module}", __name__), member)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(__all__)

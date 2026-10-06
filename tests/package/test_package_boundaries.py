@@ -127,8 +127,9 @@ def test_wheel_contains_priors_console_script_and_backend_free_command(tmp_path)
 
 
 @pytest.mark.backend
-@pytest.mark.parametrize("package", ["hwoslaps", "hwoslaps.config", "hwoslaps.scene", "hwoslaps.optics",
-                                     "hwoslaps.observation", "hwoslaps.fisher", "hwoslaps.inference", "hwoslaps.analysis"])
+@pytest.mark.parametrize("package", ["hwoslaps", "hwoslaps.config", "hwoslaps.scene", "hwoslaps.spectra",
+                                     "hwoslaps.optics", "hwoslaps.observation", "hwoslaps.fisher", "hwoslaps.inference",
+                                     "hwoslaps.analysis", "hwoslaps.population", "hwoslaps.batch", "hwoslaps.plotting"])
 def test_exports_never_shadow_child_modules_in_either_import_order(package):
     program = '''
 import importlib, json, pkgutil, sys, types
@@ -153,6 +154,19 @@ if sys.argv[2] == 'exports-first':
         assert not isinstance(value, types.ModuleType), name
         assert values[name] == (type(value).__module__, type(value).__qualname__,
                                 getattr(value, '__module__', None), getattr(value, '__qualname__', None)), name
+# Real public imports protect the formerly missing routes without copying the API inventory.
+if package.__name__ == 'hwoslaps':
+    from hwoslaps import load_batch_spec, run_batch
+    assert {'load_batch_spec', 'run_batch'} <= set(exports)
+    assert not {'iter_population_configs', 'sample_population', 'adaptive_mass_reach'} & set(exports)
+elif package.__name__ == 'hwoslaps.analysis':
+    from hwoslaps.analysis import (BinomialCount, clopper_pearson, knowledge_error_areas, KnowledgeErrorAreas,
+        knowledge_error_tolerance, ToleranceCriterion, ToleranceResult, first_separating_amplitude, SeparationResult)
+    assert {value.__name__ for value in (BinomialCount, clopper_pearson, knowledge_error_areas, KnowledgeErrorAreas,
+        knowledge_error_tolerance, ToleranceCriterion, ToleranceResult, first_separating_amplitude, SeparationResult)} <= set(exports)
+elif package.__name__ == 'hwoslaps.optics':
+    from hwoslaps.optics import SpectralWeights, sed_weights, effective_kernel
+    assert {'SpectralWeights', 'sed_weights', 'effective_kernel'} <= set(exports)
 print(json.dumps(values, sort_keys=True))
 '''
     snapshots = []

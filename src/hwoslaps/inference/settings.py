@@ -29,7 +29,8 @@ if TYPE_CHECKING:
     from ..scene.profiles import Interval
 
 __all__ = [
-    "DEFAULT_BOX_RULES", "FIT_MODES", "MASK_NAMES", "OBJECTIVE_VERSION", "PROCEDURE_VERSION", "BoxRule",
+    "FIT_TABLE", "SAMPLER_TABLE", "REFINE_TABLE", "DEFAULT_BOX_RULES", "FIT_MODES", "MASK_NAMES",
+    "OBJECTIVE_VERSION", "PROCEDURE_VERSION", "BoxRule",
     "FitSpec", "MassSupport", "PixelMask", "PriorWidths", "RefineSettings", "SamplerSettings",
 ]
 
@@ -370,7 +371,7 @@ class FitSpec:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any], *, path: str = "fit") -> FitSpec:
-        return cls._from_values(_FIT_SPEC.read(mapping, path), path)
+        return cls._from_values(FIT_TABLE.read(mapping, path), path)
 
     @classmethod
     def _from_values(cls, values: Mapping[str, Any], path: str) -> FitSpec:
@@ -402,7 +403,7 @@ class FitSpec:
         return cls._from_values(_FIT_RECORD_SPEC.read(mapping, path), path)
 
 
-_FIT_SPEC = Table((
+FIT_TABLE = Table((
     Key("mode", Text(choices=FIT_MODES), "subhalo model of H1: fixed at the hypothesis, centre free, "
         "or centre and mass free", REQUIRED),
     Key("mask", Text(choices=MASK_NAMES), "fitted pixels before the PSF border is removed: all pixels, or "
@@ -416,7 +417,7 @@ _FIT_SPEC = Table((
         _default(FitSpec, "anchor_chi2_tolerance")),
 ), rules=(Rule("mass_support is required with mode freed and refused otherwise", _check_mass_support),))
 
-_FIT_CHECKS = {key.name: key.check for key in _FIT_SPEC.keys}
+_FIT_CHECKS = {key.name: key.check for key in FIT_TABLE.keys}
 
 
 def _record_mask(value: Any, path: str) -> str | PixelMask:
@@ -425,8 +426,8 @@ def _record_mask(value: Any, path: str) -> str | PixelMask:
     return Text(choices=MASK_NAMES)(value, path)
 
 
-_FIT_RECORD_SPEC = dataclasses.replace(_FIT_SPEC, keys=tuple(
-    dataclasses.replace(key, check=_record_mask) if key.name == "mask" else key for key in _FIT_SPEC.keys))
+_FIT_RECORD_SPEC = dataclasses.replace(FIT_TABLE, keys=tuple(
+    dataclasses.replace(key, check=_record_mask) if key.name == "mask" else key for key in FIT_TABLE.keys))
 
 
 # ------------------------------------------------------------------ sampler
@@ -457,7 +458,7 @@ class SamplerSettings:
     retain_search_internal: bool = False
 
     def __post_init__(self) -> None:
-        _canonical(self, _SAMPLER)
+        _canonical(self, SAMPLER_TABLE)
 
     def n_live(self, role: Literal["smooth", "subhalo"], mode: str) -> int:
         """Live points of a role search: H0, then H1 fixed at the hypothesis or searching."""
@@ -471,13 +472,13 @@ class SamplerSettings:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any], *, path: str = "sampler") -> SamplerSettings:
-        return cls(**_SAMPLER.read(mapping, path))
+        return cls(**SAMPLER_TABLE.read(mapping, path))
 
     def to_mapping(self) -> dict[str, Any]:
         return _record(self)
 
 
-_SAMPLER = _settings_table(
+SAMPLER_TABLE = _settings_table(
     SamplerSettings,
     docs={"n_live_smooth": "live points of the H0 search",
           "n_live_subhalo_fixed": "live points of the H1 search in mode fixed_template",
@@ -525,17 +526,17 @@ class RefineSettings:
     scalar_residual_tolerance: float = 1.0e-4
 
     def __post_init__(self) -> None:
-        _canonical(self, _REFINE)
+        _canonical(self, REFINE_TABLE)
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any], *, path: str = "refine") -> RefineSettings:
-        return cls(**_REFINE.read(mapping, path))
+        return cls(**REFINE_TABLE.read(mapping, path))
 
     def to_mapping(self) -> dict[str, Any]:
         return _record(self)
 
 
-_REFINE = _settings_table(
+REFINE_TABLE = _settings_table(
     RefineSettings,
     docs={"original_start_count": "posterior samples started from, besides the sampler maximum",
           "start_separation_normalized_l2": "a sample is a new start when this far (unit-box L2) from every start",

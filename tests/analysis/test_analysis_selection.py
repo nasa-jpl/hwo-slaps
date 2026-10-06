@@ -6,6 +6,7 @@ import math
 import numpy as np
 import pytest
 
+from hwoslaps.config.checks import ConfigError
 from hwoslaps.analysis.selection import (
     Cut, RankingPolicy, ScoreTerm, aperture_mask, arc_snr, complexity, diffraction_scale_arcsec,
     electron_maps, gradient_power, rank, rank_pool, spearman_rank_correlation, standardize,
@@ -107,7 +108,9 @@ def test_rank_pool_applies_the_policy():
 
 @pytest.mark.parametrize("mutation", ["missing_feature", "bad_length", "nonfinite_extra", "duplicate_ids",
                                       "log_zero", "too_few", "unknown_key", "unknown_term_key", "unknown_cut_key",
-                                      "empty_terms", "zero_weight", "bool_weight", "bad_cut", "bool_threshold", "bad_select"])
+                                      "empty_terms", "zero_weight", "bool_weight", "bad_cut", "bool_threshold", "bad_select",
+                                      "theta_E_nan_threshold", "theta_E_inf_threshold",
+                                      "S_nan_threshold", "S_inf_threshold"])
 def test_rank_pool_refuses_invalid_policy_or_pool(mutation):
     ids, features = ("a", "b", "c"), {"x": [1, 2, 3]}
     mapping = {"terms": [{"feature": "x", "weight": 1, "log": True}],
@@ -141,6 +144,14 @@ def test_rank_pool_refuses_invalid_policy_or_pool(mutation):
         mapping["cuts"][0]["operator"] = "=="
     elif mutation == "bool_threshold":
         mapping["cuts"][0]["threshold"] = True
+    elif mutation.endswith("_threshold"):
+        feature, invalid, _ = mutation.rsplit("_", 2)
+        features[feature] = [1, 2, 3]
+        mapping["cuts"][0].update(feature=feature, threshold=np.nan if invalid == "nan" else np.inf)
+        with pytest.raises(ConfigError) as error:
+            rank_pool(ids, features, RankingPolicy.from_mapping(mapping))
+        assert error.value.path == "policy.cuts[0].threshold"
+        return
     else:
         mapping["select"] = True
     with pytest.raises(ValueError):

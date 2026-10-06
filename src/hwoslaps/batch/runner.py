@@ -167,7 +167,7 @@ def _devices(execution):
             for index in execution.devices for _ in range(execution.workers_per_device)]
 
 
-def _start_slot(number, device, session_dir, session, execution, listener):
+def _start_slot(number, device, session_dir, session, execution, listener, records):
     generation_boot = boot_id()
     directory = session_dir / 'workers' / f'w{number}'
     directory.mkdir(parents=True, exist_ok=True)
@@ -198,6 +198,9 @@ def _start_slot(number, device, session_dir, session, execution, listener):
         pid = slot.process.pid
         slot.ownership.update(pid=pid, process_group=pid, session_id=pid)
         slot.ownership = worker_record(pid, slot=number, device=device, identity=identity, identity_env=OWNER_ENV)
+        records.write(canonical_json(_process_record(slot)) + '\n')
+        records.flush()
+        os.fsync(records.fileno())
         slot.process.stdin.write((canonical_json(startup) + '\n').encode())
         slot.process.stdin.close()
     except BaseException:
@@ -270,7 +273,7 @@ def _close_slots(slots, *, interrupt):
         raise BatchError('worker ownership cleanup failed: ' + '; '.join(str(error) for error in errors)) from errors[0]
 
 
-def _ready_slot(listener, slots, revision, records, events):
+def _ready_slot(listener, slots, revision, events):
     while True:
         try:
             received = listener.ready.get(timeout=.1)
@@ -296,9 +299,6 @@ def _ready_slot(listener, slots, revision, records, events):
             raise BatchError(message['message'])
         if message['device'] != slot.device or source_revision(message['provenance']) != revision:
             raise BatchError(f'worker {slot.number} source revision/device differs from this session')
-        records.write(canonical_json(_process_record(slot)) + '\n')
-        records.flush()
-        os.fsync(records.fileno())
         events.append({'type': 'worker_ready', **slot.worker, 'provenance': message['provenance']})
         return slot
 
@@ -416,9 +416,9 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                 listener = _WorkerListener(str(Path(temporary.name) / 's'), os.urandom(32))
                 with (session_dir / 'workers.jsonl').open('a', encoding='utf-8') as records:
                     for number, device in enumerate(assigned):
-                        slots.append(_start_slot(number, device, session_dir, session, execution, listener))
+                        slots.append(_start_slot(number, device, session_dir, session, execution, listener, records))
                     for _ in slots:
-                        _ready_slot(listener, slots, revision, records, events)
+                        _ready_slot(listener, slots, revision, events)
                     stop_error = None
                     while pending or any(slot.busy is not None for slot in slots):
                         if stop_error is None:
@@ -493,10 +493,10 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                             slots.remove(slot)
                             _close_slots([slot], interrupt=False)
                             if stop_error is None and (pending or any(worker.busy is not None for worker in slots)):
-                                replacement = _start_slot(slot.number, slot.device, session_dir, session, execution, listener)
+                                replacement = _start_slot(slot.number, slot.device, session_dir, session, execution, listener, records)
                                 slots.append(replacement)
                                 try:
-                                    _ready_slot(listener, slots, revision, records, events)
+                                    _ready_slot(listener, slots, revision, events)
                                 except BatchError as error:
                                     stop_error = error
                     closing = list(slots)

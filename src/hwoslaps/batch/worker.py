@@ -262,9 +262,6 @@ def run_job(payload, cache, session, *, connection, worker, revision):
 
 
 def main():
-    from threadpoolctl import threadpool_limits
-    from ..inference.backend import BackendSession
-
     line = sys.stdin.readline()
     if not line:
         return 0
@@ -273,6 +270,9 @@ def main():
         connection = Client(startup['address'], family='AF_UNIX', authkey=bytes.fromhex(startup['authkey']))
     except (FileNotFoundError, ConnectionRefusedError):
         return 0
+    from threadpoolctl import threadpool_limits
+    from ..inference.backend import BackendSession
+
     execution = BatchExecution.from_mapping(startup['execution'])
     worker = {'slot': startup['slot'], 'device': startup['device'], 'device_kind': 'cpu', 'pid': os.getpid()}
     cache = PreparationCache(execution.preparation_cache_size, execution.forecast)

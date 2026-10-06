@@ -69,11 +69,13 @@ def test_power_law_weights_follow_radial_order_with_unit_norm_per_side(alpha):
 @pytest.mark.parametrize("arguments, message", [
     ({"alpha": -1.0}, "alpha"),
     ({"alpha": float("nan")}, "alpha"),
+    ({"alpha": float("inf")}, "alpha"),
     ({"global_nolls": (1, 55)}, "global_nolls"),
     ({"global_nolls": (6, 4)}, "global_nolls"),
     ({"segment_nolls": (3, 2)}, "segment_nolls"),
     ({"global_nolls": None, "segment_nolls": None}, "must not both be None"),
     ({"segment_variance_fraction": 1.1}, "segment_variance_fraction"),
+    ({"segment_variance_fraction": -0.1}, "segment_variance_fraction"),
 ])
 def test_power_law_prior_rejects_invalid_arguments(arguments, message):
     keywords = {"alpha": 1.0, "global_nolls": (4, 55), "segment_nolls": (1, 10), "segment_variance_fraction": 0.5,
@@ -84,6 +86,33 @@ def test_power_law_prior_rejects_invalid_arguments(arguments, message):
 
 VALID_TABLE = {"name": "flight_prior", "segment_variance_fraction": 0.4, "global_weights": {4: 3.0, 5: 4.0},
                "segment_weights": {1: 5.0, 2: 12.0}, "metadata": {"source": "offline"}}
+
+
+@pytest.mark.parametrize("document, global_expected, segment_expected", [
+    (VALID_TABLE, {4: .6, 5: .8}, {1: 5 / 13, 2: 12 / 13}),
+    ({"name": "idempotent", "segment_variance_fraction": .5, "global_weights": {4: 2., 5: 7.}},
+     {4: 2 / np.sqrt(53), 5: 7 / np.sqrt(53)}, {}),
+], ids=("both-sides-and-metadata", "original-global-only"))
+def test_prior_file_load_normalizes_and_preserves_normalized_reload(tmp_path, document,
+                                                                  global_expected, segment_expected):
+    first_path = tmp_path / "raw.yaml"
+    first_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    first, _ = load_prior(ModeWeightPriorSpec("path", None, first_path, None))
+    assert dict(first.global_weights) == pytest.approx(global_expected, rel=1e-15, abs=0)
+    assert dict(first.segment_weights) == pytest.approx(segment_expected, rel=1e-15, abs=0)
+    assert first.name == document["name"]
+    assert first.segment_variance_fraction == document["segment_variance_fraction"]
+    assert dict(first.metadata) == document.get("metadata", {})
+    normalized = {"name": first.name, "segment_variance_fraction": first.segment_variance_fraction,
+                  "global_weights": dict(first.global_weights), "segment_weights": dict(first.segment_weights),
+                  "metadata": dict(first.metadata)}
+    second_path = tmp_path / "normalized.yaml"
+    second_path.write_text(yaml.safe_dump(normalized), encoding="utf-8")
+    second, _ = load_prior(ModeWeightPriorSpec("path", None, second_path, None))
+    assert dict(second.global_weights) == pytest.approx(dict(first.global_weights), rel=1e-15, abs=0)
+    assert dict(second.segment_weights) == pytest.approx(dict(first.segment_weights), rel=1e-15, abs=0)
+    assert second.name == first.name and second.segment_variance_fraction == first.segment_variance_fraction
+    assert dict(second.metadata) == dict(first.metadata)
 
 
 @pytest.mark.parametrize("edit, message", [
@@ -97,14 +126,8 @@ VALID_TABLE = {"name": "flight_prior", "segment_variance_fraction": 0.4, "global
     ({"global_weights": {3: 1.0}}, "global_weights"),
     ({"segment_variance_fraction": 1.1}, "segment_variance_fraction"),
 ])
-def test_prior_tables_load_normalized_and_reject_malformed_tables(tmp_path, edit, message):
+def test_prior_file_refuses_malformed_tables(tmp_path, edit, message):
     path = tmp_path / "prior.yaml"
-    path.write_text(yaml.safe_dump(VALID_TABLE), encoding="utf-8")
-    prior, _ = load_prior(ModeWeightPriorSpec("path", None, path, None))
-    assert dict(prior.global_weights) == pytest.approx({4: 0.6, 5: 0.8}, rel=1e-15)
-    assert dict(prior.segment_weights) == pytest.approx({1: 5 / 13, 2: 12 / 13}, rel=1e-15)
-    assert prior.segment_variance_fraction == 0.4 and dict(prior.metadata) == {"source": "offline"}
-
     document = copy.deepcopy(VALID_TABLE)
     document.update(edit)
     document = {key: value for key, value in document.items() if value is not None}
