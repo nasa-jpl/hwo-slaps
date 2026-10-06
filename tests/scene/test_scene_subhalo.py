@@ -72,9 +72,10 @@ def test_random_placement_draws_from_its_named_stream(scene_mapping, planck15):
 def test_placement_radius_is_a_number_or_the_lens_einstein_radius(scene_mapping, planck15):
     numeric = _inject(scene_mapping, {"kind": "angle", "angle_deg": 90.0, "radius": 1.5, "offset_arcsec": -0.5})
     assert configured_injection(numeric, planck15, seed=3).position_yx_arcsec == pytest.approx((1.3, -0.2), abs=1.0e-15)
-    inside_out = _inject(scene_mapping, {"kind": "angle", "angle_deg": 0.0, "offset_arcsec": -0.8})
-    with pytest.raises(ValueError, match="not positive"):
-        configured_injection(inside_out, planck15, seed=3)
+    for offset in (-0.8, -0.81):
+        inside_out = _inject(scene_mapping, {"kind": "angle", "angle_deg": 0.0, "offset_arcsec": offset})
+        with pytest.raises(ValueError, match="not positive"):
+            configured_injection(inside_out, planck15, seed=3)
     scene_mapping["lens"]["mass"]["second"] = dict(scene_mapping["lens"]["mass"]["main"], centre=[1.0, 1.0])
     with pytest.raises(ConfigError) as error:
         _inject(scene_mapping, {"kind": "angle", "angle_deg": 0.0})
