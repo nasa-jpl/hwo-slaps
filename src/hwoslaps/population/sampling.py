@@ -288,13 +288,34 @@ def _key(container, segment, path):
     raise PopulationError(f"population.bind.{path}: must name an existing effective configuration key/index")
 
 
-def _set_existing(mapping, path, value):
-    parts = path.split(".")
+def _resolve_target(mapping, path):
+    target = []
     container = mapping
-    for segment in parts[: - 1]:
-        container = container[_key(container, segment, path)]
-    key = _key(container, parts[- 1], path)
-    container[key] = deepcopy(value)
+    for segment in path.split("."):
+        key = _key(container, segment, path)
+        target.append(key)
+        container = container[key]
+    return tuple(target)
+
+
+def _bind_targets(mapping, binds):
+    targets = {}
+    for path in binds:
+        target = _resolve_target(mapping, path)
+        for other_path, other_target in targets.items():
+            common = min(len(target), len(other_target))
+            if target[:common] == other_target[:common]:
+                raise PopulationError(f"population.bind: overlapping resolved targets "
+                                      f"{other_path!r} and {path!r}")
+        targets[path] = target
+    return targets
+
+
+def _set_target(mapping, target, value):
+    container = mapping
+    for key in target[:-1]:
+        container = container[key]
+    container[target[-1]] = deepcopy(value)
 
 
 def iter_population_members(base: ConfigSource, spec: PopulationSpec | Mapping[str, Any], count: int, *, seed: int, start: int = 0,
@@ -305,8 +326,7 @@ def iter_population_members(base: ConfigSource, spec: PopulationSpec | Mapping[s
         raise PopulationError("name_prefix: letters/digits/underscores required")
     config = resolve_config(base, base_dir = base_dir)
     mapping = config.to_mapping()
-    for path in spec.bind:
-        _set_existing(deepcopy(mapping), path, None)
+    targets = _bind_targets(mapping, spec.bind)
     catalog = None if spec.catalog is None else load_catalog(spec.catalog)
     for index in range(start, start + count):
         for attempt in range(spec.max_attempts):
@@ -316,7 +336,7 @@ def iter_population_members(base: ConfigSource, spec: PopulationSpec | Mapping[s
                 selected["run_name"] = f"{name_prefix}_{index:06d}"
                 selected["seed"] = member_seed(seed, index)
                 for path, reference in spec.bind.items():
-                    _set_existing(selected, path, json_ready(reference.get(values)))
+                    _set_target(selected, targets[path], json_ready(reference.get(values)))
                 member_config = parse_config(selected, base_dir = base_dir)
             except (PopulationError, ConfigError) as error:
                 last = error

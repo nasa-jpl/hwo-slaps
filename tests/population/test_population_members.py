@@ -107,3 +107,31 @@ def test_choice_known_incompatible_scalar_reference_is_refused(values, reference
     }
     with pytest.raises(PopulationError, match="reference|indexed"):
         PopulationSpec.from_mapping(mapping)
+
+
+@pytest.mark.parametrize("paths,first_value", [
+    (("scene.lens.mass.mass.centre.0", "scene.lens.mass.mass.centre.00"), .1),
+    (("forecast.positions.positions_yx.00", "forecast.positions.positions_yx.0.1"), [.1, .3]),
+])
+def test_binding_aliases_refuse_equal_or_prefix_targets_before_draw(paths, first_value, minimal_mapping):
+    base = parse_config(minimal_mapping)
+    before = deepcopy(base.to_mapping())
+    mapping = {
+        "variables": {
+            "a": {"kind": "constant", "value": first_value},
+            "b": {"kind": "constant", "value": .2},
+        },
+        "bind": dict(zip(paths, ("a", "b"), strict=True)),
+    }
+    spec = PopulationSpec.from_mapping(mapping)
+    reversed_mapping = deepcopy(mapping)
+    reversed_mapping["bind"] = dict(reversed(list(mapping["bind"].items())))
+    reverse_spec = PopulationSpec.from_mapping(reversed_mapping)
+    assert spec.digest() == reverse_spec.digest()
+    for candidate in (spec, reverse_spec):
+        # Even an empty request resolves the base and refuses ambiguous bindings.
+        with pytest.raises(PopulationError, match="overlapping resolved targets"):
+            list(iter_population_members(base, candidate, 0, seed=2))
+        with pytest.raises(PopulationError, match="overlapping resolved targets"):
+            list(iter_population_members(base, candidate, 1, seed=2))
+    assert base.to_mapping() == before
