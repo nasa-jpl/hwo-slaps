@@ -27,8 +27,8 @@ def test_sed_bin_weights_follow_independent_photon_equations(kind,nodes_nm):
     edges=np.array([450.,*interior,550.])/1.e9
     expected=np.log(edges[1:]/edges[:-1]) if kind=="flat_fnu" else edges[1:]**2-edges[:-1]**2
     expected/=expected.sum()
-    np.testing.assert_allclose(weights.normalized,expected,rtol=1.e-8,atol=0.)
-    np.testing.assert_array_equal(weights.bin_edges_m,edges)
+    np.testing.assert_allclose(weights.normalized,expected,rtol=1.e-10,atol=0.)
+    np.testing.assert_allclose(weights.bin_edges_m,edges,rtol=1.e-15,atol=0.)
     # Mathematical photon measure includes the single recorded common factor.
     measured=weights.rates.sum()*math.exp(weights.log_rate_scale)
     expected_integral=detected_flux_per_m2(sed,1.,band)*6.62607015e-34/1.e-26

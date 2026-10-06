@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
-from ..identity import validate_loaded_file
+from ..identity import json_ready, validate_loaded_file
+from ..scene.image_source import frozen_value
 from ..optics.kernels import KernelBinding
 from ..optics.chromatic import SpectralWeights, effective_kernel, sed_weights
 from ..optics.optical_psf import OpticalPSF, OpticalSpec
@@ -43,6 +44,9 @@ class PsfPair:
     model_kernels: KernelBinding
     spectral: Mapping[str, Any] | None
     _model_bound: _BoundPSF = field(repr=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "spectral", frozen_value(self.spectral))
 
     @property
     def relation(self) -> str:
@@ -80,7 +84,7 @@ class PsfPair:
         return {"truth": self.truth.to_mapping(), "model": self.model.provider.to_mapping(),
                 "truth_kernels": self.truth_kernels.to_mapping(), "model_kernels": self.model_kernels.to_mapping(),
                 "psf_relation": self.relation, "knowledge_error": None if draw is None else draw.to_mapping(),
-                "spectral": self.spectral}
+                "spectral": json_ready(self.spectral)}
 
 
 def truth_provider(config: EngineConfig, *, bandpass: Bandpass | None = None) -> PSFProvider:
