@@ -238,7 +238,7 @@ def test_zero_amplitude_knowledge_error_gives_unit_retention(minimal_mapping):
     minimal_mapping["psf"] = {"truth": {
         "kind": "optical", "pupil": {"kind": "hex_segmented", "diameter_m": 7.225765,
         "pixels": 64, "supersampling": 2, "rings": 2, "segment_point_to_point_m": 1.65, "gap_m": .006},
-        "focal_length_m": 144, "wavelength_nm": 500, "detector_oversampling": 3, "kernel_shape": [7, 7],
+        "focal_length_m": 144, "wavelength_nm": 500, "detector_oversampling": 11, "kernel_shape": [7, 7],
         "wavefront": {"zernikes": {4: 5.0}}}}
     minimal_mapping["forecast"]["positions"] = {"kind": "grid", "spacing_arcsec": .4, "half_width_arcsec": .4}
     with prepare_forecast(minimal_mapping) as prepared:
