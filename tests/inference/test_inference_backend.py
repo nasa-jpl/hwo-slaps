@@ -227,6 +227,92 @@ def test_jax_analysis_enables_x64_and_returns_float64():
     ]}
 
 
+GUARD_CHILD = textwrap.dedent("""
+    import json, sys
+    import numpy as np
+    import jax
+    import autofit as af
+    import autolens as al
+    import autogalaxy as ag
+    from autofit.non_linear import fitness as fitness_module
+    from hwoslaps.inference import backend
+    sys.path.insert(0, sys.argv[1])
+    from conftest import make_raw_imaging
+    mode = sys.argv[2]
+    original_update = jax.config.update
+    original_fitness = fitness_module.Fitness
+    original_instance = af.Model.instance_from_vector
+    original_analysis = backend.ANALYSIS_CLASS
+    constructions = []
+    jax.config.update("jax_enable_x64", False)
+    before = bool(jax.config.jax_enable_x64)
+
+    class ObservedAnalysis(original_analysis):
+        def __init__(self, *args, **kwargs):
+            constructions.append(True)
+            super().__init__(*args, **kwargs)
+
+    class DelegatingFitness(original_fitness):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+
+    def delegating_instance(self, *args, **kwargs):
+        return original_instance(self, *args, **kwargs)
+
+    def ineffective_update(name, value, *args, **kwargs):
+        if name == "jax_enable_x64":
+            return None
+        return original_update(name, value, *args, **kwargs)
+
+    backend.ANALYSIS_CLASS = ObservedAnalysis
+    if mode == "ineffective_enable":
+        jax.config.update = ineffective_update
+    elif mode == "missing_apis":
+        fitness_module.Fitness = DelegatingFitness
+        af.Model.instance_from_vector = delegating_instance
+    else:
+        raise ValueError(mode)
+    error_type, message = None, None
+    try:
+        kernel = np.exp(-(np.mgrid[-3:4, -3:4].astype(float) ** 2).sum(axis=0) / 2.0)
+        analysis = backend.make_analysis(make_raw_imaging(kernel / kernel.sum()),
+                                         cosmology=ag.cosmo.Planck15(), use_jax=True)
+    except RuntimeError as error:
+        error_type, message = type(error).__name__, str(error)
+    finally:
+        flag = bool(jax.config.jax_enable_x64)
+        jax.config.update = original_update
+        fitness_module.Fitness = original_fitness
+        af.Model.instance_from_vector = original_instance
+        backend.ANALYSIS_CLASS = original_analysis
+        jax.config.update("jax_enable_x64", before)
+    json.dump({"before": before, "after": flag, "error_type": error_type, "error": message,
+               "analysis_constructions": len(constructions),
+               "versions": {"autofit": str(af.__version__), "autolens": str(al.__version__)}}, sys.stdout)
+""")
+
+
+@pytest.mark.parametrize("fault", ["ineffective_enable", "missing_apis"])
+def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault):
+    """Real installed guards refuse before any delegating real analysis construction."""
+    environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
+    lane = os.path.dirname(os.path.abspath(__file__))
+    completed = subprocess.run([sys.executable, "-c", GUARD_CHILD, lane, fault], env=environment,
+                               capture_output=True, text=True, check=True, timeout=90)
+    report = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert report["before"] is False and report["analysis_constructions"] == 0
+    assert report["error_type"] == "RuntimeError"
+    if fault == "ineffective_enable":
+        assert report["after"] is False
+        assert report["error"] == "JAX 64-bit mode could not be enabled"
+    else:
+        assert report["after"] is True
+        for name in ("Fitness.use_jax_vmap", "Fitness.batch_size", "Model.instance_from_vector(xp=...)"):
+            assert name in report["error"]
+        for package, version in report["versions"].items():
+            assert version and f"{package} {version}" in report["error"]
+
+
 @pytest.mark.xtx_gpu
 def test_pooled_emulator_training_equals_serial(monkeypatch):
     """Networks trained through the session pool are byte-equal to serial training."""
