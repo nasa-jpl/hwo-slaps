@@ -20,7 +20,7 @@ from ..identity import file_digest, json_ready, mapping_digest
 from ..seeding import member_seed, stream_rng
 from .catalog import CATALOG_TABLE, Catalog, CatalogSpec, load_catalog
 from .derivations import DERIVATION_TABLE, Derivation, parse_derivation
-from .distributions import (Constant, DISTRIBUTION_TABLE, Distribution, PopulationError, Reference, finite_value,
+from .distributions import (Choice, Constant, DISTRIBUTION_TABLE, Distribution, PopulationError, Reference, finite_value,
                             open_uniforms, parse_distribution, resolve_value)
 
 __all__ = ["Copula", "PopulationSpec", "PopulationMember", "sample_population", "iter_population_members", "POPULATION_TABLE"]
@@ -91,10 +91,19 @@ def _reference_size(variable):
     if isinstance(variable, Derivation):
         return "unknown" if variable.kind == "function" else variable.size
     if isinstance(variable, Constant):
-        if isinstance(variable.value, (tuple, list)):
-            return len(variable.value)
-        if isinstance(variable.value, (Mapping, str, bool)) or variable.value is None:
-            return "non_numeric"
+        return _value_reference_size(variable.value)
+    if isinstance(variable, Choice):
+        sizes = {_value_reference_size(value) for value in variable.values}
+        # Different selected shapes are checked when the actual choice is drawn.
+        return sizes.pop() if len(sizes) == 1 else "unknown"
+    return None
+
+
+def _value_reference_size(value):
+    if isinstance(value, (tuple, list)):
+        return len(value)
+    if isinstance(value, (Mapping, str, bool)) or value is None:
+        return "non_numeric"
     return None
 
 

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.config.schema import parse_config
-from hwoslaps.population import PopulationError, PopulationSpec, iter_population_members
+from hwoslaps.population import PopulationError, PopulationSpec, iter_population_members, sample_population
 
 
 def spec(variable,bind):return {"variables":{"x":variable},"bind":bind}
@@ -74,3 +74,36 @@ def test_rejection_redraws_invalid_members_and_reports_original_error(minimal_ma
         assert member.attempt==expected
         assert member.values["e"]==independent_e(3,member.index,expected)
         assert member.config.scene.lens.mass[0].values["ell_comps"][0]==member.values["e"]
+
+
+def test_vector_choice_references_reach_scalar_laws_and_config_binding(minimal_mapping):
+    variables = {
+        "v": {"kind": "choice", "values": [[.2, .4], [.3, .5]]},
+        "x": {"kind": "normal", "mean": {"var": "v[0]"}, "std": .01},
+    }
+    mapping = {"variables": variables, "bind": {"scene.lens.redshift": "v[0]"}}
+    members = list(iter_population_members(parse_config(minimal_mapping), mapping, 40, seed=2))
+    centred = deepcopy(mapping)
+    centred["variables"]["x"]["mean"] = 0.
+    centred_rows = sample_population(centred, 40, seed=2)
+    assert {tuple(member.values["v"]) for member in members} == {(.2, .4), (.3, .5)}
+    for member, row in zip(members, centred_rows, strict=True):
+        assert member.config.scene.lens.redshift == member.values["v"][0]
+        assert member.values["x"] == member.values["v"][0] + row["x"]
+
+
+@pytest.mark.parametrize("values,reference", [
+    ([.2, .3], "v[0]"),
+    ([[.2, .4], [.3, .5]], "v[2]"),
+    ([[.2, .4], [.3, .5]], "v"),
+])
+def test_choice_known_incompatible_scalar_reference_is_refused(values, reference):
+    mapping = {
+        "variables": {
+            "v": {"kind": "choice", "values": values},
+            "x": {"kind": "normal", "mean": {"var": reference}, "std": .01},
+        },
+        "bind": {"scene.lens.redshift": "x"},
+    }
+    with pytest.raises(PopulationError, match="reference|indexed"):
+        PopulationSpec.from_mapping(mapping)
