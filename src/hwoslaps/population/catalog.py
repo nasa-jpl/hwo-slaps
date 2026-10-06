@@ -16,7 +16,11 @@ from ..config.checks import ConfigError, Key, MapOf, Table, Text
 from ..identity import read_file_snapshot
 from .distributions import PopulationError, Reference
 
-__all__ = ["CatalogSpec", "Catalog", "load_catalog"]
+__all__ = ["CatalogSpec", "Catalog", "load_catalog", "CATALOG_TABLE"]
+
+CATALOG_TABLE = Table((Key("path", Text(), "CSV/NPZ path"),
+                       Key("columns", MapOf(Text(), Text()), "numeric columns", {}),
+                       Key("text_columns", MapOf(Text(), Text()), "text columns", {})))
 
 
 @dataclass(frozen = True)
@@ -47,8 +51,7 @@ class CatalogSpec:
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any], *, base_dir: Path | None = None, path: str = "population.catalog"):
         try:
-            values = Table((Key("path", Text(), "CSV/NPZ path"), Key("columns", MapOf(Text()), "numeric columns", {}),
-                          Key("text_columns", MapOf(Text()), "text columns", {}))).read(mapping, path)
+            values = CATALOG_TABLE.read(mapping, path)
             filename = Path(values["path"]).expanduser()
             if not filename.is_absolute():
                 filename = (Path.cwd() if base_dir is None else Path(base_dir)) / filename

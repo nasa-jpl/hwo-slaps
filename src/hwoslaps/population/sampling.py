@@ -14,16 +14,16 @@ from typing import Any
 import numpy as np
 from scipy.special import ndtr, ndtri
 
-from ..config.checks import ConfigError, Integer, Key, Nullable, Table
+from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Nullable, Real, Table, Text, Variants
 from ..config.schema import ConfigSource, EngineConfig, parse_config, resolve_config
 from ..identity import file_digest, json_ready, mapping_digest
 from ..seeding import member_seed, stream_rng
-from .catalog import Catalog, CatalogSpec, load_catalog
-from .derivations import Derivation, parse_derivation
-from .distributions import (Constant, Distribution, PopulationError, Reference, finite_value,
+from .catalog import CATALOG_TABLE, Catalog, CatalogSpec, load_catalog
+from .derivations import DERIVATION_TABLE, Derivation, parse_derivation
+from .distributions import (Constant, DISTRIBUTION_TABLE, Distribution, PopulationError, Reference, finite_value,
                             open_uniforms, parse_distribution, resolve_value)
 
-__all__ = ["Copula", "PopulationSpec", "PopulationMember", "sample_population", "iter_population_members"]
+__all__ = ["Copula", "PopulationSpec", "PopulationMember", "sample_population", "iter_population_members", "POPULATION_TABLE"]
 
 
 def _integer(value, name):
@@ -170,9 +170,7 @@ class PopulationSpec:
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any], *, base_dir = None):
         try:
-            values = Table((Key("variables", _mapping, "ordered variables"), Key("copulas", _mapping, "Gaussian copulas", {}),
-                          Key("catalog", Nullable(_mapping), "catalog", None), Key("bind", _mapping, "bindings"),
-                          Key("max_attempts", Integer(min = 1), "rejection limit", 1))).read(mapping, "population")
+            values = POPULATION_TABLE.read(mapping, "population")
             variables = {}
             for name, value in values["variables"].items():
                 path = f"population.variables.{name}"
@@ -181,7 +179,7 @@ class PopulationSpec:
                                  else parse_distribution(value, path))
             copulas = {}
             for name, value in values["copulas"].items():
-                fields = Table((Key("variables", lambda v, p: v, "variables"), Key("correlation", lambda v, p: v, "correlation"))).read(value, f"population.copulas.{name}")
+                fields = COPULA_TABLE.read(value, f"population.copulas.{name}")
                 copulas[name] = Copula(name, fields["variables"], fields["correlation"])
             catalog = None if values["catalog"] is None else CatalogSpec.from_mapping(values["catalog"], base_dir = base_dir)
             binds = {path: Reference.parse(value, f"population.bind.{path}") for path, value in values["bind"].items()}
@@ -197,6 +195,20 @@ class PopulationSpec:
 
     def digest(self):
         return mapping_digest({"spec": self.to_mapping(), "catalog_sha256": None if self.catalog is None else file_digest(self.catalog.path)})
+
+
+_VARIABLE_NAME = Text(pattern=r"[A-Za-z_][A-Za-z0-9_]*")
+_REFERENCE_NAME = Text(pattern=r"[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?")
+VARIABLE_TABLE = Variants("kind", {**DISTRIBUTION_TABLE.tables, **DERIVATION_TABLE.tables})
+COPULA_TABLE = Table((Key("variables", ListOf(_VARIABLE_NAME, min_length=2, unique=True), "coupled distributions"),
+                      Key("correlation", ListOf(ListOf(Real(), min_length=2), min_length=2), "normal-score correlation matrix")))
+POPULATION_TABLE = Table((
+    Key("variables", MapOf(key=_VARIABLE_NAME, value=VARIABLE_TABLE), "ordered variables"),
+    Key("copulas", MapOf(key=_VARIABLE_NAME, value=COPULA_TABLE), "Gaussian copulas", {}),
+    Key("catalog", Nullable(CATALOG_TABLE), "catalog", None),
+    Key("bind", MapOf(Text(), _REFERENCE_NAME, min_length=1), "existing effective configuration paths"),
+    Key("max_attempts", Integer(min=1), "rejection limit", 1),
+))
 
 
 @dataclass(frozen = True)

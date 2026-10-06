@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Real, Table, Text
+from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Real, Table, Text, Union, Variants
 from ..scene.convert import ell_comps_from, multipole_components_from, polar_offset, shear_components_from
-from .distributions import PopulationError, Reference, Value, read_value
+from .distributions import PopulationError, Reference, Value, VALUE_CHECK, read_value
 
-__all__ = ["Derivation", "parse_derivation"]
+__all__ = ["Derivation", "parse_derivation", "DERIVATION_TABLE"]
 
 
 def _input(value, path):
@@ -114,28 +114,32 @@ class Derivation:
 
 
 _TABLES = {
-    "vector": Table((Key("of", _vector_input, "vector components"),)),
-    "polar_offset": Table((Key("radius", read_value, "radius"), Key("angle_deg", read_value, "angle in degrees"),
-                          Key("centre_y", read_value, "centre y", 0.), Key("centre_x", read_value, "centre x", 0.))),
-    "ell_comps": Table((Key("axis_ratio", read_value, "minor/major axis ratio"), Key("angle_deg", read_value, "major axis angle"))),
-    "shear_components": Table((Key("magnitude", read_value, "shear magnitude"), Key("angle_deg", read_value, "shear angle"))),
-    "multipole_components": Table((Key("strength", read_value, "multipole strength"), Key("angle_deg", read_value, "multipole angle"),
+    "vector": Table((Key("of", ListOf(VALUE_CHECK, min_length=2), "vector components"),)),
+    "polar_offset": Table((Key("radius", VALUE_CHECK, "radius"), Key("angle_deg", VALUE_CHECK, "angle in degrees"),
+                          Key("centre_y", VALUE_CHECK, "centre y", 0.), Key("centre_x", VALUE_CHECK, "centre x", 0.))),
+    "ell_comps": Table((Key("axis_ratio", VALUE_CHECK, "minor/major axis ratio"), Key("angle_deg", VALUE_CHECK, "major axis angle"))),
+    "shear_components": Table((Key("magnitude", VALUE_CHECK, "shear magnitude"), Key("angle_deg", VALUE_CHECK, "shear angle"))),
+    "multipole_components": Table((Key("strength", VALUE_CHECK, "multipole strength"), Key("angle_deg", VALUE_CHECK, "multipole angle"),
                                   Key("order", Integer(min = 1), "multipole order"))),
     "function": Table((Key("function", Text(pattern = r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*"), "module:function"),
-                      Key("inputs", _function_inputs, "keyword inputs", {}))),
+                      Key("inputs", MapOf(Text(), Union((VALUE_CHECK, ListOf(VALUE_CHECK)))), "keyword inputs", {}))),
 }
 
+
+DERIVATION_TABLE = Variants("kind", _TABLES)
 
 def parse_derivation(mapping: Mapping[str, Any], path: str) -> Derivation:
     if not isinstance(mapping, Mapping) or not isinstance(mapping.get("kind"), str) or mapping["kind"] not in _TABLES:
         raise PopulationError(f"{path}.kind: unsupported derivation kind")
     kind = mapping["kind"]
     try:
-        table = _TABLES[kind]
-        values = Table((Key("kind", Text(choices = (kind,)), "derivation kind"), * table.keys)).read(mapping, path)
+        values = DERIVATION_TABLE.read(mapping, path)
         values.pop("kind")
         if kind == "function":
-            return Derivation(kind, values["inputs"], values["function"])
+            return Derivation(kind, {name: _input(value, f"{path}.inputs.{name}") for name, value in values["inputs"].items()}, values["function"])
+        values = {name: (tuple(read_value(item, f"{path}.{name}[{index}]") for index, item in enumerate(value))
+                         if name == "of" else value if name == "order" else read_value(value, f"{path}.{name}"))
+                  for name, value in values.items()}
         for name, value in values.items():
             if name != "of" and isinstance(value, Reference):
                 continue
