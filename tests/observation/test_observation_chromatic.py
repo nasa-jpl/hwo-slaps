@@ -9,7 +9,8 @@ import pytest
 pytestmark=pytest.mark.backend
 
 
-def test_two_colour_expected_image_is_the_sum_of_single_colour_images(minimal_mapping):
+@pytest.mark.parametrize("truth_kind",["optical","kernel_cube"])
+def test_two_colour_expected_image_is_the_sum_of_single_colour_images(minimal_mapping,truth_kind,tmp_path,tiny_gaussian_kernel):
     from hwoslaps.fisher.api import prepare_forecast
     from hwoslaps.optics.chromatic import effective_kernel,sed_weights
     from hwoslaps.optics.kernels import KernelBinding
@@ -20,6 +21,12 @@ def test_two_colour_expected_image_is_the_sum_of_single_colour_images(minimal_ma
         "pixels":64,"supersampling":2},"focal_length_m":20.,"wavelength_samples":5,
         "detector_oversampling":3,"kernel_shape":[9,9]}}
     mapping["instrument"]["bandpass"]={"kind":"top_hat","min_nm":450.,"max_nm":550.,"throughput":.21}
+    if truth_kind=="kernel_cube":
+        path=tmp_path/"colours.npz"
+        np.savez(path,kernels=np.stack([np.roll(tiny_gaussian_kernel,index-2,axis=0) for index in range(5)]),
+                 wavelengths_m=np.array([450.,475.,500.,525.,550.])/1.e9)
+        mapping["psf"]["truth"]={"kind":"kernel_cube","path":str(path),"pixel_scale_arcsec":.05,"normalize":False}
+        mapping["instrument"]["collecting_area_m2"]=3.14
     mapping["instrument"]["detector"]["gain_e_per_adu"]=2.5
     mapping["scene"]["source"]["light"]["light"]["sed"]={"kind":"power_law","index":-3.}
     mapping["scene"]["source"]["light"]["blue"]={"type":"Sersic","centre":[.05,-.04],
