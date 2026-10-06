@@ -102,8 +102,11 @@ def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
 
 
 def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
+    from hwoslaps.batch.state import BatchError
     process, record, log = _start('import time\ntime.sleep(60)\n', tmp_path, 'foreign')
     try:
+        with pytest.raises(BatchError, match='cookie_matches=False'):
+            worker_record(process.pid, slot=0, device='cpu', identity='0' * 64, identity_env=OWNER_ENV)
         mismatches = ({**record, 'identity': '0' * 64}, {**record, 'start_time': record['start_time'] + 1},
                       {**record, 'boot_id': 'another-boot'})
         for wrong in mismatches:
@@ -113,6 +116,61 @@ def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
         assert [member['pid'] for member in group_members(record)] == [process.pid]
     finally:
         _close(process, record, log)
+
+
+def test_missing_bootstrap_cookie_refuses_and_actual_worker_eof_skips_science(tmp_path):
+    import hashlib
+    import hwoslaps.batch.worker as worker
+    from hwoslaps.batch.state import BatchError
+    source = Path(worker.__file__).resolve()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    binding, finished = tmp_path / 'binding.json', tmp_path / 'eof.json'
+    script = tmp_path / 'actual-worker.py'
+    script.write_text(f'''
+if __name__ == '__main__':
+    import hashlib, json, sys
+    from pathlib import Path
+    import hwoslaps.batch.worker as worker
+    actual = Path(worker.__file__).resolve()
+    assert str(actual) == {str(source)!r}
+    assert hashlib.sha256(actual.read_bytes()).hexdigest() == {digest!r}
+    Path({str(binding)!r}).write_text(json.dumps({{'path': str(actual), 'sha256': {digest!r}}}))
+    code = worker.main()
+    Path({str(finished)!r}).write_text(json.dumps({{'code': code,
+        'backend_imported': 'hwoslaps.inference.backend' in sys.modules, 'jax_imported': 'jax' in sys.modules}}))
+    raise SystemExit(code)
+''')
+    environment = dict(os.environ)
+    environment.pop(OWNER_ENV, None)
+    environment['PYTHONPATH'] = str(source.parents[2])
+    log = (tmp_path / 'cookie-free.log').open('wb')
+    process = descriptor = None
+    try:
+        process = subprocess.Popen([sys.executable, str(script)], env=environment, stdin=subprocess.PIPE,
+                                   stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        descriptor = open_pidfd(process.pid)
+        _wait(binding.exists, timeout=10.)
+        with pytest.raises(BatchError, match='cookie_present=False'):
+            worker_record(process.pid, slot=0, device='cpu', identity='a' * 64, identity_env=OWNER_ENV)
+        assert process.poll() is None and pidfd_exited(descriptor) is False
+        process.stdin.close()
+        assert process.wait(timeout=10.) == 0
+        assert json.loads(finished.read_text()) == {'code': 0, 'backend_imported': False, 'jax_imported': False}
+        assert json.loads(binding.read_text()) == {'path': str(source), 'sha256': digest}
+    finally:
+        try:
+            if process is not None:
+                process.stdin.close()
+                if descriptor is not None:
+                    try:
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                process.wait(timeout=10.)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            log.close()
 
 
 def test_pidfd_ownership_works_above_the_select_descriptor_limit(tmp_path):
