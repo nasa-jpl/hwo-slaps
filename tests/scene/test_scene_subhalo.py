@@ -58,15 +58,23 @@ def test_placement_is_about_the_lens_centre(scene_mapping, planck15, position, s
 
 
 def test_random_placement_draws_from_its_named_stream(scene_mapping, planck15):
-    spec = _inject(scene_mapping, {"kind": "random", "scatter_arcsec": 0.05})
-    placed = {seed: configured_injection(spec, planck15, seed=seed).position_yx_arcsec for seed in (5, 6, 70)}
-    assert configured_injection(spec, planck15, seed=5).position_yx_arcsec == placed[5]
-    assert len(set(placed.values())) == 3
-    for seed, (y, x) in placed.items():
-        drawn_angle = math.degrees(math.atan2(y - LENS_CENTRE[0], x - LENS_CENTRE[1])) % 360.0
-        assert drawn_angle == pytest.approx(_stream_draws(seed, 0.05)[0], abs=1.0e-9)
-        for aliased in (np.random.default_rng(seed + 1), np.random.default_rng(seed)):
-            assert drawn_angle != pytest.approx(aliased.uniform(0.0, 360.0), abs=1.0e-6)
+    original_global_state = np.random.get_state()
+    try:
+        np.random.seed(777)
+        expected_global_draws = np.random.random(8)
+        np.random.seed(777)
+        spec = _inject(scene_mapping, {"kind": "random", "scatter_arcsec": 0.05})
+        placed = {seed: configured_injection(spec, planck15, seed=seed).position_yx_arcsec for seed in (5, 6, 70)}
+        assert configured_injection(spec, planck15, seed=5).position_yx_arcsec == placed[5]
+        assert len(set(placed.values())) == 3
+        for seed, (y, x) in placed.items():
+            drawn_angle = math.degrees(math.atan2(y - LENS_CENTRE[0], x - LENS_CENTRE[1])) % 360.0
+            assert drawn_angle == pytest.approx(_stream_draws(seed, 0.05)[0], abs=1.0e-9)
+            for aliased in (np.random.default_rng(seed + 1), np.random.default_rng(seed)):
+                assert drawn_angle != pytest.approx(aliased.uniform(0.0, 360.0), abs=1.0e-6)
+        np.testing.assert_array_equal(np.random.random(8), expected_global_draws)
+    finally:
+        np.random.set_state(original_global_state)
 
 
 def test_placement_radius_is_a_number_or_the_lens_einstein_radius(scene_mapping, planck15):
