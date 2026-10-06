@@ -57,7 +57,7 @@ def new_output(path):
 
 
 def run_product(config, output, *, masses, engine, q_threshold, budget_s, command, noise_seed=None,
-                check=None, extra=None, plot=False, started_at=None):
+                extra=None, plot=False, started_at=None):
     from hwoslaps.analysis.reductions import summarize
     from hwoslaps.artifacts import save_forecast, save_observation, write_json
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
@@ -68,8 +68,6 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
     lane = require_lane(engine)
     environment = capture_provenance(command=command)
     with prepare_forecast(config, execution=Execution(engine=engine)) as prepared:
-        if check is not None:
-            check(prepared)
         output = new_output(output)
         result = forecast(prepared, masses_msun=masses)
         summary = summarize(result, q_threshold=q_threshold)

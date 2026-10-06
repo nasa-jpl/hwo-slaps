@@ -28,8 +28,9 @@ supplies the original discrete-normalization amplitude.
 | Source amplitude target | 0.003174147284617635 e-/s per pixel sample at the effective radius | Pinned discrete paper normalization |
 | Blank variance target | 9.100559691926973 e-² | Sky and dark counts plus read variance in engine order |
 
-The driver checks collecting area at relative 1e-12, AB source and sky rates at 1e-9, and
-continuous amplitude against the discrete target at 2e-7. Blank variance is checked at 1e-15. The source-rate target applies to
+The reference test `tests/observation/test_observation_hwo_reference.py` checks collecting
+area at relative 1e-12, AB source and sky rates at 1e-9, continuous amplitude at 2e-7, and
+blank variance at 1e-15 through the real expected-observation boundary. The source-rate target applies to
 the AB input. The literal-amplitude overlay retains the small continuous/discrete difference.
 These photometric checks are separate from forecast convergence.
 
