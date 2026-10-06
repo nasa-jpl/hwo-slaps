@@ -53,7 +53,7 @@ def test_patched_blurring_mask_matches_independent_dense_geometry(kernel_shape, 
     ky, kx = kernel_shape
     included = np.random.default_rng(ky * 100 + kx + array_shape[0]).random(array_shape) > 0.7
     included[0, 0] = True
-    # A guard border contains the full footprint; the original corner remains an edge case.
+    # The guard border keeps each footprint in the valid domain without backend padding.
     included = np.pad(included, ((ky // 2, ky // 2), (kx // 2, kx // 2)), constant_values=False)
     mask = ~included
     dense_neighborhood = binary_dilation(included, structure=np.ones(kernel_shape, dtype=bool))
