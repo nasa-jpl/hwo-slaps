@@ -19,11 +19,16 @@ hwoslaps validate examples/monolithic_illustrative/scene.yaml examples/monolithi
 python examples/monolithic_illustrative/run.py --q-threshold 10 --output out/monolithic
 ```
 
-The CPU reference driver forecasts a 1e8 solar-mass NFW halo and writes expected
+The CPU reference driver uses eight workers, forecasts a 1e8 solar-mass NFW halo and writes expected
 observation, forecast and run record. Add `--plot` to save maps. Resolved rates,
 collecting area and actual sampling of each light group appear in the run record.
+Set `--reference-workers` to a positive count to select another CPU allocation.
 
-Budget: 120 s CPU. On XTX on 2026-10-06, Python 3.11 and BLAS threads 1, the run reached
-its 120 s external limit before completing. Lens/source sampling remains unreported by
-that interrupted run. Sampling describes the configured discretization; the example supplies
-no mission performance prediction or detection-accuracy claim based on that diagnostic alone.
+Budget: 120 s CPU. On XTX on 2026-10-06, Python 3.11, BLAS threads 1 and eight CPU
+workers, the actual driver completed in 24.7548 s. Its complete scientific forecast
+and expected-observation members matched the serial baseline bitwise. The original
+serial command reached its 120 s limit; a separate completion diagnostic took
+120.6165 s and retained its budget failure. Actual sampling was
+`lens = 0.3100470893969617` and `source = 0.09437939132284434`.
+Sampling describes the configured discretization; the example supplies no mission
+performance prediction or detection-accuracy claim based on that diagnostic alone.

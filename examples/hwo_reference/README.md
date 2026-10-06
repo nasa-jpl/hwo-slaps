@@ -36,8 +36,9 @@ the AB input separately checks sky, dark and two-read variance using its resolve
 The literal-amplitude overlay retains the small continuous/discrete difference.
 These photometric checks are separate from forecast convergence.
 
-The CPU smoke command preserves the scene and pupil, uses a 101 x 101 kernel, and changes
-position spacing to 0.3 arcsec:
+The CPU smoke command preserves the scene and pupil, uses a 101 x 101 kernel, changes
+position spacing to 0.3 arcsec, and uses eight reference workers. Set
+`--reference-workers` to a positive count to select another CPU allocation:
 
 ```bash
 python examples/hwo_reference/run.py --quick --seed 11 --q-threshold 10 --output out/hwo_quick
@@ -68,9 +69,12 @@ hwoslaps forecast examples/hwo_reference/instrument.yaml examples/hwo_reference/
 combined family, seed 20260835. `fit_kernel_51.yaml` supplies the paper nonlinear
 fit support. A batch pairs this fit arm with its larger forecast arm through `forecast_arm`.
 
-Budget: CPU smoke 120 s; full GPU 600 s. On XTX on 2026-10-06, the CPU smoke reached its
-120 s external limit before completing. The full run completed in 55.3556 s with one
-NVIDIA B200 visible, Python 3.11 and BLAS threads 1. Its actual sampling record was
+Budget: CPU smoke 120 s; full GPU 600 s. On XTX on 2026-10-06, Python 3.11 and
+BLAS threads 1, the actual eight-worker CPU smoke completed in 75.3120 s. Its complete
+forecast, expected and seed-11 noisy scientific products matched the serial baseline
+bitwise. The original serial command reached its 120 s limit; a separate completion
+baseline took 382.3314 s and retained its budget failure. The full GPU run completed
+in 55.3556 s with one NVIDIA B200 visible. Its actual sampling record was
 `source:disk = 0.024480394447703214` and its 500 nm captured fraction was
 0.9999453026734084. These diagnostics do not establish forecast convergence.
 A budget overrun is reported without changing physical inputs.
