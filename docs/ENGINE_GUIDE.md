@@ -11,7 +11,9 @@ Configuration files compose in order. Asset paths belong to the file that suppli
 ```python
 from hwoslaps.config.schema import load_config
 
-config = load_config(["scene.yaml", "instrument.yaml", "forecast.yaml"])
+config = load_config(["examples/hwo_reference/scene_smooth_ring.yaml",
+                      "examples/hwo_reference/instrument.yaml",
+                      "examples/hwo_reference/forecast.yaml"])
 longer = config.replace({"observation": {"exposure_time_s": 1800.0}})
 ```
 
@@ -91,7 +93,7 @@ Sampler recovery, weighted sampler quantiles and refined recovery are separate f
 
 Population members use named per-member streams, so extending a pool or changing chunking does not redefine existing members. A ranking policy supplies cuts, weighted standardized terms and top-k size. No library paper cohort, threshold or instrument selection policy is inferred.
 
-Batch source is defined and its integration/runtime checks are still pending. The source interfaces plan jobs, run/resume into an output directory and open metadata. A run report distinguishes completed, skipped, failed, duplicate, not-selected and orphaned jobs, preparations and revision counts. Resume verifies the recorded case/policy identity; a changed policy conflicts rather than silently reclassifying old outcomes. Full scientific case reading can require a backend, while controller/metadata imports stay separate. The current source signature is `run_batch(spec, output_dir, resume=True, execution=None, select=None, verify=False, require_single_revision=False)`. `open_batch` reads metadata; product accessors load forecasts, observations and cases. Final acceptance still needs the integrated producer and its tests.
+Batch source is defined and its integration/runtime checks are still pending. The source interfaces plan jobs, run/resume into an output directory and open metadata. A run report distinguishes completed, skipped, failed, duplicate, not-selected and orphaned jobs, preparations and revision counts. Resume verifies the recorded case/policy identity; a changed policy conflicts rather than silently reclassifying old outcomes. Full scientific case reading can require a backend, while controller/metadata imports stay separate. The current source signature is `run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False)`. `open_batch` reads metadata; product accessors load forecasts, observations and cases. Final acceptance still needs the integrated producer and its tests.
 
 Current artifacts record arrays, kernels, effective configuration, input hashes, code/environment provenance and schemas. Old study archives have no compatibility loader. Final CLI/artifact transport and generated-reference checks are pending integration. Keep the data, mask, kernel, covariance and nuisance span fixed when making a numerical comparison.
 
