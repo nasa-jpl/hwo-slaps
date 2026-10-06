@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+from pathlib import Path
 import multiprocessing
 import os
 import subprocess
@@ -184,16 +186,28 @@ def test_make_analysis_uses_the_given_cosmology_and_writes_no_autolens_class(raw
     assert all(vars(al.AnalysisImaging)[name] is value for name, value in before.items())
 
 
+def _backend_binding_args():
+    path = Path(__file__).resolve().parents[2] / "src/hwoslaps/inference/backend.py"
+    return str(path.resolve()), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 X64_CHILD = textwrap.dedent("""
     import json, sys
     import numpy as np
     import jax
     import autogalaxy as ag
     from autofit.non_linear.fitness import Fitness
-    from hwoslaps.inference.backend import make_analysis
+    from hwoslaps.inference import backend
+    make_analysis = backend.make_analysis
     from hwoslaps.inference.fit_model import autofit_model
     sys.path.insert(0, sys.argv[1])
     from conftest import make_light_model, make_raw_imaging
+    import hashlib
+    from pathlib import Path
+    loaded = Path(backend.__file__).resolve()
+    binding = {"backend_path": str(loaded), "backend_sha256": hashlib.sha256(loaded.read_bytes()).hexdigest()}
+    assert binding == {"backend_path": str(Path(sys.argv[2]).resolve()), "backend_sha256": sys.argv[3]}
+    print(json.dumps({"binding": binding}), flush=True)
     kernel = np.exp(-(np.mgrid[-3:4, -3:4].astype(float) ** 2).sum(axis=0) / 2.0)
     fit_model = make_light_model()
     before = bool(jax.config.jax_enable_x64)
@@ -209,7 +223,7 @@ X64_CHILD = textwrap.dedent("""
                   "finite": bool(np.all(np.isfinite(values)))}
         reports.append(report)
         print(json.dumps({"iteration": iteration, "before": before, **report}), flush=True)
-    json.dump({"before": before, "analyses": reports}, sys.stdout)
+    json.dump({"before": before, "analyses": reports, "binding": binding}, sys.stdout)
 """)
 
 
@@ -218,9 +232,11 @@ def test_jax_analysis_enables_x64_and_returns_float64():
     """A fresh process from x64 off: both real analyses keep x64 on and return finite float64 Fitness."""
     environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
     lane = os.path.dirname(os.path.abspath(__file__))
-    completed = subprocess.run([sys.executable, "-c", X64_CHILD, lane], env=environment, capture_output=True,
+    expected_path, expected_sha = _backend_binding_args()
+    completed = subprocess.run([sys.executable, "-c", X64_CHILD, lane, expected_path, expected_sha], env=environment, capture_output=True,
                                text=True, check=True, timeout=600)
     report = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert report.pop("binding") == {"backend_path": expected_path, "backend_sha256": expected_sha}
     assert report == {"before": False, "analyses": [
         {"after": True, "dtype": "float64", "finite": True},
         {"after": True, "dtype": "float64", "finite": True},
@@ -239,6 +255,11 @@ GUARD_CHILD = textwrap.dedent("""
     sys.path.insert(0, sys.argv[1])
     from conftest import make_raw_imaging
     mode = sys.argv[2]
+    import hashlib
+    from pathlib import Path
+    loaded = Path(backend.__file__).resolve()
+    binding = {"backend_path": str(loaded), "backend_sha256": hashlib.sha256(loaded.read_bytes()).hexdigest()}
+    assert binding == {"backend_path": str(Path(sys.argv[3]).resolve()), "backend_sha256": sys.argv[4]}
     original_update = jax.config.update
     original_fitness = fitness_module.Fitness
     original_instance = af.Model.instance_from_vector
@@ -286,7 +307,7 @@ GUARD_CHILD = textwrap.dedent("""
         af.Model.instance_from_vector = original_instance
         backend.ANALYSIS_CLASS = original_analysis
         jax.config.update("jax_enable_x64", before)
-    json.dump({"before": before, "after": flag, "error_type": error_type, "error": message,
+    json.dump({"binding": binding, "before": before, "after": flag, "error_type": error_type, "error": message,
                "analysis_constructions": len(constructions),
                "versions": {"autofit": str(af.__version__), "autolens": str(al.__version__)}}, sys.stdout)
 """)
@@ -298,9 +319,11 @@ def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault
     """Real installed guards refuse before any delegating real analysis construction."""
     environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
     lane = os.path.dirname(os.path.abspath(__file__))
-    completed = subprocess.run([sys.executable, "-c", GUARD_CHILD, lane, fault], env=environment,
+    expected_path, expected_sha = _backend_binding_args()
+    completed = subprocess.run([sys.executable, "-c", GUARD_CHILD, lane, fault, expected_path, expected_sha], env=environment,
                                capture_output=True, text=True, check=True, timeout=90)
     report = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert report.pop("binding") == {"backend_path": expected_path, "backend_sha256": expected_sha}
     assert report["before"] is False and report["analysis_constructions"] == 0
     assert report["error_type"] == "RuntimeError"
     if fault == "ineffective_enable":
