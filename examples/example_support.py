@@ -42,8 +42,8 @@ def require_lane(engine):
     import jax
 
     devices = jax.devices()
-    if not devices or any(device.platform != "gpu" for device in devices):
-        raise RuntimeError("this JAX example requires an actual GPU; select its device before running")
+    if len(devices) != 1 or devices[0].platform != "gpu":
+        raise RuntimeError("this JAX example requires exactly one visible GPU; select its device before running")
     return {"engine": engine, "lane": "gpu", "devices": [str(device) for device in devices]}
 
 
@@ -90,7 +90,9 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
     elapsed = time.perf_counter() - started
     record = {
         "command": list(command), "execution": lane, "environment": environment,
-        "elapsed_s": elapsed, "timing_scope": "main entry through product writes and engine close; final record and printing excluded", "budget_s": budget_s, "within_budget": elapsed <= budget_s,
+        "elapsed_s": elapsed,
+        "timing_scope": "main entry through product writes and engine close; final record and printing excluded",
+        "budget_s": budget_s, "within_budget": elapsed <= budget_s,
         "config_digest": result.provenance["config_digest"],
         "comparison_digest": result.provenance["comparison_digest"],
         "input_files": result.provenance["file_digests"], "q_threshold": q_threshold,

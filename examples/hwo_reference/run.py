@@ -27,6 +27,8 @@ def check_reference(prepared):
     sky = prepared.observation.exposure.sky_rate_e_per_s
     if not math.isclose(sky, 0.002510279845963486, rel_tol=1e-9, abs_tol=0):
         raise ValueError("HWO sky rate differs from the pinned target")
+    if not math.isclose(prepared.observation.exposure.blank_variance_e2, 9.100559691926973, rel_tol=1e-15, abs_tol=0):
+        raise ValueError("HWO blank detector variance differs from the pinned target")
 
 
 def main(argv=None):
