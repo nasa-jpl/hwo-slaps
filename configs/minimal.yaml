@@ -1,0 +1,27 @@
+# Illustrative lens and detector values; they describe no instrument.
+run_name: minimal
+seed: 11
+cosmology: {name: Planck15}
+scene:
+  grid: {shape: [41, 41], pixel_scale_arcsec: 0.1, over_sample_size: 4}
+  lens:
+    redshift: 0.2
+    mass:
+      main: {type: Isothermal, centre: [0.0, 0.0], einstein_radius: 1.0, ell_comps: [0.1, 0.0]}
+  source:
+    redshift: 0.6
+    light:
+      disk: {type: Exponential, centre: [-0.03, 0.08], ell_comps: [0.14516129, 0.25142673],
+             effective_radius: 0.11, intensity: 500.0}
+  subhalo: {type: NFW, concentration: {kind: moline2017_eq7, x_sub: 1.0}}
+  injection: {mass_msun: 1.0e8, position: {kind: angle, angle_deg: 90.0}}
+psf:
+  truth: {kind: kernel, path: minimal_kernel.npy, pixel_scale_arcsec: 0.1}
+instrument:
+  detector: {gain_e_per_adu: 1.0, read_noise_e: 0.2, dark_current_e_per_s: 0.002}
+observation:
+  exposure_time_s: 2000.0
+  sky: {rate_e_per_s: 1.0}
+forecast:
+  positions: {kind: grid, spacing_arcsec: 0.2, half_width_arcsec: 1.2}
+  mask: {kind: all_pixels}

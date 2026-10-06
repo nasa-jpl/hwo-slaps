@@ -302,7 +302,118 @@ def _elliptical_gaussians(shape, scale, components):
     return image
 
 
-def write_inputs(out):
+def _engine_input_text(name):
+    """Final-schema inputs from the same fixed scientific scene used by the paper lane."""
+    science = SCENES[name]["science"]
+    lensing = science["lensing"]
+    light = lensing["source_galaxy"]["light"]
+    subhalo = lensing["subhalo"]
+    grid = lensing["grid"]
+    mass = lensing["lens_galaxy"]["mass"]
+    fisher = science["modeling"]["fisher"]
+    mapped = fisher["map"]["grid"]
+    detector = science["observation"]["detector"]
+    text = f'''run_name: {science["run_name"]}
+seed: {science["global_seed"]}
+cosmology: {{name: {lensing["cosmology"]}}}
+scene:
+  grid: {{shape: {grid["shape"]}, pixel_scale_arcsec: {grid["pixel_scale"]}, over_sample_size: {grid["over_sample_size"]}}}
+  lens:
+    redshift: {lensing["lens_galaxy"]["redshift"]}
+    mass:
+      mass: {{type: {mass["type"]}, centre: {mass["centre"]}, einstein_radius: {mass["einstein_radius"]}, ell_comps: {mass["ell_comps"]}}}
+  source:
+    redshift: {lensing["source_galaxy"]["redshift"]}
+    light:
+'''
+    if light["type"] == "Image":
+        text += f'''      light: {{type: Image, asset_path: ../{light["asset_path"]}, centre: {light["centre"]},
+              rotation_deg: {light["rotation_deg"]}, total_flux: {light["total_flux"]}, flux_scale: {light["flux_scale"]}, size_scale: {light["size_scale"]}}}
+'''
+    else:
+        text += f'''      light: {{type: {light["type"]}, centre: {light["centre"]}, ell_comps: {light["ell_comps"]},
+              intensity: {light["intensity"]}, effective_radius: {light["effective_radius"]}}}
+'''
+    if subhalo["model"] == "NFW":
+        concentration = subhalo["concentration"]
+        h = "null" if concentration["h"] is None else str(concentration["h"])
+        text += f'''  subhalo:
+    type: NFW
+    concentration: {{kind: {concentration["model"]}, x_sub: {concentration["x_sub"]}, h: {h}}}
+    redshift: null
+'''
+    else:
+        text += f'''  subhalo: {{type: {subhalo["model"]}, redshift: null}}
+'''
+    text += "psf:\n"
+    psf = science["psf"]
+    if psf.get("provider") == "kernel":
+        kernel = psf["kernel"]
+        text += f'''  truth: {{kind: kernel, path: ../{kernel["path"]}, pixel_scale_arcsec: {kernel["pixel_scale_arcsec"]}, normalize: true}}
+'''
+    else:
+        telescope = psf["telescope"]
+        high = psf["hres_psf"]
+        wavelength_nm = high["wavelength"] * 1e9
+        diameter = telescope["pupil_diameter"]
+        sample = high["wavelength"] / diameter * (180.0 / np.pi * 3600.0) / high["sampling"]
+        oversampling = int(np.ceil(grid["pixel_scale"] / sample))
+        aberrations = psf["aberrations"]
+        text += f'''  truth:
+    kind: optical
+    pupil: {{kind: hex_segmented, diameter_m: {diameter}, pixels: {high["num_pix"]}, supersampling: {telescope["supersampling_factor"]}, rings: {telescope["num_rings"]},
+            segment_point_to_point_m: {telescope["segment_point_to_point"]}, gap_m: {telescope["gap_size"]}}}
+    focal_length_m: {telescope["focal_length"]}
+    wavelength_nm: {wavelength_nm}
+    detector_oversampling: {oversampling}
+    kernel_shape: {psf["kernel"]["shape_native"]}
+    wavefront:
+      segment_hexikes: {aberrations["segment_hexikes"]}
+      zernikes: {aberrations["global_zernikes"]}
+'''
+    if "fit_psf" in science["modeling"]:
+        delta = science["modeling"]["fit_psf"]["delta"]
+        text += f'''  model:
+    kind: knowledge_error
+    draw:
+      prior: {{packaged: {Path(delta["prior_table"]).stem}}}
+      amplitude_rms_nm: {delta["amplitude_rms_nm"]}
+      seed: {delta["seed"]}
+      family: {delta["family"]}
+'''
+    else:
+        text += "  model: {kind: matched}\n"
+    difference = fisher["finite_diff"]
+    fixed = "[source.light.light.rotation_deg]" if light["type"] == "Image" else "[]"
+    text += f'''instrument:
+  detector: {{gain_e_per_adu: {detector["gain"]}, read_noise_e: {detector["read_noise"]}, dark_current_e_per_s: {detector["dark_current"]}}}
+observation:
+  exposure_time_s: {science["observation"]["exposure_time"]}
+  sky: {{rate_e_per_s: {detector["sky_background"]}}}
+forecast:
+  positions: {{kind: grid, spacing_arcsec: {mapped["spacing_arcsec"]}, half_width_arcsec: {mapped["half_width_arcsec"]}, annulus: null}}
+  mask: {{kind: all_pixels}}
+  nuisances:
+    fixed: {fixed}
+    steps: {{position: {difference["centre_arcsec"]}, einstein_radius: {difference["einstein_radius_arcsec"]}, ellipticity: {difference["ell_comp"]}, amplitude: {difference["source_intensity_frac"]}, size: {difference["source_reff_frac"]}}}
+    priors: {{}}
+    background_offset: true
+'''
+    if fisher["include_psf_nuisance"]:
+        modes = fisher["psf_basis"]
+        text += f'''    wavefront:
+      modes:
+        segment_hexikes: {{segments: {modes["segment_hexikes"]["segments"]}, nolls: {modes["segment_hexikes"]["mode_nolls"]}}}
+        zernikes: {{nolls: {modes["global_zernikes"]["mode_nolls"]}}}
+      step_nm: {fisher["psf_mode_steps"]["segment_hexikes"]}
+      prior_sigma_nm: {fisher["psf_mode_prior_sigmas"]["segment_hexikes"]}
+'''
+    else:
+        text += "    wavefront: null\n"
+    return text + "  noise_covariance: null\n"
+
+
+def write_inputs(out, *, legacy=False):
     """Write the synthetic asset, the detector kernel and the engine YAML."""
     out.mkdir(parents=True, exist_ok=True)
     sb = _elliptical_gaussians(SOURCE_SHAPE, SOURCE_PIXEL_SCALE, SOURCE_COMPONENTS)
@@ -316,6 +427,12 @@ def write_inputs(out):
              metadata_json=np.asarray(json.dumps(metadata, sort_keys=True)))
     kernel = _elliptical_gaussians(KERNEL_SHAPE, 1.0, KERNEL_COMPONENTS)
     np.save(out / DETECTOR_KERNEL, kernel)
+    engine = out / "engine"
+    engine.mkdir(exist_ok=True)
+    for name in SCENES:
+        (engine / f"{name}.yaml").write_text(_engine_input_text(name), encoding="utf-8")
+    if not legacy:
+        return
     for name, scene in SCENES.items():
         header = (
             f"# Paper-parity scene {name}: {scene['description']}.\n"
@@ -772,10 +889,10 @@ def assemble(out, work, scenes, invocation):
                       for lane, record in lane_records.items()},
         }
         if name in SCENES:
-            entry.update(engine_config=f"{name}.yaml", description=SCENES[name]["description"],
+            entry.update(engine_config=f"engine/{name}.yaml", description=SCENES[name]["description"],
                          masses_msun=SCENES[name]["masses_msun"])
         else:
-            entry.update(engine_config=f"{NONLINEAR['scene']}.yaml", **NONLINEAR)
+            entry.update(engine_config=f"engine/{NONLINEAR['scene']}.yaml", **NONLINEAR)
         reference = lane_records["reference"]
         for key, value in reference.items():
             if key not in ("seconds", "versions", "environment"):
@@ -804,15 +921,23 @@ def _diff_paths(a, b, prefix=""):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--paper-tree", type=Path, required=True)
+    parser.add_argument("--paper-tree", type=Path)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--work", type=Path, required=True)
-    parser.add_argument("--gpu", type=int, required=True)
+    parser.add_argument("--work", type=Path)
+    parser.add_argument("--gpu", type=int)
     parser.add_argument("--scenes", nargs="+", default=list(SCENES) + [NONLINEAR_SCENE])
     parser.add_argument("--lane", choices=LANES, help="internal: run one lane in this process")
     parser.add_argument("--kernel-anchor", action="store_true",
                         help=f"write only {K1_FIXTURE} (the K1 anchor), in the reference lane")
+    parser.add_argument("--inputs-only", action="store_true", help="write only synthetic assets and final-schema engine YAML")
     args = parser.parse_args()
+    if args.inputs_only:
+        if args.lane is not None or args.kernel_anchor:
+            parser.error("--inputs-only cannot be combined with --lane or --kernel-anchor")
+        write_inputs(args.out.resolve())
+        return 0
+    if args.paper_tree is None or args.work is None or args.gpu is None:
+        parser.error("--paper-tree, --work and --gpu are required for paper execution")
     paper_tree = args.paper_tree.resolve()
     out = args.out.resolve()
     work = args.work.resolve()
@@ -842,7 +967,7 @@ def main():
                    "--lane", "reference", "--kernel-anchor"]
         subprocess.run(command, env={**base, **_lane_environment("reference", args.gpu)}, check=True)
         return 0
-    write_inputs(out)
+    write_inputs(out, legacy=True)
     for lane in LANES:
         command = [sys.executable, str(Path(__file__).resolve()), "--paper-tree", str(paper_tree),
                    "--out", str(out), "--work", str(work), "--gpu", str(args.gpu),

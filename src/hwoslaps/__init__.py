@@ -1,27 +1,42 @@
-"""Reusable strong-lensing observations and subhalo sensitivity forecasts."""
-from __future__ import annotations
+"""Public engine values and operations, imported when requested."""
 from importlib import import_module
-from typing import Any
 
+from ._version import __version__
 _PUBLIC_API = {
-    "PreparedForecast": ("forecasting", "PreparedForecast"),
-    "prepare_forecast": ("forecasting", "prepare_forecast"),
-    "forecast": ("forecasting", "forecast"),
-    "simulate": ("forecasting", "simulate"),
-    "ForecastResult": ("modeling.forecast_results", "ForecastResult"),
-    "summarize_forecast": ("modeling.forecast_results", "summarize_forecast"),
-    "mass_reach": ("modeling.mass_reach", "mass_reach"),
-    "adaptive_mass_reach": ("modeling.mass_reach", "adaptive_mass_reach"),
-    "validate_nonlinear": ("modeling.nonlinear.api", "validate_nonlinear"),
+    "ConfigError": ("config.checks", "ConfigError"),
+    "EngineConfig": ("config.schema", "EngineConfig"),
+    "load_config": ("config.schema", "load_config"),
+    "simulate": ("simulation", "simulate"),
+    "Observation": ("observation.observation", "Observation"),
+    "Halo": ("scene.halos", "Halo"),
+    "prepare_forecast": ("fisher.api", "prepare_forecast"),
+    "forecast": ("fisher.api", "forecast"),
+    "PreparedForecast": ("fisher.api", "PreparedForecast"),
+    "Execution": ("fisher.api", "Execution"),
+    "ForecastResult": ("fisher.result", "ForecastResult"),
+    "summarize": ("analysis.reductions", "summarize"),
+    "mass_reach": ("analysis.reach", "mass_reach"),
+    "adaptive_mass_reach": ("analysis.reach", "adaptive_mass_reach"),
     "sample_population": ("population", "sample_population"),
     "iter_population_configs": ("population", "iter_population_configs"),
-    "save_forecast_result": ("forecast_artifacts", "save_forecast_result"),
-    "load_forecast_result": ("forecast_artifacts", "load_forecast_result"),
+    "prepare_case": ("inference.api", "prepare_case"),
+    "validate_nonlinear": ("inference.api", "validate_nonlinear"),
+    "FitSpec": ("inference.settings", "FitSpec"),
+    "SamplerSettings": ("inference.settings", "SamplerSettings"),
+    "RefineSettings": ("inference.settings", "RefineSettings"),
+    "CaseResult": ("inference.result", "CaseResult"),
+    "save_forecast": ("artifacts", "save_forecast"),
+    "load_forecast": ("artifacts", "load_forecast"),
+    "save_observation": ("artifacts", "save_observation"),
+    "load_observation": ("artifacts", "load_observation"),
+    "save_case": ("artifacts", "save_case"),
+    "load_case": ("artifacts", "load_case"),
 }
 __all__ = list(_PUBLIC_API)
+__all__.append("__version__")
 
 
-def __getattr__(name: str) -> Any:
+def __getattr__(name):
     if name not in _PUBLIC_API:
         raise AttributeError(name)
     module, member = _PUBLIC_API[name]
@@ -30,5 +45,5 @@ def __getattr__(name: str) -> Any:
     return value
 
 
-def __dir__() -> list[str]:
+def __dir__():
     return sorted(__all__)

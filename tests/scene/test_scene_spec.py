@@ -99,7 +99,8 @@ def test_parsed_scene_holds_the_read_values_and_defaults(scene_mapping):
     assert spec.grid.shape == (40, 40) and spec.grid.pixel_scale_arcsec == 0.05 and spec.grid.over_sample_size == 2
     (main,) = spec.lens.mass
     assert (main.name, main.plane, main.role, main.type) == ("main", "lens", "mass", "Isothermal")
-    assert dict(main.values) == {"centre": (0.0, 0.0), "einstein_radius": 0.8, "ell_comps": (0.05, 0.0)}
+    assert dict(main.values) == {"centre": (0.0, 0.0), "einstein_radius": 0.8, "ell_comps": (0.05, 0.0),
+                                "multipoles": None}
     assert spec.lens.light[0].values["intensity"] == 3.0 and spec.source.mass == ()
     assert spec.subhalo == HaloModel("NFW", Moline2017(x_sub=1.0, h=None), None)
     assert spec.subhalo_redshift is None and spec.injection is None

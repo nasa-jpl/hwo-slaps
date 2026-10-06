@@ -36,6 +36,13 @@ def test_nuisance_order_follows_registry_and_fixed_patterns(light_type, minimal_
             assert prepared.nuisances.parameters[amplitude].prior_sigma == 0.02
             np.testing.assert_array_equal(prepared.nuisances.prior_precision,
                                           [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2500.0, 0.0, 0.0, 0.0])
+        lens_images = np.array(prepared.nuisances.images[:len(lens_names)], copy=True)
+    minimal_mapping["forecast"]["nuisances"] = {"fixed": ["source.*"], "background_offset": False,
+                                                 "wavefront": None}
+    with prepare_forecast(minimal_mapping, execution=Execution(engine="reference")) as prepared:
+        assert prepared.nuisances.names == lens_names
+        np.testing.assert_array_equal(prepared.nuisances.images, lens_images)
+        np.testing.assert_array_equal(prepared.nuisances.prior_precision, np.zeros(len(lens_names)))
     minimal_mapping["forecast"]["nuisances"] = {"fixed": ["lens.mass.*", "source.light.*.centre_*"], "background_offset": False}
     with prepare_forecast(minimal_mapping, execution=Execution(engine="reference")) as prepared:
         assert prepared.nuisances.names == source_names[2:]

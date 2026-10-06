@@ -1,153 +1,159 @@
-"""Explicit scientific operations and command-owned output artifacts."""
-
+"""Run engine operations from composed configurations and write current artifacts."""
 from __future__ import annotations
 
 import argparse
-from contextlib import redirect_stderr, redirect_stdout
-import json
+from datetime import datetime, timezone
+import logging
+import math
 from pathlib import Path
 import sys
-from typing import Any, Sequence
 
-import numpy as np
-import yaml
-
-from .config import load_config
+from .config.checks import ConfigError, render_reference
+from .config.loading import dump_yaml, parse_assignment, set_path
+from .config.schema import ROOT_TABLE, compose_config, parse_config
 
 
-class _Tee:
-    """Write to the caller's stream and a line-buffered operation log."""
-
-    def __init__(self, *streams):
-        self._streams = streams
-
-    def write(self, data: str) -> int:
-        for stream in self._streams:
-            stream.write(data)
-        return len(data)
-
-    def flush(self) -> None:
-        for stream in self._streams:
-            stream.flush()
+def _positive_number(text):
+    try:
+        value = float(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive finite number") from error
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError("must be a positive finite number")
+    return value
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the CLI without importing any optical or inference backend."""
-    parser = argparse.ArgumentParser(description="Strong-lensing simulations and forecasts")
-    commands = parser.add_subparsers(dest="operation", required=True)
-    for operation, description in (
-        ("validate", "Compose and validate scientific configuration"),
-        ("simulate", "Simulate one observation"),
-        ("forecast", "Evaluate a prepared sensitivity forecast"),
-    ):
-        command = commands.add_parser(operation, help=description)
-        command.add_argument("-c", "--config", action="append", required=True, metavar="YAML")
-        command.add_argument("--base-dir", type=Path, help="Explicit base for file-declared relative paths")
-        if operation != "validate":
-            command.add_argument(
-                "--output-dir", required=True, type=Path,
-                help="New directory for operation artifacts",
-            )
-        if operation == "forecast":
-            command.add_argument(
-                "--masses", nargs="+", type=float, metavar="MSUN",
-                help="Explicit subhalo masses in solar masses",
-            )
-            command.add_argument(
-                "--positions", type=Path, metavar="JSON",
-                help="JSON array of [y, x] positions in arcseconds",
-            )
+def _positive_integer(text):
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return value
+
+
+def _seed(text):
+    value = int(text)
+    if value < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return value
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="hwoslaps", description=__doc__)
+    parser.add_argument("--log-level", choices=("DEBUG", "INFO", "WARNING"), default="INFO")
+    commands = parser.add_subparsers(dest="command", required=True)
+    validate = commands.add_parser("validate", help="check composed configuration and its digest")
+    simulate = commands.add_parser("simulate", help="simulate an injection or a smooth control")
+    forecast = commands.add_parser("forecast", help="forecast the supplied subhalo masses")
+    reference = commands.add_parser("reference", help="print the configuration reference")
+    reference.add_argument("section", nargs="?")
+    for command in (validate, simulate, forecast):
+        command.add_argument("configs", nargs="+", metavar="CONFIG")
+        command.add_argument("--set", action="append", default=[], metavar="PATH=VALUE")
+    validate.add_argument("--print", action="store_true", dest="print_config")
+    for command in (simulate, forecast):
+        command.add_argument("-o", "--output-dir", type=Path, required=True)
+    noise = simulate.add_mutually_exclusive_group(required=True)
+    noise.add_argument("--noise-seed", type=_seed)
+    noise.add_argument("--expected", action="store_true")
+    simulate.add_argument("--smooth", action="store_true")
+    forecast.add_argument("--masses", type=_positive_number, nargs="+", required=True)
+    forecast.add_argument("--engine", choices=("reference", "jax"), default="reference")
+    forecast.add_argument("--reference-workers", type=_positive_integer, default=1)
+    forecast.add_argument("--batch-size", type=_positive_integer, default=16)
+    forecast.add_argument("--progress", action="store_true")
     return parser
 
 
-def _read_positions(path: Path | None):
-    if path is None:
-        return None
-    with path.expanduser().open("r", encoding="utf-8") as stream:
-        values = json.load(stream)
-    positions = np.asarray(values, dtype=float)
-    if positions.ndim != 2 or positions.shape[1] != 2 or positions.shape[0] == 0:
-        raise ValueError("positions must contain a non-empty array of [y, x] coordinates")
-    if not np.all(np.isfinite(positions)):
-        raise ValueError("positions must contain finite coordinates")
-    return positions
+def _load(args):
+    mapping = compose_config(args.configs)
+    for assignment in args.set:
+        path, value = parse_assignment(assignment)
+        mapping = set_path(mapping, path, value, create=True)
+    return parse_config(mapping, base_dir=Path.cwd())
 
 
-def _metadata_value(value):
-    if isinstance(value, np.generic):
-        return value.item()
-    if isinstance(value, np.ndarray):
-        return value.tolist()
-    raise TypeError("observation metadata must contain JSON-compatible values")
-
-
-def _save_observation(observation: Any, path: Path) -> None:
-    """Write simulated arrays, dataset PSF, and explicit observation identity."""
-    metadata = json.dumps(observation.metadata, sort_keys=True, default=_metadata_value, allow_nan=False)
-    np.savez_compressed(
-        path,
-        data_adu=np.asarray(observation.data.native),
-        noise_adu=np.asarray(observation.noise_map.native),
-        noiseless_source_eps=np.asarray(observation.noiseless_source_eps),
-        imaging_psf_kernel=np.asarray(observation.psf.native),
-        pixel_scale_arcsec=float(observation.pixel_scale),
-        metadata_json=np.asarray(metadata),
-    )
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run a public engine operation with explicit command-owned I/O."""
-    parser = build_parser()
-    args = parser.parse_args(argv)
+def _new_output_dir(path):
+    destination = path.expanduser().resolve()
     try:
-        config = load_config(args.config, base_dir=args.base_dir)
-        if args.operation == "forecast" and "modeling" not in config:
-            raise ValueError("forecast requires modeling.fisher settings")
-        masses = getattr(args, "masses", None)
-        if masses is not None and (
-            not np.all(np.isfinite(masses)) or np.any(np.asarray(masses) <= 0)
-        ):
-            raise ValueError("masses must be positive finite solar masses")
-        positions = _read_positions(getattr(args, "positions", None))
-        if args.operation == "validate":
-            print("Configuration valid")
+        destination.mkdir(parents=True)
+    except FileExistsError as error:
+        raise ConfigError("output_dir", f"{destination} already exists") from error
+    return destination
+
+
+def _configure_logging(level, path=None):
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+    handlers = [logging.StreamHandler()]
+    handlers[0].setLevel(level)
+    if path is not None:
+        handlers.append(logging.FileHandler(path))
+        handlers[-1].setLevel(logging.DEBUG)
+    for handler in handlers:
+        handler.setFormatter(formatter)
+        root.addHandler(handler)
+    logging.captureWarnings(True)
+    return root, handlers
+
+
+def main(argv=None):
+    command = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+    args = parser.parse_args(command)
+    try:
+        if args.command == "reference":
+            print(render_reference([("Engine configuration", ROOT_TABLE)], section=args.section))
             return 0
-
-        output = args.output_dir.expanduser().resolve()
-        try:
-            output.mkdir(parents=True, exist_ok=False)
-        except FileExistsError as exc:
-            raise FileExistsError(
-                f"Output directory already exists: {output}; choose a new output directory"
-            ) from exc
-        with (output / "run.log").open("w", encoding="utf-8", buffering=1) as log:
-            with redirect_stdout(_Tee(sys.stdout, log)), redirect_stderr(_Tee(sys.stderr, log)):
-                from .provenance import write_provenance
-
-                command = list(sys.argv) if argv is None else ["hwoslaps", *argv]
-                if args.operation == "simulate":
-                    from . import simulate
-
-                    observation = simulate(config)
-                    with (output / "config_used.yaml").open("w", encoding="utf-8") as stream:
-                        yaml.safe_dump(config, stream, sort_keys=False)
-                    write_provenance(output / "provenance.yaml", config=config, command=command)
-                    _save_observation(observation, output / "observation.npz")
-                else:
-                    from . import forecast, prepare_forecast
-
-                    prepared = prepare_forecast(config)
-                    effective = prepared.config
-                    with (output / "config_used.yaml").open("w", encoding="utf-8") as stream:
-                        yaml.safe_dump(effective, stream, sort_keys=False)
-                    write_provenance(output / "provenance.yaml", config=effective, command=command)
-                    result = forecast(prepared, masses=masses, positions=positions)
-                    result.save_npz(output / "forecast.npz")
-                print(f"Artifacts: {output}")
-    except (OSError, ValueError, ImportError) as exc:
-        parser.error(str(exc))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        config = _load(args)
+        if args.command == "validate":
+            if args.print_config:
+                print(dump_yaml(config.to_mapping()), end="")
+            else:
+                print(f"{config.run_name}: valid, digest {config.digest()}")
+            return 0
+        if args.command == "forecast" and config.forecast is None:
+            raise ConfigError("forecast", "required for forecasting")
+        if args.command == "simulate" and not args.smooth and config.scene.injection is None:
+            raise ConfigError("scene.injection", "no injection configured; pass --smooth to simulate the smooth scene")
+        output = _new_output_dir(args.output_dir)
+    except ConfigError as error:
+        parser.error(str(error))
+    root, handlers = _configure_logging(args.log_level, output / "run.log")
+    try:
+        from .artifacts import save_forecast, save_observation, write_json, write_yaml
+        from .provenance import capture_provenance
+        run_record = {"operation": args.command, "command": command,
+                      "started_utc": datetime.now(timezone.utc).isoformat(),
+                      "environment": capture_provenance(command=command)}
+        if args.command == "simulate":
+            from .scene.cosmology import Cosmology
+            from .scene.subhalo import configured_injection
+            from .simulation import simulate
+            halo = None if args.smooth else configured_injection(config.scene, Cosmology(config.cosmology), seed=config.seed)
+            observation = simulate(config, subhalo=halo, noise_seed=args.noise_seed)
+            write_yaml(output / "effective_config.yaml", config.to_mapping())
+            save_observation(observation, output / "observation.npz")
+            config_digest = observation.config_digest
+        else:
+            from .fisher.api import Execution, forecast, prepare_forecast
+            execution = Execution(args.engine, args.reference_workers, args.batch_size, args.progress)
+            with prepare_forecast(config, execution=execution) as prepared:
+                write_yaml(output / "effective_config.yaml", prepared.config.to_mapping())
+                result = forecast(prepared, masses_msun=args.masses)
+                save_forecast(result, output / "forecast.npz")
+                config_digest = result.provenance["config_digest"]
+        write_json(output / "provenance.json", {**run_record, "config_digest": config_digest})
+        print(f"artifacts: {output}")
+        return 0
+    except KeyboardInterrupt:
+        root.exception("operation interrupted")
+        return 130
+    except Exception:
+        root.exception("operation failed")
+        raise
+    finally:
+        for handler in handlers:
+            root.removeHandler(handler)
+            handler.close()
+        logging.captureWarnings(False)

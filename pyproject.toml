@@ -1,7 +1,52 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "hwoslaps"
+dynamic = ["version"]
+description = "Subhalo detectability forecasts and nonlinear validation for strong-lens imaging"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Georgios Vassilakis" }]
+keywords = ["strong gravitational lensing", "dark matter subhalos", "point spread function", "forecast"]
+classifiers = ["Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11",
+               "Topic :: Scientific/Engineering :: Astronomy", "Topic :: Scientific/Engineering :: Physics"]
+dependencies = ["numpy>=1.26", "scipy>=1.11", "PyYAML>=6.0", "astropy>=6.0", "threadpoolctl>=3.5"]
+
+[project.optional-dependencies]
+lensing = [
+    "autolens @ git+https://github.com/PyAutoLabs/PyAutoLens.git@10bfea51ea95fb02087147190da562e186535d7f",
+    "autogalaxy==2026.5.14.2", "autoarray==2026.5.14.2", "autoconf==2026.5.14.2", "numba", "tqdm>=4.66",
+]
+optics = ["hcipy @ git+https://github.com/ehpor/hcipy.git@cc853b392463c33f02db6d20ce16dce0f7d10e2e"]
+jax = ["jax==0.4.38", "jaxlib==0.4.38"]
+cuda12 = ["hwoslaps[jax]", "jax-cuda12-plugin==0.4.38", "jax-cuda12-pjrt==0.4.38"]
+inference = ["hwoslaps[lensing,jax]", "autofit==2026.5.14.2", "nautilus-sampler==1.0.5", "scikit-learn==1.8.0"]
+plot = ["matplotlib>=3.7"]
+test = ["pytest>=8"]
+validated = ["numpy==1.26.4", "scipy==1.17.1", "threadpoolctl==3.6.0"]
+all = ["hwoslaps[lensing,optics,jax,inference,plot,test,validated]"]
+
+[project.scripts]
+hwoslaps = "hwoslaps.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "hwoslaps._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["hwoslaps*"]
+namespaces = false
+
+[tool.setuptools.package-data]
+"hwoslaps.optics" = ["priors/*.yaml"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
-markers = ["xtx_gpu: requires the supported JAX CUDA runtime and a GPU"]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+markers = ["backend: needs the scientific backend stack", "xtx_gpu: needs one assigned CUDA JAX device",
+           "xtx_multi_gpu: needs two assigned CUDA JAX devices"]
