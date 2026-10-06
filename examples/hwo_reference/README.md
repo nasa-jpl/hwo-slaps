@@ -31,7 +31,9 @@ supplies the original discrete-normalization amplitude.
 The reference test `tests/observation/test_observation_hwo_reference.py` checks collecting
 area at relative 1e-12, AB source and sky rates at 1e-9, continuous amplitude at 2e-7, and
 blank variance at 1e-15 through the real expected-observation boundary. The source-rate target applies to
-the AB input. The literal-amplitude overlay retains the small continuous/discrete difference.
+the AB input. The blank-variance target applies to the literal sky rate in `paper_values.yaml`;
+the AB input separately checks sky, dark and two-read variance using its resolved sky rate.
+The literal-amplitude overlay retains the small continuous/discrete difference.
 These photometric checks are separate from forecast convergence.
 
 The CPU smoke command preserves the scene and pupil, uses a 101 x 101 kernel, and changes
