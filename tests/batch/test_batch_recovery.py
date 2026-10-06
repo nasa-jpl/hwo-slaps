@@ -215,3 +215,47 @@ def test_changed_job_during_recovery_is_a_conflict(tiny_batch_spec, tmp_path, er
         for record in original_records:
             signal_owned(record, signal.SIGKILL)
         _cleanup(process, identity, log, root)
+
+
+def test_pre_ready_controller_crash_preserves_durable_worker_ownership(tiny_batch_spec, tmp_path):
+    spec = tiny_batch_spec(population={'count': 1}, execution={'workers_per_device': 1})
+    root = tmp_path / 'pre-ready'
+    process, identity, log = _controller(spec, root, tmp_path, 'pre-ready-controller')
+    resumed = resumed_identity = resumed_log = worker = None
+    try:
+        worker = _wait(lambda: next(iter(_worker_records(root)), None))
+        assert not any(event['type'] == 'worker_ready' for event in _events(root)), \
+            'the actual startup control must capture durable ownership before readiness'
+        assert group_members(worker)
+        signal_owned(worker, signal.SIGSTOP)
+        assert not any(event['type'] == 'worker_ready' for event in _events(root)), \
+            'the actual worker became ready before the pinned stop; this control is vacuous'
+        signal_owned(identity, signal.SIGKILL)
+        process.wait(timeout=10.)
+        assert group_members(worker), 'a real stopped earlier worker must survive its controller'
+        resumed, resumed_identity, resumed_log = _controller(spec, root, tmp_path, 'pre-ready-resume')
+        _wait(lambda: next((event for event in _events(root) if event['session'] == 2
+                           and event['type'] == 'waiting_for_earlier_workers'), None))
+        time.sleep(.1)
+        assert resumed.poll() is None and group_members(worker)
+        assert not any(event['session'] == 2 and event['type'] == 'worker_ready' for event in _events(root))
+        assert not (root / 'sessions/2/workers.jsonl').exists()
+        signal_owned(worker, signal.SIGCONT)
+        _wait(lambda: not group_members(worker), timeout=90.)
+        assert resumed.wait(timeout=240.) == 0
+        events = [event for event in _events(root) if event['session'] == 2]
+        exited = next(event for event in events if event['type'] == 'earlier_workers_exited')
+        ready = next(event for event in events if event['type'] == 'worker_ready')
+        assert ready['time'] > exited['time']
+        generations = [(record['pid'], record['start_time'], record['identity']) for record in _worker_records(root)]
+        assert len(generations) == len(set(generations)) == 2, 'publish ownership exactly once per real generation'
+        assert not any(group_members(record) for record in _worker_records(root))
+    finally:
+        if worker is not None:
+            # A failed non-vacuity/assertion must not strand a real stopped worker.
+            signal_owned(worker, signal.SIGCONT)
+            signal_owned(worker, signal.SIGKILL)
+            _wait(lambda: not group_members(worker), timeout=10.)
+        if resumed is not None:
+            _cleanup(resumed, resumed_identity, resumed_log, root)
+        _cleanup(process, identity, log, root)
