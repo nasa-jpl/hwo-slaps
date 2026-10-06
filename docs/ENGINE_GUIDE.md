@@ -83,7 +83,7 @@ with prepare_forecast(config) as prepared:
         sampler_seed=11, output_dir="out/cases")
 ```
 
-This is a source-checked call shape, without a promised sampler runtime or convergence outcome. `fixed_template` fixes the physical halo; `local_search` frees its position; `freed` also frees mass inside a supplied `MassSupport`. Use actual records to identify fitted parameters, masks and priors. Forecast background/wavefront nuisances are not automatically fitted by inference.
+This is a source-checked call shape, without a promised sampler runtime or convergence outcome. `fixed_template` fixes the physical halo; `local_search` frees its position; `freed` also frees mass inside a supplied `MassSupport`. Use actual records to identify fitted parameters, masks and priors. Inference currently fits the selected scene parameters; forecast background/wavefront columns remain unfitted.
 
 `q_signed = 2*(logL_subhalo-logL_smooth)` may be negative. `q_clipped` is a separate display value. Classification needs a complete caller `ClassificationRule`, including acceptance statuses and a nullable or positive stationarity tolerance. Failed/incomplete/unresolved cases remain distinct from accepted nondetections. Agreement reports mask/comparison differences and unfitted forecast nuisances. Retries may change sampler/refinement settings but preserve the physical case and comparison inputs.
 
