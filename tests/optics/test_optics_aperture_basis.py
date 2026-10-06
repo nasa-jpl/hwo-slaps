@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.optics.aperture_basis import ApertureBasisTransform, positive_diagonal_qr
+from hwoslaps.optics.knowledge_error import WavefrontDrawSpec, draw_wavefront
 from hwoslaps.optics.mode_priors import ModeWeightPriorSpec, draw_global_orthonormal, load_prior
 from hwoslaps.optics.pupils import build_pupil, parse_pupil
 from hwoslaps.optics.wavefront import WavefrontBasis
@@ -65,3 +66,13 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
         np.testing.assert_allclose(realized, orthonormal @ expected, rtol=1e-10, atol=1e-11)
         recovered = np.linalg.lstsq(orthonormal, realized, rcond=None)[0]
         np.testing.assert_allclose(recovered, expected, rtol=1e-10, atol=1e-11)
+        # The public draw must use that transform before its physical RMS normalization.
+        runtime = draw_wavefront(basis, WavefrontDrawSpec(
+            ModeWeightPriorSpec("packaged", "jwst_wss_drift_v1", None, None), 1.0, 20260806, "global"))
+        direction = np.array([runtime.orthonormal_global[noll] for noll in global_nolls])
+        expected_opd = orthonormal @ direction
+        expected_scale = 1.0 / np.std(expected_opd)
+        physical = basis.opd_nm(runtime.coefficients).ravel()[mask]
+        np.testing.assert_allclose(physical, expected_opd * expected_scale, rtol=1e-10, atol=1e-11)
+        projected = np.linalg.lstsq(orthonormal, physical, rcond=None)[0]
+        np.testing.assert_allclose(projected, direction * expected_scale, rtol=1e-10, atol=1e-11)
