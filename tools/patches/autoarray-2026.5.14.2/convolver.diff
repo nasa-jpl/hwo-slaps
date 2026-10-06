@@ -1,0 +1,54 @@
+--- a/autoarray/operators/convolver.py
++++ b/autoarray/operators/convolver.py
+@@ -234,16 +234,43 @@
+ 
+     def state_from(self, mask):
+ 
+-        if (
+-            mask.shape_native[0] != self.kernel.shape_native[0]
+-            or mask.shape_native[1] != self.kernel.shape_native[1]
+-        ):
+-            return ConvolverState(kernel=self.kernel, mask=mask)
++        # ConvolverState is a pure function of (kernel values, mask values),
++        # and building it is expensive (its blurring-mask derivation scales
++        # with mask pixels times kernel area). Memoize the last state, keyed
++        # on the contents of both inputs; content keys are required because
++        # kernels in this stack can be sum-normalized in place after a
++        # convolver is constructed.
++        cached_state = self._state
++        cached_mask = getattr(self, "_state_mask_values", None)
+ 
+-        if self._state is None:
+-            return ConvolverState(kernel=self.kernel, mask=mask)
++        if cached_state is not None and cached_mask is not None:
++            if (
++                cached_mask.shape == mask.shape_native
++                and np.array_equal(cached_mask, np.asarray(mask))
++                and np.array_equal(
++                    self._state_kernel_values,
++                    np.asarray(self.kernel.native.array),
++                )
++            ):
++                return cached_state
+ 
+-        return self._state
++        if cached_state is not None and cached_mask is None:
++            # A state supplied at construction carries no input record; trust
++            # it only for the kernel-shaped masks the previous implementation
++            # accepted.
++            if (
++                mask.shape_native[0] == self.kernel.shape_native[0]
++                and mask.shape_native[1] == self.kernel.shape_native[1]
++            ):
++                return cached_state
++
++        state = ConvolverState(kernel=self.kernel, mask=mask)
++        self._state = state
++        self._state_mask_values = np.array(mask, dtype=bool, copy=True)
++        self._state_kernel_values = np.array(
++            self.kernel.native.array, dtype=float, copy=True
++        )
++        return state
+ 
+     @property
+     def use_fft(self):

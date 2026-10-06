@@ -1,66 +1,40 @@
-name: Scientific engine contracts
-
+name: Engine tests
 on:
   push:
   pull_request:
   workflow_dispatch:
     inputs:
-      backend:
-        description: Run the pinned optional science stack
-        type: boolean
-        default: false
-      gpu:
-        description: Run CUDA contracts on a configured self-hosted GPU runner
-        type: boolean
-        default: false
-
-permissions:
-  contents: read
-
+      backend: {description: Run the pinned scientific stack, type: boolean, default: false}
+      gpu: {description: Run CUDA tests on a self-hosted GPU runner, type: boolean, default: false}
+permissions: {contents: read}
 jobs:
   core:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      - run: python -m pip install . pytest wheel
-      - name: Dependency-light science and installed command
-        run: >-
-          python -m pytest -q
-          tests/test_config_loading.py tests/test_config_validation_fisher.py
-          tests/test_config_validation_observation.py tests/test_cli.py
-          tests/test_population.py tests/test_detector_contract.py
-          tests/test_fisher_core.py tests/test_fisher_adapter.py
-          tests/test_fisher_geometry.py tests/test_fisher_nuisance.py
-          tests/test_fisher_runtime.py tests/test_fisher_runtime_guards.py
-          tests/test_forecast_results.py tests/test_forecast_artifacts.py
-          tests/test_mass_reach.py tests/test_study_boundary.py
-          tests/test_package_boundaries.py
-          tests/test_package_import_integrity.py
+        with: {python-version: '3.11'}
+      - run: python -m pip install 'setuptools>=77' wheel
+      - run: python -m pip install . pytest
+      - run: python tools/run_core_tests.py tests -q
   backend:
     if: github.event_name == 'workflow_dispatch' && inputs.backend
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: conda-incubator/setup-miniconda@v3
-        with:
-          python-version: '3.11'
-          activate-environment: hwo-slaps-ci
-      - name: Install the supported pinned backend
-        shell: bash -el {0}
+        with: {python-version: '3.11', activate-environment: hwo-slaps-ci}
+      - shell: bash -el {0}
         run: bash install.sh --cpu --env-name hwo-slaps-ci
-      - name: Real scientific backend contracts
-        shell: bash -el {0}
-        run: python tools/run_backend_tests.py tests -q -m 'not xtx_gpu'
+      - shell: bash -el {0}
+        env: {OMP_NUM_THREADS: '1', MKL_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1', NUMEXPR_NUM_THREADS: '1'}
+        run: python tools/run_backend_tests.py tests -q -m 'not xtx_gpu and not xtx_multi_gpu'
   gpu:
     if: github.event_name == 'workflow_dispatch' && inputs.gpu
     runs-on: [self-hosted, linux, gpu]
     steps:
       - uses: actions/checkout@v4
-      - name: CUDA contracts in the provisioned supported environment
-        shell: bash -el {0}
-        run: >-
-          python tools/run_backend_tests.py --require-gpu --numba-jit enabled
-          tests -q -m xtx_gpu
+      - shell: bash -el {0}
+        env: {JAX_ENABLE_X64: '1', XLA_PYTHON_CLIENT_PREALLOCATE: 'false', OMP_NUM_THREADS: '1',
+              MKL_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1', NUMEXPR_NUM_THREADS: '1'}
+        run: python tools/run_backend_tests.py --require-gpu --numba-jit enabled tests -q -m 'xtx_gpu and not xtx_multi_gpu'
