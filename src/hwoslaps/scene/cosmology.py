@@ -18,7 +18,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config.checks import Key, Nullable, Table, Text
+from ..config.checks import ConfigError, Key, ListOf, Nullable, Real, Rule, Table, Text
 from ..constants import C_M_S, G_SI, KM_TO_M, MPC_TO_M
 
 __all__ = [
@@ -28,10 +28,26 @@ __all__ = [
 
 RHO_CRIT_CONVENTION = "matter_lambda"
 
+
+def _check_baryon_density(values: Mapping[str, Any], path: str) -> None:
+    if values["Ob0"] > values["Om0"]:
+        raise ConfigError(f"{path}.Ob0", "must not exceed Om0")
+
+
+_FLAT_LCDM_TABLE = Table((
+    Key("H0", Real(min=0.0, min_open=True), "Hubble constant", unit="km/s/Mpc"),
+    Key("Om0", Real(min=0.0, min_open=True, max=1.0, max_open=True), "matter density fraction"),
+    Key("Ob0", Real(min=0.0), "baryon density fraction", 0.0),
+    Key("Tcmb0", Real(min=0.0), "CMB temperature", 0.0, unit="K"),
+    Key("Neff", Real(min=0.0), "effective number of neutrino species", 3.046),
+    Key("m_nu_eV", ListOf(Real(min=0.0), length=3), "three neutrino masses", [0.0, 0.0, 0.0], unit="eV"),
+), rules=(Rule("Ob0 must not exceed Om0", _check_baryon_density),))
+
 COSMOLOGY_TABLE = Table(
-    keys=(Key("name", Nullable(Text(choices=("Planck15",))),
-              "named flat Lambda-CDM realization (Planck15 resolves to ag.cosmo.Planck15())", None),),
-    exactly_one=(("name",),),
+    keys=(Key("name", Nullable(Text()),
+              "named astropy flat Lambda-CDM realization (Planck15 preserves the paper backend)", None),
+          Key("flat_lcdm", Nullable(_FLAT_LCDM_TABLE), "custom flat Lambda-CDM parameters", None)),
+    exactly_one=(("name", "flat_lcdm"),),
     doc="The cosmology of distances, critical densities and halo scales.",
 )
 
@@ -42,15 +58,15 @@ class FlatLCDMParameters:
 
     H0: float
     Om0: float
-    Ob0: float
-    Tcmb0: float
-    Neff: float
-    m_nu_eV: tuple[float, float, float]
+    Ob0: float = 0.0
+    Tcmb0: float = 0.0
+    Neff: float = 3.046
+    m_nu_eV: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
 
 @dataclass(frozen=True)
 class CosmologySpec:
-    """A named realization or, from W2-COSMO, custom flat Lambda-CDM parameters."""
+    """A named realization or custom flat Lambda-CDM parameters."""
 
     name: str | None
     flat_lcdm: FlatLCDMParameters | None
@@ -77,15 +93,30 @@ class LensingGeometry:
 def parse_cosmology(mapping: Mapping[str, Any], path: str = "cosmology") -> CosmologySpec:
     """Read the ``cosmology`` section strictly."""
     values = COSMOLOGY_TABLE.read(mapping, path)
-    return CosmologySpec(name=values["name"], flat_lcdm=None)
+    if values["name"] is not None:
+        try:
+            _flat_realization(values["name"])
+        except ValueError as error:
+            raise ConfigError(f"{path}.name", str(error)) from error
+    custom = values["flat_lcdm"]
+    return CosmologySpec(name=values["name"], flat_lcdm=None if custom is None else _parameters(custom))
+
+
+def _parameters(values: Mapping[str, Any]) -> FlatLCDMParameters:
+    return FlatLCDMParameters(**{**values, "m_nu_eV": tuple(values["m_nu_eV"])})
+
+
+def _flat_realization(name: str) -> Any:
+    from astropy.cosmology import FlatLambdaCDM, realizations
+
+    realization = getattr(realizations, name, None)
+    if not isinstance(realization, FlatLambdaCDM):
+        raise ValueError(f"cosmology {name!r} is not an astropy flat Lambda-CDM realization")
+    return realization
 
 
 def _realization_parameters(name: str) -> FlatLCDMParameters:
-    from astropy.cosmology import FlatLambdaCDM, realizations
-
-    realization = getattr(realizations, name)
-    if not isinstance(realization, FlatLambdaCDM):
-        raise ValueError(f"cosmology {name!r} is not a flat Lambda-CDM realization")
+    realization = _flat_realization(name)
     m_nu = realization.m_nu
     return FlatLCDMParameters(
         H0=float(realization.H0.value), Om0=float(realization.Om0), Ob0=float(realization.Ob0 or 0.0),
@@ -106,10 +137,12 @@ class Cosmology:
     def __init__(self, spec: CosmologySpec) -> None:
         if not isinstance(spec, CosmologySpec):
             raise TypeError(f"Cosmology needs a CosmologySpec, got {type(spec).__name__}")
-        if spec.name != "Planck15":
-            raise ValueError(f"cosmology {spec.name!r} is not available; this engine provides Planck15")
+        if (spec.name is None) == (spec.flat_lcdm is None):
+            raise ValueError("cosmology needs exactly one of name and flat_lcdm")
+        parameters = (_realization_parameters(spec.name) if spec.name is not None else
+                      _parameters(_FLAT_LCDM_TABLE.read(asdict(spec.flat_lcdm), "cosmology.flat_lcdm")))
         object.__setattr__(self, "_spec", spec)
-        object.__setattr__(self, "_parameters", _realization_parameters(spec.name))
+        object.__setattr__(self, "_parameters", parameters)
         object.__setattr__(self, "_backend", None)
         object.__setattr__(self, "_geometries", {})
 
@@ -134,7 +167,12 @@ class Cosmology:
         if self._backend is None:
             import autogalaxy as ag
 
-            object.__setattr__(self, "_backend", ag.cosmo.Planck15())
+            parameters = self._parameters
+            backend = (ag.cosmo.Planck15() if self._spec.name == "Planck15" else
+                       ag.cosmo.FlatLambdaCDM(H0=parameters.H0, Om0=parameters.Om0, Ob0=parameters.Ob0,
+                                             Tcmb0=parameters.Tcmb0, Neff=parameters.Neff,
+                                             m_nu=list(parameters.m_nu_eV)))
+            object.__setattr__(self, "_backend", backend)
         return self._backend
 
     def geometry(self, z_deflector: float, z_source: float) -> LensingGeometry:
@@ -166,13 +204,20 @@ class Cosmology:
     def to_mapping(self) -> dict[str, Any]:
         parameters = asdict(self._parameters)
         parameters["m_nu_eV"] = list(parameters["m_nu_eV"])
+        offset = None
+        if self._spec.name is not None and self._spec.name != "Planck15":
+            distance = float(self.autogalaxy().angular_diameter_distance_to_earth_in_kpc_from(0.5)) / 1000.0
+            reference = _flat_realization(self._spec.name).angular_diameter_distance(0.5).value
+            offset = float(distance / reference - 1.0)
         return {"name": self._spec.name, "parameters": parameters, "rho_crit_convention": RHO_CRIT_CONVENTION,
-                "autogalaxy_vs_astropy_d_a_rel_z0p5": None}
+                "autogalaxy_vs_astropy_d_a_rel_z0p5": offset}
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> Cosmology:
         """The cosmology a ``to_mapping`` record names; its recorded parameters must be this engine's."""
-        cosmology = cls(parse_cosmology({"name": mapping["name"]}, "cosmology"))
+        values = ({"name": mapping["name"]} if mapping["name"] is not None else
+                  {"flat_lcdm": mapping["parameters"]})
+        cosmology = cls(parse_cosmology(values, "cosmology"))
         if cosmology.to_mapping() != dict(mapping):
             raise ValueError(f"cosmology record {dict(mapping)!r} differs from {cosmology.to_mapping()!r}")
         return cosmology

@@ -37,7 +37,8 @@ from .cosmology import Cosmology, LensingGeometry
 
 __all__ = [
     "CONCENTRATION_TABLE", "ConcentrationSpec", "FixedConcentration", "HALO_MODEL_TABLE", "Halo",
-    "HaloLensing", "HaloModel", "MOLINE2017_MASS_RANGE_MSUN", "Moline2017", "PowerLawConcentration",
+    "HaloLensing", "HaloModel", "MOLINE2017_MASS_RANGE_MSUN", "Moline2017", "OverdensityTruncation",
+    "PowerLawConcentration", "TauTruncation", "TruncationSpec", "bmo_mass_fraction", "truncation_tau",
     "concentration", "halo_lensing", "halo_lensing_traced", "halo_model_from_values", "halo_model_table",
     "make_halo",
 ]
@@ -50,7 +51,7 @@ _MOLINE_A1, _MOLINE_A2, _MOLINE_A3 = -0.195, 0.089, 0.089
 _MOLINE_B = -0.54
 _MOLINE_MAX_X_SUB = 1.5
 
-_PROFILE_CLASSES = {"PointMass": "PointMass", "SIS": "IsothermalSph", "NFW": "NFWSph"}
+_PROFILE_CLASSES = {"PointMass": "PointMass", "SIS": "IsothermalSph", "NFW": "NFWSph", "TNFW": "TruncatedNFWSph"}
 
 
 def _finite(value: Any, name: str) -> float:
@@ -115,32 +116,54 @@ ConcentrationSpec = Moline2017 | PowerLawConcentration | FixedConcentration
 
 
 @dataclass(frozen=True)
+class TauTruncation:
+    """Truncation radius in units of the parent NFW scale radius."""
+
+    tau: float
+
+    def __post_init__(self) -> None:
+        _positive(self.tau, "tau")
+
+
+@dataclass(frozen=True)
+class OverdensityTruncation:
+    """Parent NFW mean enclosed density in units of the halo-plane critical density."""
+
+    overdensity: float
+
+    def __post_init__(self) -> None:
+        _positive(self.overdensity, "overdensity")
+
+
+TruncationSpec = TauTruncation | OverdensityTruncation
+
+
+@dataclass(frozen=True)
 class HaloModel:
-    """A halo family: ``PointMass``, ``SIS`` or ``NFW`` with its concentration relation.
+    """A halo family and, for NFW families, its concentration and optional truncation."""
 
-    ``truncation`` belongs to the truncated NFW of W2-COSMO and is None for every type here.
-    """
-
-    type: Literal["PointMass", "SIS", "NFW"]
+    type: Literal["PointMass", "SIS", "NFW", "TNFW"]
     concentration: ConcentrationSpec | None
-    truncation: None
+    truncation: TruncationSpec | None
 
     def __post_init__(self) -> None:
         if self.type not in _PROFILE_CLASSES:
             raise ValueError(f"halo type must be one of {', '.join(_PROFILE_CLASSES)}, got {self.type!r}")
-        if (self.type == "NFW") != (self.concentration is not None):
-            raise ValueError(f"an NFW halo needs a concentration relation and other types none; got "
+        if (self.type in ("NFW", "TNFW")) != (self.concentration is not None):
+            raise ValueError(f"NFW and TNFW halos need a concentration relation and other types none; got "
                              f"{self.type} with {self.concentration!r}")
-        if self.truncation is not None:
-            raise ValueError(f"halo type {self.type} has no truncation")
+        if (self.type == "TNFW") != (self.truncation is not None):
+            raise ValueError(f"only TNFW halos need a truncation, got {self.type} with {self.truncation!r}")
+        if self.truncation is not None and not isinstance(self.truncation, (TauTruncation, OverdensityTruncation)):
+            raise TypeError(f"unknown truncation {self.truncation!r}")
 
     @property
-    def mass_definition(self) -> Literal["point_mass", "M200c"]:
-        return "point_mass" if self.type == "PointMass" else "M200c"
+    def mass_definition(self) -> Literal["point_mass", "M200c", "M200c_parent"]:
+        return "point_mass" if self.type == "PointMass" else "M200c_parent" if self.type == "TNFW" else "M200c"
 
     @property
     def profile_class(self) -> str:
-        """The AutoLens mass profile class: PointMass, IsothermalSph or NFWSph."""
+        """The AutoLens truth mass profile class."""
         return _PROFILE_CLASSES[self.type]
 
 
@@ -179,17 +202,25 @@ CONCENTRATION_TABLE = Variants(
     doc="Concentration-mass relation of an NFW halo.",
 )
 
+_TRUNCATION_TABLE = Variants("kind", {
+    "tau": Table((Key("tau", Real(min=0.0, min_open=True), "r_t / r_s"),)),
+    "overdensity": Table((Key("overdensity", Real(min=0.0, min_open=True),
+                              "parent NFW mean enclosed density in units of rho_crit"),)),
+})
+
 _TYPE_KEYS: Mapping[str, tuple[Key, ...]] = {
     "PointMass": (),
     "SIS": (),
     "NFW": (Key("concentration", CONCENTRATION_TABLE, "concentration-mass relation"),),
+    "TNFW": (Key("concentration", CONCENTRATION_TABLE, "parent NFW concentration-mass relation"),
+             Key("truncation", _TRUNCATION_TABLE, "BMO truncation radius")),
 }
 
 
 def halo_model_table(extra_keys: Sequence[Key] = ()) -> Variants:
     """The halo-model variants (selected by ``type``), each extended by ``extra_keys``."""
     return Variants("type", {name: Table(keys + tuple(extra_keys)) for name, keys in _TYPE_KEYS.items()},
-                    doc="PointMass (point_mass), SIS (M200c) or NFW (M200c) halo.")
+                    doc="PointMass (point_mass), SIS or NFW (M200c), or TNFW (M200c_parent) halo.")
 
 
 HALO_MODEL_TABLE = halo_model_table()
@@ -198,8 +229,12 @@ HALO_MODEL_TABLE = halo_model_table()
 def halo_model_from_values(values: Mapping[str, Any]) -> HaloModel:
     """The ``HaloModel`` of values read by a halo-model table (extra keys are ignored)."""
     relation = values.get("concentration")
+    truncation = values.get("truncation")
+    if truncation is not None:
+        truncation = (TauTruncation(truncation["tau"]) if truncation["kind"] == "tau" else
+                      OverdensityTruncation(truncation["overdensity"]))
     return HaloModel(type=values["type"], concentration=None if relation is None else _relation(relation),
-                     truncation=None)
+                     truncation=truncation)
 
 
 def _relation(values: Mapping[str, Any]) -> ConcentrationSpec:
@@ -222,10 +257,42 @@ def _model_mapping(model: HaloModel) -> dict[str, Any]:
                                    "mass_slope": relation.mass_slope, "redshift_slope": relation.redshift_slope}
     elif isinstance(relation, FixedConcentration):
         record["concentration"] = {"kind": "fixed", "value": relation.value}
+    if isinstance(model.truncation, TauTruncation):
+        record["truncation"] = {"kind": "tau", "tau": model.truncation.tau}
+    elif isinstance(model.truncation, OverdensityTruncation):
+        record["truncation"] = {"kind": "overdensity", "overdensity": model.truncation.overdensity}
     return record
 
 
 # ------------------------------------------------------------------ physics
+
+
+def truncation_tau(spec: TruncationSpec, c200: Any, xp: Any = np) -> Any:
+    """BMO r_t/r_s; twelve log-radius Newton steps for a parent NFW overdensity radius."""
+    if isinstance(spec, TauTruncation):
+        return spec.tau
+    if not isinstance(spec, OverdensityTruncation):
+        raise TypeError(f"unknown truncation {spec!r}")
+    log_density = xp.log((200.0 / 3.0) * c200**3 / (xp.log(1.0 + c200) - c200 / (1.0 + c200)))
+    log_radius = xp.log(c200) + (1.0 / 3.0) * xp.log(200.0 / spec.overdensity)
+    for _ in range(12):
+        tau = xp.exp(log_radius)
+        enclosed = xp.log(1.0 + tau) - tau / (1.0 + tau)
+        residual = xp.log((spec.overdensity / 3.0) * tau**3 / enclosed) - log_density
+        derivative = 3.0 - tau**2 / ((1.0 + tau)**2 * enclosed)
+        log_radius = log_radius - residual / derivative
+    tau = xp.exp(log_radius)
+    if xp is np:
+        residual = np.log((spec.overdensity / 3.0) * tau**3 / (np.log(1.0 + tau) - tau / (1.0 + tau))) - log_density
+        if not np.all(np.isfinite(residual)) or np.any(np.abs(residual) > 1e-12):
+            raise ValueError("overdensity truncation did not converge within twelve log-radius Newton steps")
+    return tau
+
+
+def bmo_mass_fraction(tau: Any, xp: Any = np) -> Any:
+    """Dimensionless total mass of the BMO profile, relative to 4 pi rho_s r_s^3."""
+    squared = tau**2
+    return squared / (squared + 1.0)**2 * ((squared - 1.0) * xp.log(tau) + tau * xp.pi - (squared + 1.0))
 
 
 def concentration(spec: ConcentrationSpec, m200_msun: Any, z_halo: float, reduced_h: float, *, xp: Any = np) -> Any:
@@ -276,10 +343,14 @@ def halo_lensing(model: HaloModel, mass_msun: float, geometry: LensingGeometry, 
     scale_radius_m = scale_radius_kpc * KPC_TO_M
     kappa_s = (rho_s * scale_radius_m) / geometry.sigma_crit_kg_m2
     scale_radius_arcsec = (scale_radius_m / (geometry.d_deflector_mpc * MPC_TO_M)) * ARCSEC_PER_RAD
-    return HaloLensing(
-        {"kappa_s": float(kappa_s), "scale_radius": float(scale_radius_arcsec)},
-        {"reduced_h": float(reduced_h), "concentration": c200, "r200_kpc": float(r200_m * M_TO_KPC),
-         "scale_radius_kpc": scale_radius_kpc, "rho_s_kg_m3": float(rho_s)})
+    parameters = {"kappa_s": float(kappa_s), "scale_radius": float(scale_radius_arcsec)}
+    derived = {"reduced_h": float(reduced_h), "concentration": c200, "r200_kpc": float(r200_m * M_TO_KPC),
+               "scale_radius_kpc": scale_radius_kpc, "rho_s_kg_m3": float(rho_s)}
+    if model.type == "TNFW":
+        tau = float(truncation_tau(model.truncation, c200))
+        parameters["truncation_radius"] = tau * parameters["scale_radius"]
+        derived.update(tau=tau, total_mass_msun=float(mass * bmo_mass_fraction(tau) / f_c))
+    return HaloLensing(parameters, derived)
 
 
 def halo_lensing_traced(model: HaloModel, mass_msun: Any, geometry: LensingGeometry, *, reduced_h: float,
@@ -306,7 +377,11 @@ def halo_lensing_traced(model: HaloModel, mass_msun: Any, geometry: LensingGeome
     f_c = xp.log(1 + c200) - c200 / (1 + c200)
     rho_s = geometry.rho_crit_kg_m3 * (200.0 / 3.0) * c200**3 / f_c
     kappa_s = (rho_s * scale_radius_m) / geometry.sigma_crit_kg_m2
-    return {"kappa_s": kappa_s, "scale_radius": (scale_radius_m / d_deflector_m) * ARCSEC_PER_RAD}
+    parameters = {"kappa_s": kappa_s, "scale_radius": (scale_radius_m / d_deflector_m) * ARCSEC_PER_RAD}
+    if model.type == "TNFW":
+        tau = truncation_tau(model.truncation, c200, xp=xp)
+        parameters["truncation_radius"] = tau * parameters["scale_radius"]
+    return parameters
 
 
 # ------------------------------------------------------------------ realized halos
@@ -367,7 +442,11 @@ class Halo:
         """The AutoLens mass profile of this halo, at ``centre`` when given (radial tables use the origin)."""
         import autolens as al
 
-        profile_class = getattr(al.mp, self.model.profile_class)
+        if self.model.type == "TNFW":
+            from .halo_profiles import TruncatedNFWSph
+            profile_class = TruncatedNFWSph
+        else:
+            profile_class = getattr(al.mp, self.model.profile_class)
         return profile_class(centre=self.position_yx_arcsec if centre is None else tuple(centre),
                              **self.lensing().parameters)
 
