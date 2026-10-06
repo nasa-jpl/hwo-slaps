@@ -78,6 +78,8 @@ def sed_weights(bandpass: Bandpass, sed: SED, wavelengths_m: ArrayLike) -> Spect
     edges = bandpass.bin_edges(nodes)
     wavelengths, throughput = bandpass.integration_grid(sed)
     log_shape = sed.log_fnu(wavelengths)
+    if np.any(np.isnan(log_shape) | np.isposinf(log_shape)):
+        raise ValueError("the spectral log measure must be finite; -inf denotes zero response")
     positive = np.isfinite(log_shape) & (throughput > 0.0)
     if not np.any(positive):
         raise NoSpectralResponse("the spectrum has no photons through the bandpass")

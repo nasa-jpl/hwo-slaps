@@ -153,3 +153,18 @@ def test_photon_weighted_mean_wavelength_is_second_order_accurate(tmp_path):
     assert mean_errors[0]<5.e-4
     assert all(3.5<ratio<4.5 for ratio in np.array(mean_errors[1:])/mean_errors[:-1])
     assert all(1.7<ratio<2.3 for ratio in np.array(centre_errors[1:])/centre_errors[:-1])
+
+
+def test_unrepresentable_log_measure_is_a_numeric_error_instead_of_zero_response():
+    from decimal import Decimal,localcontext
+    from hwoslaps.optics.chromatic import NoSpectralResponse
+    # The requested common log scale itself exceeds float64's largest finite scalar.
+    # These photons are positive, so the one-node metadata consumer must not label them absent.
+    with localcontext() as context:
+        context.prec=60
+        assert Decimal("1e308")*(Decimal(1000)/2).ln()>Decimal(str(np.finfo(float).max))
+    band=build_bandpass(parse_bandpass({"kind":"top_hat","min_nm":1.,"max_nm":2.,"throughput":.5},"band"))
+    sed=build_sed(parse_sed({"kind":"power_law","index":1.e308},"sed"),redshift=0.)
+    with np.errstate(over="ignore"),pytest.raises(ValueError) as caught:
+        sed_weights(band,sed,band.nodes(1))
+    assert not isinstance(caught.value,NoSpectralResponse)
