@@ -2,24 +2,26 @@
 
 hwoslaps computes the profiled linear-Gaussian statistic of a dark-matter subhalo over masses and positions in a strong-lens image. It supports studies of mass reach, source morphology, PSF quality, PSF knowledge error and chromatic imaging. Lens and source parameters, background and supported wavefront modes can enter the nuisance model. AutoLens and Nautilus provide nonlinear comparisons under specified fit bounds.
 
-> Draft documentation: final CLI, example, installation and generated-reference checks are pending. The commands below describe the staged interfaces; no new example runtime or chromatic convergence result is claimed.
+> Validation in progress: the public CLI, isolated installation, generated reference and four example families have passed their scoped checks. Batch execution and final combined validation remain open.
 
 ## Start here
 
 - [Engine guide](docs/ENGINE_GUIDE.md)
 - [Scientific conventions and limits](docs/SCIENCE.md)
 - [Migration](docs/MIGRATION.md)
-- [Configuration reference](docs/CONFIG.md), generated from the final owning tables when integration is ready
+- [Configuration reference](docs/CONFIG.md), generated from the owning tables
 - [Test instructions](tests/README.md), pending final test-tooling reconciliation
 
-The Python core supplies configuration and array reductions. Rendering and nonlinear fitting need the supported science stack. These installation routes are defined by the package/installer and still need final environment verification:
+The Python core supplies configuration and array reductions. Rendering and nonlinear fitting need the supported science stack. The CPU installer and import-origin checks passed in an isolated XTX environment; GPU calculations were validated separately in the existing science environment. Choose the installer mode for your hardware:
 
 ```bash
 python -m pip install .
+bash install.sh --cpu
+# For a CUDA installation:
 bash install.sh --gpu
 ```
 
-The staged quick start uses positional configuration files and a new output directory:
+The quick start uses positional configuration files and a new output directory:
 
 ```bash
 hwoslaps validate configs/minimal.yaml
@@ -41,17 +43,17 @@ summary = summarize(result, q_threshold=10.0)  # a caller choice
 reach = mass_reach(summary, quantity="detectable_fraction", target=0.1, interpolation="linear")
 ```
 
-## Examples awaiting execution
+## Examples
 
-The current example sources distinguish reproduction inputs from illustrative instrument choices. Their final README and runtime records are pending.
+The examples distinguish reproduction inputs from illustrative instrument choices. These runtimes were measured on XTX on 2026-10-06; each linked README records the inputs and numerical limits.
 
 | Example | Purpose | Input label | Execution status |
 |---|---|---|---|
-| `examples/hwo_reference/` | Paper HWO pupil, SEI throughput and source/sky derivations | Reproduction targets | Unexecuted current drivers |
-| `examples/monolithic_illustrative/` | A configurable monolithic instrument | Illustrative, no Euclid measurement claim | Unexecuted |
-| `examples/chromatic/` | Multiple SED groups and a monochromatic fitted PSF comparison | Approximation with required convergence study | Unexecuted; no convergence claim |
-| `examples/kernel_psf/` | External matched/mismatched kernels and area reductions | Illustrative detector kernels | Generator and driver unexecuted |
-| `examples/population/` | Member streams and resumable forecast/nonlinear jobs | Illustrative population | Source defined; producer/runtime checks pending |
+| [HWO reference](examples/hwo_reference/README.md) | Paper HWO pupil, SEI throughput and source/sky derivations | Reproduction targets | CPU quick 75.31 s; GPU full 55.36 s |
+| [Monolithic instrument](examples/monolithic_illustrative/README.md) | A configurable monolithic instrument | Illustrative, no Euclid measurement claim | CPU 24.75 s |
+| [Chromatic](examples/chromatic/README.md) | Multiple SED groups and a monochromatic fitted PSF comparison | Finite-support approximation | GPU grid 137.41 s; six-product convergence comparison passed |
+| [Kernel PSF](examples/kernel_psf/README.md) | External matched/mismatched kernels and area reductions | Illustrative detector kernels | CPU pair 8.88 s |
+| [Population](examples/population/README.md) | Member streams and resumable forecast/nonlinear jobs | Illustrative population | Batch validation pending |
 
 A threshold of 10 in an example command is a reader choice, not a package detection rule. The generated products record the chosen threshold, input identities and execution settings.
 
