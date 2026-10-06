@@ -18,7 +18,11 @@ from ..spectra.bandpass import Bandpass, bin_integrals
 from ..spectra.sed import SED
 from .kernels import DetectorPSF, PIXEL_SCALE_ATOL_ARCSEC
 
-__all__ = ["SpectralWeights", "effective_kernel", "sed_weights"]
+__all__ = ["NoSpectralResponse", "SpectralWeights", "effective_kernel", "sed_weights"]
+
+
+class NoSpectralResponse(ValueError):
+    """The declared spectral shape has no photons through the captured band."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -76,7 +80,7 @@ def sed_weights(bandpass: Bandpass, sed: SED, wavelengths_m: ArrayLike) -> Spect
     log_shape = sed.log_fnu(wavelengths)
     positive = np.isfinite(log_shape) & (throughput > 0.0)
     if not np.any(positive):
-        raise ValueError("the spectrum has no photons through the bandpass")
+        raise NoSpectralResponse("the spectrum has no photons through the bandpass")
     logarithms = log_shape[positive] + np.log(throughput[positive])
     offset = float(np.max(logarithms))
     integrand = np.zeros_like(wavelengths)
