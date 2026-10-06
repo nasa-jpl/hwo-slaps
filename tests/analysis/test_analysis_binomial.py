@@ -11,9 +11,9 @@ from hwoslaps.analysis.knowledge_error import first_separating_amplitude
 @pytest.mark.parametrize("trials", [1, 590])
 def test_clopper_pearson_closed_forms_at_zero_and_full_counts(trials):
     assert clopper_pearson(0, trials, confidence=0.95) == pytest.approx(
-        (0, 1 - 0.025 ** (1 / trials)), abs=1e-12)
+        (0, 1 - 0.025 ** (1 / trials)), abs=1e-12, rel=0)
     assert clopper_pearson(trials, trials, confidence=0.95) == pytest.approx(
-        (0.025 ** (1 / trials), 1), abs=1e-12)
+        (0.025 ** (1 / trials), 1), abs=1e-12, rel=0)
 
 
 @pytest.mark.parametrize("count,trials", [(0, 590), (1, 590), (3, 493), (50, 100), (590, 590), (3, 20), (17, 40)])
@@ -21,11 +21,11 @@ def test_clopper_pearson_closed_forms_at_zero_and_full_counts(trials):
 def test_clopper_pearson_bounds_solve_the_binomial_tail_equations(count, trials, confidence):
     lower, upper = clopper_pearson(count, trials, confidence=confidence)
     independent = binomtest(count, trials).proportion_ci(confidence, method="exact")
-    assert (lower, upper) == pytest.approx((independent.low, independent.high), abs=1e-12)
+    assert (lower, upper) == pytest.approx((independent.low, independent.high), abs=1e-12, rel=0)
     if count:
-        assert binom.sf(count - 1, trials, lower) == pytest.approx((1 - confidence) / 2, abs=1e-10)
+        assert binom.sf(count - 1, trials, lower) == pytest.approx((1 - confidence) / 2, abs=1e-10, rel=0)
     if count != trials:
-        assert binom.cdf(count, trials, upper) == pytest.approx((1 - confidence) / 2, abs=1e-10)
+        assert binom.cdf(count, trials, upper) == pytest.approx((1 - confidence) / 2, abs=1e-10, rel=0)
 
 
 @pytest.mark.parametrize("count,trials", [(True, 5), (np.bool_(False), 5), (1.5, 5), (1, True),
@@ -52,10 +52,10 @@ def test_first_separating_amplitude():
         result = first_separating_amplitude(controls, null, confidence=0.95)
         assert result.amplitude == expected and result.separates_all_larger is True
         oracle = binomtest(null.count, null.trials).proportion_ci(0.95, method="exact")
-        assert result.null_interval == pytest.approx((oracle.low, oracle.high), abs=1e-12)
+        assert result.null_interval == pytest.approx((oracle.low, oracle.high), abs=1e-12, rel=0)
         for a, count in controls.items():
             bounds = binomtest(count.count, count.trials).proportion_ci(0.95, method="exact")
-            assert result.control_intervals[a] == pytest.approx((bounds.low, bounds.high), abs=1e-12)
+            assert result.control_intervals[a] == pytest.approx((bounds.low, bounds.high), abs=1e-12, rel=0)
         record = result.to_mapping()
         assert record["interval"] == "clopper_pearson_nominal"
         assert record["confidence"] == 0.95 and record["amplitude"] == expected
