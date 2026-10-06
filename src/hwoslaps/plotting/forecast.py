@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ._axes import axes_or_new
+from .axes import axes_or_new
 
 if TYPE_CHECKING:
     from ..analysis.knowledge_error import KnowledgeErrorAreas

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from ._axes import axes_or_new, pixel_extent
+from .axes import axes_or_new, pixel_extent
 
 if TYPE_CHECKING:
     from ..observation.observation import Observation

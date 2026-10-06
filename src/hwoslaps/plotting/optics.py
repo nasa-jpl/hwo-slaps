@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from ._axes import axes_or_new, pixel_extent
+from .axes import axes_or_new, pixel_extent
 
 if TYPE_CHECKING:
     from ..optics.kernels import DetectorPSF
@@ -19,7 +19,8 @@ def plot_kernel(psf: DetectorPSF, *, log: bool, ax=None) -> "Axes":
     """Show the detector kernel with linear or logarithmic colour normalization.
 
     Kernel values are preserved, with no peak normalization or added floor.
-    Zero kernel values are masked in logarithmic colour space.
+    Zero kernel values are masked in logarithmic colour space. Native row zero
+    has positive y, matching the actual convolved point image.
     """
     if not isinstance(log, (bool, np.bool_)):
         raise ValueError("log must be boolean")
@@ -33,7 +34,7 @@ def plot_kernel(psf: DetectorPSF, *, log: bool, ax=None) -> "Axes":
         options["norm"] = LogNorm(vmin=float(positive.min()), vmax=float(positive.max()))
         values = np.ma.masked_less_equal(values, 0)
     ax = axes_or_new(ax)
-    ax.imshow(values, origin="lower", extent=pixel_extent(psf.kernel.shape, psf.pixel_scale_arcsec),
+    ax.imshow(values, origin="upper", extent=pixel_extent(psf.kernel.shape, psf.pixel_scale_arcsec),
               interpolation="nearest", **options)
     ax.set_xlabel("x (arcsec)")
     ax.set_ylabel("y (arcsec)")
