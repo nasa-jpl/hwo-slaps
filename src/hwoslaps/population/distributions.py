@@ -24,7 +24,7 @@ class PopulationError(ValueError):
     """An invalid population specification or draw, with its input/member context."""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class Reference:
     variable: str
     index: int | None = None
@@ -91,15 +91,15 @@ def finite_value(value: Any, path: str) -> Any:
         raise PopulationError(f"{path}: {error}") from None
 
 
-def _number(value: float, name: str, *, positive=False) -> float:
+def _number(value: float, name: str, *, positive = False) -> float:
     value = read_value(value, name)
     if isinstance(value, Reference) or (positive and value <= 0.0):
         raise PopulationError(f"{name}: must be {'positive ' if positive else ''}finite number")
     return value
 
 
-def _bounds(low, high, *, positive=False):
-    low, high = _number(low, "low", positive=positive), _number(high, "high", positive=positive)
+def _bounds(low, high, *, positive = False):
+    low, high = _number(low, "low", positive = positive), _number(high, "high", positive = positive)
     if not low < high:
         raise PopulationError(f"high must exceed low, got [{low!r}, {high!r}]")
     return low, high
@@ -117,7 +117,7 @@ class _Law:
                      if isinstance(getattr(self, field.name), Reference))
 
     def to_mapping(self) -> dict[str, Any]:
-        return {"kind": self.kind, **{field.name: ({"var": value.name()} if isinstance(value, Reference)
+        return {"kind": self.kind, ** {field.name:({"var": value.name()} if isinstance(value, Reference)
                                                    else deepcopy(value))
                                     for field in fields(self) for value in (getattr(self, field.name),)}}
 
@@ -125,7 +125,7 @@ class _Law:
         if not 0.0 < u < 1.0:
             raise PopulationError(f"{self.kind}: quantile input must be in (0,1)")
         try:
-            with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            with np.errstate(over = "ignore", invalid = "ignore", divide = "ignore"):
                 return self._quantile(u, resolve)
         except (OverflowError, FloatingPointError) as error:
             raise PopulationError(f"{self.kind}: draw exceeded finite numerical support") from error
@@ -138,26 +138,29 @@ class _Law:
         for field in fields(self):
             value = getattr(self, field.name)
             if field.name in {"std", "median", "sigma_ln"} and not isinstance(value, Reference):
-                _number(value, f"{self.kind}.{field.name}", positive=True)
+                _number(value, f"{self.kind}.{field.name}", positive = True)
         if hasattr(self, "low") and not isinstance(self.low, Reference) and not isinstance(self.high, Reference):
-            _bounds(self.low, self.high, positive=self.kind in {"log_uniform", "truncated_lognormal"})
+            _bounds(self.low, self.high, positive = self.kind in {"log_uniform", "truncated_lognormal"})
         elif hasattr(self, "low") and self.kind in {"log_uniform", "truncated_lognormal"}:
             for name in ("low", "high"):
                 value = getattr(self, name)
-                if not isinstance(value, Reference): _number(value, name, positive=True)
+                if not isinstance(value, Reference):
+                    _number(value, name, positive = True)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class Constant(_Law):
     value: Any
     kind = "constant"
     def __post_init__(self):
         object.__setattr__(self, "value", finite_value(self.value, "constant.value"))
-    def references(self): return ()
-    def quantile(self, u, resolve): return deepcopy(self.value)
+    def references(self):
+        return ()
+    def quantile(self, u, resolve):
+        return deepcopy(self.value)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class Choice(_Law):
     values: tuple[Any, ...]
     weights: tuple[float, ...] | None = None
@@ -173,46 +176,47 @@ class Choice(_Law):
             if any(value < 0 for value in weights) or not math.isfinite(sum(weights)) or sum(weights) <= 0:
                 raise PopulationError("choice.weights: finite non-negative weights with positive finite sum required")
             object.__setattr__(self, "weights", weights)
-    def references(self): return ()
+    def references(self):
+        return ()
     def _quantile(self, u, resolve):
         weights = np.ones(len(self.values)) if self.weights is None else np.asarray(self.weights)
         cumulative = np.cumsum(weights) / np.sum(weights)
-        index = min(int(np.searchsorted(cumulative, u, side="right")), len(self.values)-1)
+        index = min(int(np.searchsorted(cumulative, u, side = "right")), len(self.values) - 1)
         return deepcopy(self.values[index])
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class Uniform(_Law):
     low: Value
     high: Value
     kind = "uniform"
     def _quantile(self, u, resolve):
         low, high = _bounds(resolve(self.low), resolve(self.high))
-        return _finite_scalar(low + u * (high-low))
+        return _finite_scalar(low + u * (high - low))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class LogUniform(_Law):
     low: Value
     high: Value
     kind = "log_uniform"
     def _quantile(self, u, resolve):
-        low, high = _bounds(resolve(self.low), resolve(self.high), positive=True)
-        value = _finite_scalar(np.exp(np.log(low) + u*(np.log(high)-np.log(low))))
+        low, high = _bounds(resolve(self.low), resolve(self.high), positive = True)
+        value = _finite_scalar(np.exp(np.log(low) + u * (np.log(high) - np.log(low))))
         return float(np.clip(value, low, high))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class Normal(_Law):
     mean: Value
     std: Value
     kind = "normal"
     def _quantile(self, u, resolve):
-        mean, std = _number(resolve(self.mean), "mean"), _number(resolve(self.std), "std", positive=True)
-        return _finite_scalar(mean + std*ndtri(u))
+        mean, std = _number(resolve(self.mean), "mean"), _number(resolve(self.std), "std", positive = True)
+        return _finite_scalar(mean + std * ndtri(u))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class TruncatedNormal(_Law):
     mean: Value
     std: Value
@@ -220,31 +224,31 @@ class TruncatedNormal(_Law):
     high: Value
     kind = "truncated_normal"
     def _quantile(self, u, resolve):
-        mean, std = _number(resolve(self.mean), "mean"), _number(resolve(self.std), "std", positive=True)
+        mean, std = _number(resolve(self.mean), "mean"), _number(resolve(self.std), "std", positive = True)
         low, high = _bounds(resolve(self.low), resolve(self.high))
-        a, b = (low-mean)/std, (high-mean)/std
+        a, b = (low - mean) / std, (high - mean) / std
         if a <= 0:
-            probability = ndtr(a) + u*(ndtr(b)-ndtr(a))
+            probability = ndtr(a) + u * (ndtr(b) - ndtr(a))
             t = ndtri(probability)
         else:
-            probability = ndtr(-b) + (1-u)*(ndtr(-a)-ndtr(-b))
-            t = -ndtri(probability)
-        value = _finite_scalar(mean + std*t)
+            probability = ndtr(- b) + (1 - u) * (ndtr(- a) - ndtr(- b))
+            t = - ndtri(probability)
+        value = _finite_scalar(mean + std * t)
         return float(np.clip(value, low, high))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class LogNormal(_Law):
     median: Value
     sigma_ln: Value
     kind = "lognormal"
     def _quantile(self, u, resolve):
-        median = _number(resolve(self.median), "median", positive=True)
-        sigma = _number(resolve(self.sigma_ln), "sigma_ln", positive=True)
-        return _finite_scalar(median*np.exp(sigma*ndtri(u)))
+        median = _number(resolve(self.median), "median", positive = True)
+        sigma = _number(resolve(self.sigma_ln), "sigma_ln", positive = True)
+        return _finite_scalar(median * np.exp(sigma * ndtri(u)))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen = True)
 class TruncatedLogNormal(_Law):
     median: Value
     sigma_ln: Value
@@ -252,12 +256,12 @@ class TruncatedLogNormal(_Law):
     high: Value
     kind = "truncated_lognormal"
     def _quantile(self, u, resolve):
-        median = _number(resolve(self.median), "median", positive=True)
-        sigma = _number(resolve(self.sigma_ln), "sigma_ln", positive=True)
-        low, high = _bounds(resolve(self.low), resolve(self.high), positive=True)
-        logvalue = TruncatedNormal(math.log(median),sigma,math.log(low),math.log(high)).quantile(u,lambda v:v)
+        median = _number(resolve(self.median), "median", positive = True)
+        sigma = _number(resolve(self.sigma_ln), "sigma_ln", positive = True)
+        low, high = _bounds(resolve(self.low), resolve(self.high), positive = True)
+        logvalue = TruncatedNormal(math.log(median), sigma, math.log(low), math.log(high)).quantile(u, lambda v: v)
         value = _finite_scalar(np.exp(logvalue))
-        return float(np.clip(value,low,high))
+        return float(np.clip(value, low, high))
 
 
 Distribution = Constant | Choice | Uniform | LogUniform | Normal | TruncatedNormal | LogNormal | TruncatedLogNormal
@@ -274,12 +278,12 @@ def parse_distribution(mapping: Mapping[str, Any], path: str) -> Distribution:
         keys.append(Key(item.name, check, item.name, None) if item.name == "weights"
                     else Key(item.name, check, item.name))
     try:
-        values = Table((Key("kind",Text(choices=(law.kind,)),"distribution kind"),*keys)).read(mapping,path)
+        values = Table((Key("kind", Text(choices = (law.kind,)), "distribution kind"), * keys)).read(mapping, path)
         values.pop("kind")
-        return law(**values)
+        return law( ** values)
     except (ConfigError, PopulationError) as error:
         raise PopulationError(f"{path}: {error}") from None
 
 
 def open_uniforms(rng: np.random.Generator, size: int) -> np.ndarray:
-    return (2*rng.integers(0,2**52,size=size,dtype=np.int64)+1)*2.0**-53
+    return (2 * rng.integers(0, 2 ** 52, size = size, dtype = np.int64) + 1) * 2.0 ** - 53
