@@ -42,11 +42,16 @@ def test_bandpass_tables_refuse_extrapolation_or_nonphysical_response(spectral_f
         build_bandpass(parse_bandpass({"kind": "table", **table, "support_nm": support}, "band"))
 
 
-def test_product_top_hat_must_cover_its_support():
+@pytest.mark.parametrize("mapping,path", [
+    ({"kind": "product", "support_nm": [450.0, 550.0],
+      "factors": [{"kind": "top_hat", "min_nm": 460.0, "max_nm": 540.0, "throughput": 0.8}]},
+     "band.factors[0]"),
+    ({"kind": "top_hat", "min_nm": 550.0, "max_nm": 450.0, "throughput": 1.0}, "band"),
+], ids=["product-containment", "reversed-top-hat"])
+def test_bandpass_support_rules_are_enforced(mapping, path):
     with pytest.raises(ConfigError) as error:
-        parse_bandpass({"kind": "product", "support_nm": [450.0, 550.0],
-            "factors": [{"kind": "top_hat", "min_nm": 460.0, "max_nm": 540.0, "throughput": 0.8}]}, "band")
-    assert error.value.path == "band.factors[0]"
+        parse_bandpass(mapping, "band")
+    assert error.value.path == path
 
 
 def test_nodes_and_clipped_bins_match_hand_geometry():
