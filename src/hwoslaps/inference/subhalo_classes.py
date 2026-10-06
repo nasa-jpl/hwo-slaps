@@ -13,11 +13,14 @@ import autolens as al
 import numpy as np
 
 from ..identity import mapping_digest
+from ..scene import halo_profiles
 from ..scene.cosmology import Cosmology, LensingGeometry
-from ..scene.halos import Halo, HaloModel, ConcentrationSpec, MOLINE2017_MASS_RANGE_MSUN, Moline2017, halo_lensing_traced
+from ..scene.halos import (Halo, HaloModel, ConcentrationSpec, TruncationSpec,
+                           MOLINE2017_MASS_RANGE_MSUN, Moline2017, halo_lensing_traced)
 from .settings import MassSupport
 
 __all__ = ["NFWM200SubhaloSph", "PointMassM200Subhalo", "SISM200Subhalo", "SubhaloMassMapping",
+           "TNFWM200SubhaloSph",
            "freed_profile_class", "mass_mapping"]
 
 
@@ -44,15 +47,19 @@ def _scalar(value: Any) -> Any:
 
 @dataclass(frozen=True)
 class SubhaloMassMapping:
-    model: Literal["PointMass", "SIS", "NFW"]
+    model: Literal["PointMass", "SIS", "NFW", "TNFW"]
     concentration: ConcentrationSpec | None
     h: float
     geometry: LensingGeometry
     support: MassSupport
+    truncation: TruncationSpec | None = None
 
     def digest(self) -> str:
-        return mapping_digest({"model": self.model, "concentration": None if self.concentration is None else asdict(self.concentration), "h": self.h,
-                               "geometry": asdict(self.geometry), "support": self.support.to_mapping()})
+        record = {"model": self.model, "concentration": None if self.concentration is None else asdict(self.concentration), "h": self.h,
+                  "geometry": asdict(self.geometry), "support": self.support.to_mapping()}
+        if self.truncation is not None:
+            record["truncation"] = asdict(self.truncation)
+        return mapping_digest(record)
 
     def profile_scales(self, log10_mass: float) -> dict[str, float]:
         if not self.support.contains(log10_mass):
@@ -60,7 +67,7 @@ class SubhaloMassMapping:
         return {key: float(value) for key, value in self.traced_scales(log10_mass, np).items()}
 
     def traced_scales(self, log10_mass: Any, xp: Any) -> dict[str, Any]:
-        return dict(halo_lensing_traced(HaloModel(self.model, self.concentration, None), 10.0 ** log10_mass, self.geometry,
+        return dict(halo_lensing_traced(HaloModel(self.model, self.concentration, self.truncation), 10.0 ** log10_mass, self.geometry,
                                        reduced_h=self.h, xp=xp))
 
 
@@ -75,13 +82,20 @@ def mass_mapping(hypothesis: Halo, cosmology: Cosmology, support: MassSupport) -
                               h=(hypothesis.model.concentration.h if isinstance(hypothesis.model.concentration, Moline2017)
                                  and hypothesis.model.concentration.h is not None else cosmology.reduced_h),
                               geometry=cosmology.geometry(hypothesis.redshift, hypothesis.source_redshift),
-                              support=support)
+                              support=support, truncation=hypothesis.model.truncation)
 
 
 def _scales(mapping: SubhaloMassMapping | None, kind: str, centre: Any, log10_m200: Any) -> dict[str, Any]:
     if mapping is None or mapping.model != kind:
         raise ValueError(f"mass_mapping for {kind} is required")
     return mapping.traced_scales(log10_m200, _xp_for(centre, log10_m200))
+
+
+class TNFWM200SubhaloSph(halo_profiles.TruncatedNFWSph):
+    def __init__(self, centre=(0.0, 0.0), log10_m200=7.0, mass_mapping=None):
+        scales = _scales(mass_mapping, "TNFW", centre, log10_m200)
+        super().__init__(centre=centre, **scales)
+        self.log10_m200, self.mass_mapping = _scalar(log10_m200), mass_mapping
 
 
 class NFWM200SubhaloSph(al.mp.NFWSph):
@@ -116,7 +130,8 @@ class PointMassM200Subhalo(al.mp.PointMass):
 
 
 def freed_profile_class(model: str) -> type:
-    classes = {"NFW": NFWM200SubhaloSph, "SIS": SISM200Subhalo, "PointMass": PointMassM200Subhalo}
+    classes = {"NFW": NFWM200SubhaloSph, "SIS": SISM200Subhalo, "PointMass": PointMassM200Subhalo,
+               "TNFW": TNFWM200SubhaloSph}
     if model not in classes:
         raise ValueError(f"unknown freed halo model {model!r}")
     return classes[model]
