@@ -73,6 +73,14 @@ def test_image_asset_loader_validates_the_storage_format(tmp_path, member, fragm
 
 
 def test_image_asset_loader_reads_the_format_and_reloads_rewritten_files(tmp_path):
+    """Public transport preserves prepared pixels/scale/provenance and file identity.
+
+    Loader-only synthetic NPZ and preparation oracles do not exercise the actual
+    image writer. A writer metadata loss or overwrite regression must fail this
+    existing transport owner; the real prepare/save/load path needs no new seam.
+    """
+    from hwoslaps.artifacts import save_image_asset
+
     path = _write(tmp_path / "asset.npz", sb=_unit_sb() * (1.0 + 5.0e-9))
     asset = load_image_asset(path)
     assert isinstance(asset, ImageAsset)
@@ -88,6 +96,26 @@ def test_image_asset_loader_reads_the_format_and_reloads_rewritten_files(tmp_pat
     reloaded = load_image_asset(path)
     assert reloaded is not asset and reloaded.sb.shape == (9, 10)
     assert reloaded != asset and len({asset, reloaded}) == 2
+
+    prepared = prepare_image_asset(_galaxy_frame(), half_light_radius_arcsec=0.12,
+                                   provenance={"catalog_id": "writer_roundtrip"})
+    prepared_digest = prepared.digest
+    written = save_image_asset(prepared, tmp_path / "prepared.npz")
+    original_bytes = written.read_bytes()
+    loaded = load_image_asset(written)
+    assert loaded.sb.dtype == prepared.sb.dtype and loaded.sb.shape == prepared.sb.shape
+    assert loaded.sb.tobytes() == prepared.sb.tobytes() and not loaded.sb.flags.writeable
+    assert loaded.pixel_scale_arcsec == prepared.pixel_scale_arcsec
+    assert loaded.metadata == prepared.metadata
+    assert loaded.digest == hashlib.sha256(original_bytes).hexdigest()
+    assert prepared.digest == prepared_digest
+    replacement = prepare_image_asset(_galaxy_frame(), half_light_radius_arcsec=0.12,
+                                      provenance={"catalog_id": "replacement"})
+    with pytest.raises(FileExistsError):
+        save_image_asset(replacement, written)
+    assert written.read_bytes() == original_bytes
+    assert load_image_asset(written) is loaded
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["asset.npz", "prepared.npz"]
 
 
 def _evaluate(profile, points):
