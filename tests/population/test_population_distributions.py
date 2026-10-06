@@ -52,7 +52,7 @@ def test_invalid_specs_raise_before_a_draw(law):
     {"kind":"uniform","low":-1e308,"high":1e308},
 ])
 def test_unrepresentable_draws_raise_with_member_and_variable(law):
-    with pytest.raises(PopulationError,match=r"member .*variable x.*finite"):
+    with pytest.raises(PopulationError,match=r"member \d+, variable x: distribution result:.*got inf"):
         sample_population(spec(law),20,seed=1)
 
 

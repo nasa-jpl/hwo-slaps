@@ -20,7 +20,7 @@ def test_bind_writes_effective_scalar_vector_block_and_list_paths(minimal_mappin
         ({"kind":"constant","value":.3},{"scene.lens.redshift":"x"},lambda c:c.scene.lens.redshift,.3),
         ({"kind":"vector","of":[.01,.02]},{"scene.lens.mass.mass.centre":"x"},lambda c:c.scene.lens.mass[0].values["centre"],(.01,.02)),
         ({"kind":"vector","of":[.01,.02]},{"scene.lens.mass.mass.centre.0":"x[1]"},lambda c:c.scene.lens.mass[0].values["centre"][0],.02),
-        ({"kind":"constant","value":{"rate_e_per_s":2.}},{"observation.sky":"x"},lambda c:c.observation.sky["rate_e_per_s"],2.),
+        ({"kind":"constant","value":{"rate_e_per_s":2.}},{"observation.sky":"x"},lambda c:c.observation.sky.rate_e_per_s,2.),
         ({"kind":"constant","value":.2},{"forecast.positions.positions_yx.0.1":"x"},lambda c:c.forecast.positions.positions_yx[0][1],.2),
     ]
     for variable,bind,read,expected in examples:
