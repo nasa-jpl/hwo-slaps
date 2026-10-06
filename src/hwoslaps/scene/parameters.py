@@ -43,10 +43,8 @@ def scene_parameters(spec: SceneSpec) -> tuple[SceneParameter, ...]:
     parameters = []
     for _, component in _components(spec):
         for definition in PROFILE_TYPES[component.type].parameters(component.values):
-            value = component.values[definition.key]
             parameters.append(SceneParameter(_name(component, definition),
-                                             float(value if definition.index is None else value[definition.index]),
-                                             definition))
+                                             float(definition.value_from(component.values)), definition))
     return tuple(parameters)
 
 
@@ -78,13 +76,7 @@ def _replaced(spec: SceneSpec, galaxy: GalaxySpec, component: ComponentSpec, def
     if not definition.domain.contains(value):
         element = "" if definition.index is None else f"[{definition.index}]"
         raise ConfigError(f"{path}.{definition.key}{element}", f"{label}: outside {definition.domain.describe()}")
-    values = dict(component.values)
-    if definition.index is None:
-        values[definition.key] = float(value)
-    else:
-        pair = list(values[definition.key])
-        pair[definition.index] = float(value)
-        values[definition.key] = pair
+    values = definition.replaced_values(component.values, value)
     table = (MASS_COMPONENT_TABLE if component.role == "mass" else LIGHT_COMPONENT_TABLE).tables[component.type]
     for rule in table.rules:
         try:

@@ -62,6 +62,38 @@ def _family_value(value: float | Mapping[str, float] | None, family: str) -> flo
     return value.get(family) if isinstance(value, Mapping) else value
 
 
+def _check_circular_power_law_tangent(scene: SceneSpec, parameters: Sequence[NuisanceParameter]) -> None:
+    """Admit the circular EPL central span only with its physical flat compensators.
+
+    For gamma!=2 the even normalization term is
+    C_mu=(2-gamma)*theta/(gamma-1)*J_theta -(2-gamma)*sum(c_i J_c_i).
+    Free/flat compensators give the same attainable first-order image span;
+    fixing or penalizing a required direction breaks that argument. Inspect
+    semantic priors, not finite central columns or underflowed precisions.
+    """
+    selected = {parameter.name: parameter for parameter in parameters if parameter.kind == "scene"}
+    for component in scene.lens.mass:
+        if (component.type != "PowerLaw" or component.values["slope"] == 2.0
+                or any(value != 0.0 for value in component.values["ell_comps"])):
+            continue
+        prefix = f"{component.plane}.{component.role}.{component.name}."
+        if not any(prefix + name in selected for name in ("ell_comp_1", "ell_comp_2")):
+            continue
+        required = [prefix + "einstein_radius"]
+        for order, pair in (component.values.get("multipoles") or {}).items():
+            if pair is not None:
+                required.extend(prefix + f"multipole_{order}_{index + 1}"
+                                for index, value in enumerate(pair) if value != 0.0)
+        missing = [name for name in required if name not in selected or selected[name].prior_sigma is not None]
+        if missing:
+            descriptions = [name + (" (fixed)" if name not in selected else " (Gaussian prior)") for name in missing]
+            raise ConfigError("forecast.nuisances", f"circular PowerLaw {prefix[:-1]} at slope "
+                              f"{component.values['slope']:g} has a normalization cusp in its selected ellipse "
+                              f"directions; flat/free compensation requires {', '.join(descriptions)}. "
+                              "Use a noncircular shape, fix the ellipse directions, or free those compensators "
+                              "without Gaussian priors")
+
+
 def resolve_nuisances(scene: SceneSpec, spec: NuisanceSpec, psfs: PsfPair) -> tuple[NuisanceParameter, ...]:
     provider = psfs.model.provider
     check_nuisance_spec(scene, spec, model_has_basis=provider.basis is not None)
@@ -94,6 +126,7 @@ def resolve_nuisances(scene: SceneSpec, spec: NuisanceSpec, psfs: PsfPair) -> tu
             parameters.append(NuisanceParameter("psf." + mode.name, "wavefront", provider.coefficients.value(mode),
                                                 _family_value(spec.wavefront.step_nm, mode.family),
                                                 _family_value(spec.wavefront.prior_sigma_nm, mode.family)))
+    _check_circular_power_law_tangent(scene, parameters)
     return tuple(parameters)
 
 

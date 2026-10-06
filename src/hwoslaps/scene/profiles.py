@@ -9,7 +9,7 @@ Each ``ProfileType`` defines a component type completely:
 - ``amplitude_key`` and ``unit_integral(values)``: the photometric normalization, the
   integral in arcsec^2 of the profile at unit amplitude.
 
-Component types here: ``Isothermal`` (mass), ``Exponential`` and ``Image`` (light).
+Mass types: Isothermal, PowerLaw and ExternalShear. Light types: Exponential, Sersic and Image.
 """
 
 from __future__ import annotations
@@ -74,6 +74,29 @@ class ParameterDef:
     kind: ParameterKind
     step_mode: Literal["additive", "multiplicative"]
     domain: Interval
+
+    def value_from(self, values: Mapping[str, Any]) -> Any:
+        """Read the scalar from its dotted registry key (and optional pair element)."""
+        value = values
+        for key in self.key.split("."):
+            value = value[key]
+        return value if self.index is None else value[self.index]
+
+    def replaced_values(self, values: Mapping[str, Any], value: float) -> dict[str, Any]:
+        """Copy the mappings on this key's path and replace only this scalar."""
+        result = dict(values)
+        target = result
+        keys = self.key.split(".")
+        for key in keys[:-1]:
+            target[key] = dict(target[key])
+            target = target[key]
+        if self.index is None:
+            target[keys[-1]] = float(value)
+        else:
+            pair = list(target[keys[-1]])
+            pair[self.index] = float(value)
+            target[keys[-1]] = pair
+        return result
 
 
 @dataclass(frozen=True)
@@ -194,6 +217,58 @@ def sersic_unit_integral(effective_radius: float, sersic_index: float) -> float:
     return float(2.0 * np.pi * n * effective_radius**2 * np.exp(b) * gamma(2.0 * n) / b ** (2.0 * n))
 
 
+# ------------------------------------------------------------------ multipoles shared by Isothermal and PowerLaw
+
+
+def _check_orders(values: Mapping[str, Any], path: str) -> None:
+    if all(value is None for value in values.values()):
+        raise ConfigError(path, "multipoles must contain at least one of m3 or m4")
+
+
+_MULTIPOLES = Key("multipoles", Nullable(Table((
+    Key("m3", Nullable(Pair(Real())), "Cartesian third-order multipole components", None),
+    Key("m4", Nullable(Pair(Real())), "Cartesian fourth-order multipole components", None),
+), rules=(Rule("at least one multipole order", _check_orders),))), "multipoles linked to the base profile", None)
+
+
+def _check_multipoles(values: Mapping[str, Any], path: str) -> None:
+    multipoles = values["multipoles"]
+    if multipoles is None:
+        return
+    e = math.hypot(*values["ell_comps"])
+    q = (1.0 - e) / (1.0 + e)
+    slope = values.get("slope", 2.0)
+    if "slope" not in values:
+        q = min(q, 0.99999)  # The evaluated Isothermal axis ratio, including its circular clamp.
+    bound = 2.0 * (3.0 - slope) * q ** (slope - 1.0) / (1.0 + q)
+    amplitude = sum(math.hypot(*pair) for pair in multipoles.values() if pair is not None)
+    if not amplitude < bound:
+        raise ConfigError(f"{path}.multipoles" if path else "multipoles",
+                          f"sum of multipole amplitudes {amplitude:g} must be below {bound:g} "
+                          "to keep convergence positive at the evaluated axis ratio")
+
+
+_MULTIPOLE_RULE = Rule("positive base plus multipole convergence", _check_multipoles)
+
+
+def _multipole_parameters(values: Mapping[str, Any]) -> tuple[ParameterDef, ...]:
+    multipoles = values.get("multipoles") or {}
+    return tuple(ParameterDef(f"multipole_{order}_{index + 1}", f"multipoles.{order}", index,
+                              "multipole", "additive", _REAL_LINE)
+                 for order in ("m3", "m4") if multipoles.get(order) is not None for index in (0, 1))
+
+
+def _multipole_layouts(values: Mapping[str, Any]) -> tuple[ProfileLayout, ...]:
+    multipoles = values.get("multipoles") or {}
+    return tuple(ProfileLayout(f"_multipole_{order}", "CartesianPowerLawMultipole", (
+        ArgumentLayout("m", (Fixed(int(order[1:])),)),
+        ArgumentLayout("centre", (Link("", "centre", 0), Link("", "centre", 1))),
+        ArgumentLayout("einstein_radius", (Link("", "einstein_radius", None),)),
+        ArgumentLayout("slope", (Link("", "slope", None),) if "slope" in values else (Fixed(2.0),)),
+        _pair("multipole_comps", f"multipole_{order}_1", f"multipole_{order}_2"),
+    )) for order in ("m3", "m4") if multipoles.get(order) is not None)
+
+
 # ------------------------------------------------------------------ Isothermal (mass)
 
 _ISOTHERMAL_PARAMETERS = (
@@ -213,13 +288,46 @@ ISOTHERMAL = ProfileType(
     table=Table(
         (_CENTRE,
          Key("einstein_radius", _real(_POSITIVE), "AutoLens Einstein radius of the SIE", unit="arcsec"),
-         _ELL_COMPS),
-        rules=(_ELLIPTICITY_RULE,),
+         _ELL_COMPS, _MULTIPOLES),
+        rules=(_ELLIPTICITY_RULE, _MULTIPOLE_RULE),
         doc="Singular isothermal ellipsoid (al.mp.Isothermal); AutoGalaxy evaluates it at q <= 0.99999.",
     ),
     amplitude_key=None,
-    parameters=lambda values: _ISOTHERMAL_PARAMETERS,
-    layout=lambda values: _ISOTHERMAL_LAYOUT,
+    parameters=lambda values: (*_ISOTHERMAL_PARAMETERS, *_multipole_parameters(values)),
+    layout=lambda values: (*_ISOTHERMAL_LAYOUT, *_multipole_layouts(values)),
+    unit_integral=None,
+)
+
+# ------------------------------------------------------------------ PowerLaw and ExternalShear (mass)
+
+_SLOPE = Interval(1.0, 3.0)
+_POWER_LAW_PARAMETERS = (*_ISOTHERMAL_PARAMETERS,
+                         ParameterDef("slope", "slope", None, "slope", "additive", _SLOPE))
+_POWER_LAW_LAYOUT = (ProfileLayout("", "PowerLaw", (*_ISOTHERMAL_LAYOUT[0].arguments, _scalar("slope"))),)
+
+POWER_LAW = ProfileType(
+    name="PowerLaw", role="mass",
+    table=Table((*ISOTHERMAL.table.keys, Key("slope", _real(_SLOPE), "three-dimensional density slope")),
+                rules=(_ELLIPTICITY_RULE, _MULTIPOLE_RULE), doc="Elliptical power-law lens mass."),
+    amplitude_key=None,
+    parameters=lambda values: (*_POWER_LAW_PARAMETERS, *_multipole_parameters(values)),
+    layout=lambda values: (*_POWER_LAW_LAYOUT, *_multipole_layouts(values)), unit_integral=None,
+)
+
+
+def _check_shear(values: Mapping[str, Any], path: str) -> None:
+    if not math.hypot(values["gamma_1"], values["gamma_2"]) < 1.0:
+        raise ConfigError(path, "hypot(gamma_1, gamma_2) must be below 1")
+
+
+EXTERNAL_SHEAR = ProfileType(
+    name="ExternalShear", role="mass",
+    table=Table(tuple(Key(name, Real(), "external shear about the image-plane origin")
+                      for name in ("gamma_1", "gamma_2")), rules=(Rule("hypot(shear) < 1", _check_shear),)),
+    amplitude_key=None,
+    parameters=lambda values: tuple(ParameterDef(name, name, None, "shear", "additive", _REAL_LINE)
+                                    for name in ("gamma_1", "gamma_2")),
+    layout=lambda values: (ProfileLayout("", "ExternalShear", (_scalar("gamma_1"), _scalar("gamma_2"))),),
     unit_integral=None,
 )
 
@@ -253,6 +361,23 @@ EXPONENTIAL = ProfileType(
     parameters=lambda values: _EXPONENTIAL_PARAMETERS,
     layout=lambda values: _EXPONENTIAL_LAYOUT,
     unit_integral=lambda values: sersic_unit_integral(values["effective_radius"], 1.0),
+)
+
+# ------------------------------------------------------------------ Sersic (light)
+
+_SERSIC_INDEX = Interval(0.36, 8.0, open_lower=False, open_upper=False)
+SERSIC = ProfileType(
+    name="Sersic", role="light",
+    table=Table((*EXPONENTIAL.table.keys,
+                 Key("sersic_index", _real(_SERSIC_INDEX), "Sersic index of the rendered Ciotti-Bertin series")),
+                rules=(_ELLIPTICITY_RULE,), doc="Sersic light with circularized effective radius."),
+    amplitude_key="intensity",
+    parameters=lambda values: (*_EXPONENTIAL_PARAMETERS,
+                              ParameterDef("sersic_index", "sersic_index", None, "sersic_index", "additive",
+                                           _SERSIC_INDEX)),
+    layout=lambda values: (ProfileLayout("", "Sersic", (*_EXPONENTIAL_LAYOUT[0].arguments,
+                                                        _scalar("sersic_index"))),),
+    unit_integral=lambda values: sersic_unit_integral(values["effective_radius"], values["sersic_index"]),
 )
 
 # ------------------------------------------------------------------ Image (light)
@@ -296,7 +421,7 @@ IMAGE = ProfileType(
     unit_integral=lambda values: values["flux_scale"] * values["size_scale"] ** 2,
 )
 
-PROFILE_TYPES: Mapping[str, ProfileType] = {profile.name: profile for profile in (ISOTHERMAL, EXPONENTIAL, IMAGE)}
+PROFILE_TYPES: Mapping[str, ProfileType] = {profile.name: profile for profile in (ISOTHERMAL, POWER_LAW, EXTERNAL_SHEAR, EXPONENTIAL, SERSIC, IMAGE)}
 
 
 # ------------------------------------------------------------------ instantiation
@@ -317,8 +442,7 @@ def instantiate(component: ComponentSpec, *, assets: Mapping[str, ImageAsset] | 
     def element_value(element: ParameterRef | Fixed | Link) -> Any:
         if isinstance(element, ParameterRef):
             definition = definitions[element.parameter]
-            value = values[definition.key]
-            return value if definition.index is None else value[definition.index]
+            return definition.value_from(values)
         if isinstance(element, Fixed):
             return element.value
         linked = arguments_by_suffix[element.suffix][element.argument]
@@ -349,6 +473,10 @@ def _construct(role: str, profile_class: str, arguments: dict[str, Any],
         else:
             raise KeyError(f"image asset {path} is not among the prepared assets {sorted(assets)}")
         return ImageLightProfile.from_asset(asset, **arguments)
+    if profile_class == "CartesianPowerLawMultipole":
+        from .multipole_profile import CartesianPowerLawMultipole
+
+        return CartesianPowerLawMultipole(**arguments)
     import autolens as al
 
     return getattr(al.mp if role == "mass" else al.lp, profile_class)(**arguments)
