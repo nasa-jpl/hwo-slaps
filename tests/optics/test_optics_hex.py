@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.config.checks import ConfigError
-from hwoslaps.optics.metrics import captured_power_fraction, strehl_ratio
+from hwoslaps.optics.metrics import captured_power_fraction, fwhm_arcsec, strehl_ratio
 from hwoslaps.optics.providers import build_psf_provider, parse_psf
 from hwoslaps.optics.pupils import Pupil, build_pupil, parse_pupil
 from hwoslaps.optics.wavefront import WavefrontMode
@@ -82,3 +82,25 @@ def test_recorded_captured_power_equals_the_metric(p1_truth):
     derivative_side = psf.kernel(coefficients=shifted).source["captured_power_fraction"]
     assert derivative_side == captured_power_fraction(psf, coefficients=shifted)
     assert derivative_side != recorded
+
+
+def test_segmented_kernel_converges_with_pupil_sampling(paper_pupil):
+    results = []
+    for pixels in (96, 128, 192):
+        truth = {"kind": "optical", "pupil": {**paper_pupil, "pixels": pixels},
+                 "focal_length_m": 144.0, "wavelength_nm": 500.0,
+                 "detector_oversampling": 3, "kernel_shape": [15, 15], "wavefront": {}}
+        provider = build_psf_provider(parse_psf({"truth": truth}).truth, pixel_scale_arcsec=0.00716)
+        kernel = provider.kernel().kernel
+        rows, columns = np.indices(kernel.shape)
+        centre = np.array(kernel.shape) // 2
+        moment = np.sum(kernel * ((rows - centre[0]) ** 2 + (columns - centre[1]) ** 2))
+        field = provider.focal_field(samples_per_lambda_over_d=6, radius_lambda_over_d=6)
+        assert strehl_ratio(provider) == pytest.approx(1.0, rel=1e-12, abs=1e-12)
+        assert provider.basis.aperture_rms_nm(provider.coefficients) == pytest.approx(0.0, abs=1e-12)
+        results.append((fwhm_arcsec(field), kernel[tuple(centre)], moment))
+    reference = results[-1]
+    for width, peak, moment in results:
+        assert width == pytest.approx(reference[0], rel=2e-3)
+        assert peak == pytest.approx(reference[1], rel=5e-3)
+        assert moment == pytest.approx(reference[2], rel=1e-2)
