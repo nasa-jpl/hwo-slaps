@@ -62,6 +62,7 @@ def test_chromatic_jax_engine_matches_reference(minimal_mapping,relation,device)
     from hwoslaps.fisher.api import Execution,forecast,prepare_forecast
     mapping=chromatic_mapping(minimal_mapping,relation=relation)
     with prepare_forecast(mapping) as reference,prepare_forecast(mapping,execution=Execution(engine="jax")) as jax:
+        if device=="gpu":assert jax.engine.describe()["device"].startswith("cuda")
         actual=forecast(jax,masses_msun=[1.e8]);expected=forecast(reference,masses_msun=[1.e8])
         assert len(jax.psfs.truth_kernels.kernels)==3
         assert len(jax.engine._model_slots)==2 # source slots; lens is an independently bound constant.

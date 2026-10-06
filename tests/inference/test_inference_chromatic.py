@@ -9,7 +9,8 @@ pytestmark=pytest.mark.backend
 
 
 @pytest.mark.parametrize("model",["kernel","monochromatic"])
-def test_chromatic_truth_is_fit_with_one_actual_model_kernel(minimal_mapping,model,image_asset):
+@pytest.mark.parametrize("use_jax",[False,True])
+def test_chromatic_truth_is_fit_with_one_actual_model_kernel(minimal_mapping,model,image_asset,use_jax):
     from hwoslaps.fisher.api import prepare_forecast
     from hwoslaps.inference.api import prepare_case
     from hwoslaps.inference.settings import FitSpec
@@ -40,7 +41,7 @@ def test_chromatic_truth_is_fit_with_one_actual_model_kernel(minimal_mapping,mod
         assert len(prepared.psfs.model_kernels.kernels)==1
         trial=prepared.hypothesis(1.e8,(.4,-.6))
         observation=simulate(prepared,subhalo=trial,noise_seed=None)
-        case=prepare_case(prepared,trial,observation,fit=FitSpec(mode="fixed_template"),use_jax=False)
+        case=prepare_case(prepared,trial,observation,fit=FitSpec(mode="fixed_template"),use_jax=use_jax)
         assert tuple(prepared.scene.light_groups)==("source:light","source:second")
         assert prepared.scene.light_groups["source:light"].components==("light","third")
         model_names=case.model("smooth").parameter_names
