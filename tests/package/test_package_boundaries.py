@@ -114,6 +114,7 @@ def test_wheel_contains_priors_console_script_and_backend_free_command(tmp_path)
     completed = subprocess.run([sys.executable, "-c", program], cwd=foreign, env=environment,
                                check=True, capture_output=True, text=True, timeout=30)
     assert "valid, digest" in completed.stdout
+    assert not any(foreign.iterdir()), "validate must not publish outputs in its working directory"
     startup = tmp_path / "startup"
     startup.mkdir()
     # A failed startup origin check must terminate Python; ordinary sitecustomize exceptions are ignored.
@@ -124,6 +125,7 @@ def test_wheel_contains_priors_console_script_and_backend_free_command(tmp_path)
     module = subprocess.run([sys.executable, "-m", "hwoslaps", "validate", str(config)], cwd=foreign,
                             env=module_environment, check=True, capture_output=True, text=True, timeout=30)
     assert "valid, digest" in module.stdout
+    assert not any(foreign.iterdir()), "module validate must not publish outputs in its working directory"
 
 
 @pytest.mark.backend

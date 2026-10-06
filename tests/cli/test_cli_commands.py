@@ -19,6 +19,12 @@ def test_validate_reports_dotted_key_and_reference_is_backend_free(minimal_mappi
     failed = run_cli("validate", path)
     assert failed.returncode == 2
     assert "scene.grid.over_sample_size" in failed.stderr
+    # Invalid configuration must refuse before either operation publishes its directory.
+    for operation, flags in (("simulate", ("--expected", "--smooth")), ("forecast", ("--masses", "1e8"))):
+        output = path.parent / operation
+        invalid = run_cli(operation, path, *flags, "-o", output)
+        assert invalid.returncode == 2 and "scene.grid.over_sample_size" in invalid.stderr
+        assert not output.exists()
     # The actual command must compose all owning schemas without a scientific backend.
     program = r'''
 import importlib.abc, sys
