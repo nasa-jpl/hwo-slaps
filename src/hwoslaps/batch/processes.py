@@ -78,7 +78,13 @@ def _cookie(pid, identity_env):
 def _exited(descriptor, timeout_ms=0):
     poller = select.poll()
     poller.register(descriptor, select.POLLIN | select.POLLHUP | select.POLLERR)
-    return bool(poller.poll(timeout_ms))
+    events = poller.poll(timeout_ms)
+    for _, mask in events:
+        if mask & (select.POLLERR | select.POLLNVAL):
+            raise BatchError('pidfd poll returned an error or invalid descriptor; process exit is unverified')
+        if not mask & (select.POLLIN | select.POLLHUP):
+            raise BatchError('pidfd poll returned an unexpected event; process exit is unverified')
+    return bool(events)
 
 
 def worker_record(pid, *, slot, device, identity, identity_env):

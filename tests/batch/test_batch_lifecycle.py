@@ -73,6 +73,8 @@ def _close(process, record, log):
 
 
 def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
+    from hwoslaps.batch.processes import _exited
+    from hwoslaps.batch.state import BatchError
     descriptor = open_pidfd(os.getpid())
     try:
         assert not os.get_inheritable(descriptor)
@@ -81,8 +83,11 @@ def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
         poller = select.poll()
         poller.register(descriptor, select.POLLIN)
         assert poller.poll(0) == [], 'the current live process must not appear exited'
+        assert _exited(descriptor) is False
     finally:
         os.close(descriptor)
+    with pytest.raises(BatchError, match='error or invalid descriptor'):
+        _exited(descriptor)
     with pytest.raises(OSError) as invalid:
         open_pidfd(-1)
     assert invalid.value.errno == errno.EINVAL
