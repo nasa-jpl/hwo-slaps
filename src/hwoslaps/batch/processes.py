@@ -15,9 +15,6 @@ import sys
 
 from .state import BatchError
 
-OWNER_ENV = 'HWOSLAPS_BATCH_PROCESS_ID'
-
-
 def require_process_support():
     """Refuse unsupported runtime before creating any backend worker."""
     if (sys.platform != 'linux' or not Path('/proc/self/stat').is_file()
@@ -26,7 +23,7 @@ def require_process_support():
     try:
         boot_id()
         _stat(os.getpid())
-        _cookie(os.getpid())
+        Path('/proc/self/environ').read_bytes()
         descriptor = os.pidfd_open(os.getpid())
         try:
             signal.pidfd_send_signal(descriptor, 0)
@@ -47,8 +44,8 @@ def _stat(pid):
             'session_id': int(fields[3]), 'start_time': int(fields[19]), 'uid': directory.stat().st_uid}
 
 
-def _cookie(pid):
-    prefix = OWNER_ENV.encode('ascii') + b'='
+def _cookie(pid, identity_env):
+    prefix = identity_env.encode('ascii') + b'='
     environment = (Path('/proc') / str(pid) / 'environ').read_bytes()
     return next((entry[len(prefix):] for entry in environment.split(b'\0') if entry.startswith(prefix)), None)
 
@@ -59,17 +56,17 @@ def _exited(descriptor):
     return bool(poller.poll(0))
 
 
-def worker_record(pid, *, slot, device, identity):
+def worker_record(pid, *, slot, device, identity, identity_env):
     """Capture at spawn before bootstrap release, and persist this same record at ready."""
     descriptor = os.pidfd_open(pid)
     try:
         info = _stat(pid)
-        cookie = _cookie(pid)
+        cookie = _cookie(pid, identity_env)
         if (_exited(descriptor) or info['state'] in ('Z', 'X') or info['process_group'] != pid
                 or info['session_id'] != pid or info['uid'] != os.getuid() or cookie != identity.encode('ascii')):
             raise BatchError(f'new worker {pid} did not retain its verified process identity')
         return {**{key: info[key] for key in ('pid', 'process_group', 'session_id', 'start_time', 'uid')},
-                'slot': slot, 'device': device, 'identity': identity, 'boot_id': boot_id()}
+                'slot': slot, 'device': device, 'identity': identity, 'identity_env': identity_env, 'boot_id': boot_id()}
     finally:
         os.close(descriptor)
 
@@ -110,7 +107,7 @@ def _group_handles(record):
             retain = False
             try:
                 info = _stat(pid)
-                cookie = _cookie(pid)
+                cookie = _cookie(pid, record['identity_env'])
                 if _exited(descriptor) or info['state'] in ('Z', 'X'):
                     continue
                 if info['process_group'] != record['process_group']:

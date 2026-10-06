@@ -25,7 +25,7 @@ from ..config.schema import resolve_config
 from ..identity import canonical_json, mapping_digest
 from ..provenance import capture_provenance
 from .jobs import follow_ups, plan_batch
-from .processes import (OWNER_ENV, boot_id, group_members, require_process_support, signal_owned,
+from .processes import (boot_id, group_members, require_process_support, signal_owned,
                         worker_record)
 from .spec import BatchExecution
 from .results import open_batch
@@ -33,6 +33,7 @@ from .state import (BatchConflict, BatchError, BatchIncomplete, EventLog, batch_
                     next_session, read_json, read_marker, source_revision, verify_marker, write_failure)
 
 _LOG = logging.getLogger(__name__)
+OWNER_ENV = 'HWOSLAPS_BATCH_PROCESS_ID'
 
 
 @dataclass(frozen=True)
@@ -130,8 +131,10 @@ def _wait_for_earlier_workers(output, session, events):
                 continue
             record = json.loads(line)
             if set(record) != {'slot', 'pid', 'process_group', 'device', 'start_time', 'boot_id',
-                               'session_id', 'identity', 'uid'}:
+                               'session_id', 'identity', 'identity_env', 'uid'}:
                 raise BatchConflict(f'invalid worker record in {path}')
+            if record['identity_env'] != OWNER_ENV:
+                raise BatchConflict(f'invalid ownership metadata name in {path}')
             if isinstance(record['pid'], bool) or not isinstance(record['pid'], int) or record['pid'] < 1:
                 raise BatchConflict(f'invalid worker pid in {path}')
             records.append((int(previous.name), record))
@@ -185,7 +188,7 @@ def _start_slot(number, device, session_dir, session, execution, listener):
     # Before releasing bootstrap, capture this actual spawned generation. The provisional
     # cookie/session record is used only to clean up a startup failure, never persisted.
     slot.ownership = {'slot': number, 'device': device, 'pid': None, 'process_group': None,
-                      'session_id': None, 'identity': identity, 'uid': os.getuid(),
+                      'session_id': None, 'identity': identity, 'identity_env': OWNER_ENV, 'uid': os.getuid(),
                       'start_time': None, 'boot_id': generation_boot}
     startup = {'address': listener.address, 'authkey': listener.authkey.hex(), 'slot': number,
                'session': session, 'device': device, 'execution': execution.to_mapping()}
@@ -194,7 +197,7 @@ def _start_slot(number, device, session_dir, session, execution, listener):
             cwd=directory, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
         pid = slot.process.pid
         slot.ownership.update(pid=pid, process_group=pid, session_id=pid)
-        slot.ownership = worker_record(pid, slot=number, device=device, identity=identity)
+        slot.ownership = worker_record(pid, slot=number, device=device, identity=identity, identity_env=OWNER_ENV)
         slot.process.stdin.write((canonical_json(startup) + '\n').encode())
         slot.process.stdin.close()
     except BaseException:
