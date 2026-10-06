@@ -6,6 +6,7 @@ import argparse
 import math
 from pathlib import Path
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from example_support import positive_number, run_product, verify_sei
@@ -29,6 +30,7 @@ def check_reference(prepared):
 
 
 def main(argv=None):
+    started = time.perf_counter()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--quick", action="store_true")
@@ -51,7 +53,7 @@ def main(argv=None):
     run_product(config, args.output, masses=[1e7, 1e8, 1e9], engine="reference" if args.quick else "jax",
                 q_threshold=args.q_threshold, budget_s=120 if args.quick else 600,
                 command=sys.argv if argv is None else [str(__file__), *argv], noise_seed=args.seed,
-                check=check_reference, extra={"quick": args.quick, "sei": sei}, plot=args.plot)
+                check=check_reference, extra={"quick": args.quick, "sei": sei}, plot=args.plot, started_at=started)
     return 0
 
 

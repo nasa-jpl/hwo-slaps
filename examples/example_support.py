@@ -54,14 +54,14 @@ def new_output(path):
 
 
 def run_product(config, output, *, masses, engine, q_threshold, budget_s, command, noise_seed=None,
-                check=None, extra=None, plot=False):
+                check=None, extra=None, plot=False, started_at=None):
     from hwoslaps.analysis.reductions import summarize
     from hwoslaps.artifacts import save_forecast, save_observation, write_json
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
     from hwoslaps.provenance import capture_provenance
     from hwoslaps.simulation import simulate
 
-    started = time.perf_counter()
+    started = time.perf_counter() if started_at is None else started_at
     lane = require_lane(engine)
     environment = capture_provenance(command=command)
     with prepare_forecast(config, execution=Execution(engine=engine)) as prepared:
@@ -87,21 +87,21 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
                     axes.figure.savefig(output / filename)
                 finally:
                     plt.close(axes.figure)
-        elapsed = time.perf_counter() - started
-        record = {
-            "command": list(command), "execution": lane, "environment": environment,
-            "elapsed_s": elapsed, "budget_s": budget_s, "within_budget": elapsed <= budget_s,
-            "config_digest": result.provenance["config_digest"],
-            "comparison_digest": result.provenance["comparison_digest"],
-            "input_files": result.provenance["file_digests"], "q_threshold": q_threshold,
-            "masses_msun": result.masses_msun.tolist(), "positions_count": len(result.positions),
-            "metric": result.detection_metric, "q_max": summary.q_max.tolist(),
-            "sampling": dict(prepared.observation.sampling),
-            "photometry": result.provenance["photometry"], "spectral": result.provenance["spectral"],
-            "noise_seed": noise_seed, "extra": extra,
-        }
-        write_json(output / "run.json", record)
-        print(json.dumps(record, indent=2, allow_nan=False))
-        if elapsed > budget_s:
-            raise RuntimeError(f"example exceeds its {budget_s} s budget: {elapsed:.3f} s; see {output / 'run.json'}")
-        return result, record
+    elapsed = time.perf_counter() - started
+    record = {
+        "command": list(command), "execution": lane, "environment": environment,
+        "elapsed_s": elapsed, "timing_scope": "main entry through product writes and engine close; final record and printing excluded", "budget_s": budget_s, "within_budget": elapsed <= budget_s,
+        "config_digest": result.provenance["config_digest"],
+        "comparison_digest": result.provenance["comparison_digest"],
+        "input_files": result.provenance["file_digests"], "q_threshold": q_threshold,
+        "masses_msun": result.masses_msun.tolist(), "positions_count": len(result.positions),
+        "metric": result.detection_metric, "q_max": summary.q_max.tolist(),
+        "sampling": dict(prepared.observation.sampling),
+        "photometry": result.provenance["photometry"], "spectral": result.provenance["spectral"],
+        "noise_seed": noise_seed, "extra": extra,
+    }
+    write_json(output / "run.json", record)
+    print(json.dumps(record, indent=2, allow_nan=False))
+    if elapsed > budget_s:
+        raise RuntimeError(f"example exceeds its {budget_s} s budget: {elapsed:.3f} s; see {output / 'run.json'}")
+    return result, record
