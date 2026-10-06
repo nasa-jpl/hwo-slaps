@@ -83,3 +83,72 @@ def test_effective_kernel_keeps_node_order_and_the_original_one_node_object():
     combined=effective_kernel(kernels,weights,.03,source={"label":"two nodes"})
     np.testing.assert_allclose(combined.kernel,expected,rtol=1.e-12,atol=0.)
     assert combined.source["captured_power_fraction"] is None
+
+
+def circular_provider(band, count):
+    from hwoslaps.constants import ARCSEC_PER_RAD
+    from hwoslaps.optics.providers import build_psf_provider, parse_psf
+    pitch=500.e-9/(2*2.)*ARCSEC_PER_RAD
+    spec=parse_psf({"truth":{"kind":"optical","pupil":{"kind":"circular","diameter_m":2.,
+        "pixels":256,"supersampling":4},"focal_length_m":20.,"wavelength_samples":count,
+        "detector_oversampling":3,"kernel_shape":[31,31]}}).truth
+    return build_psf_provider(spec,pixel_scale_arcsec=pitch,wavelengths_m=band.nodes(count)),pitch
+
+
+@pytest.mark.backend
+def test_broadband_circular_kernel_matches_weighted_analytic_airy():
+    from scipy.special import j1
+    from hwoslaps.constants import ARCSEC_PER_RAD
+    band=top_hat();sed=build_sed(parse_sed({"kind":"flat_fnu"},"sed"),redshift=0.)
+    provider,pitch=circular_provider(band,8)
+    actual=effective_kernel(provider.kernels(),sed_weights(band,sed,provider.wavelengths_m),pitch,source={}).kernel
+    # Independent Airy probability density, pixel-integrated on the specified 3x3 centres.
+    # 64 wavelength bins carry exact flat-fnu dln(lambda) weights, without the spectral helper.
+    edges=np.linspace(450.e-9,550.e-9,65);nodes=(edges[:-1]+edges[1:])/2
+    weights=np.log(edges[1:]/edges[:-1])/math.log(550./450.)
+    yy,xx=np.mgrid[-15:16,-15:16];expected=np.zeros((31,31))
+    omega=(pitch/ARCSEC_PER_RAD/3)**2
+    for wavelength,weight in zip(nodes,weights):
+        node=np.zeros_like(expected)
+        for oy in (-1/3,0.,1/3):
+            for ox in (-1/3,0.,1/3):
+                angle=np.hypot(yy+oy,xx+ox)*pitch/ARCSEC_PER_RAD
+                v=math.pi*2.*angle/wavelength
+                airy=np.ones_like(v);nonzero=v!=0
+                airy[nonzero]=(2*j1(v[nonzero])/v[nonzero])**2
+                node+=math.pi*2.**2/(4*wavelength**2)*airy*omega
+        expected+=weight*node
+    assert np.max(np.abs(actual-expected))/expected.max()<5.e-4
+
+
+def ramp_band(tmp_path,eps):
+    width=500.*eps;low,high=500.-width/2,500.+width/2
+    path=tmp_path/f"ramp-{eps}.npz";np.savez(path,wave=[low,high],value=[.1,.7])
+    band=build_bandpass(parse_bandpass({"kind":"table","path":str(path),"wavelength_key":"wave",
+        "value_key":"value","wavelength_unit":"nm","support_nm":[low,high]},"band"))
+    return band,width,low,high
+
+
+@pytest.mark.backend
+def test_photon_weighted_mean_wavelength_is_second_order_accurate(tmp_path):
+    from hwoslaps.spectra.photometry import effective_wavelength_m
+    sed=build_sed(parse_sed({"kind":"flat_fnu"},"sed"),redshift=0.)
+    mean_errors=[];centre_errors=[]
+    for eps in (.001,.04,.08,.16):
+        band,width,low,high=ramp_band(tmp_path,eps)
+        # Integral(T dlambda) / integral(T dlambda/lambda), with the throughput factor cancelled.
+        expected_nm=width/((1-1.5*500./width)*math.log(high/low)+1.5)
+        mean=effective_wavelength_m(sed,band)
+        assert mean*1.e9==pytest.approx(expected_nm,rel=1.e-9,abs=0.)
+        provider,pitch=circular_provider(band,24)
+        combined=effective_kernel(provider.kernels(),sed_weights(band,sed,provider.wavelengths_m),pitch,source={}).kernel
+        at_mean=provider.kernel(mean).kernel;at_centre=provider.kernel(500.e-9).kernel
+        residual=np.linalg.norm(combined-at_mean)/np.linalg.norm(at_mean)
+        if eps==.001:
+            assert residual<1.e-6
+        else:
+            mean_errors.append(residual)
+            centre_errors.append(np.linalg.norm(combined-at_centre)/np.linalg.norm(at_centre))
+    assert mean_errors[0]<5.e-4
+    assert all(3.5<ratio<4.5 for ratio in np.array(mean_errors[1:])/mean_errors[:-1])
+    assert all(1.7<ratio<2.3 for ratio in np.array(centre_errors[1:])/centre_errors[:-1])
