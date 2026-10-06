@@ -129,8 +129,11 @@ def _wait_for_earlier_workers(output, session, events):
             if not line.endswith('\n'):
                 _LOG.warning('ignoring a truncated worker record in %s; completion publication remains authoritative', path)
                 continue
-            record = json.loads(line)
-            if set(record) != {'slot', 'pid', 'process_group', 'device', 'start_time', 'boot_id',
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as error:
+                raise BatchConflict(f'invalid worker record in {path}: {error}') from error
+            if not isinstance(record, dict) or set(record) != {'slot', 'pid', 'process_group', 'device', 'start_time', 'boot_id',
                                'session_id', 'identity', 'identity_env', 'uid'}:
                 raise BatchConflict(f'invalid worker record in {path}')
             if record['identity_env'] != OWNER_ENV:

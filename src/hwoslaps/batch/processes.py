@@ -12,19 +12,45 @@ from pathlib import Path
 import select
 import signal
 import sys
+import time
 
 from .state import BatchError
+
+
+def open_pidfd(pid):
+    """Open a real Linux pidfd, including Python builds lacking os.pidfd_open."""
+    if hasattr(os, 'pidfd_open'):
+        return os.pidfd_open(pid)
+    if sys.platform != 'linux':
+        raise BatchError('pidfd ownership requires Linux')
+    import ctypes
+    import operator
+    pid = operator.index(pid)
+    if ctypes.c_int(pid).value != pid:
+        raise OverflowError('PID does not fit in the libc signed int argument')
+    try:
+        function = ctypes.CDLL(None, use_errno=True).pidfd_open
+    except AttributeError as error:
+        raise BatchError('neither Python nor libc exposes pidfd_open; no workers were started') from error
+    function.argtypes = (ctypes.c_int, ctypes.c_uint)
+    function.restype = ctypes.c_int
+    descriptor = function(pid, 0)
+    if descriptor < 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    return descriptor
+
 
 def require_process_support():
     """Refuse unsupported runtime before creating any backend worker."""
     if (sys.platform != 'linux' or not Path('/proc/self/stat').is_file()
-            or not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal')):
+            or not hasattr(signal, 'pidfd_send_signal')):
         raise BatchError('batch runtime requires Linux /proc and pidfd identity-safe process signaling')
     try:
         boot_id()
         _stat(os.getpid())
         Path('/proc/self/environ').read_bytes()
-        descriptor = os.pidfd_open(os.getpid())
+        descriptor = open_pidfd(os.getpid())
         try:
             signal.pidfd_send_signal(descriptor, 0)
         finally:
@@ -50,21 +76,47 @@ def _cookie(pid, identity_env):
     return next((entry[len(prefix):] for entry in environment.split(b'\0') if entry.startswith(prefix)), None)
 
 
-def _exited(descriptor):
+def pidfd_exited(descriptor, timeout_ms=0):
+    """Confirm pinned kernel exit, refusing descriptor/error events as evidence."""
     poller = select.poll()
     poller.register(descriptor, select.POLLIN | select.POLLHUP | select.POLLERR)
-    return bool(poller.poll(0))
+    events = poller.poll(timeout_ms)
+    for _, mask in events:
+        if mask & (select.POLLERR | select.POLLNVAL):
+            raise BatchError('pidfd poll returned an error or invalid descriptor; process exit is unverified')
+        if not mask & (select.POLLIN | select.POLLHUP):
+            raise BatchError('pidfd poll returned an unexpected event; process exit is unverified')
+    return bool(events)
 
 
 def worker_record(pid, *, slot, device, identity, identity_env):
     """Capture at spawn before bootstrap release, and persist this same record at ready."""
-    descriptor = os.pidfd_open(pid)
+    descriptor = open_pidfd(pid)
     try:
         info = _stat(pid)
-        cookie = _cookie(pid, identity_env)
-        if (_exited(descriptor) or info['state'] in ('Z', 'X') or info['process_group'] != pid
-                or info['session_id'] != pid or info['uid'] != os.getuid() or cookie != identity.encode('ascii')):
-            raise BatchError(f'new worker {pid} did not retain its verified process identity')
+        captured_birth = info['start_time']
+        deadline = time.monotonic() + .05
+        while True:
+            cookie = _cookie(pid, identity_env)
+            valid = (not pidfd_exited(descriptor) and info['state'] not in ('Z', 'X')
+                     and info['process_group'] == pid and info['session_id'] == pid
+                     and info['uid'] == os.getuid() and info['start_time'] == captured_birth)
+            if valid and cookie == identity.encode('ascii'):
+                break
+            # Bootstrap remains unreleased. Retry only missing initial /proc
+            # cookie bytes, never another live identity or a read/exit error.
+            message = (f'new worker {pid} did not retain its verified process identity: '
+                       f'state={info["state"]}, group_matches={info["process_group"] == pid}, '
+                       f'session_matches={info["session_id"] == pid}, uid_matches={info["uid"] == os.getuid()}, '
+                       f'birth_matches={info["start_time"] == captured_birth}, '
+                       f'cookie_present={cookie is not None}, cookie_matches={cookie == identity.encode("ascii")}')
+            remaining = deadline - time.monotonic()
+            if not valid or cookie is not None or remaining <= 0.:
+                raise BatchError(message)
+            time.sleep(min(.001, remaining))
+            if time.monotonic() >= deadline:
+                raise BatchError(message)
+            info = _stat(pid)
         return {**{key: info[key] for key in ('pid', 'process_group', 'session_id', 'start_time', 'uid')},
                 'slot': slot, 'device': device, 'identity': identity, 'identity_env': identity_env, 'boot_id': boot_id()}
     finally:
@@ -98,7 +150,7 @@ def _group_handles(record):
             if preliminary['process_group'] != record['process_group'] or preliminary['state'] in ('Z', 'X'):
                 continue
             try:
-                descriptor = os.pidfd_open(pid)
+                descriptor = open_pidfd(pid)
             except ProcessLookupError:
                 continue
             except PermissionError:
@@ -108,12 +160,17 @@ def _group_handles(record):
             try:
                 info = _stat(pid)
                 cookie = _cookie(pid, record['identity_env'])
-                if _exited(descriptor) or info['state'] in ('Z', 'X'):
+                if pidfd_exited(descriptor) or info['state'] in ('Z', 'X'):
                     continue
                 if info['process_group'] != record['process_group']:
                     continue
                 if (info['session_id'] != record['session_id'] or info['uid'] != record['uid']
                         or cookie != record['identity'].encode('ascii')):
+                    # /proc identity reads are not atomic with process exit. Only
+                    # definitive exit on this already-pinned pidfd may clear a
+                    # transient mismatch; a live foreign process still refuses.
+                    if pidfd_exited(descriptor, 50):
+                        continue
                     foreign.append(pid)
                     continue
                 if record['start_time'] is not None and info['start_time'] < record['start_time']:
@@ -124,7 +181,8 @@ def _group_handles(record):
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except PermissionError:
-                ambiguous.append(pid)
+                if not pidfd_exited(descriptor, 50):
+                    ambiguous.append(pid)
             finally:
                 if not retain:
                     os.close(descriptor)

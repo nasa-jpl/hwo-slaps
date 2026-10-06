@@ -1,6 +1,7 @@
 """Artifact-selected trials: positive-amplitude eligibility and validated retry transport."""
 from copy import deepcopy
 from dataclasses import replace
+import json
 from pathlib import Path
 
 import numpy as np
@@ -106,3 +107,66 @@ def test_retry_followup_consumes_actual_typed_stationarity_verdict(tiny_batch_sp
     with pytest.raises(BatchConflict, match='validated case changed'):
         follow_ups(plan, job, root)
     path.write_bytes(original)
+
+
+@pytest.mark.backend
+def test_actual_worker_passes_stationarity_policy_to_real_case_classifier(tiny_batch_spec, tmp_path, monkeypatch):
+    import hashlib
+    import sys
+    import hwoslaps.analysis.nonlinear as classifier
+    import hwoslaps.batch.runner as runner
+    import hwoslaps.batch.worker as worker
+    from hwoslaps.batch import open_batch, run_batch
+    tolerance = 1e-4
+    statuses = ['sampler_only', 'verified_zero_residual_anchor', 'accepted_repeatable_profile']
+    family = {'trials': {'kind': 'explicit', 'explicit': [{'mass_msun': 1e8, 'position_yx': [.1, .2]}]},
+              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'},
+              'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 200, 'n_shell': 1,
+                          'f_live': .01, 'discard_exploration': True, 'number_of_cores': 1},
+              'retry': {'acceptance': {'smooth': statuses, 'subhalo': statuses},
+                        'require_retained_state': False, 'stationarity_tolerance': tolerance}}
+    spec = tiny_batch_spec(population={'count': 1}, forecast=None, nonlinear={'n': family},
+                           execution={'workers_per_device': 1})
+    observed = tmp_path / 'actual-classifier-call.json'
+    entry = tmp_path / 'actual-worker-entry.py'
+    expected = {name: {'path': str(Path(module.__file__).resolve()),
+                       'sha256': hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()}
+                for name, module in [('worker', worker), ('classifier', classifier)]}
+    entry.write_text(f'''
+if __name__ == '__main__':
+    import hashlib, json
+    from pathlib import Path
+    import hwoslaps.batch.worker as worker
+    import hwoslaps.analysis.nonlinear as classifier
+    binding = {{}}
+    for name, module in [('worker', worker), ('classifier', classifier)]:
+        actual = Path(module.__file__).resolve()
+        binding[name] = {{'path': str(actual), 'sha256': hashlib.sha256(actual.read_bytes()).hexdigest()}}
+    assert binding == {expected!r}
+    real_status = classifier.case_status
+    def observed_status(case, **keywords):
+        assert keywords.get('stationarity_tolerance') == {tolerance!r}, 'actual worker must pass its stationarity tolerance'
+        assert all(case.role(role).status == 'success' for role in ('smooth', 'subhalo'))
+        result = real_status(case, **keywords)
+        Path({str(observed)!r}).write_text(json.dumps({{'binding': binding, 'case_id': case.case_id,
+            'stationarity_tolerance': keywords['stationarity_tolerance'], 'status': result.status,
+            'reasons': list(result.reasons)}}))
+        return result
+    classifier.case_status = observed_status
+    raise SystemExit(worker.main())
+''')
+    real_popen = runner.subprocess.Popen
+    def actual_worker_entry(command, *arguments, **keywords):
+        if isinstance(command, (list, tuple)) and list(command) == [sys.executable, '-m', 'hwoslaps.batch.worker']:
+            command = [sys.executable, str(entry)]
+        return real_popen(command, *arguments, **keywords)
+    monkeypatch.setattr(runner.subprocess, 'Popen', actual_worker_entry)
+    root = tmp_path / 'stationarity-worker'
+    report = run_batch(spec, root)
+    assert report.counts['completed'] == 1 and report.counts['failed'] == 0
+    record, actual = next(open_batch(root).cases())
+    call = json.loads(observed.read_text())
+    assert call['binding'] == expected and call['case_id'] == actual.case_id
+    assert call['stationarity_tolerance'] == tolerance
+    assert call['status'] == record.marker['summary']['retry']['status']
+    assert call['reasons'] == record.marker['summary']['retry']['reasons']

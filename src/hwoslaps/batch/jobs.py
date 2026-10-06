@@ -15,6 +15,7 @@ from ..config.schema import EngineConfig
 from ..fisher.positions import explicit_positions, grid_positions, ring_positions
 from ..identity import file_digest, json_ready, mapping_digest, text_digest
 from ..inference.settings import RefineSettings, SamplerSettings
+from ..optics.providers import KnowledgeErrorModel
 from ..population import iter_population_members
 from ..scene.cosmology import Cosmology
 from ..scene.subhalo import configured_injection
@@ -240,7 +241,7 @@ def plan_batch(spec: BatchSpec) -> BatchPlan:
     for member in members:
         for arm in spec.arms:
             config = member.config.replace(arm.overrides, base_dir=spec.base_dir)
-            if arm.directions is not None and config.psf.model.kind != 'knowledge_error':
+            if arm.directions is not None and not isinstance(config.psf.model, KnowledgeErrorModel):
                 raise ConfigError(f'arms.{arm.name}.directions', 'requires a knowledge_error model PSF')
             for direction in (None,) if arm.directions is None else range(1, arm.directions + 1):
                 effective = config if direction is None else config.replace({'psf': {'model': {'draw': {
