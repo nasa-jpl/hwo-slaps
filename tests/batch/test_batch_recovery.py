@@ -11,7 +11,7 @@ import pytest
 
 from hwoslaps.artifacts import write_yaml
 from hwoslaps.batch import BatchIncomplete, run_batch
-from hwoslaps.batch.processes import group_members, signal_owned, worker_record
+from hwoslaps.batch.processes import boot_id, group_members, signal_owned, worker_record
 from hwoslaps.batch.runner import OWNER_ENV
 
 pytestmark = pytest.mark.backend
@@ -56,14 +56,28 @@ def _controller(spec, root, tmp_path, label, extra=(), program=None):
     path = tmp_path / (label + '.py')
     path.write_text('if __name__ == "__main__":\n' +
                     ''.join('    ' + line for line in script.splitlines(keepends=True)))
+    generation_boot = boot_id()
     log = (tmp_path / (label + '.log')).open('wb')
     command = [sys.executable, str(path), 'batch', 'run', str(source), '-o', str(root), *extra]
-    process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE, stdout=log,
-                               stderr=subprocess.STDOUT, start_new_session=True)
-    record = worker_record(process.pid, slot=0, device='cpu', identity=identity, identity_env=OWNER_ENV)
-    process.stdin.write(b'go\n')
-    process.stdin.close()
-    return process, record, log
+    process = None
+    record = None
+    try:
+        process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE, stdout=log,
+                                   stderr=subprocess.STDOUT, start_new_session=True)
+        record = {'slot': 0, 'device': 'cpu', 'pid': process.pid, 'process_group': process.pid,
+                  'session_id': process.pid, 'identity': identity, 'identity_env': OWNER_ENV,
+                  'uid': os.getuid(), 'start_time': None, 'boot_id': generation_boot}
+        record = worker_record(process.pid, slot=0, device='cpu', identity=identity, identity_env=OWNER_ENV)
+        process.stdin.write(b'go\n')
+        process.stdin.close()
+        return process, record, log
+    except BaseException:
+        if process is None:
+            log.close()
+        else:
+            process.stdin.close()
+            _cleanup(process, record, log, root)
+        raise
 
 
 def _cleanup(controller, identity, log, output):

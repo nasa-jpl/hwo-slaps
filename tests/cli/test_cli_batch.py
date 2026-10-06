@@ -4,11 +4,15 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import signal
+import time
 
 import numpy as np
 import pytest
 
 from hwoslaps.artifacts import write_yaml
+from hwoslaps.batch.processes import boot_id, group_members, signal_owned, worker_record
+from hwoslaps.batch.runner import OWNER_ENV
 
 pytestmark = pytest.mark.backend
 
@@ -17,8 +21,83 @@ def _cli(arguments):
     environment = dict(os.environ)
     source = Path(__file__).resolve().parents[2] / 'src'
     environment['PYTHONPATH'] = str(source) + (os.pathsep + environment['PYTHONPATH'] if environment.get('PYTHONPATH') else '')
-    return subprocess.run([sys.executable, '-m', 'hwoslaps', *arguments], env=environment,
-                          capture_output=True, text=True, timeout=240)
+    identity = os.urandom(32).hex()
+    environment[OWNER_ENV] = identity
+    generation_boot = boot_id()
+    output = Path(arguments[arguments.index('-o') + 1]) if '-o' in arguments else None
+    entry = ('if __name__ == "__main__":\n'
+             '    import sys, runpy\n'
+             '    if sys.stdin.readline() != "go\\n": raise SystemExit(2)\n'
+             '    sys.argv = ["hwoslaps", *sys.argv[1:]]\n'
+             '    runpy.run_module("hwoslaps", run_name="__main__")\n')
+    command = [sys.executable, '-c', entry, *arguments]
+    process = subprocess.Popen(command, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, text=True, start_new_session=True)
+    own = {'slot': 0, 'device': 'cpu', 'pid': process.pid, 'process_group': process.pid,
+           'session_id': process.pid, 'identity': identity, 'identity_env': OWNER_ENV,
+           'uid': os.getuid(), 'start_time': None, 'boot_id': generation_boot}
+    known, errors, blocked = {}, [], set()
+    def records():
+        if output is not None:
+            for path in (output / 'sessions').glob('*/workers.jsonl'):
+                try:
+                    for line in path.read_text().splitlines(keepends=True):
+                        if not line.endswith('\n'):
+                            continue
+                        record = json.loads(line)
+                        if record['identity_env'] != OWNER_ENV:
+                            raise ValueError('foreign ownership environment name')
+                        known[(record['pid'], record['identity'])] = record
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    message = f'{path}: {error}'
+                    if message not in errors:
+                        errors.append(message)
+        return [own, *known.values()]
+    def guarded(record, number=None):
+        key = (record['pid'], record['identity'])
+        if key in blocked:
+            return False
+        try:
+            if number is not None:
+                signal_owned(record, number)
+            return bool(group_members(record))
+        except Exception as error:
+            blocked.add(key)
+            errors.append(str(error))
+            return False
+    try:
+        own = worker_record(process.pid, slot=0, device='cpu', identity=identity, identity_env=OWNER_ENV)
+        stdout, stderr = process.communicate('go\n', timeout=240.)
+        if any(guarded(record) for record in records()) or errors:
+            raise AssertionError('actual CLI returned with survivors or invalid ownership metadata')
+        return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+    except BaseException as original:
+        for record in records():
+            guarded(record, signal.SIGTERM)
+        deadline = time.monotonic() + 5.
+        while time.monotonic() < deadline and any(guarded(record) for record in records()):
+            process.poll()
+            time.sleep(.02)
+        deadline = time.monotonic() + 5.
+        while True:
+            for record in records():
+                guarded(record, signal.SIGKILL)
+            if not any(guarded(record) for record in records()):
+                break
+            if time.monotonic() >= deadline:
+                errors.append('verified CLI descendants did not drain')
+                break
+            time.sleep(.02)
+        try:
+            process.wait(timeout=5.)
+        except subprocess.TimeoutExpired:
+            errors.append('CLI leader remains after pinned cleanup')
+        if errors:
+            raise AssertionError('CLI ownership cleanup failed: ' + '; '.join(errors)) from original
+        raise
+    finally:
+        for stream in (process.stdin, process.stdout, process.stderr):
+            stream.close()
 
 
 def test_cli_batch_exit_codes_and_overrides(minimal_mapping, tmp_path):

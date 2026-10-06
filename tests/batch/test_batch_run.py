@@ -121,7 +121,9 @@ def test_failed_jobs_are_recorded_and_rerun(tiny_batch_spec, tmp_path):
     bad_job = root / 'members/system_000000/bad/forecast'
     assert not (bad_job / 'complete.json').exists()
     failure = json.loads((bad_job / 'run_001/failure.json').read_text())
-    assert failure['error_type'] and failure['message'] and 'Traceback' in failure['traceback']
+    assert failure['error_type'] == 'ValueError'
+    assert 'holds shape (2, 2), expected (1600, 1600)' in failure['message']
+    assert 'Traceback' in failure['traceback']
     with pytest.raises(BatchIncomplete) as again:
         run_batch(spec, root)
     assert again.value.report.counts['skipped'] == 1 and again.value.report.counts['failed'] == 1
