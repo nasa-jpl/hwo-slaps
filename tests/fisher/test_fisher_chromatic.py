@@ -143,7 +143,9 @@ def test_monochromatic_model_mode_binds_each_group_at_its_mean_wavelength(minima
                         alpha=group.sed.index
                         expected_nm=(a*integral(-alpha)+b*integral(1-alpha))/(a*integral(-alpha-1)+b*integral(-alpha))
                         recorded=prepared.psfs.spectral["model"]["groups"][key]["kernel_wavelength_m"]
-                        assert recorded*1.e9==pytest.approx(expected_nm,rel=1.e-10,abs=0.)
+                        # Mandated 10001-point trapezoid error <=5.09e-10; root-approved
+                        # continuous oracle bound1e-9, with all kernel identities still bitwise.
+                        assert recorded*1.e9==pytest.approx(expected_nm,rel=1.e-9,abs=0.)
                         np.testing.assert_array_equal(prepared.psfs.model_kernels.for_group(key).kernel,
                                                       prepared.psfs.truth.kernel(recorded).kernel)
                 result=forecast(prepared,masses_msun=[1.e8])
