@@ -89,7 +89,10 @@ def worker_record(pid, *, slot, device, identity, identity_env):
         cookie = _cookie(pid, identity_env)
         if (_exited(descriptor) or info['state'] in ('Z', 'X') or info['process_group'] != pid
                 or info['session_id'] != pid or info['uid'] != os.getuid() or cookie != identity.encode('ascii')):
-            raise BatchError(f'new worker {pid} did not retain its verified process identity')
+            raise BatchError(f'new worker {pid} did not retain its verified process identity: '
+                             f'state={info["state"]}, group_matches={info["process_group"] == pid}, '
+                             f'session_matches={info["session_id"] == pid}, uid_matches={info["uid"] == os.getuid()}, '
+                             f'cookie_present={cookie is not None}, cookie_matches={cookie == identity.encode("ascii")}')
         return {**{key: info[key] for key in ('pid', 'process_group', 'session_id', 'start_time', 'uid')},
                 'slot': slot, 'device': device, 'identity': identity, 'identity_env': identity_env, 'boot_id': boot_id()}
     finally:
