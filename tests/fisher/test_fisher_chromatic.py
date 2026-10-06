@@ -39,23 +39,39 @@ def test_single_node_chromatic_forecast_equals_monochromatic_forecast(minimal_ma
     from hwoslaps.fisher.api import forecast,prepare_forecast
     from hwoslaps.spectra.bandpass import build_bandpass,parse_bandpass
     sampled=chromatic_mapping(minimal_mapping,count=1,relation=relation)
-    outside=tmp_path/"outside-band.npz";np.savez(outside,wave=[700.,900.],value=[1.,1.])
+    outside=tmp_path/"zero-response-sed.npz";np.savez(outside,wave=[400.,465.,470.,475.,600.],value=[0.,0.,1.,0.,0.])
     for galaxy in ("lens","source"):
         for component in sampled["scene"][galaxy]["light"].values():
             if sed_state=="no_sed":component.pop("sed")
             elif sed_state=="response":component["sed"]={"kind":"flat_fnu"}
             else:component["sed"]={"kind":"table","path":str(outside),"wavelength_key":"wave",
                 "value_key":"value","wavelength_unit":"nm","quantity":"fnu"}
+    if sed_state=="zero_response":
+        response=tmp_path/"response.npz";np.savez(response,wave=[450.,480.,481.,550.],value=[0.,0.,.21,.21])
+        sampled["instrument"]["bandpass"]={"kind":"table","path":str(response),"wavelength_key":"wave",
+            "value_key":"value","wavelength_unit":"nm","support_nm":[450.,550.]}
     sampled["forecast"]["nuisances"]["wavefront"]={"modes":{"zernikes":{"nolls":[4,5]}},"step_nm":1.,"prior_sigma_nm":5.}
     mono=deepcopy(sampled);truth=mono["psf"]["truth"]
     truth.pop("wavelength_samples")
     truth["wavelength_nm"]=build_bandpass(parse_bandpass(sampled["instrument"]["bandpass"],"band")).nodes(1)[0]*1.e9
+    if sed_state=="no_sed":
+        from hwoslaps.config.checks import ConfigError
+        from hwoslaps.config.schema import parse_config
+        # X7 still requires an SED for sampled optics, even at one node. The supported
+        # absent-shape metadata boundary is explicit monochromatic optics with a band.
+        with pytest.raises(ConfigError,match="requires an SED"):parse_config(sampled)
+        sampled=deepcopy(mono)
+        mono["instrument"].pop("bandpass")
     with prepare_forecast(mono) as a,prepare_forecast(sampled) as b:
         np.testing.assert_array_equal(a.mean_truth_adu,b.mean_truth_adu)
         np.testing.assert_array_equal(a.mean_model_adu,b.mean_model_adu)
         assert a.nuisances.names==b.nuisances.names
         np.testing.assert_array_equal(a.nuisances.images,b.nuisances.images)
         for prepared in (a,b):
+            if prepared.psfs.spectral is None:
+                assert sed_state=="no_sed" and prepared is a
+                prepared.validate_identity()
+                continue
             for record in prepared.psfs.spectral["truth"]["groups"].values():
                 assert record["status"]==sed_state
                 assert (record["sed_digest"] is None)==(sed_state=="no_sed")
