@@ -25,6 +25,8 @@ from ..config.schema import resolve_config
 from ..identity import canonical_json, mapping_digest
 from ..provenance import capture_provenance
 from .jobs import follow_ups, plan_batch
+from .processes import (OWNER_ENV, boot_id, group_members, require_process_support, signal_owned,
+                        worker_record)
 from .spec import BatchExecution
 from .results import open_batch
 from .state import (BatchConflict, BatchError, BatchIncomplete, EventLog, batch_lock, claim_run_dir,
@@ -57,6 +59,7 @@ class _Slot:
     keys: tuple[str, ...] = ()
     busy: object = None
     run: str | None = None
+    ownership: dict = field(default_factory=dict)
 
 
 class _WorkerListener:
@@ -107,30 +110,11 @@ class _WorkerListener:
 
 
 def _process_record(slot):
-    pid = slot.process.pid
-    start, boot = None, None
-    proc = Path('/proc')
-    if proc.is_dir():
-        fields = (proc / str(pid) / 'stat').read_text().rsplit(')', 1)[1].split()
-        start = int(fields[19])
-        boot = (proc / 'sys/kernel/random/boot_id').read_text().strip()
-    return {'slot': slot.number, 'pid': pid, 'process_group': os.getpgid(pid),
-            'device': slot.device, 'start_time': start, 'boot_id': boot}
+    return dict(slot.ownership)
 
 
 def _live(record):
-    try:
-        os.kill(record['pid'], 0)
-    except (ProcessLookupError, PermissionError):
-        return False
-    if record['start_time'] is not None:
-        try:
-            fields = Path(f"/proc/{record['pid']}/stat").read_text().rsplit(')', 1)[1].split()
-        except FileNotFoundError:
-            return False
-        if int(fields[19]) != record['start_time'] or Path('/proc/sys/kernel/random/boot_id').read_text().strip() != record['boot_id']:
-            return False
-    return True
+    return bool(group_members(record))
 
 
 def _wait_for_earlier_workers(output, session, events):
@@ -145,7 +129,8 @@ def _wait_for_earlier_workers(output, session, events):
                 _LOG.warning('ignoring a truncated worker record in %s; completion publication remains authoritative', path)
                 continue
             record = json.loads(line)
-            if set(record) != {'slot', 'pid', 'process_group', 'device', 'start_time', 'boot_id'}:
+            if set(record) != {'slot', 'pid', 'process_group', 'device', 'start_time', 'boot_id',
+                               'session_id', 'identity', 'uid'}:
                 raise BatchConflict(f'invalid worker record in {path}')
             if isinstance(record['pid'], bool) or not isinstance(record['pid'], int) or record['pid'] < 1:
                 raise BatchConflict(f'invalid worker pid in {path}')
@@ -184,6 +169,8 @@ def _start_slot(number, device, session_dir, session, execution, listener):
     directory.mkdir(parents=True, exist_ok=True)
     log = (session_dir / 'workers' / f'w{number}.log').open('ab', buffering=0)
     environment = dict(os.environ)
+    identity = os.urandom(32).hex()
+    environment[OWNER_ENV] = identity
     for name in ('OMP_NUM_THREADS', 'MKL_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'NUMEXPR_NUM_THREADS'):
         environment[name] = str(execution.threads_per_worker)
     environment['CUDA_VISIBLE_DEVICES'] = '' if device == 'cpu' else device
@@ -200,24 +187,26 @@ def _start_slot(number, device, session_dir, session, execution, listener):
         log.close()
         raise
     slot = _Slot(number, device, process, log)
+    # Before releasing bootstrap, capture this actual spawned generation. The provisional
+    # cookie/session record is used only to clean up a startup failure, never persisted.
+    slot.ownership = {'slot': number, 'device': device, 'pid': process.pid, 'process_group': process.pid,
+                      'session_id': process.pid, 'identity': identity, 'uid': os.getuid(),
+                      'start_time': None, 'boot_id': boot_id()}
     startup = {'address': listener.address, 'authkey': listener.authkey.hex(), 'slot': number,
                'session': session, 'device': device, 'execution': execution.to_mapping()}
     try:
+        slot.ownership = worker_record(process.pid, slot=number, device=device, identity=identity)
         process.stdin.write((canonical_json(startup) + '\n').encode())
         process.stdin.close()
     except BaseException:
-        _signal_group(slot, signal.SIGTERM)
-        process.wait(timeout=30.)
-        log.close()
+        process.stdin.close()
+        _close_slots([slot], interrupt=True)
         raise
     return slot
 
 
 def _signal_group(slot, number):
-    try:
-        os.killpg(slot.process.pid, number)
-    except ProcessLookupError:
-        pass
+    signal_owned(slot.ownership, number)
 
 
 def _close_slots(slots, *, interrupt):
@@ -230,14 +219,24 @@ def _close_slots(slots, *, interrupt):
             except (EOFError, BrokenPipeError, ConnectionResetError):
                 pass
     deadline = time.monotonic() + (30. if interrupt else 60.)
+    while any(_live(slot.ownership) for slot in slots) and time.monotonic() < deadline:
+        for slot in slots:
+            slot.process.poll()
+        time.sleep(.05)
+    # A reaped leader is not authority to abandon its actual inherited descendants.
+    remaining = [slot for slot in slots if _live(slot.ownership)]
+    kill_deadline = time.monotonic() + 5.
+    while remaining:
+        for slot in remaining:
+            _signal_group(slot, signal.SIGKILL)
+            slot.process.poll()
+        remaining = [slot for slot in remaining if _live(slot.ownership)]
+        if remaining and time.monotonic() >= kill_deadline:
+            raise BatchError('verified owned worker descendants did not drain after pinned SIGKILL; inspect worker records')
+        if remaining:
+            time.sleep(.05)
     for slot in slots:
-        try:
-            slot.process.wait(timeout=max(0., deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            _signal_group(slot, signal.SIGKILL)
-            slot.process.wait()
-        if interrupt or slot.process.returncode != 0:
-            _signal_group(slot, signal.SIGKILL)
+        slot.process.wait(timeout=1.)
         if slot.connection is not None:
             slot.connection.close()
         slot.log.close()
@@ -314,6 +313,7 @@ def _choose_job(slot, pending, slots):
 
 
 def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False):
+    require_process_support()
     output = Path(output_dir).expanduser().resolve()
     if not resume and output.exists() and any(output.iterdir()):
         raise BatchConflict(f'fresh batch requires a missing or empty directory: {output}')

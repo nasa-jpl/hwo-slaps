@@ -17,7 +17,7 @@ from ..config.schema import parse_config
 from ..identity import file_digest, json_ready, mapping_digest
 from ..provenance import capture_provenance
 from ..seeding import derived_seed
-from .jobs import JobPayload, trial_id
+from .jobs import JobPayload, case_id, trial_id
 from .spec import BatchExecution
 from .state import (BatchConflict, RetryVerdict, claim_run_dir, publish_marker, read_marker, source_revision,
                     verify_marker, write_failure)
@@ -37,8 +37,14 @@ class PreparationCache:
         key = config.digest()
         if key in self._items:
             prepared = self._items.pop(key)
+            try:
+                if prepared.record['config_digest'] != key:
+                    raise BatchConflict('cached preparation identity differs from its key')
+                prepared.validate_identity()
+            except BaseException:
+                prepared.close()
+                raise
             self._items[key] = prepared
-            prepared.validate_identity()
             return prepared, True, 0.
         if len(self._items) == self.size:
             _, old = self._items.popitem(last=False)
@@ -46,8 +52,11 @@ class PreparationCache:
         start = time.perf_counter()
         prepared = prepare_forecast(config, execution=self.execution)
         duration = time.perf_counter() - start
-        self._items[key] = prepared
         self.prepared_count += 1
+        if prepared.record['config_digest'] != key:
+            prepared.close()
+            raise BatchConflict('actual preparation inputs changed after the cache key was captured')
+        self._items[key] = prepared
         return prepared, False, duration
 
     def close(self):
@@ -124,13 +133,19 @@ def run_job(payload, cache, session, *, connection, worker, revision):
             if payload.kind == 'simulate':
                 halo = configured_injection(config.scene, Cosmology(config.cosmology), seed=config.seed) if parameters['inject'] else None
                 result = simulate(config, subhalo=halo, noise_seed=seeds['noise'])
+                if result.config_digest != payload.config_digest:
+                    raise BatchConflict(f'actual simulated inputs differ from the planned job: {payload.job_id}')
                 artifacts = {'observation': save_observation(result, run_dir / 'observation.npz')}
             else:
                 prepared, hit, duration = cache.get(config)
+                if prepared.record['config_digest'] != payload.config_digest:
+                    raise BatchConflict(f'actual preparation differs from the planned job: {payload.job_id}')
                 preparation = _preparation(prepared, hit, duration)
                 if payload.kind == 'forecast':
                     forecast_start = time.perf_counter()
                     result = forecast(prepared, masses_msun=parameters['masses_msun'])
+                    if result.provenance['config_digest'] != payload.config_digest:
+                        raise BatchConflict(f'actual forecast inputs differ from the planned job: {payload.job_id}')
                     forecast_s = time.perf_counter() - forecast_start
                     artifacts = {'forecast': save_forecast(result, run_dir / 'forecast.npz')}
                 elif payload.kind == 'nonlinear':
@@ -165,7 +180,7 @@ def run_job(payload, cache, session, *, connection, worker, revision):
                         first, first_sha = load_case_snapshot(first_path)
                         if first_sha != parameters['retry_case_sha256']:
                             raise BatchConflict(f'first retry case artifact changed: {first_path}')
-                        if (first.case_id != parameters['retry_source_job_id'] or first.hypothesis != hypothesis
+                        if (first.case_id != case_id(parameters['retry_source_job_id']) or first.hypothesis != hypothesis
                                 or first.observation.config_digest != payload.config_digest
                                 or first.observation.noise_seed != seeds['noise']):
                             raise BatchConflict(f'retry is not the same physical case: {payload.job_id}')
@@ -173,21 +188,32 @@ def run_job(payload, cache, session, *, connection, worker, revision):
                     if reference_config.digest() != parameters['forecast_config_digest']:
                         raise BatchConflict(f'forecast reference bytes changed for {payload.job_id}')
                     reference, reference_hit, reference_duration = cache.get(reference_config)
+                    if reference.record['config_digest'] != parameters['forecast_config_digest']:
+                        raise BatchConflict(f'actual reference preparation differs from its plan: {payload.job_id}')
                     reference_preparation = _preparation(reference, reference_hit, reference_duration)
                     q = forecast(reference, masses_msun=[hypothesis.mass_msun], positions=[hypothesis.position_yx_arcsec])
+                    if q.provenance['config_digest'] != parameters['forecast_config_digest']:
+                        raise BatchConflict(f'actual reference forecast differs from its plan: {payload.job_id}')
                     forecast_reference = ForecastReference.from_result(q, mass_index=0, position_index=0)
                     # A size-one cache may have evicted the fit preparation while forecasting.
                     if reference is not prepared:
                         prepared, restored_hit, restored_duration = cache.get(config)
+                        if prepared.record['config_digest'] != payload.config_digest:
+                            raise BatchConflict(f'restored fit preparation differs from its plan: {payload.job_id}')
                         preparation = _preparation(prepared, hit and restored_hit, duration + restored_duration)
                     observation = simulate(prepared, subhalo=hypothesis if parameters['inject'] else None,
                                            noise_seed=seeds['noise'])
+                    if observation.config_digest != payload.config_digest:
+                        raise BatchConflict(f'actual nonlinear observation differs from its plan: {payload.job_id}')
                     refine = parameters['refine']
                     result = validate_nonlinear(prepared, hypothesis, observation,
                         fit=FitSpec.from_mapping(parameters['fit']), sampler=SamplerSettings.from_mapping(parameters['sampler']),
                         sampler_seed=seeds['sampler'], output_dir=run_dir / 'fit',
                         refine=None if refine is None else RefineSettings.from_mapping(refine), session=session,
-                        forecast_reference=forecast_reference, case_id=payload.job_id)
+                        forecast_reference=forecast_reference, case_id=case_id(payload.job_id))
+                    if (result.observation.config_digest != payload.config_digest
+                            or result.forecast_reference.config_digest != parameters['forecast_config_digest']):
+                        raise BatchConflict(f'actual case input identities differ from their plans: {payload.job_id}')
                     artifacts = {'case': save_case(result, run_dir / 'case.json')}
                     summary = {'role_statuses': {role: result.role(role).acceptance_status.value for role in ('smooth', 'subhalo')},
                                'q_signed': result.q_signed, 'forecast_q': forecast_reference.q, 'trial': actual_trial}

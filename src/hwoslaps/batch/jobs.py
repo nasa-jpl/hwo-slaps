@@ -13,7 +13,7 @@ from ..artifacts import load_forecast
 from ..config.checks import ConfigError
 from ..config.schema import EngineConfig
 from ..fisher.positions import explicit_positions, grid_positions, ring_positions
-from ..identity import file_digest, json_ready, mapping_digest
+from ..identity import file_digest, json_ready, mapping_digest, text_digest
 from ..inference.settings import RefineSettings, SamplerSettings
 from ..population import iter_population_members
 from ..scene.cosmology import Cosmology
@@ -117,6 +117,11 @@ class BatchPlan:
 def trial_id(mass_msun: float, position_yx: tuple[float, float]) -> str:
     y, x = position_yx
     return f'm{mass_msun:.6e}_y{y + 0.0:+.6f}_x{x + 0.0:+.6f}'
+
+
+def case_id(job_id: str) -> str:
+    """Globally specific deterministic basename required by the actual nonlinear API."""
+    return 'batch_' + text_digest(job_id)
 
 
 def _participates(family, arm: PlannedArm) -> bool:
