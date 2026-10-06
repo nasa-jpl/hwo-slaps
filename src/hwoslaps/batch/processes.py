@@ -75,10 +75,10 @@ def _cookie(pid, identity_env):
     return next((entry[len(prefix):] for entry in environment.split(b'\0') if entry.startswith(prefix)), None)
 
 
-def _exited(descriptor):
+def _exited(descriptor, timeout_ms=0):
     poller = select.poll()
     poller.register(descriptor, select.POLLIN | select.POLLHUP | select.POLLERR)
-    return bool(poller.poll(0))
+    return bool(poller.poll(timeout_ms))
 
 
 def worker_record(pid, *, slot, device, identity, identity_env):
@@ -139,6 +139,11 @@ def _group_handles(record):
                     continue
                 if (info['session_id'] != record['session_id'] or info['uid'] != record['uid']
                         or cookie != record['identity'].encode('ascii')):
+                    # /proc identity reads are not atomic with process exit. Only
+                    # definitive exit on this already-pinned pidfd may clear a
+                    # transient mismatch; a live foreign process still refuses.
+                    if _exited(descriptor, 50):
+                        continue
                     foreign.append(pid)
                     continue
                 if record['start_time'] is not None and info['start_time'] < record['start_time']:
@@ -149,7 +154,8 @@ def _group_handles(record):
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except PermissionError:
-                ambiguous.append(pid)
+                if not _exited(descriptor, 50):
+                    ambiguous.append(pid)
             finally:
                 if not retain:
                     os.close(descriptor)
