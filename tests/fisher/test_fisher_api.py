@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from pathlib import Path
+import re
 
 import numpy as np
 import pytest
@@ -45,7 +46,7 @@ def test_prepared_configuration_cannot_relabel_cached_science(minimal_mapping):
         np.testing.assert_array_equal(after.fisher_profiled, before.fisher_profiled)
 
 
-@pytest.mark.parametrize("asset_kind", ["kernel", "image"])
+@pytest.mark.parametrize("asset_kind", ["kernel", "model_kernel", "image"])
 def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, image_asset, asset_kind):
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
@@ -53,14 +54,26 @@ def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, i
         minimal_mapping["scene"]["source"]["light"] = {"light": {"type": "Image", "asset_path": str(image_asset),
             "centre": [0.0, 0.0], "flux_scale": 1.0, "size_scale": 1.0, "rotation_deg": 0.0, "total_flux": 1.0}}
         path = image_asset
+    elif asset_kind == "model_kernel":
+        truth_path = Path(minimal_mapping["psf"]["truth"]["path"])
+        path = truth_path.with_name("model-kernel.npy")
+        model_kernel = np.load(truth_path, allow_pickle=False)
+        model_kernel[3, 3] *= 1.4
+        np.save(path, model_kernel / model_kernel.sum())
+        minimal_mapping["psf"]["model"] = {**minimal_mapping["psf"]["truth"], "path": str(path)}
+        assert path != truth_path and path.read_bytes() != truth_path.read_bytes()
     else:
         path = Path(minimal_mapping["psf"]["truth"]["path"])
     original = path.read_bytes()
     with prepare_forecast(minimal_mapping) as prepared:
+        if asset_kind == "model_kernel":
+            assert prepared.psfs.mismatched
+            assert str(path) in prepared.record["file_digests"]
+            assert str(truth_path) in prepared.record["file_digests"]
         before = forecast(prepared, masses_msun=[1.0e8])
         try:
             path.write_bytes(original + b"changed")
-            with pytest.raises(ValueError, match=str(path)):
+            with pytest.raises(ValueError, match=rf"referenced file {re.escape(str(path))} changed"):
                 forecast(prepared, masses_msun=[1.0e8])
         finally:
             path.write_bytes(original)
