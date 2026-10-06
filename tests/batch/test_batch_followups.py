@@ -62,7 +62,7 @@ def test_retry_followup_consumes_actual_typed_stationarity_verdict(tiny_batch_sp
     from hwoslaps.inference.result import CaseResult, ObservationRecord, RefineOutcome, RoleFit, RoleStatus
     from hwoslaps.scene.cosmology import Cosmology
     from hwoslaps.scene.halos import make_halo
-    policy = {'acceptance': {'smooth': ['accepted'], 'subhalo': ['accepted']},
+    policy = {'acceptance': {'smooth': ['accepted_repeatable_profile'], 'subhalo': ['accepted_repeatable_profile']},
               'require_retained_state': False, 'stationarity_tolerance': tolerance}
     family = {'trials': {'kind': 'explicit', 'explicit': [{'mass_msun': 1e8, 'position_yx': [.1, .2]}]},
               'inject': False, 'noise': False, 'fit': {'mode': 'fixed_template'}, 'retry': policy}

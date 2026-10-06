@@ -10,7 +10,7 @@ from hwoslaps.config.checks import ConfigError
 _FAMILY = {'trials': {'kind': 'explicit', 'explicit': [{'members': 'all', 'mass_msun': 1e8,
                                                      'position_yx': [.1, .2]}]},
            'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'}}
-_RETRY = {'acceptance': {'smooth': ['accepted'], 'subhalo': ['accepted']},
+_RETRY = {'acceptance': {'smooth': ['accepted_repeatable_profile'], 'subhalo': ['accepted_repeatable_profile']},
           'require_retained_state': False, 'stationarity_tolerance': None}
 
 
