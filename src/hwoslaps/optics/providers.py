@@ -18,6 +18,7 @@ import numbers
 import types
 from collections.abc import Mapping
 from dataclasses import dataclass
+from numbers import Real as RealNumber
 from pathlib import Path
 from typing import Any, Literal, Protocol, Sequence
 
@@ -36,7 +37,7 @@ from .pupils import PUPIL_TABLE, CircularPupilSpec, build_pupil, parse_pupil
 from .wavefront import WAVEFRONT_TABLE, WavefrontBasis, WavefrontCoefficients, validate_coefficients
 
 __all__ = [
-    "CROSS_RULES", "PSF_TABLE", "KernelFileSpec", "KernelPSF", "KnowledgeErrorModel", "MatchedModel", "ModelPSF",
+    "CROSS_RULES", "PSF_TABLE", "KernelFileSpec", "KernelPSF", "KnowledgeErrorModel", "MatchedModel", "ModelPSF", "MonochromaticModel",
     "PSFProvider", "PsfModelSpec", "PsfSpec", "PsfTruthSpec", "WavefrontModel", "build_model_psf",
     "build_psf_provider", "parse_psf", "KernelCubePSF", "KernelCubeSpec",
 ]
@@ -284,8 +285,15 @@ class KnowledgeErrorModel:
     draw: WavefrontDrawSpec
 
 
+@dataclass(frozen=True)
+class MonochromaticModel:
+    """Truth optics at one fixed or photon-mean wavelength per light group."""
+
+    wavelength_nm: float | None = None
+
+
 PsfTruthSpec = OpticalSpec | KernelFileSpec | KernelCubeSpec
-PsfModelSpec = MatchedModel | KernelFileSpec | OpticalSpec | WavefrontModel | KnowledgeErrorModel
+PsfModelSpec = MatchedModel | KernelFileSpec | OpticalSpec | WavefrontModel | KnowledgeErrorModel | MonochromaticModel
 
 
 @dataclass(frozen=True)
@@ -299,8 +307,9 @@ class ModelPSF:
     """The model PSF: its provider, its relation to the truth, and the knowledge error drawn for it."""
 
     provider: PSFProvider
-    relation: Literal["matched", "kernel", "optical", "wavefront", "knowledge_error"]
+    relation: Literal["matched", "kernel", "optical", "wavefront", "knowledge_error", "monochromatic"]
     knowledge_error: KnowledgeErrorDraw | None
+    wavelength_nm: float | None = None
 
 
 def _join(path: str, key: str) -> str:
@@ -356,7 +365,7 @@ WAVEFRONT_MODEL_TABLE = Table((
     Key("offset", Nullable(WAVEFRONT_TABLE), "coefficients added to the truth coefficients", default=None),
 ), exactly_one=(("wavefront", "offset"),))
 
-_OPTICAL_MODELS = ("optical", "wavefront", "knowledge_error")
+_OPTICAL_MODELS = ("optical", "wavefront", "knowledge_error", "monochromatic")
 
 
 def _check_relations(values: Mapping[str, Any], path: str) -> None:
@@ -367,6 +376,8 @@ def _check_relations(values: Mapping[str, Any], path: str) -> None:
                           f"model kind {model['kind']} needs an optical truth")
     if truth["kind"] != "optical":
         return
+    if model["kind"] == "monochromatic" and (truth["wavelength_samples"] is None or truth["wavelength_samples"] < 2):
+        raise ConfigError(_join(path, "model.kind"), "monochromatic model needs optical truth wavelength_samples >= 2")
     if model["kind"] == "optical":
         if any(model[key] != truth[key] for key in ("wavelength_nm", "wavelength_samples")):
             raise ConfigError(_join(path, "model"), "an optical model must have the truth's wavelength keys")
@@ -401,8 +412,10 @@ PSF_TABLE = Table((
         "optical": OPTICAL_TABLE,
         "wavefront": WAVEFRONT_MODEL_TABLE,
         "knowledge_error": Table((Key("draw", DRAW_TABLE, "knowledge-error draw added to the truth coefficients"),)),
+        "monochromatic": Table((Key("wavelength_nm", Nullable(Real(min=0.0, min_open=True)),
+                                     "model wavelength; null uses each group's photon-weighted mean", None),)),
     }, default="matched"), "the PSF the analysis assumes", default={}),
-), rules=(Rule("optical, wavefront and knowledge_error models need an optical truth; segment hexikes and segment draws "
+), rules=(Rule("optical, wavefront, knowledge_error and monochromatic models need an optical truth; segment hexikes and segment draws "
                "need a hex-segmented pupil with those segments", _check_relations),))
 
 
@@ -441,6 +454,8 @@ def parse_psf(mapping: Mapping[str, Any], path: str = "psf") -> PsfSpec:
         model_spec = _kernel_file_spec(model)
     elif model["kind"] == "optical":
         model_spec = _optical_spec(model, where)
+    elif model["kind"] == "monochromatic":
+        model_spec = MonochromaticModel(model["wavelength_nm"])
     elif model["kind"] == "wavefront":
         replaced, offset = (None if model[name] is None else
                             WavefrontCoefficients.from_mapping(model[name], _join(where, name))
@@ -606,6 +621,15 @@ def build_model_psf(spec: PsfModelSpec, truth: PSFProvider, *, pixel_scale_arcse
                          f"{scale!r} arcsec")
     if isinstance(spec, MatchedModel):
         return ModelPSF(truth, "matched", None)
+    if isinstance(spec, MonochromaticModel):
+        optical = _optical_truth(truth, "monochromatic")
+        if optical.spec.wavelength_samples is None or optical.spec.wavelength_samples < 2:
+            raise ValueError("monochromatic model needs optical truth wavelength_samples >= 2")
+        if spec.wavelength_nm is not None and (isinstance(spec.wavelength_nm, (bool, np.bool_))
+                or not isinstance(spec.wavelength_nm, RealNumber) or not np.isfinite(spec.wavelength_nm)
+                or spec.wavelength_nm <= 0.0):
+            raise ValueError("monochromatic wavelength_nm must be positive and finite")
+        return ModelPSF(optical, "monochromatic", None, spec.wavelength_nm)
     if isinstance(spec, KernelFileSpec):
         return ModelPSF(_kernel_provider(spec, scale, "psf.model"), "kernel", None)
     if isinstance(spec, OpticalSpec):
