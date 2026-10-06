@@ -53,7 +53,20 @@ class SceneRenderer:
         return self.exposure.mean_adu(self.light_rate(scene, binding))
 
     def derivative_adu(self, scene: Scene, binding: KernelBinding,
-                       derivatives: Sequence[np.ndarray]) -> np.ndarray:
+                       derivatives: Sequence[np.ndarray] | Mapping[str, np.ndarray]) -> np.ndarray:
+        if isinstance(derivatives, Mapping):
+            if set(derivatives) != set(scene.light_images) or set(scene.light_images) != set(binding.group_index):
+                raise ValueError("one derivative kernel is required for each bound light group")
+            terms = []
+            for group, image in scene.light_images.items():
+                derivative = derivatives[group]
+                if np.shape(derivative) != binding.for_group(group).shape:
+                    raise ValueError(f"derivative support differs for light group {group}")
+                terms.append(convolve_real_space(image, derivative, scene.pixel_scale_arcsec))
+            total = terms[0]
+            for term in terms[1:]:
+                total = total + term
+            return self.exposure.signal_adu(total)
         if len(derivatives) != len(binding.kernels):
             raise ValueError("derivatives must be aligned with binding.kernels")
         if set(scene.light_groups) != set(binding.group_index):

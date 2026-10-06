@@ -2,17 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
 from ..identity import validate_loaded_file
 from ..optics.kernels import KernelBinding
+from ..optics.chromatic import SpectralWeights, effective_kernel, sed_weights
 from ..optics.optical_psf import OpticalPSF, OpticalSpec
 from ..optics.providers import KernelFileSpec, ModelPSF, PSFProvider, build_model_psf, build_psf_provider
 from ..spectra.bandpass import Bandpass
-from ..spectra.sed import SED
+from ..spectra.sed import SED, build_sed
+from ..spectra.photometry import effective_wavelength_m
 from ..optics.wavefront import WavefrontMode
 
 if TYPE_CHECKING:
@@ -24,12 +27,22 @@ __all__ = ["PsfPair", "bind_psfs", "bind_truth", "truth_provider", "validate_loa
 
 
 @dataclass(frozen=True)
+class _BoundPSF:
+    binding: KernelBinding
+    node_kernels: tuple[Any, ...]
+    weights: Mapping[str, SpectralWeights]
+    monochromatic_wavelengths: Mapping[str, float] | None
+    record: Mapping[str, Any] | None
+
+
+@dataclass(frozen=True)
 class PsfPair:
     truth: PSFProvider
     model: ModelPSF
     truth_kernels: KernelBinding
     model_kernels: KernelBinding
     spectral: Mapping[str, Any] | None
+    _model_bound: _BoundPSF = field(repr=False)
 
     @property
     def relation(self) -> str:
@@ -39,19 +52,28 @@ class PsfPair:
     def mismatched(self) -> bool:
         return self.relation != "matched"
 
-    def model_kernel_derivatives(self, mode: WavefrontMode, step_nm: float) -> tuple[np.ndarray, ...]:
+    def model_kernel_derivatives(self, mode: WavefrontMode, step_nm: float) -> tuple[np.ndarray, ...] | Mapping[str, np.ndarray]:
         provider = self.model.provider
         if provider.basis is None or provider.coefficients is None:
             raise ValueError("wavefront nuisances need a model PSF with a wavefront basis")
         coefficients = provider.coefficients
         value = coefficients.value(mode)
+        upper, lower = coefficients.replace(mode, value + step_nm), coefficients.replace(mode, value - step_nm)
+        if self._model_bound.monochromatic_wavelengths is not None:
+            return {group: (provider.kernel(wavelength, coefficients=upper).kernel
+                            - provider.kernel(wavelength, coefficients=lower).kernel) / (2.0 * step_nm)
+                    for group, wavelength in self._model_bound.monochromatic_wavelengths.items()}
         nodes = provider.wavelengths_m
-        if nodes is None or len(nodes) != 1:
-            raise ValueError("wavefront derivatives require a monochromatic optical provider")
-        plus = provider.kernel(nodes[0], coefficients=coefficients.replace(mode, value + step_nm))
-        minus = provider.kernel(nodes[0], coefficients=coefficients.replace(mode, value - step_nm))
-        derivative = (plus.kernel - minus.kernel) / (2.0 * step_nm)
-        return (derivative,)
+        if nodes is None:
+            raise ValueError("wavefront derivatives need optical wavelength nodes")
+        if len(nodes) == 1:
+            plus = provider.kernel(nodes[0], coefficients=upper)
+            minus = provider.kernel(nodes[0], coefficients=lower)
+            return ((plus.kernel - minus.kernel) / (2.0 * step_nm),)
+        plus, minus = provider.kernels(coefficients=upper), provider.kernels(coefficients=lower)
+        return {group: (effective_kernel(plus, weights, provider.pixel_scale_arcsec, source={}).kernel
+                        - effective_kernel(minus, weights, provider.pixel_scale_arcsec, source={}).kernel)
+                       / (2.0 * step_nm) for group, weights in self._model_bound.weights.items()}
 
     def to_mapping(self) -> dict[str, Any]:
         draw = self.model.knowledge_error
@@ -88,20 +110,76 @@ def validate_loaded_psf_files(provider: PSFProvider, binding: KernelBinding, man
 
 def bind_truth(provider: PSFProvider, scene: SceneSpec,
                instrument: Instrument, *, loaded_seds: Mapping[str, SED] | None = None) -> tuple[KernelBinding, Mapping[str, Any] | None]:
+    bound = _bind_provider(provider, scene, instrument, loaded_seds=loaded_seds)
+    return bound.binding, bound.record
+
+
+def _captured_seds(scene: SceneSpec, supplied: Mapping[str, SED] | None) -> Mapping[str, SED]:
+    if supplied is not None:
+        return supplied
+    return {f"{galaxy.plane}.{component.name}": build_sed(component.sed, redshift=galaxy.redshift)
+            for galaxy in (scene.lens, scene.source) for component in galaxy.light if component.sed is not None}
+
+
+def _bind_provider(provider: PSFProvider, scene: SceneSpec, instrument: Instrument, *,
+                   loaded_seds: Mapping[str, SED] | None = None,
+                   monochromatic: bool = False, wavelength_nm: float | None = None) -> _BoundPSF:
+    seds = _captured_seds(scene, loaded_seds)
+    groups = scene.light_groups(loaded_seds=seds)
     nodes = provider.wavelengths_m
-    if nodes is None:
-        kernel = provider.kernel()
-    elif len(nodes) == 1:
-        kernel = provider.kernel(nodes[0])
+    band = instrument.bandpass
+    if nodes is None or (len(nodes) == 1 and not monochromatic):
+        # Original one-node operations: no weighted arithmetic or renormalization.
+        kernel = provider.kernel() if nodes is None else provider.kernel(nodes[0])
+        binding = KernelBinding.uniform(kernel, tuple(groups))
+        record = None
+        if nodes is not None and band is not None:
+            record = {"wavelengths_m": list(nodes), "captured_power_fractions": [kernel.source["captured_power_fraction"]],
+                      "groups": {group: {"kernel_wavelength_m": nodes[0]} for group in groups}}
+        return _BoundPSF(binding, (kernel,), MappingProxyType({}), None, record)
+    if band is None:
+        raise ValueError("chromatic PSF binding needs the captured instrument bandpass")
+    group_seds = {}
+    for key, group in groups.items():
+        if group.sed is None:
+            raise ValueError(f"chromatic light group {key} needs an SED")
+        group_seds[key] = seds[f"{group.plane}.{group.components[0]}"]
+    weights = {key: sed_weights(band, sed, nodes) for key, sed in group_seds.items()}
+    means = {key: effective_wavelength_m(sed, band) for key, sed in group_seds.items()}
+    if monochromatic:
+        wavelengths = {key: mean if wavelength_nm is None else wavelength_nm / 1.0e9
+                       for key, mean in means.items()}
+        cache = {wavelength: provider.kernel(wavelength) for wavelength in dict.fromkeys(wavelengths.values())}
+        kernels = {key: cache[wavelength] for key, wavelength in wavelengths.items()}
+        node_kernels = tuple(cache.values())
     else:
-        raise ValueError("several wavelength nodes require chromatic PSF binding")
-    return KernelBinding.uniform(kernel, tuple(scene.light_groups(loaded_seds=loaded_seds))), None
+        wavelengths = None
+        node_kernels = provider.kernels()
+        kernels = {key: effective_kernel(node_kernels, weight, scene.grid.pixel_scale_arcsec,
+                     source={"provider": provider.to_mapping(), "weights": weight.to_mapping()})
+                   for key, weight in weights.items()}
+    binding = KernelBinding.from_groups(kernels)
+    record = {"wavelengths_m": list(nodes),
+              "kernel_wavelengths_m": [node.source.get("wavelength_m") for node in node_kernels],
+              "captured_power_fractions": [node.source["captured_power_fraction"] for node in node_kernels],
+              "node_kernels": [{"identity": node.kernel_identity().to_mapping(), "source": dict(node.source)}
+                               for node in node_kernels],
+              "groups": {key: {"sed_digest": group_seds[key].digest(), "weights": weights[key].to_mapping(),
+                                "effective_wavelength_m": means[key],
+                                "kernel_wavelength_m": None if wavelengths is None else wavelengths[key],
+                                "kernel_identity": kernels[key].kernel_identity().to_mapping()} for key in groups}}
+    return _BoundPSF(binding, node_kernels, MappingProxyType(weights),
+                     None if wavelengths is None else MappingProxyType(wavelengths), record)
 
 
 def bind_psfs(config: EngineConfig, scene: SceneSpec, instrument: Instrument, *, truth: PSFProvider,
               loaded_seds: Mapping[str, SED] | None = None) -> PsfPair:
-    truth_kernels, spectral = bind_truth(truth, scene, instrument, loaded_seds=loaded_seds)
+    seds = _captured_seds(scene, loaded_seds)
+    bound_truth = _bind_provider(truth, scene, instrument, loaded_seds=seds)
     model = build_model_psf(config.psf.model, truth, pixel_scale_arcsec=scene.grid.pixel_scale_arcsec)
-    model_kernels = truth_kernels if model.relation == "matched" else bind_truth(
-        model.provider, scene, instrument, loaded_seds=loaded_seds)[0]
-    return PsfPair(truth, model, truth_kernels, model_kernels, spectral)
+    bound_model = bound_truth if model.relation == "matched" else _bind_provider(
+        model.provider, scene, instrument, loaded_seds=seds,
+        monochromatic=model.relation == "monochromatic", wavelength_nm=model.wavelength_nm)
+    spectral = None if bound_truth.record is None and bound_model.record is None else {
+        "truth": bound_truth.record, "model": bound_model.record}
+    return PsfPair(truth, model, bound_truth.binding, bound_model.binding, spectral, bound_model)
