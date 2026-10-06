@@ -16,7 +16,7 @@ def main(argv=None):
     parser.add_argument("--q-threshold", type=positive_number, required=True)
     parser.add_argument("--plot", action="store_true")
     args = parser.parse_args(argv)
-    from hwoslaps.config.loading import load_config
+    from hwoslaps.config.schema import load_config
 
     directory = Path(__file__).resolve().parent
     config = load_config([directory / name for name in ("scene.yaml", "instrument.yaml", "forecast.yaml")])

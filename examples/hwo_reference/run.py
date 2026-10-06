@@ -39,7 +39,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.seed < 0:
         parser.error("--seed must be non-negative")
-    from hwoslaps.config.loading import load_config
+    from hwoslaps.config.schema import load_config
 
     directory = Path(__file__).resolve().parent
     sei = verify_sei(directory / "sei_v0.1.9")

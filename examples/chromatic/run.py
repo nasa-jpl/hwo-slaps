@@ -19,7 +19,7 @@ def main(argv=None):
     parser.add_argument("--ring", action="store_true", help="use the 36-position convergence layout")
     parser.add_argument("--plot", action="store_true")
     args = parser.parse_args(argv)
-    from hwoslaps.config.loading import load_config
+    from hwoslaps.config.schema import load_config
 
     directory = Path(__file__).resolve().parent
     hwo = directory.parent / "hwo_reference"
