@@ -41,7 +41,7 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
         opd = basis.opd_nm(raw).ravel()[mask]
         assert np.mean(opd ** 2) == pytest.approx(1.0, rel=1e-10)
         if index == 0:
-            assert [value != 0.0 for _, value in raw.zernikes()] == [True, False, False, False]
+            assert [value != 0.0 for _, value in raw.zernikes()] == [True] + [False] * (len(global_nolls) - 1)
     for index in range(len(segment_nolls)):
         unit = {noll: float(j == index) for j, noll in enumerate(segment_nolls)}
         raw = transform.to_raw(segment={3: unit})
@@ -49,7 +49,7 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
         opd = basis.opd_nm(raw).ravel()[segment_mask]
         assert np.mean(opd ** 2) == pytest.approx(1.0, rel=1e-10)
         if index == 0:
-            assert [value != 0.0 for _, _, value in raw.segment_hexikes()] == [True, False, False]
+            assert [value != 0.0 for _, _, value in raw.segment_hexikes()] == [True] + [False] * (len(segment_nolls) - 1)
     with pytest.raises(ValueError, match="exactly the transform modes"):
         transform.to_raw(global_={4: 1.0})
     if mode_source == "packaged_drift":
