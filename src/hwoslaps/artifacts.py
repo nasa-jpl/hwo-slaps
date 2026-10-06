@@ -19,7 +19,7 @@ from typing import Any, TYPE_CHECKING
 import numpy as np
 
 from .config.loading import dump_yaml
-from .identity import canonical_json, json_ready
+from .identity import canonical_json, json_ready, read_file_snapshot
 
 if TYPE_CHECKING:
     from .fisher.result import ForecastResult
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from .scene.image_source import ImageAsset
 
 __all__ = ["save_forecast", "load_forecast", "save_observation", "load_observation",
-           "save_case", "load_case", "save_image_asset", "write_json", "write_yaml"]
+           "save_case", "load_case", "load_case_snapshot", "save_image_asset", "write_json", "write_yaml"]
 _STATISTICS = ("fisher_raw", "fisher_profiled", "sigma_amplitude", "q_asimov", "degradation")
 _AMPLITUDES = {"amplitude_hat": ("amplitude_hat", "q_mismatch", "z_mismatch"),
                "amplitude_spurious": ("amplitude_spurious", "q_spurious", "z_spurious")}
@@ -290,12 +290,18 @@ def save_case(result: CaseResult, path) -> Path:
 
 
 def load_case(path) -> CaseResult:
+    return load_case_snapshot(path)[0]
+
+
+def load_case_snapshot(path) -> tuple[CaseResult, str]:
+    """The fully validated case and SHA-256 of the same UTF-8 artifact bytes."""
     from .inference.result import CaseResult
-    value = _json_value(Path(path).read_text(encoding="utf-8"))
+    content, digest = read_file_snapshot(path)
+    value = _json_value(content.decode("utf-8"))
     _keys(value, ("schema", "version", "result"), "case artifact")
     if value["schema"] != "hwoslaps.case" or type(value["version"]) is not int or value["version"] != 1:
         raise ValueError("unsupported case artifact schema")
-    return CaseResult.from_mapping(value["result"])
+    return CaseResult.from_mapping(value["result"]), digest
 
 
 def save_image_asset(asset: ImageAsset, path) -> Path:

@@ -1,10 +1,12 @@
 """Current artifact formats, exact scientific values and atomic no-overwrite publishing."""
+import hashlib
 import json
+from dataclasses import replace
 
 import numpy as np
 import pytest
 
-from hwoslaps.artifacts import (load_case, load_forecast, load_observation, save_case, save_forecast,
+from hwoslaps.artifacts import (load_case, load_case_snapshot, load_forecast, load_observation, save_case, save_forecast,
                                save_image_asset, save_observation, write_json, write_yaml)
 
 
@@ -110,10 +112,27 @@ def test_observation_round_trip_preserves_bytes_sampling_and_kernel_sharing(tmp_
 
 @pytest.mark.backend
 @pytest.mark.parametrize("custom_mask", [False, True])
-def test_case_round_trip_preserves_typed_result(tmp_path, custom_mask):
+@pytest.mark.parametrize("replace_after_read", [False, True])
+def test_case_round_trip_preserves_typed_result(tmp_path, monkeypatch, custom_mask, replace_after_read):
+    import hwoslaps.artifacts as artifacts
     original = case_value(custom_mask)
-    loaded = load_case(save_case(original, tmp_path / "case.json"))
+    path = save_case(original, tmp_path / "case.json")
+    original_bytes = path.read_bytes()
+    replacement = replace(original, smooth=replace(original.smooth, log_likelihood=-4., truth_log_likelihood=-4.),
+                          q_signed=6., q_clipped=6.)
+    replacement_bytes = save_case(replacement, tmp_path / "replacement.json").read_bytes()
+    real_snapshot = artifacts.read_file_snapshot
+    def replace_file_after_actual_read(filename):
+        content, digest = real_snapshot(filename)
+        if replace_after_read:
+            path.write_bytes(replacement_bytes)
+        return content, digest
+    monkeypatch.setattr(artifacts, "read_file_snapshot", replace_file_after_actual_read)
+    loaded, digest = load_case_snapshot(path)
     assert original.to_mapping() == loaded.to_mapping()
+    assert digest == hashlib.sha256(original_bytes).hexdigest(), "case digest must identify the bytes actually validated"
+    assert load_case(path).q_signed == (6. if replace_after_read else 4.)
+    assert path.read_bytes() == (replacement_bytes if replace_after_read else original_bytes)
 
 
 @pytest.mark.parametrize("writer,payload", [(save_forecast, forecast_value()), (save_observation, observation_value()),
