@@ -122,6 +122,10 @@ def test_identical_model_kernel_is_the_matched_limit(minimal_mapping):
 def test_execution_does_not_enter_configuration_digest(minimal_mapping):
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
+    # Execution left the config schema, but invalid pool sizes still refuse before preparation.
+    for workers in (0, -2, 1.5, True):
+        with pytest.raises(ValueError, match="reference_workers must be an integer >= 1"):
+            Execution(reference_workers=workers)
     with prepare_forecast(minimal_mapping) as reference, prepare_forecast(minimal_mapping, execution=Execution(engine="jax")) as jax:
         assert reference.record["config_digest"] == jax.record["config_digest"]
         assert reference.record["comparison_digest"] == jax.record["comparison_digest"]
