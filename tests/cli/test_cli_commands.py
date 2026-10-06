@@ -1,0 +1,113 @@
+"""The installed command's real configuration, output and replay boundaries."""
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+import numpy as np
+import pytest
+
+
+def run_cli(*arguments):
+    return subprocess.run([sys.executable, "-m", "hwoslaps", *map(str, arguments)], capture_output=True, text=True,
+                          timeout=120)
+
+
+def test_validate_reports_dotted_key_and_reference_is_backend_free(minimal_mapping, write_config):
+    minimal_mapping["scene"]["grid"]["over_sample_size"] = 0
+    path = write_config(minimal_mapping)
+    failed = run_cli("validate", path)
+    assert failed.returncode == 2
+    assert "scene.grid.over_sample_size" in failed.stderr
+    reference = run_cli("reference", "scene.grid")
+    assert reference.returncode == 0 and "pixel_scale_arcsec" in reference.stdout
+
+
+def test_output_directory_must_not_exist(minimal_mapping, write_config, tmp_path):
+    path = write_config(minimal_mapping)
+    output = tmp_path / "existing"
+    output.mkdir()
+    (output / "previous").write_bytes(b"scientific result")
+    completed = run_cli("forecast", path, "--masses", "1e8", "-o", output)
+    assert completed.returncode == 2
+    assert (output / "previous").read_bytes() == b"scientific result"
+    assert sorted(item.name for item in output.iterdir()) == ["previous"]
+
+
+@pytest.mark.parametrize("arguments", [[], ["--masses", "nan"], ["--masses", "-1"]])
+def test_forecast_usage_errors_write_nothing(minimal_mapping, write_config, tmp_path, arguments):
+    path = write_config(minimal_mapping)
+    output = tmp_path / "result"
+    completed = run_cli("forecast", path, *arguments, "-o", output)
+    assert completed.returncode == 2 and not output.exists()
+
+
+@pytest.mark.backend
+def test_simulate_and_forecast_write_loadable_artifacts_and_replay_exactly(minimal_mapping, write_config, tmp_path):
+    from hwoslaps.artifacts import load_forecast, load_observation
+    from hwoslaps.config.schema import load_config
+    minimal_mapping["scene"]["injection"] = {"mass_msun": 1e8, "position": {"kind": "direct", "centre": [0.0, 0.8]}}
+    path = write_config(minimal_mapping)
+    for name, flags in (("expected", ["--expected"]), ("noisy", ["--noise-seed", "11"]),
+                        ("control", ["--expected", "--smooth"])):
+        output = tmp_path / name
+        completed = run_cli("simulate", path, *flags, "-o", output)
+        assert completed.returncode == 0, completed.stderr
+        observed = load_observation(output / "observation.npz")
+        assert observed.noise_seed == (11 if name == "noisy" else None)
+        assert (observed.subhalo is None) == (name == "control")
+        record = json.loads((output / "provenance.json").read_text())
+        assert record["operation"] == "simulate"
+        assert record["config_digest"] == observed.config_digest
+    output = tmp_path / "forecast"
+    completed = run_cli("forecast", path, "--masses", "1e7", "1e8", "1e9", "-o", output)
+    assert completed.returncode == 0, completed.stderr
+    first = load_forecast(output / "forecast.npz")
+    assert json.loads((output / "provenance.json").read_text())["config_digest"] == first.provenance["config_digest"]
+    effective = output / "effective_config.yaml"
+    assert load_config(effective).digest() == load_config(path).digest()
+    replay = tmp_path / "replay"
+    completed = run_cli("forecast", effective, "--masses", "1e7", "1e8", "1e9", "-o", replay)
+    assert completed.returncode == 0, completed.stderr
+    second = load_forecast(replay / "forecast.npz")
+    assert first.positions_yx.tobytes() == second.positions_yx.tobytes()
+    assert first.fisher_profiled.tobytes() == second.fisher_profiled.tobytes()
+
+
+@pytest.mark.backend
+@pytest.mark.parametrize("operation", ["simulate", "forecast"])
+def test_companion_identity_comes_from_the_actual_product_after_valid_publication(
+        minimal_mapping, write_config, tmp_path, monkeypatch, operation):
+    from hwoslaps.artifacts import load_forecast, load_observation
+    from hwoslaps.cli import main
+    from hwoslaps.config.schema import load_config
+    from hwoslaps.provenance import capture_provenance
+    import hwoslaps.provenance as provenance
+
+    path = write_config(minimal_mapping)
+    before = load_config(path).digest()
+    kernel_path = Path(minimal_mapping["psf"]["truth"]["path"])
+    original = np.load(kernel_path)
+    changed = original.copy()
+    changed[3, 3] *= 1.1
+    changed /= changed.sum()
+    replacement = tmp_path / "replacement.npy"
+    np.save(replacement, changed)
+    published = False
+    def capture_with_publication(*args, **kwargs):
+        nonlocal published
+        assert not published
+        replacement.replace(kernel_path)
+        published = True
+        return capture_provenance(*args, **kwargs)
+    monkeypatch.setattr(provenance, "capture_provenance", capture_with_publication)
+    output = tmp_path / operation
+    arguments = (["simulate", path, "--expected", "--smooth", "-o", output] if operation == "simulate" else
+                 ["forecast", path, "--masses", "1e8", "-o", output])
+    assert main(list(map(str, arguments))) == 0
+    assert published
+    record = json.loads((output / "provenance.json").read_text())
+    identity = (load_observation(output / "observation.npz").config_digest if operation == "simulate" else
+                load_forecast(output / "forecast.npz").provenance["config_digest"])
+    assert identity != before
+    assert record["config_digest"] == identity

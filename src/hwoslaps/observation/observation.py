@@ -14,9 +14,10 @@ from typing import TYPE_CHECKING, Any, Final, Literal, Mapping
 
 import numpy as np
 
-from ..config.checks import ConfigError, Integer, Key, Nullable, Real, Rule, Table
+from ..config.checks import ConfigError, Integer, Key, Nullable, Real, Rule, Sha256, Table
 from ..identity import array_digest
 from ..instrument import check_finite_number
+from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
 from ..spectra.bandpass import BANDPASS_TABLE, BandpassSpec, parse_bandpass
 from ..spectra.sed import SED_TABLE, SEDSpec, parse_sed
 from .expected import Exposure, Plane, convolve_light
@@ -127,10 +128,14 @@ class Observation:
     sampling: Mapping[str, float]
 
     def __post_init__(self) -> None:
-        if self.kind not in ("expected", "noisy"):
+        if not isinstance(self.kind, str) or self.kind not in ("expected", "noisy"):
             raise ValueError(f"kind must be 'expected' or 'noisy', got {self.kind!r}")
         if (self.kind == "expected") != (self.noise_seed is None):
             raise ValueError("an expected observation has no noise seed and a noisy one has its seed")
+        if self.kind == "noisy":
+            object.__setattr__(self, "noise_seed", Integer(min=0)(self.noise_seed, "noise_seed"))
+        if self.config_digest is not None:
+            object.__setattr__(self, "config_digest", Sha256()(self.config_digest, "config_digest"))
         if self.kind == "expected" and self.data_adu is not self.expected_adu:
             raise ValueError("the data of an expected observation is its expected image")
         planes = set(self.light_rate_by_plane_e_per_s)
@@ -144,6 +149,13 @@ class Observation:
         for name, array in arrays.items():
             if array.shape != shape:
                 raise ValueError(f"{name} has shape {array.shape}; the grid is {shape}")
+            if not np.all(np.isfinite(array)):
+                raise ValueError(f"{name} contains non-finite values")
+        if np.any(self.noise_map_adu <= 0.0):
+            raise ValueError("noise_map_adu must be strictly positive")
+        if any(abs(kernel.pixel_scale_arcsec - self.grid.pixel_scale_arcsec) > PIXEL_SCALE_ATOL_ARCSEC
+               for kernel in self.psfs.kernels):
+            raise ValueError("observation kernels and grid have different angular sampling")
         if set(self.sampling) != set(self.psfs.group_index):
             raise ValueError(f"sampling covers {sorted(self.sampling)}; the light groups are "
                              f"{sorted(self.psfs.group_index)}")

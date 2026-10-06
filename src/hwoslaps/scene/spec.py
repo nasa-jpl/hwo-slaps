@@ -57,6 +57,12 @@ class GridSpec:
     pixel_scale_arcsec: float
     over_sample_size: int
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "shape", tuple(Shape()(self.shape, "grid.shape")))
+        object.__setattr__(self, "pixel_scale_arcsec",
+                           Real(min=0.0, min_open=True)(self.pixel_scale_arcsec, "grid.pixel_scale_arcsec"))
+        object.__setattr__(self, "over_sample_size", Integer(min=1)(self.over_sample_size, "grid.over_sample_size"))
+
 
 @dataclass(frozen=True)
 class FluxSpec:

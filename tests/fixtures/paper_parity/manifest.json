@@ -120,7 +120,7 @@
    },
    "dataset_kind": "noisy",
    "description": "noisy injected NFW trial at the P2 maximum-q node, fitted with the delta fit kernel; smooth and freed models at truth and perturbed",
-   "engine_config": "p2_delta_knowledge_error.yaml",
+   "engine_config": "engine/p2_delta_knowledge_error.yaml",
    "fit_mode": "freed",
    "fixture": "n1_nonlinear_likelihood.npz",
    "lanes": {
@@ -477,7 +477,7 @@
     },
     "sigma_adu": "4260c079bc40e059a6b8300492f9677882d9c6e75f6cbbb9c1f2abe134f6048c"
    },
-   "engine_config": "p1_optical_matched.yaml",
+   "engine_config": "engine/p1_optical_matched.yaml",
    "fit_kernel_sha256": "9e50ba91260311cf795ab8d9cebed1b9696b8528adb1be62b3f3ba8e9ab7b152",
    "fixture": "p1_optical_matched.npz",
    "lanes": {
@@ -840,7 +840,7 @@
     },
     "sigma_adu": "4260c079bc40e059a6b8300492f9677882d9c6e75f6cbbb9c1f2abe134f6048c"
    },
-   "engine_config": "p2_delta_knowledge_error.yaml",
+   "engine_config": "engine/p2_delta_knowledge_error.yaml",
    "fit_kernel_sha256": "7499d5e22583ca9c019728e1c3a4d9d33b49c7a88517996c2c1dd99ec0478da1",
    "fit_psf_delta": {
     "delta_id": "e598a298ab285140",
@@ -2297,7 +2297,7 @@
     },
     "sigma_adu": "1371f7737ba4948618e0f9e619b127bf67166779fa1e674c4211c95396c5567f"
    },
-   "engine_config": "p3_image_source_kernel.yaml",
+   "engine_config": "engine/p3_image_source_kernel.yaml",
    "fit_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f",
    "fixture": "p3_image_source_kernel.npz",
    "lanes": {
@@ -2569,7 +2569,7 @@
     },
     "sigma_adu": "93a594058d31666af027425bb5170c1ce4331a424fc8d3ddc46875001d12170d"
    },
-   "engine_config": "p4_subhalo_pointmass.yaml",
+   "engine_config": "engine/p4_subhalo_pointmass.yaml",
    "fit_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f",
    "fixture": "p4_subhalo_pointmass.npz",
    "lanes": {
@@ -2841,7 +2841,7 @@
     },
     "sigma_adu": "93a594058d31666af027425bb5170c1ce4331a424fc8d3ddc46875001d12170d"
    },
-   "engine_config": "p4_subhalo_sis.yaml",
+   "engine_config": "engine/p4_subhalo_sis.yaml",
    "fit_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f",
    "fixture": "p4_subhalo_sis.npz",
    "lanes": {

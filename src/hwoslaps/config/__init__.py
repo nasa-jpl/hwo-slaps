@@ -1,10 +1,25 @@
-"""Load, compose and validate portable forecasting configurations."""
+"""Public engine values and operations, imported when requested."""
+from importlib import import_module
 
-from .loading import load_config, merge_configs, resolve_config_paths
-from .validation import validate_or_raise
+_PUBLIC_API = {
+    "ConfigError": ("checks", "ConfigError"),
+    "EngineConfig": ("schema", "EngineConfig"),
+    "compose_config": ("schema", "compose_config"),
+    "parse_config": ("schema", "parse_config"),
+    "load_config": ("schema", "load_config"),
+    "resolve_config": ("schema", "resolve_config"),
+}
+__all__ = list(_PUBLIC_API)
 
-__all__ = [
-    "load_config", "merge_configs", "resolve_config_paths",
-    "validate_or_raise",
-]
 
+def __getattr__(name):
+    if name not in _PUBLIC_API:
+        raise AttributeError(name)
+    module, member = _PUBLIC_API[name]
+    value = getattr(import_module(f".{module}", __name__), member)
+    globals()[name] = value
+    return value
+
+
+def __dir__():
+    return sorted(__all__)

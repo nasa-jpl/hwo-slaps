@@ -8,7 +8,7 @@ import pytest
 from scipy.integrate import quad
 
 from hwoslaps.config.checks import ConfigError
-from hwoslaps.scene.parameters import scene_parameters, with_parameter
+from hwoslaps.scene.parameters import scene_parameter_names, scene_parameters, with_parameter
 from hwoslaps.scene.profiles import instantiate
 from hwoslaps.scene.spec import parse_scene
 
@@ -92,14 +92,26 @@ def test_shear_deflections_and_registry_order(minimal_mapping):
     assert [p.name for p in scene_parameters(spec)][:2] == ["lens.mass.main.gamma_1", "lens.mass.main.gamma_2"]
 
 
-def test_multipole_parameter_reads_replacement_and_links_use_registry(minimal_mapping):
+@pytest.mark.parametrize("configured_flux", [False, True], ids=["amplitude", "sersic-flux-sed"])
+def test_multipole_parameter_reads_replacement_and_links_use_registry(minimal_mapping, configured_flux):
+    if configured_flux:
+        light = minimal_mapping["scene"]["source"]["light"]["light"]
+        light.pop("intensity")
+        light.update(type="Sersic", sersic_index=4.0, flux={"rate_e_per_s": 8.0},
+                     sed={"kind": "power_law", "index": -1.5})
     spec = _scene(minimal_mapping, _mass(multipoles={"m4": [0.0, -0.03], "m3": [0.02, 0.0]}))
-    names = [p.name.rsplit(".", 1)[-1] for p in scene_parameters(spec) if p.name.startswith("lens.mass")]
+    names = [name.rsplit(".", 1)[-1] for name in scene_parameter_names(spec) if name.startswith("lens.mass")]
     assert names == ["centre_y", "centre_x", "einstein_radius", "ell_comp_1", "ell_comp_2", "slope",
                      "multipole_m3_1", "multipole_m3_2", "multipole_m4_1", "multipole_m4_2"]
     updated = with_parameter(spec, "lens.mass.main.multipole_m3_2", -0.012)
     assert updated.lens.mass[0].values["multipoles"]["m3"] == (0.02, -0.012)
     assert spec.lens.mass[0].values["multipoles"]["m3"] == (0.02, 0.0)
+    assert updated.source.light == spec.source.light
+    if configured_flux:
+        assert updated.source.light[0].values["intensity"] is None
+        assert updated.source.light[0].flux.rate_e_per_s == 8.0
+        assert updated.source.light[0].sed == spec.source.light[0].sed
+        assert "source.light.light.intensity" in scene_parameter_names(updated)
     profiles = instantiate(updated.lens.mass[0])
     assert list(profiles) == ["main", "main_multipole_m3", "main_multipole_m4"]
     for profile in list(profiles.values())[1:]:

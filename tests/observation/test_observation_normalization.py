@@ -88,13 +88,23 @@ def test_image_flux_normalization_includes_flux_and_size_scale(minimal_mapping, 
     assert setup.file_digests[str(image_asset)] == asset.digest
 
 
-def test_grouped_monochromatic_scene_keeps_real_flux_and_nuisance_paths(minimal_mapping):
+@pytest.mark.parametrize("family", ["exponential", "sersic_flux_multipoles"])
+def test_grouped_monochromatic_scene_keeps_real_flux_and_nuisance_paths(minimal_mapping, family):
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
     mapping = minimal_mapping
     first = mapping["scene"]["source"]["light"]["light"]
+    if family == "sersic_flux_multipoles":
+        first.pop("intensity")
+        first.update(type="Sersic", sersic_index=4.0, flux={"rate_e_per_s": 8.0})
+        mapping["scene"]["lens"]["mass"]["mass"].update(type="PowerLaw", slope=2.08, ell_comps=[0.0, 0.0],
+            multipoles={"m3": [0.02, -0.01], "m4": [-0.03, 0.01]})
     second = deepcopy(first)
-    second.update(centre=[0.04, -0.06], intensity=0.3, effective_radius=0.18)
+    second.update(centre=[0.04, -0.06], effective_radius=0.18)
+    if family == "sersic_flux_multipoles":
+        second["flux"] = {"rate_e_per_s": 3.0}
+    else:
+        second["intensity"] = 0.3
     mapping["scene"]["source"]["light"]["second"] = second
     with prepare_forecast(mapping) as plain:
         expected_mean = plain.mean_truth_adu.copy()
@@ -107,6 +117,39 @@ def test_grouped_monochromatic_scene_keeps_real_flux_and_nuisance_paths(minimal_
         actual = forecast(grouped, masses_msun=[1.0e8])
         np.testing.assert_allclose(actual.fisher_profiled, expected.fisher_profiled, rtol=1.0e-10)
         assert "source.light.second.intensity" in grouped.nuisances.names
+        if family == "sersic_flux_multipoles":
+            import autolens as al
+
+            lens_keys = ("centre_y", "centre_x", "einstein_radius", "ell_comp_1", "ell_comp_2", "slope",
+                         "multipole_m3_1", "multipole_m3_2", "multipole_m4_1", "multipole_m4_2")
+            source_keys = ("centre_y", "centre_x", "ell_comp_1", "ell_comp_2", "intensity",
+                           "effective_radius", "sersic_index")
+            expected_names = (tuple("lens.mass.mass." + key for key in lens_keys)
+                + tuple(f"source.light.{name}.{key}" for name in ("light", "second") for key in source_keys)
+                + ("observation.background_offset_adu",))
+            assert grouped.nuisances.names == expected_names
+            assert all(parameter.prior_sigma is None for parameter in grouped.nuisances.parameters)
+            for configured, resolved, rate in zip(grouped.config.scene.source.light,
+                                                   grouped.scene.spec.source.light, (8.0, 3.0)):
+                n = 4.0
+                b = 2*n-1/3+4/(405*n)+46/(25515*n*n)+131/(1148175*n**3)-2194697/(30690717750*n**4)
+                unit = 2*math.pi*n*resolved.values["effective_radius"]**2*math.exp(b)*math.gamma(2*n)/b**(2*n)
+                omega = grouped.scene.pixel_scale_arcsec**2
+                amplitude = rate*omega/unit
+                assert resolved.flux is None and configured.flux.rate_e_per_s == rate
+                assert resolved.sed == configured.sed
+                assert resolved.values["intensity"] == pytest.approx(amplitude, rel=1e-12, abs=0.0)
+                record = grouped.observation.photometry.components[f"source.{resolved.name}"]
+                assert record["flux_input"] == {"rate_e_per_s": rate, "ab_mag": None, "reference_band": None}
+                assert dict(record["sed"]) == ({"kind": "flat_fnu"} if resolved.name == "light"
+                                               else {"kind": "power_law", "index": -2.0})
+                assert record["rate_e_per_s"] == rate and record["amplitude_key"] == "intensity"
+                assert record["amplitude"] == resolved.values["intensity"]
+                assert record["unit_integral_arcsec2"] == pytest.approx(unit, rel=1e-12, abs=0.0)
+                profile = al.lp.Sersic(**dict(resolved.values))
+                pixels = np.asarray(profile.image_2d_from(grid=grouped.scene.grid).native)
+                assert record["mapping_ratio"] == pytest.approx(pixels.sum()*omega/(amplitude*unit), rel=1e-12, abs=0.0)
+                assert record["ab_mag_in_band"] is None and record["band_mean_throughput"] is None
     with prepare_forecast(mapping, execution=Execution(engine="jax")) as grouped_jax:
         jax = forecast(grouped_jax, masses_msun=[1.0e8])
     np.testing.assert_allclose(jax.fisher_profiled, actual.fisher_profiled, rtol=5.0e-6)

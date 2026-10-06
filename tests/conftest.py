@@ -11,18 +11,6 @@ import json
 import numpy as np
 import pytest
 
-MARKERS = (
-    "backend: needs a scientific backend (PyAutoLens stack, hcipy, jax, nautilus, numba or matplotlib)",
-    "xtx_gpu: needs the pinned CUDA JAX runtime and one GPU",
-    "xtx_multi_gpu: needs two GPUs assigned by the orchestrator",
-)
-
-
-def pytest_configure(config):
-    for marker in MARKERS:
-        config.addinivalue_line("markers", marker)
-
-
 def _visible_gpus():
     try:
         import jax
