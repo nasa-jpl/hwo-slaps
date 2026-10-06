@@ -1,30 +1,23 @@
-"""Optional visualization consumers; graphics dependencies load on demand."""
+"""Optional plots of current engine products; graphics imports occur on calls."""
 
 from importlib import import_module
 
 _EXPORTS = {
-    'plot_lensing_comparison': '.lensing_plots',
-    'plot_lensing_baseline_scene': '.lensing_plots',
-    'plot_psf_comparison': '.psf_plots',
-    'plot_psf_zoom': '.psf_plots',
-    'plot_psf_system_overview': '.psf_plots',
-    'plot_psf_complete_analysis': '.psf_plots',
-    'plot_observation_comparison': '.observation_plots',
-    'plot_fisher_local_summary': '.detection_plots',
-    'plot_fisher_psf_mode_scan': '.detection_plots',
-    'plot_fisher_detection_map_summary': '.detection_plots',
-    'plot_fisher_map_degradation': '.detection_plots',
-    'generate_all_plots': '.registry',
-    'get_plot_registry': '.registry',
+    "plot_statistic_map": ".forecast",
+    "plot_detection_map": ".forecast",
+    "plot_mass_curve": ".forecast",
+    "plot_knowledge_error": ".forecast",
+    "plot_kernel": ".optics",
+    "plot_pupil": ".optics",
+    "plot_observation": ".observation",
 }
 __all__ = list(_EXPORTS)
 
 
 def __getattr__(name):
-    module_name = _EXPORTS.get(name)
-    if module_name is None:
+    if name not in _EXPORTS:
         raise AttributeError(name)
-    return getattr(import_module(module_name, __name__), name)
+    return getattr(import_module(_EXPORTS[name], __name__), name)
 
 
 def __dir__():
