@@ -305,3 +305,113 @@ def test_preparation_cache_closes_evicted_and_invalid_actual_entries(tiny_batch_
         if convolver is not None:
             convolver.kernel = original
         cache.close()
+
+
+@pytest.mark.parametrize('kind,reason', [('simulate', 'actual simulated inputs differ'),
+                                      ('reference', 'actual reference forecast differs'),
+                                      ('case', 'actual case input identities differ')])
+def test_actual_worker_refuses_unplanned_scientific_capture(tiny_batch_spec, tmp_path, monkeypatch, kind, reason):
+    import hashlib
+    import sys
+    import hwoslaps.batch.runner as runner
+    import hwoslaps.batch.worker as worker
+    import hwoslaps.fisher.api as fisher_api
+    import hwoslaps.simulation as simulation
+    import hwoslaps.inference.api as inference_api
+    family = {'trials': {'kind': 'explicit', 'explicit': [{'mass_msun': 1e8, 'position_yx': [.1, .2]}]},
+              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'},
+              'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 200, 'n_shell': 1,
+                          'f_live': .01, 'discard_exploration': True, 'number_of_cores': 1}}
+    sections = {'simulate': {'inject': True, 'noise': False}} if kind == 'simulate' else {'nonlinear': {'n': family}}
+    spec = tiny_batch_spec(population={'count': 1}, forecast=None, execution={'workers_per_device': 1}, **sections)
+    planned = plan_batch(spec).jobs[0]
+    path = Path(planned.config.psf.truth.path)
+    original = path.read_bytes()
+    observed = tmp_path / 'actual-capture.json'
+    entry = tmp_path / 'actual-publication-worker.py'
+    expected = {name: {'path': str(Path(module.__file__).resolve()),
+                       'sha256': hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()}
+                for name, module in [('worker', worker), ('fisher', fisher_api), ('simulation', simulation),
+                                     ('inference', inference_api)]}
+    entry.write_text(f'''
+if __name__ == '__main__':
+    import hashlib, json
+    from pathlib import Path
+    import hwoslaps.batch.worker as worker
+    real_job = worker.run_job
+    def actual_job(payload, cache, session, **keywords):
+        import numpy as np
+        import hwoslaps.fisher.api as fisher
+        import hwoslaps.simulation as simulation
+        import hwoslaps.inference.api as inference
+        from hwoslaps.inference.result import ForecastReference
+        binding = {{name: {{'path': str(Path(module.__file__).resolve()),
+                           'sha256': hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()}}
+                   for name, module in [('worker', worker), ('fisher', fisher), ('simulation', simulation), ('inference', inference)]}}
+        assert binding == {expected!r}
+        real_prepare, real_forecast = fisher.prepare_forecast, fisher.forecast
+        real_simulate, real_validate = simulation.simulate, inference.validate_nonlinear
+        path = Path({str(path)!r})
+        original = path.read_bytes()
+        def publish(operation):
+            kernel = np.zeros((7, 7)); kernel[3, 3] = 1.
+            np.save(path, kernel)
+            try:
+                result = operation()
+                digest = (result.config_digest if {kind!r} == 'simulate' else
+                          result.provenance['config_digest'] if {kind!r} == 'reference' else result.observation.config_digest)
+                assert digest != payload.config_digest
+                Path({str(observed)!r}).write_text(json.dumps({{'binding': binding, 'actual_digest': digest,
+                    'planned_digest': payload.config_digest, 'kernel_sha256': hashlib.sha256(path.read_bytes()).hexdigest()}}))
+                return result
+            finally:
+                path.write_bytes(original)
+        def actual_simulate(source, **arguments):
+            return publish(lambda: real_simulate(source, **arguments))
+        def actual_forecast(source, **arguments):
+            def calculation():
+                with real_prepare(source.config, execution=source.execution) as prepared:
+                    return real_forecast(prepared, **arguments)
+            return publish(calculation)
+        def actual_case(source, hypothesis, observation, **arguments):
+            def calculation():
+                with real_prepare(source.config, execution=source.execution) as prepared:
+                    trial = prepared.hypothesis(hypothesis.mass_msun, hypothesis.position_yx_arcsec)
+                    observed = real_simulate(prepared, subhalo=trial, noise_seed=observation.noise_seed)
+                    q = real_forecast(prepared, masses_msun=[trial.mass_msun], positions=[trial.position_yx_arcsec])
+                    arguments['forecast_reference'] = ForecastReference.from_result(q, mass_index=0, position_index=0)
+                    result = real_validate(prepared, trial, observed, **arguments)
+                    assert all(result.role(role).status == 'success' for role in ('smooth', 'subhalo'))
+                    return result
+            return publish(calculation)
+        if {kind!r} == 'simulate': simulation.simulate = actual_simulate
+        elif {kind!r} == 'reference': fisher.forecast = actual_forecast
+        else: inference.validate_nonlinear = actual_case
+        try:
+            return real_job(payload, cache, session, **keywords)
+        finally:
+            simulation.simulate, fisher.forecast, inference.validate_nonlinear = real_simulate, real_forecast, real_validate
+            path.write_bytes(original)
+    worker.run_job = actual_job
+    raise SystemExit(worker.main())
+''')
+    real_popen = runner.subprocess.Popen
+    def actual_worker_entry(command, *arguments, **keywords):
+        if isinstance(command, (list, tuple)) and list(command) == [sys.executable, '-m', 'hwoslaps.batch.worker']:
+            command = [sys.executable, str(entry)]
+        return real_popen(command, *arguments, **keywords)
+    monkeypatch.setattr(runner.subprocess, 'Popen', actual_worker_entry)
+    root = tmp_path / 'scientific-capture'
+    try:
+        with pytest.raises(BatchConflict, match=reason):
+            run_batch(spec, root)
+        capture = json.loads(observed.read_text())
+        assert capture['binding'] == expected
+        assert capture['planned_digest'] == planned.config_digest != capture['actual_digest']
+        assert capture['kernel_sha256'] != hashlib.sha256(original).hexdigest()
+        failure = json.loads((root / planned.job_id / 'run_001/failure.json').read_text())
+        assert failure['error_type'] == 'BatchConflict' and reason in failure['message']
+        assert not (root / planned.job_id / 'complete.json').exists()
+        assert path.read_bytes() == original
+    finally:
+        path.write_bytes(original)
