@@ -120,7 +120,15 @@ def main(argv=None):
         return _batch_main(args, parser)
     try:
         if args.command == "reference":
-            print(render_reference([("Engine configuration", ROOT_TABLE)], section=args.section))
+            from .analysis.nonlinear import CLASSIFICATION_TABLE
+            from .batch.spec import BATCH_TABLE
+            from .inference.settings import FIT_TABLE, REFINE_TABLE, SAMPLER_TABLE
+            from .population.sampling import POPULATION_TABLE
+
+            documents = [("", ROOT_TABLE), ("population", POPULATION_TABLE), ("batch", BATCH_TABLE),
+                         ("fit", FIT_TABLE), ("sampler", SAMPLER_TABLE), ("refine", REFINE_TABLE),
+                         ("classification", CLASSIFICATION_TABLE)]
+            print(render_reference(documents, section=args.section))
             return 0
         config = _load(args)
         if args.command == "validate":

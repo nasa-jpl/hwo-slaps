@@ -2,6 +2,7 @@
 from importlib import import_module
 
 from ._version import __version__
+
 _PUBLIC_API = {
     "ConfigError": ("config.checks", "ConfigError"),
     "EngineConfig": ("config.schema", "EngineConfig"),
@@ -16,15 +17,14 @@ _PUBLIC_API = {
     "ForecastResult": ("fisher.result", "ForecastResult"),
     "summarize": ("analysis.reductions", "summarize"),
     "mass_reach": ("analysis.reach", "mass_reach"),
-    "adaptive_mass_reach": ("analysis.reach", "adaptive_mass_reach"),
-    "sample_population": ("population", "sample_population"),
-    "iter_population_configs": ("population", "iter_population_configs"),
     "prepare_case": ("inference.api", "prepare_case"),
     "validate_nonlinear": ("inference.api", "validate_nonlinear"),
     "FitSpec": ("inference.settings", "FitSpec"),
     "SamplerSettings": ("inference.settings", "SamplerSettings"),
     "RefineSettings": ("inference.settings", "RefineSettings"),
     "CaseResult": ("inference.result", "CaseResult"),
+    "load_batch_spec": ("batch.spec", "load_batch_spec"),
+    "run_batch": ("batch.runner", "run_batch"),
     "save_forecast": ("artifacts", "save_forecast"),
     "load_forecast": ("artifacts", "load_forecast"),
     "save_observation": ("artifacts", "save_observation"),
@@ -32,8 +32,7 @@ _PUBLIC_API = {
     "save_case": ("artifacts", "save_case"),
     "load_case": ("artifacts", "load_case"),
 }
-__all__ = list(_PUBLIC_API)
-__all__.append("__version__")
+__all__ = ["__version__", *list(_PUBLIC_API)]
 
 
 def __getattr__(name):

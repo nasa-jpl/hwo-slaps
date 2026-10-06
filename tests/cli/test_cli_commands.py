@@ -19,8 +19,50 @@ def test_validate_reports_dotted_key_and_reference_is_backend_free(minimal_mappi
     failed = run_cli("validate", path)
     assert failed.returncode == 2
     assert "scene.grid.over_sample_size" in failed.stderr
-    reference = run_cli("reference", "scene.grid")
-    assert reference.returncode == 0 and "pixel_scale_arcsec" in reference.stdout
+    # The actual command must compose all owning schemas without a scientific backend.
+    program = r'''
+import importlib.abc, sys
+forbidden = {'autolens', 'autogalaxy', 'autoarray', 'autofit', 'autoconf', 'hcipy',
+             'jax', 'jaxlib', 'nautilus', 'numba', 'matplotlib'}
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in forbidden:
+            raise ModuleNotFoundError('blocked scientific backend: ' + fullname, name=fullname)
+sys.meta_path.insert(0, Block())
+from hwoslaps.cli import main
+result = main(['reference', *sys.argv[1:]])
+assert not any(name.split('.')[0] in forbidden for name in sys.modules)
+raise SystemExit(result)
+'''
+    def reference(*sections):
+        return subprocess.run([sys.executable, "-c", program, *sections], capture_output=True,
+                              text=True, timeout=30)
+
+    documents = reference()
+    assert documents.returncode == 0, documents.stderr
+    for heading in ("top level", "scene.grid", "population", "batch", "fit", "sampler", "refine", "classification"):
+        assert f"## {heading}\n" in documents.stdout
+    sections = {
+        "scene.grid": ("pixel_scale_arcsec", "arcsec"),
+        "population": ("variables", "max_attempts"),
+        "batch.execution": ("devices", "workers_per_device"),
+        "fit": ("mode", "mass_support"),
+        "sampler": ("n_live_smooth", "jax_n_batch"),
+        "refine": ("original_start_count", "repeat_gtol"),
+        "classification.acceptance": ("smooth", "subhalo"),
+    }
+    for section, keys in sections.items():
+        selected = reference(section)
+        assert selected.returncode == 0, selected.stderr
+        assert selected.stdout.startswith(f"## {section}\n")
+        assert all(key in selected.stdout for key in keys)
+        assert "## top level\n" not in selected.stdout
+    for key, default in (("n_live_smooth", "`100`"), ("repeat_gtol", "`1e-12`"),
+                         ("stationarity_tolerance", "required")):
+        row = next(line for line in documents.stdout.splitlines() if line.startswith(f"| `{key}` |"))
+        assert row.split("|")[3].strip() == default
+    unknown = reference("absent_section")
+    assert unknown.returncode == 2 and "unknown section" in unknown.stderr
 
 
 def test_output_directory_must_not_exist(minimal_mapping, write_config, tmp_path):

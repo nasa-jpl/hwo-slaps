@@ -18,7 +18,8 @@ from ..identity import mapping_digest
 from ..inference.result import CaseResult, RoleStatus
 from ..inference.sampler import REQUIRED_SEARCH_INTERNAL_FILES
 
-__all__ = ["AgreementTable", "AttemptSelection", "CaseClassification", "CaseStatus", "ClassificationRule",
+__all__ = ["CLASSIFICATION_TABLE", "AgreementTable", "AttemptSelection", "CaseClassification", "CaseStatus",
+           "ClassificationRule",
            "RoleAcceptance", "StatusResult", "case_status", "classify_case", "detection_agreement", "select_attempt"]
 
 CaseStatus = Literal["accepted", "unresolved", "failed", "incomplete"]
@@ -70,7 +71,7 @@ class ClassificationRule:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any], *, path: str = "classification") -> ClassificationRule:
-        values = _CLASSIFICATION.read(mapping, path)
+        values = CLASSIFICATION_TABLE.read(mapping, path)
         values["acceptance"] = RoleAcceptance.from_mapping(values["acceptance"], path=f"{path}.acceptance")
         return cls(**values)
 
@@ -81,7 +82,7 @@ class ClassificationRule:
                 "stationarity_tolerance": self.stationarity_tolerance}
 
 
-_CLASSIFICATION = Table((
+CLASSIFICATION_TABLE = Table((
     Key("q_threshold", _POSITIVE, "required detection threshold"),
     Key("marginal_half_width", _NONNEGATIVE, "open half width about the threshold"),
     Key("acceptance", _ACCEPTANCE, "role statuses accepted by this rule"),
