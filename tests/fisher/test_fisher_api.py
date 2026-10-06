@@ -132,15 +132,33 @@ def test_execution_does_not_enter_configuration_digest(minimal_mapping):
 
 
 @pytest.mark.parametrize("amplitude", [0.0, 1.0])
-def test_small_knowledge_error_has_matched_limit_and_quadratic_spurious_response(amplitude):
+def test_small_knowledge_error_has_matched_limit_and_quadratic_spurious_response(amplitude, tmp_path):
+    from hwoslaps.artifacts import load_forecast, save_forecast
     from hwoslaps.config.schema import load_config
     from hwoslaps.fisher.api import forecast, prepare_forecast
+    from hwoslaps.identity import json_ready
 
     path = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity" / "engine" / "p2_delta_knowledge_error.yaml"
     config = load_config(path)
     altered = config.replace({"psf": {"model": {"draw": {"amplitude_rms_nm": amplitude}}}})
     with prepare_forecast(altered) as prepared:
         result = forecast(prepared, masses_msun=[1.0e8], positions=[[0.0, 0.4]])
+        if amplitude == 1.0:
+            realized = prepared.psfs.model.knowledge_error
+            assert realized is not None
+            expected_draw = json_ready(realized.to_mapping())
+            assert expected_draw["draw"]["orthonormal_segment"] and expected_draw["draw"]["orthonormal_global"]
+            assert expected_draw["draw"]["coefficients"] == json_ready(realized.draw.coefficients.to_mapping())
+            expected_truth = prepared.psfs.truth_kernels.to_mapping()
+            expected_model = prepared.psfs.model_kernels.to_mapping()
+            assert result.provenance["knowledge_error"] == expected_draw
+            stored = load_forecast(save_forecast(result, tmp_path / "knowledge-error.npz"))
+            assert stored.provenance["knowledge_error"] == expected_draw
+            assert stored.provenance["truth_kernels"] == expected_truth
+            assert stored.provenance["model_kernels"] == expected_model
+            assert stored.provenance["file_digests"] == prepared.record["file_digests"]
+            for name in ("fisher_raw", "fisher_profiled", "amplitude_hat", "amplitude_spurious"):
+                np.testing.assert_array_equal(getattr(stored, name), getattr(result, name))
     if amplitude == 0.0:
         matched = config.replace({"psf": {"model": {"kind": "matched"}}})
         with prepare_forecast(matched) as prepared:
