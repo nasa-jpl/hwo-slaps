@@ -31,6 +31,10 @@ class SpectralWeights:
     log_rate_scale: float
 
     def __post_init__(self) -> None:
+        if any(np.iscomplexobj(value) for value in (self.wavelengths_m, self.bin_edges_m, self.rates)):
+            raise ValueError("spectral nodes, edges and rates must be real")
+        if any(np.asarray(value).dtype.kind == "b" for value in (self.wavelengths_m, self.bin_edges_m)):
+            raise ValueError("spectral wavelengths must be real numbers, not booleans")
         nodes, edges, rates = (np.array(value, dtype=float, copy=True)
                                for value in (self.wavelengths_m, self.bin_edges_m, self.rates))
         if (nodes.ndim != 1 or nodes.size == 0 or not np.all(np.isfinite(nodes))
@@ -64,6 +68,8 @@ class SpectralWeights:
 
 
 def sed_weights(bandpass: Bandpass, sed: SED, wavelengths_m: ArrayLike) -> SpectralWeights:
+    if np.iscomplexobj(wavelengths_m) or np.asarray(wavelengths_m).dtype.kind == "b":
+        raise ValueError("spectral wavelengths must be real numbers")
     nodes = np.asarray(wavelengths_m, dtype=float)
     edges = bandpass.bin_edges(nodes)
     wavelengths, throughput = bandpass.integration_grid(sed)
