@@ -44,7 +44,8 @@ def area_product():
     positions = grid_positions((0, 0), spacing_arcsec=.5, half_width_arcsec=.5, annulus=None)
     values = np.array([[4., 0, 0, 0, 0, 0, 0, 0, 0], [4., 4, 4, 4, 0, 0, 0, 0, 0]])
     provenance = {"comparison_digest": "same-science", "mask": {"digest": "same-mask"},
-                  "nuisance_names": [], "truth_kernels": KernelBinding.uniform(DetectorPSF.from_array(np.ones((3, 3)), .05), ("source.light.light",)).to_mapping()}
+                  "nuisance_names": [], "truth_kernels": KernelBinding.uniform(
+                      DetectorPSF.from_array(np.ones((3, 3)), .05), ("source.light.light",)).to_mapping()}
     reference = ForecastResult(np.array([1e8, 2e8]), positions, values + 1, values, None, None, "matched", {},
                                provenance | {"psf_relation": "matched"})
     amplitude = np.zeros((2, 9))

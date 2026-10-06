@@ -22,6 +22,12 @@ def test_forecast_plots_draw_the_result_values(plt, forecast_product):
     assert ax.images[0].origin == "lower"
     assert ax.images[0].get_extent() == pytest.approx((-.6, .6, -.6, .6))
     assert ax.get_xlabel() == "x (arcsec)" and ax.get_ylabel() == "y (arcsec)"
+    # A9 literal asymmetric matrix independently catches flips/transposes and wrong rows.
+    information = np.arange(1., 19.).reshape(2, 9)
+    hand = ForecastResult(result.masses_msun, result.positions, information + 1, information,
+                          None, None, "matched", {}, {})
+    hand_ax = plot_statistic_map(hand, "q_asimov", mass_index=1)
+    np.testing.assert_array_equal(hand_ax.images[0].get_array(), [[10, 11, 12], [13, 14, 15], [16, 17, 18]])
 
     # Sparse rows must retain an unevaluated hole, not paint it as a nondetection.
     keep = np.array([True, True, True, True, False, True, True, True, True])
