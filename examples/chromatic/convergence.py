@@ -38,6 +38,7 @@ def main(argv=None):
             if (truth["wavelength_samples"] != nodes or truth["kernel_shape"] != [support, support]
                     or config["psf"]["model"]["kind"] != arm or record["execution"]["lane"] != "gpu"
                     or record["q_threshold"] != args.q_threshold or not record["extra"]["ring"]
+                    or record["config_digest"] != result.provenance["config_digest"]
                     or result.positions.kind != "ring" or len(result.positions) != 36):
                 raise ValueError(f"{name}: product does not have the prescribed ring/PSF/threshold/lane inputs")
             if arm == "monochromatic" and config["psf"]["model"]["wavelength_nm"] is not None:
@@ -49,7 +50,9 @@ def main(argv=None):
             if common_identity is None:
                 common_identity = identity
                 reference = result
-            elif (identity != common_identity or result.masses_msun.dtype != reference.masses_msun.dtype
+            elif (identity != common_identity
+                  or result.provenance["file_digests"] != reference.provenance["file_digests"]
+                  or result.masses_msun.dtype != reference.masses_msun.dtype
                   or result.masses_msun.tobytes() != reference.masses_msun.tobytes()
                   or result.positions_yx.dtype != reference.positions_yx.dtype
                   or result.positions_yx.tobytes() != reference.positions_yx.tobytes()):
