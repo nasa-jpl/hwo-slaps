@@ -48,6 +48,7 @@ def test_member_identity_is_cantor_and_base_is_unchanged(minimal_mapping):
         assert member.run_name==f"system_{member.index:06d}"
         assert member.seed==member.config.seed==expected
         assert member.attempt==0 and member.to_mapping()["config_digest"]==member.config.digest()
+        assert member.catalog_sha256 is None and member.to_mapping()["catalog_sha256"] is None
     assert members[0].to_mapping()==next(iter_population_members(base,mapping,1,seed=5,start=7)).to_mapping()
     assert base.to_mapping()==before
 
@@ -135,3 +136,48 @@ def test_binding_aliases_refuse_equal_or_prefix_targets_before_draw(paths, first
         with pytest.raises(PopulationError, match="overlapping resolved targets"):
             list(iter_population_members(base, candidate, 1, seed=2))
     assert base.to_mapping() == before
+
+
+def test_member_identity_records_catalog_bytes_consumed_during_publication(minimal_mapping, tmp_path, monkeypatch):
+    from hwoslaps.population import sampling
+
+    path = tmp_path / "published.csv"
+    first = b"redshift\n0.2\n"
+    second = b"redshift\n0.3\n"
+    path.write_bytes(first)
+    mapping = {
+        "variables": {},
+        "catalog": {"path": str(path), "columns": {"zl": "redshift"}},
+        "bind": {"scene.lens.redshift": "zl"},
+    }
+    spec = PopulationSpec.from_mapping(mapping)
+    planned = spec.digest()
+    original_load = sampling.load_catalog
+
+    def publish_during_load(catalog_spec):
+        path.write_bytes(second)
+        try:
+            return original_load(catalog_spec)
+        finally:
+            path.write_bytes(first)
+
+    monkeypatch.setattr(sampling, "load_catalog", publish_during_load)
+    member = next(iter_population_members(parse_config(minimal_mapping), spec, 1, seed=2))
+    assert member.values["zl"] == member.config.scene.lens.redshift == .3
+    assert path.read_bytes() == first and spec.digest() == planned
+    expected_sha = hashlib.sha256(second).hexdigest()
+    assert member.catalog_sha256 == member.to_mapping()["catalog_sha256"] == expected_sha
+    captured = spec.captured_digest(catalog_sha256=member.catalog_sha256)
+    assert captured != planned
+    path.unlink()
+    assert spec.captured_digest(catalog_sha256=expected_sha) == captured
+    with pytest.raises(PopulationError, match="catalog_sha256"):
+        spec.captured_digest(catalog_sha256=None)
+
+    no_catalog = PopulationSpec.from_mapping({
+        "variables": {"x": {"kind": "constant", "value": .2}},
+        "bind": {"scene.lens.redshift": "x"},
+    })
+    assert no_catalog.captured_digest(catalog_sha256=None) == no_catalog.digest()
+    with pytest.raises(PopulationError, match="without a catalog"):
+        no_catalog.captured_digest(catalog_sha256=expected_sha)

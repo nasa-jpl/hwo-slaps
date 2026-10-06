@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from scipy.special import ndtr, ndtri
 
-from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Nullable, Real, Table, Text, Variants
+from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Nullable, Real, Sha256, Table, Text, Variants
 from ..config.schema import ConfigSource, EngineConfig, parse_config, resolve_config
 from ..identity import file_digest, json_ready, mapping_digest
 from ..seeding import member_seed, stream_rng
@@ -202,8 +202,21 @@ class PopulationSpec:
                 "catalog": None if self.catalog is None else self.catalog.to_mapping(),
                 "bind": {path: reference.name() for path, reference in self.bind.items()}, "max_attempts": self.max_attempts}
 
+    def captured_digest(self, *, catalog_sha256: str | None) -> str:
+        """Identify the spec with the catalog bytes actually loaded by a consumer."""
+        if self.catalog is None:
+            if catalog_sha256 is not None:
+                raise PopulationError("population.catalog_sha256: must be None without a catalog")
+        else:
+            try:
+                catalog_sha256 = Sha256()(catalog_sha256, "population.catalog_sha256")
+            except ConfigError as error:
+                raise PopulationError(str(error)) from None
+        return mapping_digest({"spec": self.to_mapping(), "catalog_sha256": catalog_sha256})
+
     def digest(self):
-        return mapping_digest({"spec": self.to_mapping(), "catalog_sha256": None if self.catalog is None else file_digest(self.catalog.path)})
+        """Identify the spec with the catalog file's current bytes."""
+        return self.captured_digest(catalog_sha256=None if self.catalog is None else file_digest(self.catalog.path))
 
 
 _VARIABLE_NAME = Text(pattern=r"[A-Za-z_][A-Za-z0-9_]*")
@@ -228,13 +241,20 @@ class PopulationMember:
     attempt: int
     values: Mapping[str, Any]
     config: EngineConfig
+    catalog_sha256: str | None = None
 
     def __post_init__(self):
+        if self.catalog_sha256 is not None:
+            try:
+                digest = Sha256()(self.catalog_sha256, "catalog_sha256")
+            except ConfigError as error:
+                raise PopulationError(str(error)) from None
+            object.__setattr__(self, "catalog_sha256", digest)
         object.__setattr__(self, "values", MappingProxyType(deepcopy(dict(self.values))))
 
     def to_mapping(self):
         return {"index": self.index, "run_name": self.run_name, "seed": self.seed, "attempt": self.attempt,
-                "values": json_ready(self.values), "config_digest": self.config.digest()}
+                "values": json_ready(self.values), "config_digest": self.config.digest(), "catalog_sha256": self.catalog_sha256}
 
 
 def _spec(spec):
@@ -341,7 +361,8 @@ def iter_population_members(base: ConfigSource, spec: PopulationSpec | Mapping[s
             except (PopulationError, ConfigError) as error:
                 last = error
                 continue
-            yield PopulationMember(index, selected["run_name"], selected["seed"], attempt, values, member_config)
+            yield PopulationMember(index, selected["run_name"], selected["seed"], attempt, values, member_config,
+                                   catalog_sha256=None if catalog is None else catalog.digest)
             break
         else:
             raise PopulationError(f"member {index}: no valid draw in {spec.max_attempts} attempts; last error: {last}") from last
