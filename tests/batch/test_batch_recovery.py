@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -10,8 +11,8 @@ import time
 import pytest
 
 from hwoslaps.artifacts import write_yaml
-from hwoslaps.batch import BatchIncomplete, run_batch
-from hwoslaps.batch.processes import boot_id, group_members, signal_owned, worker_record
+from hwoslaps.batch import BatchConflict, BatchIncomplete, run_batch
+from hwoslaps.batch.processes import boot_id, group_members, open_pidfd, signal_owned, worker_record
 from hwoslaps.batch.runner import OWNER_ENV
 
 pytestmark = pytest.mark.backend
@@ -134,7 +135,7 @@ def test_controller_crash_then_resume_and_immediate_barrier(tiny_batch_spec, tmp
         _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
         worker = _worker_records(root)[0]
         assert group_members(worker), 'actual earlier worker must be live before the kill'
-        descriptor = os.pidfd_open(process.pid)
+        descriptor = open_pidfd(process.pid)
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:
@@ -166,7 +167,7 @@ def test_worker_death_is_a_job_failure(tiny_batch_spec, tmp_path):
     try:
         _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
         worker = _worker_records(root)[0]
-        descriptor = os.pidfd_open(worker['pid'])
+        descriptor = open_pidfd(worker['pid'])
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:
@@ -176,6 +177,97 @@ def test_worker_death_is_a_job_failure(tiny_batch_spec, tmp_path):
         assert failure['error_type'] == 'WorkerExited' and failure['exit_code'] == -signal.SIGKILL
         assert (root / 'members/system_000001/base/forecast/complete.json').exists()
         assert len(_worker_records(root)) >= 2
+    finally:
+        _cleanup(process, identity, log, root)
+
+
+def test_controller_sigterm_restores_handler_and_drains_actual_workers(tiny_batch_spec, tmp_path):
+    spec = tiny_batch_spec(execution={'workers_per_device': 1},
+        forecast_positions={'kind': 'grid', 'spacing_arcsec': .01, 'half_width_arcsec': .6})
+    root = tmp_path / 'term'
+    restored = tmp_path / 'handler-restored.json'
+    program = f'''
+import json, signal
+from pathlib import Path
+from hwoslaps.batch import load_batch_spec, run_batch
+previous = signal.getsignal(signal.SIGTERM)
+try:
+    run_batch(load_batch_spec(sys.argv[3]), sys.argv[5])
+except KeyboardInterrupt:
+    Path({str(restored)!r}).write_text(json.dumps(signal.getsignal(signal.SIGTERM) == previous))
+    raise SystemExit(130)
+raise AssertionError('real work must still be active when TERM is sent')
+'''
+    process, identity, log = _controller(spec, root, tmp_path, 'termed', program=program)
+    try:
+        _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
+        workers = _worker_records(root)
+        assert workers and any(group_members(record) for record in workers)
+        descriptor = open_pidfd(process.pid)
+        try:
+            signal.pidfd_send_signal(descriptor, signal.SIGTERM)
+        finally:
+            os.close(descriptor)
+        assert process.wait(timeout=90.) == 130
+        assert json.loads(restored.read_text()) is True
+        report = json.loads((root / 'sessions/1/report.json').read_text())
+        assert report['interrupted'] is True and report['cleanup_error'] is None
+        assert not any(group_members(record) for record in _worker_records(root))
+    finally:
+        _cleanup(process, identity, log, root)
+
+
+def test_real_mixed_source_revisions_are_reported_and_strict_policy_refuses(tiny_batch_spec, tmp_path):
+    import hashlib
+    import hwoslaps.batch.runner as runner
+    import hwoslaps.batch.worker as worker
+    spec = tiny_batch_spec(execution={'workers_per_device': 1})
+    root = tmp_path / 'mixed-revisions'
+    first = run_batch(spec, root, select='members/system_000000/*')
+    assert first.counts['completed'] == 1
+    source = Path(runner.__file__).resolve().parents[3]
+    copied = tmp_path / 'revision-tree'
+    shutil.copytree(source, copied, ignore=shutil.ignore_patterns('.git', '__pycache__', '.pytest_cache',
+                                                                'scratch', 'output', 'outputs'))
+    for command in (["git", "init", "-q", str(copied)], ["git", "-C", str(copied), "add", "-f", "-A"],
+                    ["git", "-C", str(copied), "-c", "user.name=snapshot", "-c", "user.email=snapshot@localhost",
+                     "commit", "-qm", "real source revision keeper"]):
+        subprocess.run(command, check=True, capture_output=True)
+    revision = subprocess.run(['git', '-C', str(copied), 'rev-parse', 'HEAD'], check=True,
+                              capture_output=True, text=True).stdout.strip()
+    assert revision not in first.revisions
+    expected_revisions = {**first.revisions, revision: 1}
+    binding = tmp_path / 'revision-binding.json'
+    expected = {name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
+                for name, module in [('runner', runner), ('worker', worker)]}
+    program = f'''
+import hashlib, json
+from pathlib import Path
+sys.path.insert(0, {str(copied / 'src')!r})
+from hwoslaps.batch import load_batch_spec, run_batch
+import hwoslaps.batch.runner as runner
+import hwoslaps.batch.worker as worker
+records = {{}}
+for name, module in [('runner', runner), ('worker', worker)]:
+    actual = Path(module.__file__).resolve()
+    assert actual == Path({str(copied / 'src/hwoslaps/batch')!r}) / (name + '.py')
+    digest = hashlib.sha256(actual.read_bytes()).hexdigest()
+    assert digest == {expected!r}[name]
+    records[name] = {{'path': str(actual), 'sha256': digest}}
+report = run_batch(load_batch_spec(sys.argv[3]), sys.argv[5], select='members/system_000001/*')
+assert report.counts['completed'] == 1 and report.counts['skipped'] == 1
+assert report.revisions == {expected_revisions!r}
+Path({str(binding)!r}).write_text(json.dumps(records))
+'''
+    process, identity, log = _controller(spec, root, tmp_path, 'second-revision', program=program)
+    try:
+        assert process.wait(timeout=120.) == 0
+        assert {name: item['sha256'] for name, item in json.loads(binding.read_text()).items()} == expected
+        mixed = run_batch(spec, root)
+        assert mixed.counts['skipped'] == 2 and mixed.counts['completed'] == 0
+        assert mixed.revisions == expected_revisions
+        with pytest.raises(BatchConflict, match='mixed source revisions are forbidden'):
+            run_batch(spec, root, require_single_revision=True)
     finally:
         _cleanup(process, identity, log, root)
 
@@ -196,7 +288,7 @@ def test_changed_job_during_recovery_is_a_conflict(tiny_batch_spec, tmp_path, er
     try:
         _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
         original_records = _worker_records(root)
-        descriptor = os.pidfd_open(process.pid)
+        descriptor = open_pidfd(process.pid)
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:

@@ -1,5 +1,6 @@
 """Actual owned subprocess survivors and foreign-identity refusal."""
 import json
+import errno
 import os
 from pathlib import Path
 import signal
@@ -9,7 +10,7 @@ import time
 
 import pytest
 
-from hwoslaps.batch.processes import boot_id, group_members, signal_owned, worker_record
+from hwoslaps.batch.processes import boot_id, group_members, open_pidfd, pidfd_exited, signal_owned, worker_record
 from hwoslaps.batch.runner import OWNER_ENV
 
 pytestmark = pytest.mark.backend
@@ -71,9 +72,41 @@ def _close(process, record, log):
         log.close()
 
 
+def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
+    from hwoslaps.batch.state import BatchError
+    descriptor = open_pidfd(os.getpid())
+    try:
+        assert not os.get_inheritable(descriptor)
+        signal.pidfd_send_signal(descriptor, 0)
+        import select
+        poller = select.poll()
+        poller.register(descriptor, select.POLLIN)
+        assert poller.poll(0) == [], 'the current live process must not appear exited'
+        assert pidfd_exited(descriptor) is False
+    finally:
+        os.close(descriptor)
+    with pytest.raises(BatchError, match='error or invalid descriptor'):
+        pidfd_exited(descriptor)
+    with pytest.raises(OSError) as invalid:
+        open_pidfd(-1)
+    assert invalid.value.errno == errno.EINVAL
+    import ctypes
+    integer_bits = ctypes.sizeof(ctypes.c_int) * 8
+    # This would silently wrap to our real live PID at the libc boundary.
+    with pytest.raises(OverflowError):
+        open_pidfd(os.getpid() + (1 << integer_bits))
+    with pytest.raises(OverflowError):
+        open_pidfd(-(1 << integer_bits))
+    with pytest.raises(TypeError):
+        open_pidfd(1.5)
+
+
 def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
+    from hwoslaps.batch.state import BatchError
     process, record, log = _start('import time\ntime.sleep(60)\n', tmp_path, 'foreign')
     try:
+        with pytest.raises(BatchError, match='cookie_matches=False'):
+            worker_record(process.pid, slot=0, device='cpu', identity='0' * 64, identity_env=OWNER_ENV)
         mismatches = ({**record, 'identity': '0' * 64}, {**record, 'start_time': record['start_time'] + 1},
                       {**record, 'boot_id': 'another-boot'})
         for wrong in mismatches:
@@ -83,6 +116,61 @@ def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
         assert [member['pid'] for member in group_members(record)] == [process.pid]
     finally:
         _close(process, record, log)
+
+
+def test_missing_bootstrap_cookie_refuses_and_actual_worker_eof_skips_science(tmp_path):
+    import hashlib
+    import hwoslaps.batch.worker as worker
+    from hwoslaps.batch.state import BatchError
+    source = Path(worker.__file__).resolve()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    binding, finished = tmp_path / 'binding.json', tmp_path / 'eof.json'
+    script = tmp_path / 'actual-worker.py'
+    script.write_text(f'''
+if __name__ == '__main__':
+    import hashlib, json, sys
+    from pathlib import Path
+    import hwoslaps.batch.worker as worker
+    actual = Path(worker.__file__).resolve()
+    assert str(actual) == {str(source)!r}
+    assert hashlib.sha256(actual.read_bytes()).hexdigest() == {digest!r}
+    Path({str(binding)!r}).write_text(json.dumps({{'path': str(actual), 'sha256': {digest!r}}}))
+    code = worker.main()
+    Path({str(finished)!r}).write_text(json.dumps({{'code': code,
+        'backend_imported': 'hwoslaps.inference.backend' in sys.modules, 'jax_imported': 'jax' in sys.modules}}))
+    raise SystemExit(code)
+''')
+    environment = dict(os.environ)
+    environment.pop(OWNER_ENV, None)
+    environment['PYTHONPATH'] = str(source.parents[2])
+    log = (tmp_path / 'cookie-free.log').open('wb')
+    process = descriptor = None
+    try:
+        process = subprocess.Popen([sys.executable, str(script)], env=environment, stdin=subprocess.PIPE,
+                                   stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        descriptor = open_pidfd(process.pid)
+        _wait(binding.exists, timeout=10.)
+        with pytest.raises(BatchError, match='cookie_present=False'):
+            worker_record(process.pid, slot=0, device='cpu', identity='a' * 64, identity_env=OWNER_ENV)
+        assert process.poll() is None and pidfd_exited(descriptor) is False
+        process.stdin.close()
+        assert process.wait(timeout=10.) == 0
+        assert json.loads(finished.read_text()) == {'code': 0, 'backend_imported': False, 'jax_imported': False}
+        assert json.loads(binding.read_text()) == {'path': str(source), 'sha256': digest}
+    finally:
+        try:
+            if process is not None:
+                process.stdin.close()
+                if descriptor is not None:
+                    try:
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                process.wait(timeout=10.)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+            log.close()
 
 
 def test_pidfd_ownership_works_above_the_select_descriptor_limit(tmp_path):
@@ -98,10 +186,13 @@ def test_pidfd_ownership_works_above_the_select_descriptor_limit(tmp_path):
         for _ in range(1100):
             descriptors.append(os.open(os.devnull, os.O_RDONLY))
         process, record, log = _start('import time\ntime.sleep(60)\n', tmp_path, 'high-fd')
+        pinned = open_pidfd(process.pid)
+        descriptors.append(pinned)
         assert max(descriptors) >= 1024
         assert group_members(record)
         signal_owned(record, signal.SIGTERM)
         process.wait(timeout=10.)
+        assert pidfd_exited(pinned) is True, 'actual reaped child must report a kernel exit event'
         assert not group_members(record)
     finally:
         if process is not None:
@@ -109,6 +200,67 @@ def test_pidfd_ownership_works_above_the_select_descriptor_limit(tmp_path):
         for descriptor in descriptors:
             os.close(descriptor)
         resource.setrlimit(resource.RLIMIT_NOFILE, limits)
+
+
+def test_cleanup_drains_clear_groups_and_preserves_mixed_cookie_group(tmp_path):
+    from multiprocessing import Pipe
+    from hwoslaps.batch.runner import _Slot, _close_slots
+    from hwoslaps.batch.state import BatchError
+    ready = tmp_path / 'foreign-child.json'
+    foreign_cookie = 'f' * 64
+    script = f'''
+import json, os, subprocess, sys, time
+from pathlib import Path
+environment = dict(os.environ)
+environment[{OWNER_ENV!r}] = {foreign_cookie!r}
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)'], env=environment)
+Path({str(ready)!r}).write_text(json.dumps(child.pid))
+time.sleep(90)
+'''
+    slots, descriptors = [], []
+    try:
+        for index, program in enumerate((script, 'import time\ntime.sleep(90)\n',
+                                         'import time\ntime.sleep(90)\n')):
+            process, record, log = _start(program, tmp_path, f'cleanup-{index}')
+            connection, peer = Pipe()
+            peer.close()
+            slots.append(_Slot(index, 'cpu', process, log, connection, ownership=record))
+            descriptors.append(open_pidfd(process.pid))
+        _wait(ready.exists, timeout=10.)
+        child_pid = json.loads(ready.read_text())
+        child_descriptor = open_pidfd(child_pid)
+        descriptors.append(child_descriptor)
+        assert slots[0].process.poll() is None
+        fields = Path(f'/proc/{child_pid}/stat').read_text().rsplit(')', 1)[1].split()
+        assert int(fields[2]) == slots[0].process.pid
+        assert (OWNER_ENV + '=' + foreign_cookie).encode() in Path(f'/proc/{child_pid}/environ').read_bytes().split(b'\0')
+        with pytest.raises(BatchError, match='worker ownership cleanup failed') as refused:
+            _close_slots(slots, interrupt=True)
+        assert isinstance(refused.value.__cause__, BatchError)
+        assert 'ambiguous/foreign pids=' in str(refused.value.__cause__)
+        assert str(child_pid) in str(refused.value.__cause__)
+        assert slots[0].process.poll() is None, 'the actual mixed group must remain unsignaled'
+        signal.pidfd_send_signal(child_descriptor, 0)
+        assert all(slot.process.poll() == -signal.SIGTERM for slot in slots[1:])
+        assert all(slot.connection.closed and slot.log.closed for slot in slots)
+    finally:
+        # These independently retained actual descriptors remain authoritative even
+        # while a deliberately mixed cookie makes the production group scanner refuse.
+        for descriptor in reversed(descriptors):
+            try:
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for slot in slots:
+            slot.process.wait(timeout=10.)
+            slot.connection.close()
+            slot.log.close()
+        import select
+        for descriptor in descriptors:
+            poller = select.poll()
+            poller.register(descriptor, select.POLLIN)
+            _wait(lambda: bool(poller.poll(0)), timeout=10.)
+            os.close(descriptor)
 
 
 def test_real_training_descendants_remain_owned_after_leader_sigkill(tmp_path):
@@ -144,7 +296,7 @@ with BackendSession(training_workers=2) as session:
             return int(fields[11]) + int(fields[12])
         initial = {pid: cpu_ticks(pid) for pid in before}
         _wait(lambda: any(cpu_ticks(pid) > ticks for pid, ticks in initial.items()))
-        descriptor = os.pidfd_open(process.pid)
+        descriptor = open_pidfd(process.pid)
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:

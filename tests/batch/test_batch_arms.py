@@ -50,6 +50,8 @@ def test_direction_expansion_pairs_actual_configs(optical_batch_spec, fit_direct
 def test_nonlinear_reference_uses_the_actual_999_forecast_arm(optical_batch_spec, tmp_path):
     base = optical_batch_spec(population={'count': 1})
     optical = deepcopy(base.to_mapping()['config']['psf']['truth'])
+    # The physical pupil period must exceed the actual 999-pixel kernel extent.
+    optical['pupil']['pixels'] = 512
     wide = {**optical, 'kernel_shape': [999, 999]}
     narrow = {**optical, 'kernel_shape': [51, 51]}
     family = {'arms': ['fit'], 'forecast_arm': 'fore', 'trials': {'kind': 'explicit', 'explicit': [
@@ -57,6 +59,7 @@ def test_nonlinear_reference_uses_the_actual_999_forecast_arm(optical_batch_spec
         'fit': {'mode': 'fixed_template'}, 'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50,
         'n_eff': 200, 'n_shell': 1, 'f_live': .01, 'discard_exploration': True}}
     mapping = base.to_mapping()
+    mapping['config']['psf']['truth'] = deepcopy(optical)
     mapping['arms'] = [{'name': 'fore', 'overrides': {'psf': {'model': wide}}},
                        {'name': 'fit', 'overrides': {'psf': {'model': narrow}}}]
     mapping['forecast'] = {'masses_msun': [1e8], 'arms': ['fore']}
