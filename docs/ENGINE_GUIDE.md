@@ -1,136 +1,118 @@
-# Engine API and research workflows
+# Engine guide
 
-The engine separates scene/instrument preparation, statistical evaluation,
-experiment policy, and output. Configuration files compose in order; mappings
-merge recursively while lists/scalars replace. A relative file path belongs to
-the YAML file declaring it. Python mappings use the caller's directory or an
-explicit `base_dir`. The input mapping is copied.
+> Draft: the typed Python owners below are source-checked. Final exports, CLI/batch integration, example runs and generated configuration-reference validation remain pending.
 
-## Prepared forecasting
+## Configuration and preparation
 
-```python
-from hwoslaps.config import load_config
-from hwoslaps import prepare_forecast, forecast, summarize_forecast, mass_reach
+`EngineConfig` holds a scene, cosmology, truth/model PSFs, instrument, exposure and optional forecast setup. Create it through `config.schema.load_config`, `parse_config` or `resolve_config`. A direct constructor and `dataclasses.replace` are unsupported; use `config.replace(overrides)` so key and cross-section checks run together. The configuration is immutable, and `to_mapping()` returns an independent effective mapping.
 
-config = load_config(["scene.yaml", "instrument.yaml", "forecast.yaml"])
-prepared = prepare_forecast(config, backend="jax")  # or reference
-result = forecast(prepared, masses=[1e7, 1e8, 1e9], positions=positions_yx)
-summary = summarize_forecast(result, q_threshold=10, cell_areas_arcsec2=cell_areas)
-reach = mass_reach(result.masses_msun, summary.detectable_fraction, target=0.1)
-```
-
-`PreparedForecast` contains the smooth scene, expected observation, truth and
-fitted PSFs, and reusable nuisance/projection workspace. Preparation makes no
-detector-noise draws. A context owns backend caches; use one per worker rather
-than sharing it concurrently between threads.
-
-The returned `ForecastResult` has mass-by-position arrays for q, raw/profiled
-information, amplitude uncertainty, degradation, and optional mismatch/control
-diagnostics. JAX mass retargeting reuses compiled products. Sparse evaluated
-positions may supply `domain_positions` separately so the numerical support
-remains the full declared domain.
-
-Summaries default to the actual mismatch statistic when a fitted-PSF error is
-present, otherwise the matched Asimov statistic. Positive-amplitude rules are
-applied centrally by `result.detections(threshold)`. Use `metric="q_asimov"` only
-when matched-template power is deliberately the question; `metric="q_spurious"`
-selects the no-subhalo expected-image control statistic. Undefined diagnostics
-remain visible and reductions reject consumed nonfinite values.
-
-A fraction counts selected positions. A physical angular area requires explicit
-quadrature cell areas; arbitrary sparse samples do not automatically define an
-aperture or boundary. `selection` and `boundary` are caller-supplied masks.
-`mass_reach` returns a sampled/bracketed crossing, a below/above-range bound, or a
-nonmonotone status. It does not extrapolate censored or nonmonotone curves.
-`adaptive_mass_reach` can refine a declared finite bracket with a bounded number
-of evaluations.
-
-## Instruments and PSF questions
-
-YAML supports the existing optical provider, or `psf.provider: kernel` with
-`psf.kernel.path` and `pixel_scale_arcsec`. NPY or NPZ kernels are detector-sampled
-responses; an NPZ defaults to the `kernel` array or an explicit `array_key`.
-A `fit_kernel` describes a different model PSF. File input paths and normalized
-response hashes remain in the effective configuration for replay.
+Configuration files compose in order. Asset paths belong to the file that supplies them. Changing an alternative's `kind` or `type` replaces that alternative; scalar/list overrides replace values, while named components preserve their ordering. Misspelled keys fail with their path. The final `docs/CONFIG.md` will be generated once through `hwoslaps reference` from the real owning tables; this guide does not duplicate its key inventory.
 
 ```python
-from hwoslaps.psf import DetectorPSF
+from hwoslaps.config.schema import load_config
 
-truth = DetectorPSF.from_array(calibrated_kernel, pixel_scale_arcsec)
-model = DetectorPSF.from_array(model_kernel, pixel_scale_arcsec)
-prepared = prepare_forecast(config, psf=truth, fit_psf=model)
-result = forecast(prepared)
+config = load_config(["examples/hwo_reference/scene_smooth_ring.yaml",
+                      "examples/hwo_reference/instrument.yaml",
+                      "examples/hwo_reference/forecast.yaml"])
+longer = config.replace({"observation": {"exposure_time_s": 1800.0}})
 ```
 
-Angular sampling must match the scene. Normalization is explicit; no resampling
-or invented pupil metadata occurs. Optical coefficient nuisance modes require
-an optical provider with a declared wavefront basis. External kernels support
-mass/position and actual-kernel mismatch forecasts without that extra model.
+`config_digest` includes scientific inputs and referenced file bytes. The run label is bookkeeping. `comparison_digest` removes only `psf.model`; it is the required pairing identity for PSF knowledge-error reductions. Masks, nuisance names and truth kernel bindings are also checked. Input files or kernels changed after preparation require a new preparation.
 
-For PSF quality, generate and fit with the same provider/kernel at each chosen
-quality. For PSF knowledge error, hold the truth observation/provider fixed and
-vary the model kernel. Compare `detections` over the same masses and positions;
-retained positions are the intersection with the correct-PSF detection mask.
-Spurious-area ratios use the no-subhalo control over the entire declared domain,
-not only previously sensitive positions. Undefined zero-denominator ratios need
-an explicit caller policy. No fixed tolerance, amplitude list or retention gate
-is embedded in the engine.
+A `PreparedForecast` owns the smooth expectation, kernels, pixel selection, nuisance design, workspace and template engine. Use its context manager to release resources. `Execution` selects `reference` or `jax`, reference-worker count and batch size. Device visibility belongs to the execution environment, for example `CUDA_VISIBLE_DEVICES`; it is not an instrument property.
 
-## Simulation and nonlinear comparisons
+## Forecasts and reductions
 
 ```python
-from hwoslaps import simulate, validate_nonlinear
+from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+from hwoslaps.analysis.reductions import aperture_selection, summarize
+from hwoslaps.analysis.reach import mass_reach
 
-trial = prepared.trial(mass_msun=1e8, position_yx=(0.1, 0.2))
-expected_injection = simulate(prepared, trial=trial, sample_noise=False)
-noisy_injection = simulate(prepared, trial=trial, seed=42)
-noisy_control = simulate(prepared, trial=trial, injected=False, seed=43)
-check = validate_nonlinear(
-    prepared, trial, observation=noisy_injection, dataset_kind="noisy",
-    fit_mode="fixed_template", output_dir="new-fit",
-)
+with prepare_forecast(config, execution=Execution(engine="reference", reference_workers=1)) as prepared:
+    result = forecast(prepared, masses_msun=[1e7, 1e8, 1e9])
+selection = aperture_selection(result, centre_yx=(0.0, 0.0), radius_arcsec=1.0)
+summary = summarize(result, q_threshold=10.0, selection=selection)
+reach = mass_reach(summary, quantity="detectable_fraction", target=0.1, interpolation="linear")
 ```
 
-`simulate` respects the configuration's subhalo flag unless a trial or explicit
-`injected` value overrides it. A trial makes injection explicit; `injected=False`
-produces a null control with the same observing setup. Seeds identify random
-streams, not an assertion that two different Poisson means share identical noise.
+`ForecastResult` arrays have axes `(mass, position)`. It holds raw/profiled information and, for PSF mismatch, fitted data/bias amplitudes. Its properties expose matched, mismatch and spurious statistics. Positions are `(y, x)` arcseconds; lattice metadata lives at `result.positions.grid`. Grid cell areas equal spacing squared. A subset that drops a boundary node has unknown boundary clipping, rather than a false unclipped flag.
 
-With no `observation`, nonlinear validation generates the declared injection.
-Pass a control observation explicitly to test a false detection. Choose
-`dataset_kind="noisy"` to fit the measured image; `"asimov"` fits the expected
-image stored with the observation. The current
-consistent sampling contract, kernel identity, units, optimizer and acceptance
-checks are preserved. Freed fits require explicit mass support; no mass-prior
-range is guessed. Profile refinement requires a differentiable JAX backend and
-explicit search settings. Fitting always requires an output directory.
+`summarize` records the supplied threshold and selected metric. Mismatch detections require finite positive amplitudes as well as finite `q >= threshold`. Mismatch `q_max` zeroes nonpositive fitted amplitudes. Areas use detection count times cell area. Mass reach records sampled/bracketed results or bounds; it does not extrapolate. `interpolation="linear"` interpolates values in log mass, while `"log"` interpolates their logarithm. Choose it to suit the quantity and check nonmonotonic curves.
 
-## Morphology and populations
+## Expected, noisy and null observations
 
-Image source profiles accept prepared assets with declared flux, angular scale,
-position, rotation and size transformation. `scripts/prepare_source_image.py`
-provides explicit preparation/normalization inputs; no fixed galaxy bank is
-shipped. Analytic and image sources use the same simulation and forecast API.
+Simulation takes the halo to inject and the detector-noise seed as separate arguments. Configuration `seed` drives scene randomness. `noise_seed=None` returns the expectation; an integer requests one noisy realization. The actual `Observation.kind` controls expected/noisy fitting.
 
-`iter_population_configs` provides independent declared parameter distributions,
-deterministic member/parameter streams, and unique integer noise seeds. A
-population can also be a caller-owned table or iterator of correlated scenes.
-The engine imposes no survey population or follow-up selection model.
+```python
+from hwoslaps.simulation import simulate
 
-Selection utilities measure electron SNR, angular gradient power and relative
-complexity. Cuts, feature weights and top-k must be supplied; there are no
-parent/selected/golden tiers. Ranking noisy survey data is a scientific question
-for a study, not a claimed property of a noise-free example.
+with prepare_forecast(config) as prepared:
+    trial = prepared.hypothesis(1e8, (0.4, -0.6))
+    expected = simulate(prepared, subhalo=trial, noise_seed=None)
+    noisy = simulate(prepared, subhalo=trial, noise_seed=11)
+    null = simulate(prepared, subhalo=None, noise_seed=11)
+```
 
-## Output and execution
+The null observation is a valid fit/control input. It is excluded from like-for-like injected-detection agreement. Simulation can deliberately inject another halo recipe for a truth-model study; inference refuses a trial recipe different from the configured hypothesis and refuses a non-null observation injecting a different trial. Treat these different studies as different comparisons.
 
-`save_forecast_result`/`load_forecast_result` preserve explicit arrays and JSON
-metadata in a versioned NPZ without pickle. They atomically refuse overwrite.
-The CLI writes the effective configuration, provenance, log and result; Python
-calculations return data and do not manage campaign fleets, deadline watchers,
-release approvals, report tables or plotting.
+Detector data/noise are ADU. Source/lens light maps are detected electrons per second per native pixel, split by plane. `sampling` is measured on the fiducial smooth scene once and retained for injected/noisy observations. It is a diagnostic; [SCIENCE](SCIENCE.md) explains its tested range and nonenforcement.
 
-Optional plotting utilities consume results/components explicitly. Additional
-pupil/model families, chromatic rendering and flexible source reconstruction
-need their own physical implementation and validation. The API does not turn
-unsupported science into a configuration option.
+## PSF questions and chromatic weights
+
+For PSF quality, vary truth and model together. For knowledge error, keep truth fixed and vary `psf.model`. External detector kernels enter through the same truth/model configuration and must match detector angular sampling. A kernel's support, bytes and sampling are part of its identity; copying it at the dataset boundary prevents backend normalization from changing the prepared object.
+
+`knowledge_error_areas` separates retention, total detected-area ratio R, full-domain spurious area and in-selection spurious ratio F. Supply the aperture/selection and reference count floor. `knowledge_error_tolerance` requires one common keyed `(member, direction)` cohort at every amplitude and both maps. Eligibility comes from the reference floor, and nonfinite eligible values refuse. Clopper-Pearson confidence is supplied by the caller; pooled directions from one system carry the nominal label.
+
+Each light SED group receives its effective kernel. Spectral weights store finite common-scale bin integrals and `log_rate_scale`; use `normalized` for relative weights. These values describe `throughput*fnu*dlnlambda`, not absolute detected photon counts. Absolute exposure rates come from the photometric normalization. Unit-sum support truncation and chromatic convergence limits are stated in [SCIENCE](SCIENCE.md).
+
+Nonlinear imaging currently needs one distinct fitted model kernel. Chromatic truth may have multiple bound kernels when the fitted model uses a shared kernel, such as a monochromatic/kernel model. A matched model with multiple distinct kernels cannot be represented by this nonlinear likelihood. Preserve each truth group's binding in records.
+
+## Nonlinear comparisons
+
+`validate_nonlinear` takes a prepared forecast, physical `Halo`, actual `Observation`, `FitSpec`, `SamplerSettings`, separate `sampler_seed` and output directory. Optional `RefineSettings` requires a JAX analysis. The mask defaults to all native pixels minus the PSF border; choose the forecast-mask option or a Python `PixelMask` when the intended comparison requires it. Custom masks have a self-contained case record, distinct from the configuration grammar.
+
+```python
+from hwoslaps.inference.api import validate_nonlinear
+from hwoslaps.inference.settings import FitSpec, SamplerSettings
+
+with prepare_forecast(config) as prepared:
+    trial = prepared.hypothesis(1e8, (0.4, -0.6))
+    observation = simulate(prepared, subhalo=trial, noise_seed=None)
+    case = validate_nonlinear(prepared, trial, observation,
+        fit=FitSpec(mode="fixed_template"), sampler=SamplerSettings(use_jax=False),
+        sampler_seed=11, output_dir="out/cases")
+```
+
+This is a source-checked call shape, without a promised sampler runtime or convergence outcome. `fixed_template` fixes the physical halo; `local_search` frees its position; `freed` also frees mass inside a supplied `MassSupport`. Use actual records to identify fitted parameters, masks and priors. Inference currently fits the selected scene parameters; forecast background/wavefront columns remain unfitted.
+
+`q_signed = 2*(logL_subhalo-logL_smooth)` may be negative. `q_clipped` is a separate display value. Classification needs a complete caller `ClassificationRule`, including acceptance statuses and a nullable or positive stationarity tolerance. Failed/incomplete/unresolved cases remain distinct from accepted nondetections. Agreement reports mask/comparison differences and unfitted forecast nuisances. Retries may change sampler/refinement settings but preserve the physical case and comparison inputs.
+
+Sampler recovery, weighted sampler quantiles and refined recovery are separate fields. Requested `use_jax` and the effective constructed search fields are also separate records: an inactive backend default such as `use_jax_vmap=True` does not alone identify the executed likelihood path. Repeatable-profile acceptance does not certify stationarity or a global optimum; inspect all six gates, projected gradient and repeat diagnostics. Some exact centres/circular mass shapes have unsupported gradients while value-only sampling remains available; see [SCIENCE](SCIENCE.md).
+
+## Populations, batches, artifacts and plots
+
+Population members use named per-member streams, so extending a pool or changing chunking does not redefine existing members. A ranking policy supplies cuts, weighted standardized terms and top-k size. No library paper cohort, threshold or instrument selection policy is inferred.
+
+Batch source is defined and its integration/runtime checks are still pending. The source interfaces plan jobs, run/resume into an output directory and open metadata. A run report distinguishes completed, skipped, failed, duplicate, not-selected and orphaned jobs, preparations and revision counts. Resume verifies the recorded case/policy identity; a changed policy conflicts rather than silently reclassifying old outcomes. Full scientific case reading can require a backend, while controller/metadata imports stay separate. The current source signature is `run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False)`. `open_batch` reads metadata; product accessors load forecasts, observations and cases. Final acceptance still needs the integrated producer and its tests.
+
+Current artifacts record arrays, kernels, effective configuration, input hashes, code/environment provenance and schemas. Old study archives have no compatibility loader. Final CLI/artifact transport and generated-reference checks are pending integration. Keep the data, mask, kernel, covariance and nuisance span fixed when making a numerical comparison.
+
+The plotting producer returns Axes and leaves saving to callers. It uses current lattice geometry, retains sparse/floor gaps and labels expected source S/N. Shared public helpers `plotting.axes.axes_or_new` and `pixel_extent` support those consumers; final plot runtime proof is pending.
+
+## Staged command examples
+
+These command forms come from the current staged CLI/example sources and are unexecuted in this draft. Use new output directories and the final integrated input assets.
+
+```bash
+hwoslaps validate configs/minimal.yaml
+hwoslaps forecast configs/minimal.yaml --masses 1e7 1e8 1e9 -o out/minimal
+hwoslaps simulate configs/minimal.yaml --smooth --noise-seed 11 -o out/null
+python examples/hwo_reference/run.py --quick --q-threshold 10 --seed 11 --output out/hwo_quick
+python examples/monolithic_illustrative/run.py --q-threshold 10 --output out/monolithic
+python examples/chromatic/run.py --q-threshold 10 --output out/chromatic
+hwoslaps batch plan examples/population/batch.yaml
+hwoslaps batch run examples/population/batch.yaml -o out/population --devices cpu --select 'members/system_000000/*'
+hwoslaps batch status out/population
+```
+
+Repeating the same batch run command resumes missing jobs. `--fresh` refuses an existing batch, `--verify` checks completed artifact hashes, and `--require-single-revision` enforces the recorded revision constraint. These source-defined forms are unexecuted here. The example budgets are acceptance targets, not measured runtimes. Chromatic sampling/support variants and arms have no convergence claim until their actual product comparisons pass.
