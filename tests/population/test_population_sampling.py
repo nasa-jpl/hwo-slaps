@@ -75,13 +75,15 @@ def test_conversion_derivations_have_hand_oracles(variable,expected):
 
 def test_function_hook_calls_actual_keywords_and_validates_output(tmp_path,monkeypatch):
     module=tmp_path/"population_vector_hooks.py"
-    module.write_text("def pair(a,b):\n    return (a+b,a-b)\ndef bad(a):\n    return float('nan')\n")
+    module.write_text("def pair(a,b):\n    return (a+b,a-b)\ndef bad(a):\n    return [float('nan'), float('inf'), [1., 2.], ((1., 2.),), True, '1', None][int(a)]\n")
     monkeypatch.syspath_prepend(str(tmp_path))
     values={"u":{"kind":"constant","value":[2.,3.]},
             "x":{"kind":"function","function":"population_vector_hooks:pair","inputs":{"a":{"var":"u[0]"},"b":{"var":"u[1]"}}}}
     assert sample_population(mapping(values),1,seed=2)[0]["x"]==(5.,-1.)
-    values["x"]={"kind":"function","function":"population_vector_hooks:bad","inputs":{"a":1.}}
-    with pytest.raises(PopulationError,match="variable x.*finite"):sample_population(mapping(values),1,seed=2)
+    for index in range(7):
+        values["x"] = {"kind": "function", "function": "population_vector_hooks:bad", "inputs": {"a": index}}
+        with pytest.raises(PopulationError, match="variable x.*output"):
+            sample_population(mapping(values), 1, seed=2)
 
 
 @pytest.mark.parametrize("variables",[
