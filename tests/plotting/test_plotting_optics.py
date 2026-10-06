@@ -53,5 +53,5 @@ def test_optics_plots_preserve_values_and_requested_log_scale(plt):
                                     "supersampling": 2}, "pupil"))
     pupil_ax = plot_pupil(pupil)
     np.testing.assert_array_equal(pupil_ax.images[0].get_array(), pupil.transmission.shaped)
-    assert pupil_ax.images[0].get_extent() == (-1, 1, -1, 1)
+    assert tuple(pupil_ax.images[0].get_extent()) == (-1, 1, -1, 1)
     assert pupil_ax.get_xlabel() == "x (m)" and pupil_ax.get_ylabel() == "y (m)"
