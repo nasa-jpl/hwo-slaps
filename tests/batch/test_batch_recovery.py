@@ -236,6 +236,7 @@ def test_real_mixed_source_revisions_are_reported_and_strict_policy_refuses(tiny
     revision = subprocess.run(['git', '-C', str(copied), 'rev-parse', 'HEAD'], check=True,
                               capture_output=True, text=True).stdout.strip()
     assert revision not in first.revisions
+    expected_revisions = {**first.revisions, revision: 1}
     binding = tmp_path / 'revision-binding.json'
     expected = {name: hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
                 for name, module in [('runner', runner), ('worker', worker)]}
@@ -254,7 +255,8 @@ for name, module in [('runner', runner), ('worker', worker)]:
     assert digest == {expected!r}[name]
     records[name] = {{'path': str(actual), 'sha256': digest}}
 report = run_batch(load_batch_spec(sys.argv[3]), sys.argv[5], select='members/system_000001/*')
-assert report.counts['completed'] == 1 and set(report.revisions) == {{{revision!r}}}
+assert report.counts['completed'] == 1 and report.counts['skipped'] == 1
+assert report.revisions == {expected_revisions!r}
 Path({str(binding)!r}).write_text(json.dumps(records))
 '''
     process, identity, log = _controller(spec, root, tmp_path, 'second-revision', program=program)
@@ -263,7 +265,7 @@ Path({str(binding)!r}).write_text(json.dumps(records))
         assert {name: item['sha256'] for name, item in json.loads(binding.read_text()).items()} == expected
         mixed = run_batch(spec, root)
         assert mixed.counts['skipped'] == 2 and mixed.counts['completed'] == 0
-        assert mixed.revisions == {**first.revisions, revision: 1}
+        assert mixed.revisions == expected_revisions
         with pytest.raises(BatchConflict, match='mixed source revisions are forbidden'):
             run_batch(spec, root, require_single_revision=True)
     finally:
