@@ -86,6 +86,15 @@ def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
     with pytest.raises(OSError) as invalid:
         open_pidfd(-1)
     assert invalid.value.errno == errno.EINVAL
+    import ctypes
+    integer_bits = ctypes.sizeof(ctypes.c_int) * 8
+    # This would silently wrap to our real live PID at the libc boundary.
+    with pytest.raises(OverflowError):
+        open_pidfd(os.getpid() + (1 << integer_bits))
+    with pytest.raises(OverflowError):
+        open_pidfd(-(1 << integer_bits))
+    with pytest.raises(TypeError):
+        open_pidfd(1.5)
 
 
 def test_reused_or_foreign_identity_is_never_signaled(tmp_path):

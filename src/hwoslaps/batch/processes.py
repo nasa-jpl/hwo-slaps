@@ -23,6 +23,10 @@ def open_pidfd(pid):
     if sys.platform != 'linux':
         raise BatchError('pidfd ownership requires Linux')
     import ctypes
+    import operator
+    pid = operator.index(pid)
+    if ctypes.c_int(pid).value != pid:
+        raise OverflowError('PID does not fit in the libc signed int argument')
     try:
         function = ctypes.CDLL(None, use_errno=True).pidfd_open
     except AttributeError as error:
