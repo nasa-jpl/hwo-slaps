@@ -137,6 +137,67 @@ def test_pidfd_ownership_works_above_the_select_descriptor_limit(tmp_path):
         resource.setrlimit(resource.RLIMIT_NOFILE, limits)
 
 
+def test_cleanup_drains_clear_groups_and_preserves_mixed_cookie_group(tmp_path):
+    from multiprocessing import Pipe
+    from hwoslaps.batch.runner import _Slot, _close_slots
+    from hwoslaps.batch.state import BatchError
+    ready = tmp_path / 'foreign-child.json'
+    foreign_cookie = 'f' * 64
+    script = f'''
+import json, os, subprocess, sys, time
+from pathlib import Path
+environment = dict(os.environ)
+environment[{OWNER_ENV!r}] = {foreign_cookie!r}
+child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)'], env=environment)
+Path({str(ready)!r}).write_text(json.dumps(child.pid))
+time.sleep(90)
+'''
+    slots, descriptors = [], []
+    try:
+        for index, program in enumerate((script, 'import time\ntime.sleep(90)\n',
+                                         'import time\ntime.sleep(90)\n')):
+            process, record, log = _start(program, tmp_path, f'cleanup-{index}')
+            connection, peer = Pipe()
+            peer.close()
+            slots.append(_Slot(index, 'cpu', process, log, connection, ownership=record))
+            descriptors.append(open_pidfd(process.pid))
+        _wait(ready.exists, timeout=10.)
+        child_pid = json.loads(ready.read_text())
+        child_descriptor = open_pidfd(child_pid)
+        descriptors.append(child_descriptor)
+        assert slots[0].process.poll() is None
+        fields = Path(f'/proc/{child_pid}/stat').read_text().rsplit(')', 1)[1].split()
+        assert int(fields[2]) == slots[0].process.pid
+        assert (OWNER_ENV + '=' + foreign_cookie).encode() in Path(f'/proc/{child_pid}/environ').read_bytes().split(b'\0')
+        with pytest.raises(BatchError, match='worker ownership cleanup failed') as refused:
+            _close_slots(slots, interrupt=True)
+        assert isinstance(refused.value.__cause__, BatchError)
+        assert 'ambiguous/foreign pids=' in str(refused.value.__cause__)
+        assert str(child_pid) in str(refused.value.__cause__)
+        assert slots[0].process.poll() is None, 'the actual mixed group must remain unsignaled'
+        signal.pidfd_send_signal(child_descriptor, 0)
+        assert all(slot.process.poll() == -signal.SIGTERM for slot in slots[1:])
+        assert all(slot.connection.closed and slot.log.closed for slot in slots)
+    finally:
+        # These independently retained actual descriptors remain authoritative even
+        # while a deliberately mixed cookie makes the production group scanner refuse.
+        for descriptor in reversed(descriptors):
+            try:
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for slot in slots:
+            slot.process.wait(timeout=10.)
+            slot.connection.close()
+            slot.log.close()
+        import select
+        for descriptor in descriptors:
+            poller = select.poll()
+            poller.register(descriptor, select.POLLIN)
+            _wait(lambda: bool(poller.poll(0)), timeout=10.)
+            os.close(descriptor)
+
+
 def test_real_training_descendants_remain_owned_after_leader_sigkill(tmp_path):
     ready = tmp_path / 'training-ready'
     script = f'''
