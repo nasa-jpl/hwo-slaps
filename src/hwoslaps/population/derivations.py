@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import importlib
-import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
-from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Real, Table, Text, Union, Variants
+from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Table, Text, Union, Variants
 from ..scene.convert import ell_comps_from, multipole_components_from, polar_offset, shear_components_from
 from .distributions import PopulationError, Reference, Value, VALUE_CHECK, read_value
 
@@ -20,20 +19,6 @@ def _input(value, path):
     if isinstance(value, (list, tuple)):
         return tuple(read_value(item, f"{path}[{i}]") for i, item in enumerate(value))
     return read_value(value, path)
-
-
-def _vector_input(value, path):
-    if not isinstance(value, (list, tuple)) or len(value) < 2:
-        raise PopulationError(f"{path}: at least2 numeric/reference components required")
-    return tuple(read_value(item, f"{path}[{index}]") for index, item in enumerate(value))
-
-
-def _function_inputs(value, path):
-    if not isinstance(value, Mapping):
-        raise PopulationError(f"{path}: keyword input mapping required")
-    if any(not isinstance(name, str) or not name for name in value):
-        raise PopulationError(f"{path}: nonempty keyword names required")
-    return {name: _input(item, f"{path}.{name}") for name, item in value.items()}
 
 
 def _record(value):
