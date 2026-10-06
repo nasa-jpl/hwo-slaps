@@ -253,11 +253,13 @@ def build_role_models(scene: Scene, hypothesis: Halo, free_parameters: Sequence[
 
         mapping = mass_mapping(hypothesis, scene.cosmology, fit.mass_support)
     loaded = {}
-    for galaxy in (scene.spec.lens, scene.spec.source):
-        profiles = iter(scene.light_profiles.get(galaxy.plane, ()))
-        for component in galaxy.light:
-            for layout in PROFILE_TYPES[component.type].layout(component.values):
-                loaded[(galaxy.plane, component.name + layout.suffix)] = next(profiles)
+    for key, group in scene.light_groups.items():
+        galaxy = scene.spec.lens if group.plane == "lens" else scene.spec.source
+        attributes = (component.name + layout.suffix for component in galaxy.light
+                      if component.name in group.components
+                      for layout in PROFILE_TYPES[component.type].layout(component.values))
+        for attribute, profile in zip(attributes, scene.light_profiles[key], strict=True):
+            loaded[(group.plane, attribute)] = profile
     lens = [profile for component in scene.spec.lens.mass + scene.spec.lens.light
             for profile in _component_models(scene, component, free, fit, loaded, use_jax)]
     source = [profile for component in scene.spec.source.light
