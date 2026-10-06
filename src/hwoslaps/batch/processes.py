@@ -12,6 +12,7 @@ from pathlib import Path
 import select
 import signal
 import sys
+import time
 
 from .state import BatchError
 
@@ -93,13 +94,29 @@ def worker_record(pid, *, slot, device, identity, identity_env):
     descriptor = open_pidfd(pid)
     try:
         info = _stat(pid)
-        cookie = _cookie(pid, identity_env)
-        if (pidfd_exited(descriptor) or info['state'] in ('Z', 'X') or info['process_group'] != pid
-                or info['session_id'] != pid or info['uid'] != os.getuid() or cookie != identity.encode('ascii')):
-            raise BatchError(f'new worker {pid} did not retain its verified process identity: '
-                             f'state={info["state"]}, group_matches={info["process_group"] == pid}, '
-                             f'session_matches={info["session_id"] == pid}, uid_matches={info["uid"] == os.getuid()}, '
-                             f'cookie_present={cookie is not None}, cookie_matches={cookie == identity.encode("ascii")}')
+        captured_birth = info['start_time']
+        deadline = time.monotonic() + .05
+        while True:
+            cookie = _cookie(pid, identity_env)
+            valid = (not pidfd_exited(descriptor) and info['state'] not in ('Z', 'X')
+                     and info['process_group'] == pid and info['session_id'] == pid
+                     and info['uid'] == os.getuid() and info['start_time'] == captured_birth)
+            if valid and cookie == identity.encode('ascii'):
+                break
+            # Bootstrap remains unreleased. Retry only missing initial /proc
+            # cookie bytes, never another live identity or a read/exit error.
+            message = (f'new worker {pid} did not retain its verified process identity: '
+                       f'state={info["state"]}, group_matches={info["process_group"] == pid}, '
+                       f'session_matches={info["session_id"] == pid}, uid_matches={info["uid"] == os.getuid()}, '
+                       f'birth_matches={info["start_time"] == captured_birth}, '
+                       f'cookie_present={cookie is not None}, cookie_matches={cookie == identity.encode("ascii")}')
+            remaining = deadline - time.monotonic()
+            if not valid or cookie is not None or remaining <= 0.:
+                raise BatchError(message)
+            time.sleep(min(.001, remaining))
+            if time.monotonic() >= deadline:
+                raise BatchError(message)
+            info = _stat(pid)
         return {**{key: info[key] for key in ('pid', 'process_group', 'session_id', 'start_time', 'uid')},
                 'slot': slot, 'device': device, 'identity': identity, 'identity_env': identity_env, 'boot_id': boot_id()}
     finally:
