@@ -34,12 +34,18 @@ def chromatic_mapping(mapping,*,count=5,relation="matched"):
 
 
 @pytest.mark.parametrize("relation",["matched","knowledge_error"])
-def test_single_node_chromatic_forecast_equals_monochromatic_forecast(minimal_mapping,relation):
+@pytest.mark.parametrize("sed_state",["response","no_sed","zero_response"])
+def test_single_node_chromatic_forecast_equals_monochromatic_forecast(minimal_mapping,relation,sed_state,tmp_path):
     from hwoslaps.fisher.api import forecast,prepare_forecast
     from hwoslaps.spectra.bandpass import build_bandpass,parse_bandpass
     sampled=chromatic_mapping(minimal_mapping,count=1,relation=relation)
+    outside=tmp_path/"outside-band.npz";np.savez(outside,wave=[700.,900.],value=[1.,1.])
     for galaxy in ("lens","source"):
-        for component in sampled["scene"][galaxy]["light"].values():component["sed"]={"kind":"flat_fnu"}
+        for component in sampled["scene"][galaxy]["light"].values():
+            if sed_state=="no_sed":component.pop("sed")
+            elif sed_state=="response":component["sed"]={"kind":"flat_fnu"}
+            else:component["sed"]={"kind":"table","path":str(outside),"wavelength_key":"wave",
+                "value_key":"value","wavelength_unit":"nm","quantity":"fnu"}
     sampled["forecast"]["nuisances"]["wavefront"]={"modes":{"zernikes":{"nolls":[4,5]}},"step_nm":1.,"prior_sigma_nm":5.}
     mono=deepcopy(sampled);truth=mono["psf"]["truth"]
     truth.pop("wavelength_samples")
@@ -49,6 +55,20 @@ def test_single_node_chromatic_forecast_equals_monochromatic_forecast(minimal_ma
         np.testing.assert_array_equal(a.mean_model_adu,b.mean_model_adu)
         assert a.nuisances.names==b.nuisances.names
         np.testing.assert_array_equal(a.nuisances.images,b.nuisances.images)
+        for prepared in (a,b):
+            for record in prepared.psfs.spectral["truth"]["groups"].values():
+                assert record["status"]==sed_state
+                assert (record["sed_digest"] is None)==(sed_state=="no_sed")
+                if sed_state=="response":
+                    np.testing.assert_array_equal(record["weights"]["normalized"],[1.])
+                    assert record["weights"]["rates"][0]*math.exp(record["weights"]["log_rate_scale"])==pytest.approx(.21*math.log(550./450.),rel=1.e-12,abs=0.)
+                    assert record["effective_wavelength_m"]*1.e9==pytest.approx(100./math.log(550./450.),rel=1.e-9,abs=0.)
+                else:
+                    assert record["weights"] is None and record["effective_wavelength_m"] is None
+                assert record["kernel_wavelength_m"]==prepared.psfs.truth.wavelengths_m[0]
+            kernel=prepared.psfs.truth_kernels.single
+            assert prepared.psfs.spectral["truth"]["captured_power_fractions"]==(kernel.source["captured_power_fraction"],)
+            prepared.validate_identity()
         aa,bb=forecast(a,masses_msun=[1.e8]),forecast(b,masses_msun=[1.e8])
         for name in ("q_asimov","fisher_raw","fisher_profiled","amplitude_hat","amplitude_spurious"):
             left,right=getattr(aa,name),getattr(bb,name)
@@ -77,16 +97,24 @@ def test_chromatic_wavefront_nuisance_is_the_derivative_of_the_forward_model(min
     from hwoslaps.fisher.api import prepare_forecast
     from hwoslaps.optics.chromatic import effective_kernel,sed_weights
     from hwoslaps.optics.kernels import KernelBinding
+    from hwoslaps.fisher.psf_pair import PsfPair
     from hwoslaps.optics.wavefront import WavefrontMode
     mapping=chromatic_mapping(minimal_mapping,relation=relation)
     mapping["forecast"]["nuisances"].update(fixed=["*"],background_offset=False,
         wavefront={"modes":{"zernikes":{"nolls":[4,5]}},"step_nm":1.,"prior_sigma_nm":5.})
     with prepare_forecast(mapping) as prepared:
         provider=prepared.psfs.model.provider
+        reconstructed=PsfPair(prepared.psfs.truth,prepared.psfs.model,prepared.psfs.truth_kernels,
+                              prepared.psfs.model_kernels,prepared.psfs.spectral)
         from hwoslaps.spectra.bandpass import build_bandpass,parse_bandpass
         band=build_bandpass(parse_bandpass(mapping["instrument"]["bandpass"],"band"))
         for noll in (4,5):
             mode=WavefrontMode("zernikes",noll);value=provider.coefficients.value(mode)
+            original_derivatives=prepared.psfs.model_kernel_derivatives(mode,1.)
+            recreated_derivatives=reconstructed.model_kernel_derivatives(mode,1.)
+            assert tuple(recreated_derivatives)==tuple(original_derivatives)
+            for group in original_derivatives:
+                np.testing.assert_array_equal(recreated_derivatives[group],original_derivatives[group])
             bindings=[]
             for sign in (1.,-1.):
                 coefficients=provider.coefficients.replace(mode,value+sign)
