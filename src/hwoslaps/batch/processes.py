@@ -75,7 +75,8 @@ def _cookie(pid, identity_env):
     return next((entry[len(prefix):] for entry in environment.split(b'\0') if entry.startswith(prefix)), None)
 
 
-def _exited(descriptor, timeout_ms=0):
+def pidfd_exited(descriptor, timeout_ms=0):
+    """Confirm pinned kernel exit, refusing descriptor/error events as evidence."""
     poller = select.poll()
     poller.register(descriptor, select.POLLIN | select.POLLHUP | select.POLLERR)
     events = poller.poll(timeout_ms)
@@ -93,7 +94,7 @@ def worker_record(pid, *, slot, device, identity, identity_env):
     try:
         info = _stat(pid)
         cookie = _cookie(pid, identity_env)
-        if (_exited(descriptor) or info['state'] in ('Z', 'X') or info['process_group'] != pid
+        if (pidfd_exited(descriptor) or info['state'] in ('Z', 'X') or info['process_group'] != pid
                 or info['session_id'] != pid or info['uid'] != os.getuid() or cookie != identity.encode('ascii')):
             raise BatchError(f'new worker {pid} did not retain its verified process identity: '
                              f'state={info["state"]}, group_matches={info["process_group"] == pid}, '
@@ -142,7 +143,7 @@ def _group_handles(record):
             try:
                 info = _stat(pid)
                 cookie = _cookie(pid, record['identity_env'])
-                if _exited(descriptor) or info['state'] in ('Z', 'X'):
+                if pidfd_exited(descriptor) or info['state'] in ('Z', 'X'):
                     continue
                 if info['process_group'] != record['process_group']:
                     continue
@@ -151,7 +152,7 @@ def _group_handles(record):
                     # /proc identity reads are not atomic with process exit. Only
                     # definitive exit on this already-pinned pidfd may clear a
                     # transient mismatch; a live foreign process still refuses.
-                    if _exited(descriptor, 50):
+                    if pidfd_exited(descriptor, 50):
                         continue
                     foreign.append(pid)
                     continue
@@ -163,7 +164,7 @@ def _group_handles(record):
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except PermissionError:
-                if not _exited(descriptor, 50):
+                if not pidfd_exited(descriptor, 50):
                     ambiguous.append(pid)
             finally:
                 if not retain:

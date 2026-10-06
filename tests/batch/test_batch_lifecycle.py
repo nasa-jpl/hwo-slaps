@@ -10,7 +10,7 @@ import time
 
 import pytest
 
-from hwoslaps.batch.processes import boot_id, group_members, open_pidfd, signal_owned, worker_record
+from hwoslaps.batch.processes import boot_id, group_members, open_pidfd, pidfd_exited, signal_owned, worker_record
 from hwoslaps.batch.runner import OWNER_ENV
 
 pytestmark = pytest.mark.backend
@@ -73,7 +73,6 @@ def _close(process, record, log):
 
 
 def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
-    from hwoslaps.batch.processes import _exited
     from hwoslaps.batch.state import BatchError
     descriptor = open_pidfd(os.getpid())
     try:
@@ -83,11 +82,11 @@ def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
         poller = select.poll()
         poller.register(descriptor, select.POLLIN)
         assert poller.poll(0) == [], 'the current live process must not appear exited'
-        assert _exited(descriptor) is False
+        assert pidfd_exited(descriptor) is False
     finally:
         os.close(descriptor)
     with pytest.raises(BatchError, match='error or invalid descriptor'):
-        _exited(descriptor)
+        pidfd_exited(descriptor)
     with pytest.raises(OSError) as invalid:
         open_pidfd(-1)
     assert invalid.value.errno == errno.EINVAL
@@ -129,10 +128,13 @@ def test_pidfd_ownership_works_above_the_select_descriptor_limit(tmp_path):
         for _ in range(1100):
             descriptors.append(os.open(os.devnull, os.O_RDONLY))
         process, record, log = _start('import time\ntime.sleep(60)\n', tmp_path, 'high-fd')
+        pinned = open_pidfd(process.pid)
+        descriptors.append(pinned)
         assert max(descriptors) >= 1024
         assert group_members(record)
         signal_owned(record, signal.SIGTERM)
         process.wait(timeout=10.)
+        assert pidfd_exited(pinned) is True, 'actual reaped child must report a kernel exit event'
         assert not group_members(record)
     finally:
         if process is not None:
