@@ -37,6 +37,9 @@ def test_parameter_domains_are_what_the_component_tables_accept(tmp_path):
     # Pair elements are zero, so the probed element alone sets a joint ellipticity.
     valid = {
         "Isothermal": {"centre": [0.0, 0.0], "einstein_radius": 1.0, "ell_comps": [0.0, 0.0]},
+        "PowerLaw": {"centre": [0.0, 0.0], "einstein_radius": 1.0, "ell_comps": [0.0, 0.0], "slope": 2.0},
+        "ExternalShear": {"gamma_1": 0.0, "gamma_2": 0.0},
+        "Sersic": {"centre": [0.0, 0.0], "ell_comps": [0.0, 0.0], "effective_radius": 0.5, "intensity": 1.0, "sersic_index": 2.5},
         "Exponential": {"centre": [0.0, 0.0], "ell_comps": [0.0, 0.0], "effective_radius": 0.5, "intensity": 1.0},
         "Image": {"asset_path": str(asset), "centre": [0.0, 0.0], "total_flux": 1.0},
     }

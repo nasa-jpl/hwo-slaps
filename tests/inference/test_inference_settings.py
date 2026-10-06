@@ -145,12 +145,17 @@ def test_default_settings_equal_the_paper_procedure():
         "lens.ellipticity": {"half_width": 0.02, "fractional": False, "clip": [-0.9, 0.9]},
         "lens.amplitude": {"half_width": 0.5, "fractional": True, "clip": None},
         "lens.size": {"half_width": 0.3, "fractional": True, "clip": None},
+        "lens.multipole": {"half_width": 0.01, "fractional": False, "clip": None},
+        "lens.shear": {"half_width": 0.01, "fractional": False, "clip": None},
+        "lens.slope": {"half_width": 0.05, "fractional": False, "clip": None},
+        "lens.sersic_index": {"half_width": 0.3, "fractional": True, "clip": None},
         "lens.orientation": {"half_width": 5.0, "fractional": False, "clip": None},
         "source.position": {"half_width": 0.01, "fractional": False, "clip": None},
         "source.ellipticity": {"half_width": 0.05, "fractional": False, "clip": [-0.9, 0.9]},
         "source.orientation": {"half_width": 5.0, "fractional": False, "clip": None},
         "source.amplitude": {"half_width": 0.5, "fractional": True, "clip": None},
-        "source.size": {"half_width": 0.3, "fractional": True, "clip": None}}
+        "source.size": {"half_width": 0.3, "fractional": True, "clip": None},
+        "source.sersic_index": {"half_width": 0.3, "fractional": True, "clip": None}}
     widths = PriorWidths()
     assert (widths.subhalo_local_window_arcsec, widths.subhalo_freed_window_arcsec) == (0.03, 0.15)
     assert FitSpec(mode="fixed_template").to_mapping()["mask"] == "all_pixels_minus_psf_border"

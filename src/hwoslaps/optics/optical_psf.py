@@ -16,9 +16,10 @@ from __future__ import annotations
 import dataclasses
 import functools
 import math
+import types
 from dataclasses import dataclass
 from numbers import Integral, Real
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
@@ -31,7 +32,7 @@ from .wavefront import WavefrontBasis, WavefrontCoefficients, validate_coefficie
 if TYPE_CHECKING:
     from .knowledge_error import WavefrontDraw, WavefrontDrawSpec
 
-__all__ = ["FocalField", "OpticalPSF", "OpticalSpec", "check_sampling"]
+__all__ = ["FocalField", "OpticalPSF", "OpticalSpec", "check_sampling", "checked_wavelengths", "resolve_wavelengths"]
 
 
 @dataclass(frozen=True)
@@ -45,11 +46,12 @@ class OpticalSpec:
 
     pupil: PupilSpec
     focal_length_m: float
-    wavelength_m: float
+    wavelength_m: float | None
     detector_oversampling: int
     kernel_shape: tuple[int, int]
     wavefront: WavefrontCoefficients
     draw: WavefrontDrawSpec | None
+    wavelength_samples: int | None = None
 
 
 def check_sampling(spec: OpticalSpec, *, pixel_scale_arcsec: float, wavelength_m: float) -> None:
@@ -100,6 +102,34 @@ def _positive(value: Any, what: str) -> float:
     return float(value)
 
 
+def checked_wavelengths(wavelengths_m: Sequence[float]) -> tuple[float, ...]:
+    """A nonempty, finite, positive and strictly increasing wavelength vector in metres."""
+    wavelengths = tuple(_positive(value, "wavelengths_m") for value in wavelengths_m)
+    if not wavelengths or any(second <= first for first, second in zip(wavelengths, wavelengths[1:])):
+        raise ValueError("wavelengths_m must be nonempty and strictly increasing")
+    return wavelengths
+
+
+def resolve_wavelengths(spec: OpticalSpec, *, wavelengths_m: Sequence[float] | None = None) -> tuple[float, ...]:
+    """Resolve the configured wavelength or the caller's bandpass nodes, without reading a bandpass."""
+    if (spec.wavelength_m is None) == (spec.wavelength_samples is None):
+        raise ValueError("an optical PSF sets exactly one of wavelength_m and wavelength_samples")
+    if spec.wavelength_m is not None:
+        wavelengths = (_positive(spec.wavelength_m, "wavelength_m"),)
+        if wavelengths_m is not None and checked_wavelengths(wavelengths_m) != wavelengths:
+            raise ValueError("supplied wavelength nodes differ from the configured monochromatic wavelength")
+        return wavelengths
+    count = spec.wavelength_samples
+    if not isinstance(count, Integral) or isinstance(count, (bool, np.bool_)) or count < 1:
+        raise ValueError("wavelength_samples must be an integer >= 1")
+    if wavelengths_m is None:
+        raise ValueError("wavelength_samples requires the caller's bandpass nodes in wavelengths_m")
+    wavelengths = checked_wavelengths(wavelengths_m)
+    if len(wavelengths) != count:
+        raise ValueError(f"wavelength_samples is {count}, but {len(wavelengths)} nodes were supplied")
+    return wavelengths
+
+
 class OpticalPSF:
     """Detector kernels of one optical system at one pixel scale (a PSF provider).
 
@@ -110,7 +140,8 @@ class OpticalPSF:
     """
 
     def __init__(self, spec: OpticalSpec, *, pupil: Pupil, basis: WavefrontBasis, pixel_scale_arcsec: float,
-                 coefficients: WavefrontCoefficients, draw: WavefrontDraw | None = None) -> None:
+                 coefficients: WavefrontCoefficients, draw: WavefrontDraw | None = None,
+                 wavelengths_m: Sequence[float] | None = None) -> None:
         shape = tuple(spec.kernel_shape)
         if len(shape) != 2 or not all(_is_odd_size(n) for n in shape):
             raise ValueError(f"kernel_shape must be two odd positive integers (ny, nx), got {spec.kernel_shape!r}")
@@ -126,7 +157,7 @@ class OpticalPSF:
         self._basis = basis
         self._pixel_scale_arcsec = _positive(pixel_scale_arcsec, "pixel_scale_arcsec")
         self._focal_length_m = _positive(spec.focal_length_m, "focal_length_m")
-        self._wavelengths_m = (_positive(spec.wavelength_m, "wavelength_m"),)
+        self._wavelengths_m = resolve_wavelengths(spec, wavelengths_m=wavelengths_m)
         if basis.reference_wavelength_m != min(self._wavelengths_m):
             raise ValueError(f"the basis reference wavelength {basis.reference_wavelength_m!r} m is not the "
                              f"shortest provider wavelength {min(self._wavelengths_m)!r} m")
@@ -175,6 +206,13 @@ class OpticalPSF:
     @property
     def collecting_area_m2(self) -> float:
         return self._pupil.collecting_area_m2
+
+    @property
+    def file_digests(self) -> Mapping[str, str]:
+        """Actual prior-file bytes used to draw this provider's wavefront."""
+        if self._draw is not None and self._draw.spec.prior.kind == "path":
+            return types.MappingProxyType({str(self._draw.spec.prior.path): self._draw.prior_digest})
+        return types.MappingProxyType({})
 
     def _wavelength(self, wavelength_m: float | None) -> float:
         if wavelength_m is None:
@@ -243,6 +281,12 @@ class OpticalPSF:
             "kind": "optical", "wavelength_m": wavelength, "provider_digest": self._provider_digest,
             "coefficients_digest": wavefront.digest(), "captured_power_fraction": total / self._pupil.total_power})
 
+    def kernels(self, wavelengths_m: Sequence[float] | None = None, *,
+                coefficients: WavefrontCoefficients | None = None) -> tuple[DetectorPSF, ...]:
+        """One kernel per node, on the same detector pixels, with each propagation's source record."""
+        wavelengths = self._wavelengths_m if wavelengths_m is None else checked_wavelengths(wavelengths_m)
+        return tuple(self.kernel(wavelength, coefficients=coefficients) for wavelength in wavelengths)
+
     def detector_power(self, wavelength_m: float | None = None, *,
                        coefficients: WavefrontCoefficients | None = None) -> np.ndarray:
         """Unnormalized power per detector pixel, in units of the pupil power, shape ``(ny, nx)``."""
@@ -282,7 +326,8 @@ class OpticalPSF:
     def with_coefficients(self, coefficients: WavefrontCoefficients) -> OpticalPSF:
         """The same optics with another wavefront; shares the pupil and the basis."""
         return OpticalPSF(self._spec, pupil=self._pupil, basis=self._basis,
-                          pixel_scale_arcsec=self._pixel_scale_arcsec, coefficients=coefficients)
+                          pixel_scale_arcsec=self._pixel_scale_arcsec, coefficients=coefficients,
+                          wavelengths_m=self._wavelengths_m)
 
     def to_mapping(self) -> dict[str, Any]:
         """The provider record: optics, sampling, wavefront and the draw that set it.

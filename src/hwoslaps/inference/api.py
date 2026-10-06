@@ -20,7 +20,7 @@ from ..scene.image_source import frozen_value
 from .data import FitData, build_fit_data, support_half_widths
 from .fit_model import FitModel, autofit_model
 from .hypotheses import RoleModels, build_role_models
-from .objective import BoxObjective, guard_isothermal_origin, jax_objective
+from .objective import BoxObjective, guard_circular_mass_gradient, jax_objective
 from .result import CaseResult, ForecastReference, ObservationRecord
 from .settings import FitSpec, PixelMask, RefineSettings, SamplerSettings
 from .statistics import likelihood_ratio
@@ -77,11 +77,13 @@ class PreparedCase:
         if not self.use_jax:
             raise ValueError("refinement requires a prepared JAX analysis")
         if role not in self._objectives:
-            checked = any(component.profile_class == "hwoslaps.inference.light_profiles:Exponential"
+            checked = any(component.profile_class in {"hwoslaps.inference.light_profiles:Exponential",
+                                                       "hwoslaps.inference.light_profiles:Sersic",
+                                                       "hwoslaps.inference.mass_profiles:PowerLaw"}
                           for galaxy in model.galaxies for _, component in galaxy.components)
             objective = jax_objective(self.analysis, self.autofit_models[role], model.lower, model.upper,
                                       check_gradient_domain=checked)
-            self._objectives[role] = guard_isothermal_origin(objective, model)
+            self._objectives[role] = guard_circular_mass_gradient(objective, model)
         return self._objectives[role]
 
 

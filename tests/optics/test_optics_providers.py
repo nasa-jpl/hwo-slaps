@@ -69,7 +69,7 @@ PARSE_ROWS = {
     "unknown-model-kind": ({"model": {"kind": "explicit"}}, "psf.model.kind"),
     "even-kernel-rows": ({"truth.kernel_shape": [16, 17]}, "psf.truth.kernel_shape[0]"),
     "even-kernel-columns": ({"truth.kernel_shape": [17, 16]}, "psf.truth.kernel_shape[1]"),
-    "wavelength-required": ({"truth.wavelength_nm": DELETE}, "psf.truth.wavelength_nm"),
+    "wavelength-required": ({"truth.wavelength_nm": DELETE}, "psf.truth"),
     "oversampling-required": ({"truth.detector_oversampling": DELETE}, "psf.truth.detector_oversampling"),
     "rings-required": ({"truth.pupil.rings": DELETE}, "psf.truth.pupil.rings"),
     "hex-key-on-circle": ({"truth.pupil": {"kind": "circular", "diameter_m": 7.2, "pixels": 128,
@@ -227,6 +227,13 @@ def test_kernel_provider_limits(kernel_file):
         provider.kernel(5e-7)
     with pytest.raises(ValueError, match="no wavefront basis"):
         provider.kernel(coefficients=WavefrontCoefficients.empty())
+    with pytest.raises(ValueError, match="no spectral information"):
+        provider.kernels([5e-7])
+    spec = KernelFileSpec(Path(kernel_file), None, 0.03, True, None)
+    with pytest.raises(ValueError, match="no spectral information"):
+        build_psf_provider(spec, pixel_scale_arcsec=0.03, wavelengths_m=(5e-7,))
+    with pytest.raises(ValueError, match="only a tabulated"):
+        build_psf_provider(spec, pixel_scale_arcsec=0.03, bandpass_support_m=(4e-7, 6e-7))
     assert provider.to_mapping() == {"provider": "kernel", "kernel": psf.kernel_identity().to_mapping(),
                                      "source": dict(psf.source)}
 

@@ -19,7 +19,11 @@ if TYPE_CHECKING:
     from ..scene.spec import ComponentSpec
     from .subhalo_classes import SubhaloMassMapping
 
-__all__ = ["RoleModels", "build_role_models"]
+__all__ = ["JAX_POWER_LAW_MIN_AXIS_RATIO", "RoleModels", "build_role_models"]
+
+# AutoLens 20-term JAX EPL series: relative error 2.3e-12 at q=0.538, 7.3e-8 at q=0.333.
+# Isothermal uses its closed form and is exempt (A2 1.3; R2 section 7).
+JAX_POWER_LAW_MIN_AXIS_RATIO = 0.5
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,87 @@ def _joint_ellipticity(component: ComponentSpec, parameters: dict[str, Any], fre
                                 f"ellipticity half width is {maximum:.3g} (strictly below)")
 
 
+def _bounds(component: ComponentSpec, parameter: Any, free: set[str], fit: FitSpec,
+            narrowed: tuple[str, float] | None = None) -> tuple[float, float]:
+    if parameter.name not in free:
+        return parameter.value, parameter.value
+    rule = fit.prior_widths.rule(component.plane, parameter.definition.kind)
+    if narrowed is not None and parameter.definition.kind == narrowed[0]:
+        # Joint mass kinds use absolute widths. At zero test the limiting, fixed-truth box.
+        if narrowed[1] == 0.0:
+            return parameter.value, parameter.value
+        from .settings import BoxRule
+
+        rule = BoxRule(narrowed[1], clip=rule.clip)
+    return rule.box(parameter.value, parameter.definition.domain)
+
+
+def _corner(component: ComponentSpec, pair: list[Any], free: set[str], fit: FitSpec,
+            narrowed: tuple[str, float] | None = None) -> float:
+    return math.hypot(*(max(abs(v) for v in _bounds(component, parameter, free, fit, narrowed))
+                        for parameter in pair))
+
+
+def _mass_box_domains(component: ComponentSpec, parameters: dict[str, Any], free: set[str], fit: FitSpec,
+                      use_jax: bool) -> None:
+    kinds = {kind: [p for p in parameters.values() if p.definition.kind == kind]
+             for kind in ("ellipticity", "multipole", "slope", "shear")}
+    ellipticity = _corner(component, kinds["ellipticity"], free, fit)
+    q = (1.0 - ellipticity) / (1.0 + ellipticity)
+    path = f"scene.{component.plane}.{component.role}.{component.name}"
+    if use_jax and component.type == "PowerLaw" and q < JAX_POWER_LAW_MIN_AXIS_RATIO:
+        raise ConfigError(f"{path}.ell_comps", f"JAX PowerLaw box minimum axis ratio {q:g} is below "
+                          f"{JAX_POWER_LAW_MIN_AXIS_RATIO}; the 20-term series loses accuracy "
+                          "(relative error 2.3e-12 at q=0.538, 7.3e-8 at q=0.333)")
+    if component.type == "ExternalShear" and any(p.name in free for p in kinds["shear"]):
+        condition = lambda narrowed: _corner(component, kinds["shear"], free, fit, narrowed) < 1.0
+        if not condition(None):
+            _refuse_joint_box(component, parameters, free, fit, "shear", condition, "hypot(shear) < 1")
+    multipoles = component.values.get("multipoles")
+    relevant = [p for kind in ("multipole", "slope", "ellipticity") for p in kinds[kind]]
+    if multipoles is None or not any(p.name in free for p in relevant):
+        return
+
+    def positive(narrowed):
+        e = _corner(component, kinds["ellipticity"], free, fit, narrowed)
+        minimum_q = (1.0 - e) / (1.0 + e)
+        if component.type == "Isothermal":
+            minimum_q = min(minimum_q, 0.99999)
+        maximum_slope = (max(_bounds(component, kinds["slope"][0], free, fit, narrowed))
+                         if kinds["slope"] else 2.0)
+        amplitude = sum(_corner(component, [p for p in kinds["multipole"]
+                                           if p.definition.key == f"multipoles.{order}"], free, fit, narrowed)
+                        for order in ("m3", "m4") if multipoles.get(order) is not None)
+        return amplitude < (3.0 - maximum_slope) * minimum_q ** (maximum_slope - 1.0)
+
+    if not positive(None):
+        offending = next(kind for kind in ("multipole", "slope", "ellipticity")
+                         if any(p.name in free for p in kinds[kind]))
+        _refuse_joint_box(component, parameters, free, fit, offending, positive,
+                          "sum of multipole corner amplitudes < (3 - slope_max) q_min^(slope_max - 1)")
+
+
+def _refuse_joint_box(component, parameters, free, fit, kind, condition, description):
+    path = f"scene.{component.plane}.{component.role}.{component.name}"
+    if not condition((kind, 0.0)):
+        others = sorted({p.definition.kind for p in parameters.values()
+                         if p.definition.kind in {"ellipticity", "slope", "multipole", "shear"}
+                         and p.definition.kind != kind})
+        raise ConfigError(path, f"fit box violates {description}; no symmetric {kind} half width fits "
+                          f"with the other kinds ({', '.join(others)}) unchanged")
+    lower, upper = 0.0, fit.prior_widths.rule(component.plane, kind).half_width
+    for _ in range(80):
+        middle = (lower + upper) / 2.0
+        if condition((kind, middle)):
+            lower = middle
+        else:
+            upper = middle
+        if upper - lower <= 1.0e-8 * max(upper, 1.0e-300):
+            break
+    raise ConfigError(path, f"fit box violates {description}; largest symmetric {kind} half width "
+                      f"is {lower:.8g} (strictly below), with the other boxes unchanged")
+
+
 def _ellipticity_box_reaches_origin(component: ComponentSpec, parameters: dict[str, Any], free: set[str],
                                     fit: FitSpec) -> bool:
     pair = [parameter for parameter in parameters.values() if parameter.definition.kind == "ellipticity"]
@@ -74,6 +159,7 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
     parameters = {parameter.definition.name: parameter for parameter in scene_parameters(scene.spec)
                   if parameter.name.startswith(prefix)}
     _joint_ellipticity(component, parameters, free, fit)
+    _mass_box_domains(component, parameters, free, fit, use_jax)
     profile_type = PROFILE_TYPES[component.type]
     profiles = []
     for layout in profile_type.layout(component.values):
@@ -105,8 +191,16 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
             arguments.extend((FitArgument("pixel_scale_arcsec", (fixed(profile.pixel_scale_arcsec),), pair=False),
                               FitArgument("sb", (fixed(profile.sb),), pair=False)))
             path = "hwoslaps.scene.image_profile:ImageLightProfile"
-        elif use_jax and component.type == "Exponential" and _ellipticity_box_reaches_origin(component, parameters, free, fit):
-            path = "hwoslaps.inference.light_profiles:Exponential"
+        elif layout.profile_class == "CartesianPowerLawMultipole":
+            path = "hwoslaps.scene.multipole_profile:CartesianPowerLawMultipole"
+        elif (use_jax and component.type == "PowerLaw"
+              and _ellipticity_box_reaches_origin(component, parameters, free, fit)
+              and _bounds(component, parameters["slope"], free, fit)[0] <= 2.0
+                  <= _bounds(component, parameters["slope"], free, fit)[1]):
+            path = "hwoslaps.inference.mass_profiles:PowerLaw"
+        elif use_jax and (component.type == "Sersic" or (component.type == "Exponential"
+                          and _ellipticity_box_reaches_origin(component, parameters, free, fit))):
+            path = f"hwoslaps.inference.light_profiles:{component.type}"
         else:
             path = f"autolens:{'mp' if component.role == 'mass' else 'lp'}.{layout.profile_class}"
         arguments.sort(key=lambda argument: ranks.get(argument.name, len(parameters)))

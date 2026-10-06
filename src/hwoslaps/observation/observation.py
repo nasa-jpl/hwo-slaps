@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Any, Final, Literal, Mapping
 
 import numpy as np
 
-from ..config.checks import Integer, Key, Real, Sha256, Table
+from ..config.checks import ConfigError, Integer, Key, Nullable, Real, Rule, Sha256, Table
 from ..identity import array_digest
 from ..instrument import check_finite_number
 from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
+from ..spectra.bandpass import BANDPASS_TABLE, BandpassSpec, parse_bandpass
+from ..spectra.sed import SED_TABLE, SEDSpec, parse_sed
 from .expected import Exposure, Plane, convolve_light
 from .noise import draw_noisy_adu
 
@@ -36,10 +38,20 @@ __all__ = [
 # Measured by the native-pixel oracle in test_observation_sampling.py.
 MAX_NATIVE_SAMPLING_VARIATION: Final[float] = 0.063
 
-SKY_TABLE = Table(
-    keys=(Key("rate_e_per_s", Real(min=0.0), "detected sky rate of one pixel", unit="e-/s per pixel"),),
-    doc="the sky background",
-)
+def _sky_reference(values: Mapping[str, Any], path: str) -> None:
+    if values["reference_band"] is not None and values["ab_mag_per_arcsec2"] is None:
+        raise ConfigError(f"{path}.reference_band", "a sky reference band requires an AB surface brightness")
+    if (values["reference_band"] is None) != (values["sed"] is None):
+        raise ConfigError(f"{path}.sed", "a sky SED is required exactly when a reference band is given")
+
+
+SKY_TABLE = Table((
+    Key("rate_e_per_s", Nullable(Real(min=0.0)), "detected sky rate of one pixel", None, unit="e-/s per pixel"),
+    Key("ab_mag_per_arcsec2", Nullable(Real()), "AB sky surface brightness", None, unit="mag/arcsec^2"),
+    Key("reference_band", Nullable(BANDPASS_TABLE), "band of the supplied sky magnitude", None),
+    Key("sed", Nullable(SED_TABLE), "sky spectral shape for a reference-band magnitude", None),
+), exactly_one=(("rate_e_per_s", "ab_mag_per_arcsec2"),),
+   rules=(Rule("reference sky magnitude and SED belong together", _sky_reference),), doc="the sky background")
 
 OBSERVATION_TABLE = Table(
     keys=(
@@ -56,7 +68,10 @@ OBSERVATION_TABLE = Table(
 
 @dataclass(frozen=True)
 class SkySpec:
-    rate_e_per_s: float
+    rate_e_per_s: float | None = None
+    ab_mag_per_arcsec2: float | None = None
+    reference_band: BandpassSpec | None = None
+    sed: SEDSpec | None = None
 
 
 @dataclass(frozen=True)
@@ -70,8 +85,12 @@ class ObservationSpec:
     @classmethod
     def from_values(cls, values: Mapping[str, Any]) -> ObservationSpec:
         """The spec of values already read by ``OBSERVATION_TABLE``."""
+        sky = values["sky"]
+        reference, sed = sky["reference_band"], sky["sed"]
         return cls(exposure_time_s=values["exposure_time_s"], exposure_count=values["exposure_count"],
-                   sky=SkySpec(rate_e_per_s=values["sky"]["rate_e_per_s"]))
+                   sky=SkySpec(sky["rate_e_per_s"], sky["ab_mag_per_arcsec2"],
+                       None if reference is None else parse_bandpass(reference, "observation.sky.reference_band"),
+                       None if sed is None else parse_sed(sed, "observation.sky.sed")))
 
 
 def parse_observation(mapping: Mapping[str, Any], path: str = "observation") -> ObservationSpec:

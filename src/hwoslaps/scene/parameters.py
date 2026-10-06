@@ -16,9 +16,10 @@ from fnmatch import fnmatchcase
 
 from ..config.checks import ConfigError
 from .profiles import PROFILE_TYPES, ParameterDef
-from .spec import LIGHT_COMPONENT_TABLE, MASS_COMPONENT_TABLE, ComponentSpec, GalaxySpec, SceneSpec, component_from_values
+from .image_source import frozen_value
+from .spec import LIGHT_COMPONENT_TABLE, MASS_COMPONENT_TABLE, ComponentSpec, GalaxySpec, SceneSpec
 
-__all__ = ["SceneParameter", "match_parameters", "scene_parameters", "with_parameter"]
+__all__ = ["SceneParameter", "match_parameters", "scene_parameter_names", "scene_parameters", "with_parameter"]
 
 
 @dataclass(frozen=True)
@@ -42,11 +43,15 @@ def scene_parameters(spec: SceneSpec) -> tuple[SceneParameter, ...]:
     parameters = []
     for _, component in _components(spec):
         for definition in PROFILE_TYPES[component.type].parameters(component.values):
-            value = component.values[definition.key]
             parameters.append(SceneParameter(_name(component, definition),
-                                             float(value if definition.index is None else value[definition.index]),
-                                             definition))
+                                             float(definition.value_from(component.values)), definition))
     return tuple(parameters)
+
+
+def scene_parameter_names(spec: SceneSpec) -> tuple[str, ...]:
+    """Registry-ordered names, including amplitudes that photometry has yet to resolve."""
+    return tuple(_name(component, definition) for _, component in _components(spec)
+                 for definition in PROFILE_TYPES[component.type].parameters(component.values))
 
 
 def with_parameter(spec: SceneSpec, name: str, value: float) -> SceneSpec:
@@ -71,21 +76,16 @@ def _replaced(spec: SceneSpec, galaxy: GalaxySpec, component: ComponentSpec, def
     if not definition.domain.contains(value):
         element = "" if definition.index is None else f"[{definition.index}]"
         raise ConfigError(f"{path}.{definition.key}{element}", f"{label}: outside {definition.domain.describe()}")
-    values = dict(component.values)
-    if definition.index is None:
-        values[definition.key] = float(value)
-    else:
-        pair = list(values[definition.key])
-        pair[definition.index] = float(value)
-        values[definition.key] = pair
+    values = definition.replaced_values(component.values, value)
     table = (MASS_COMPONENT_TABLE if component.role == "mass" else LIGHT_COMPONENT_TABLE).tables[component.type]
     for rule in table.rules:
         try:
             rule.check(values, path)
         except ConfigError as error:
             raise ConfigError(error.path, f"{label}: {error.message}") from None
-    replacement = component_from_values(component.name, component.plane, component.role,
-                                        {"type": component.type, **values})
+    if component.flux is not None and definition.key == PROFILE_TYPES[component.type].amplitude_key:
+        raise ConfigError(path, "resolve the configured flux before changing its amplitude")
+    replacement = dataclasses.replace(component, values=frozen_value(values))
     role_components = tuple(replacement if item is component else item for item in getattr(galaxy, component.role))
     new_galaxy = dataclasses.replace(galaxy, **{component.role: role_components})
     return dataclasses.replace(spec, **{galaxy.plane: new_galaxy})
