@@ -65,7 +65,7 @@ For PSF quality, vary truth and model together. For knowledge error, keep truth 
 
 Each light SED group receives its effective kernel. Spectral weights store finite common-scale bin integrals and `log_rate_scale`; use `normalized` for relative weights. These values describe `throughput*fnu*dlnlambda`, not absolute detected photon counts. Absolute exposure rates come from the photometric normalization. Unit-sum support truncation and chromatic convergence limits are stated in [SCIENCE](SCIENCE.md).
 
-Nonlinear imaging currently needs one distinct fitted model kernel. Chromatic truth may have multiple bound kernels when the fitted model uses a shared kernel, such as a monochromatic/kernel model. A matched model with multiple distinct kernels cannot be represented by this nonlinear likelihood. Preserve each truth group's binding in records.
+Nonlinear imaging currently needs one distinct fitted model kernel. Chromatic truth may have multiple bound kernels when the fitted model uses one common external kernel or one explicit common monochromatic wavelength. A null model wavelength instead uses each group's photon-weighted mean, which can produce multiple model kernels. A matched model with multiple distinct kernels cannot be represented by this nonlinear likelihood. Preserve each truth group's binding in records.
 
 ## Nonlinear comparisons
 

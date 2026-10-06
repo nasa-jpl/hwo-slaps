@@ -52,6 +52,7 @@ pass does not waive an exceeded runtime budget.
 
 Budgets: 600 s per GPU product. Measured runtimes, wavelength convergence, support
 convergence, per-group sampling and captured fractions: pending. Chromatic accuracy is
-claimed only where both gates pass. A nonlinear chromatic fit requires one model kernel:
-a kernel model or monochromatic model arm; a matched chromatic fit is outside the supported
-inference model.
+claimed only where both gates pass. A nonlinear fit requires one shared model kernel.
+The group-mean monochromatic arms here can still have multiple distinct model kernels,
+as can matched chromatic arms. For nonlinear fitting, use one common external kernel or
+set an explicit common model wavelength; keep the convergence inputs above unchanged.
