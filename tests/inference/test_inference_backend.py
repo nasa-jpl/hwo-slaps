@@ -197,26 +197,34 @@ X64_CHILD = textwrap.dedent("""
     kernel = np.exp(-(np.mgrid[-3:4, -3:4].astype(float) ** 2).sum(axis=0) / 2.0)
     fit_model = make_light_model()
     before = bool(jax.config.jax_enable_x64)
-    analysis = make_analysis(make_raw_imaging(kernel / kernel.sum()), cosmology=ag.cosmo.Planck15(), use_jax=True)
-    fitness = Fitness(model=autofit_model(fit_model), analysis=analysis, paths=None, fom_is_log_likelihood=True,
-                      resample_figure_of_merit=-1.0e99, use_jax_vmap=True, batch_size=4)
     lower, upper = np.asarray(fit_model.lower), np.asarray(fit_model.upper)
     vectors = lower + np.random.default_rng(20261005).random((4, lower.size)) * (upper - lower)
-    values = np.asarray(fitness.call_wrap(vectors))
-    json.dump({"before": before, "after": bool(jax.config.jax_enable_x64), "dtype": str(values.dtype),
-               "finite": bool(np.all(np.isfinite(values)))}, sys.stdout)
+    reports = []
+    for iteration in (1, 2):
+        analysis = make_analysis(make_raw_imaging(kernel / kernel.sum()), cosmology=ag.cosmo.Planck15(), use_jax=True)
+        fitness = Fitness(model=autofit_model(fit_model), analysis=analysis, paths=None, fom_is_log_likelihood=True,
+                          resample_figure_of_merit=-1.0e99, use_jax_vmap=True, batch_size=4)
+        values = np.asarray(fitness.call_wrap(vectors))
+        report = {"after": bool(jax.config.jax_enable_x64), "dtype": str(values.dtype),
+                  "finite": bool(np.all(np.isfinite(values)))}
+        reports.append(report)
+        print(json.dumps({"iteration": iteration, "before": before, **report}), flush=True)
+    json.dump({"before": before, "analyses": reports}, sys.stdout)
 """)
 
 
 @pytest.mark.xtx_gpu
 def test_jax_analysis_enables_x64_and_returns_float64():
-    """A fresh process without JAX_ENABLE_X64: make_analysis turns x64 on before any traced evaluation."""
+    """A fresh process from x64 off: both real analyses keep x64 on and return finite float64 Fitness."""
     environment = {name: value for name, value in os.environ.items() if name != "JAX_ENABLE_X64"}
     lane = os.path.dirname(os.path.abspath(__file__))
     completed = subprocess.run([sys.executable, "-c", X64_CHILD, lane], env=environment, capture_output=True,
                                text=True, check=True, timeout=600)
     report = json.loads(completed.stdout.strip().splitlines()[-1])
-    assert report == {"before": False, "after": True, "dtype": "float64", "finite": True}
+    assert report == {"before": False, "analyses": [
+        {"after": True, "dtype": "float64", "finite": True},
+        {"after": True, "dtype": "float64", "finite": True},
+    ]}
 
 
 @pytest.mark.xtx_gpu
