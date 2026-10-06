@@ -15,16 +15,37 @@ import sys
 
 from .state import BatchError
 
+
+def open_pidfd(pid):
+    """Open a real Linux pidfd, including Python builds lacking os.pidfd_open."""
+    if hasattr(os, 'pidfd_open'):
+        return os.pidfd_open(pid)
+    if sys.platform != 'linux':
+        raise BatchError('pidfd ownership requires Linux')
+    import ctypes
+    try:
+        function = ctypes.CDLL(None, use_errno=True).pidfd_open
+    except AttributeError as error:
+        raise BatchError('neither Python nor libc exposes pidfd_open; no workers were started') from error
+    function.argtypes = (ctypes.c_int, ctypes.c_uint)
+    function.restype = ctypes.c_int
+    descriptor = function(pid, 0)
+    if descriptor < 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+    return descriptor
+
+
 def require_process_support():
     """Refuse unsupported runtime before creating any backend worker."""
     if (sys.platform != 'linux' or not Path('/proc/self/stat').is_file()
-            or not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal')):
+            or not hasattr(signal, 'pidfd_send_signal')):
         raise BatchError('batch runtime requires Linux /proc and pidfd identity-safe process signaling')
     try:
         boot_id()
         _stat(os.getpid())
         Path('/proc/self/environ').read_bytes()
-        descriptor = os.pidfd_open(os.getpid())
+        descriptor = open_pidfd(os.getpid())
         try:
             signal.pidfd_send_signal(descriptor, 0)
         finally:
@@ -58,7 +79,7 @@ def _exited(descriptor):
 
 def worker_record(pid, *, slot, device, identity, identity_env):
     """Capture at spawn before bootstrap release, and persist this same record at ready."""
-    descriptor = os.pidfd_open(pid)
+    descriptor = open_pidfd(pid)
     try:
         info = _stat(pid)
         cookie = _cookie(pid, identity_env)
@@ -98,7 +119,7 @@ def _group_handles(record):
             if preliminary['process_group'] != record['process_group'] or preliminary['state'] in ('Z', 'X'):
                 continue
             try:
-                descriptor = os.pidfd_open(pid)
+                descriptor = open_pidfd(pid)
             except ProcessLookupError:
                 continue
             except PermissionError:

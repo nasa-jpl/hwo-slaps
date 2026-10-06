@@ -11,7 +11,7 @@ import pytest
 
 from hwoslaps.artifacts import write_yaml
 from hwoslaps.batch import BatchIncomplete, run_batch
-from hwoslaps.batch.processes import boot_id, group_members, signal_owned, worker_record
+from hwoslaps.batch.processes import boot_id, group_members, open_pidfd, signal_owned, worker_record
 from hwoslaps.batch.runner import OWNER_ENV
 
 pytestmark = pytest.mark.backend
@@ -134,7 +134,7 @@ def test_controller_crash_then_resume_and_immediate_barrier(tiny_batch_spec, tmp
         _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
         worker = _worker_records(root)[0]
         assert group_members(worker), 'actual earlier worker must be live before the kill'
-        descriptor = os.pidfd_open(process.pid)
+        descriptor = open_pidfd(process.pid)
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:
@@ -166,7 +166,7 @@ def test_worker_death_is_a_job_failure(tiny_batch_spec, tmp_path):
     try:
         _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
         worker = _worker_records(root)[0]
-        descriptor = os.pidfd_open(worker['pid'])
+        descriptor = open_pidfd(worker['pid'])
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:
@@ -196,7 +196,7 @@ def test_changed_job_during_recovery_is_a_conflict(tiny_batch_spec, tmp_path, er
     try:
         _wait(lambda: any(event['type'] == 'started' for event in _events(root)))
         original_records = _worker_records(root)
-        descriptor = os.pidfd_open(process.pid)
+        descriptor = open_pidfd(process.pid)
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:

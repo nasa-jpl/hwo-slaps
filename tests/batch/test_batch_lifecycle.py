@@ -1,5 +1,6 @@
 """Actual owned subprocess survivors and foreign-identity refusal."""
 import json
+import errno
 import os
 from pathlib import Path
 import signal
@@ -9,7 +10,7 @@ import time
 
 import pytest
 
-from hwoslaps.batch.processes import boot_id, group_members, signal_owned, worker_record
+from hwoslaps.batch.processes import boot_id, group_members, open_pidfd, signal_owned, worker_record
 from hwoslaps.batch.runner import OWNER_ENV
 
 pytestmark = pytest.mark.backend
@@ -69,6 +70,22 @@ def _close(process, record, log):
         _wait(lambda: not group_members(record), timeout=10.)
     finally:
         log.close()
+
+
+def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
+    descriptor = open_pidfd(os.getpid())
+    try:
+        assert not os.get_inheritable(descriptor)
+        signal.pidfd_send_signal(descriptor, 0)
+        import select
+        poller = select.poll()
+        poller.register(descriptor, select.POLLIN)
+        assert poller.poll(0) == [], 'the current live process must not appear exited'
+    finally:
+        os.close(descriptor)
+    with pytest.raises(OSError) as invalid:
+        open_pidfd(-1)
+    assert invalid.value.errno == errno.EINVAL
 
 
 def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
@@ -144,7 +161,7 @@ with BackendSession(training_workers=2) as session:
             return int(fields[11]) + int(fields[12])
         initial = {pid: cpu_ticks(pid) for pid in before}
         _wait(lambda: any(cpu_ticks(pid) > ticks for pid, ticks in initial.items()))
-        descriptor = os.pidfd_open(process.pid)
+        descriptor = open_pidfd(process.pid)
         try:
             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
         finally:
