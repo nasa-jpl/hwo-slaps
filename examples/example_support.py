@@ -21,10 +21,13 @@ def positive_number(text):
 def verify_sei(directory):
     directory = Path(directory)
     verified, absent = {}, []
+    not_shipped = {"ProtectedAg_refl.yaml", "hwo_sci_eng-0.1.9-py3-none-any.whl"}
     for line in (directory / "SHA256SUMS").read_text().splitlines():
         expected, filename = line.split(maxsplit=1)
         target = directory / filename
         if not target.is_file():
+            if filename not in not_shipped:
+                raise FileNotFoundError(f"required SEI file is missing: {filename}")
             absent.append(filename)
             continue
         actual = hashlib.sha256(target.read_bytes()).hexdigest()
