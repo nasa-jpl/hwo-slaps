@@ -55,12 +55,25 @@ def _arrays(result):
     return arrays
 
 
-def _worker_records(output):
+def _worker_records(output, errors):
     records = []
     for path in (output / 'run/sessions').glob('*/workers.jsonl'):
-        for line in path.read_text().splitlines(keepends=True):
-            if line.endswith('\n'):
+        try:
+            lines = path.read_text().splitlines(keepends=True)
+        except OSError as error:
+            message = f'{path}: {error}'
+            if message not in errors:
+                errors.append(message)
+            continue
+        for line in lines:
+            if not line.endswith('\n'):
+                continue
+            try:
                 records.append(json.loads(line))
+            except (ValueError, TypeError) as error:
+                message = f'{path}: invalid complete ownership record: {error}'
+                if message not in errors:
+                    errors.append(message)
     return records
 
 
@@ -75,64 +88,81 @@ def _owned_phase(command, environment, log, output, deadline, device):
     own = {'slot': 0, 'device': device, 'pid': process.pid, 'process_group': process.pid,
            'session_id': process.pid, 'identity': identity, 'identity_env': OWNER_ENV,
            'uid': os.getuid(), 'start_time': None, 'boot_id': boot}
+    known, errors, blocked = {}, [], set()
+    def records():
+        required = {'slot', 'device', 'pid', 'process_group', 'session_id', 'identity',
+                    'identity_env', 'uid', 'start_time', 'boot_id'}
+        for record in _worker_records(output, errors):
+            try:
+                if not isinstance(record, dict) or set(record) != required or record['identity_env'] != OWNER_ENV:
+                    raise ValueError('invalid ownership record shape or environment name')
+                for field in ('pid', 'process_group', 'session_id', 'start_time', 'uid'):
+                    if isinstance(record[field], bool) or not isinstance(record[field], int) or record[field] < 0:
+                        raise ValueError(f'invalid ownership field {field}')
+                if not isinstance(record['identity'], str) or not isinstance(record['boot_id'], str):
+                    raise ValueError('invalid ownership identity or boot')
+                known[(record['pid'], record['identity'])] = record
+            except (ValueError, TypeError, KeyError) as error:
+                message = str(error)
+                if message not in errors:
+                    errors.append(message)
+        return [own, *known.values()]
+    def owned_live(record):
+        key = (record['pid'], record['identity'])
+        if key in blocked:
+            return False
+        try:
+            return bool(group_members(record))
+        except Exception as error:
+            blocked.add(key)
+            errors.append(str(error))
+            return False
+    def pinned_signal(record, number):
+        key = (record['pid'], record['identity'])
+        if key in blocked:
+            return
+        try:
+            signal_owned(record, number)
+        except Exception as error:
+            blocked.add(key)
+            errors.append(str(error))
     try:
         own = worker_record(process.pid, slot=0, device=device, identity=identity, identity_env=OWNER_ENV)
         process.stdin.write(b'go\n')
         process.stdin.close()
         code = process.wait(timeout=max(0., deadline - time.monotonic()))
-        records = [own, *_worker_records(output)]
-        if any(group_members(record) for record in records):
-            raise RuntimeError('B7 phase returned while owned processes remained')
+        if any(owned_live(record) for record in records()) or errors:
+            raise RuntimeError('B7 phase returned with survivors or invalid ownership metadata')
         if code != 0:
             raise subprocess.CalledProcessError(code, command)
     except BaseException as original:
-        process.stdin.close()
-        errors = []
-        blocked = set()
-        def owned_live(record):
-            key = (record['pid'], record['identity'])
-            if key in blocked:
-                return False
-            try:
-                return bool(group_members(record))
-            except Exception as error:
-                blocked.add(key)
-                errors.append(str(error))
-                return False
-        def pinned_signal(record, number):
-            key = (record['pid'], record['identity'])
-            if key in blocked:
-                return
-            try:
-                signal_owned(record, number)
-            except Exception as error:
-                blocked.add(key)
-                errors.append(str(error))
-        records = [own, *_worker_records(output)]
-        for record in records:
-            pinned_signal(record, signal.SIGTERM)
-        grace = time.monotonic() + 35.
-        while time.monotonic() < grace:
-            process.poll()
-            records = [own, *_worker_records(output)]
-            if not any(owned_live(record) for record in records):
-                break
-            time.sleep(.05)
-        kill_deadline = time.monotonic() + 5.
-        while True:
-            records = [own, *_worker_records(output)]
-            for record in records:
-                pinned_signal(record, signal.SIGKILL)
-            if not any(owned_live(record) for record in records):
-                break
-            if time.monotonic() >= kill_deadline:
-                errors.append('verified phase/worker descendants did not drain before the cleanup bound')
-                break
-            time.sleep(.05)
+        previous_term = signal.signal(signal.SIGTERM, signal.SIG_IGN)
         try:
-            process.wait(timeout=5.)
-        except subprocess.TimeoutExpired:
-            errors.append('phase remains after ownership-safe cleanup; inspect recorded identities')
+            process.stdin.close()
+            for record in records():
+                pinned_signal(record, signal.SIGTERM)
+            grace = time.monotonic() + 35.
+            while time.monotonic() < grace:
+                process.poll()
+                if not any(owned_live(record) for record in records()):
+                    break
+                time.sleep(.05)
+            kill_deadline = time.monotonic() + 5.
+            while True:
+                for record in records():
+                    pinned_signal(record, signal.SIGKILL)
+                if not any(owned_live(record) for record in records()):
+                    break
+                if time.monotonic() >= kill_deadline:
+                    errors.append('verified phase/worker descendants did not drain before the cleanup bound')
+                    break
+                time.sleep(.05)
+            try:
+                process.wait(timeout=5.)
+            except subprocess.TimeoutExpired:
+                errors.append('phase remains after ownership-safe cleanup; inspect recorded identities')
+        finally:
+            signal.signal(signal.SIGTERM, previous_term)
         if errors:
             raise RuntimeError('B7 ownership cleanup failed: ' + '; '.join(errors)) from original
         raise
@@ -233,6 +263,9 @@ def main(argv=None):
         environment.update(CUDA_VISIBLE_DEVICES=tokens[args.device], JAX_ENABLE_X64='1',
                            XLA_PYTHON_CLIENT_PREALLOCATE='true', XLA_PYTHON_CLIENT_MEM_FRACTION='.7500')
     deadline = time.monotonic() + 540.  # Reserve the remaining minute for verified cleanup.
+    def terminated(number, frame):
+        raise InterruptedError(f'B7 controller received signal {number}')
+    previous_term = signal.signal(signal.SIGTERM, terminated)
     try:
         for phase in ('direct', 'batch'):
             command = [sys.executable, str(Path(__file__).resolve()), '--phase', phase, '--config', str(args.config),
@@ -245,6 +278,8 @@ def main(argv=None):
         write_json(args.output_dir / 'failure.json', {'schema': 1, 'workload': 'B7',
                    'error_type': type(error).__name__, 'message': str(error), 'budget_certified': False})
         raise
+    finally:
+        signal.signal(signal.SIGTERM, previous_term)
     direct = json.loads((args.output_dir / 'direct.json').read_text())
     batch = json.loads((args.output_dir / 'batch.json').read_text())
     if len(direct['rows']) != 4 or len(batch['rows']) != 4 or len({row['config_digest'] for row in direct['rows']}) != 4:
