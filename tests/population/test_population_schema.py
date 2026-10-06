@@ -8,7 +8,7 @@ from hwoslaps.population.sampling import POPULATION_TABLE
 
 
 def test_owning_population_schema_renders_nested_accepted_fields():
-    rendered=render_reference(POPULATION_TABLE,"population")
+    rendered=render_reference([("population",POPULATION_TABLE)])
     for name in ("variables","copulas","catalog","columns","text_columns","bind","max_attempts",
                  "low","high","mean","std","median","sigma_ln","weights","of","axis_ratio",
                  "angle_deg","radius","centre_y","centre_x","magnitude","strength","order","function","inputs","var","correlation"):
