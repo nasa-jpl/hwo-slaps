@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.optics.aperture_basis import ApertureBasisTransform, positive_diagonal_qr
+from hwoslaps.optics.mode_priors import ModeWeightPriorSpec, draw_global_orthonormal, load_prior
 from hwoslaps.optics.pupils import build_pupil, parse_pupil
 from hwoslaps.optics.wavefront import WavefrontBasis
 
@@ -23,10 +24,14 @@ def test_positive_diagonal_qr():
 
 
 @pytest.mark.backend
-def test_transform_realizes_orthonormal_coefficients(p1_pupil):
+@pytest.mark.parametrize("mode_source", ["small", "packaged_drift"])
+def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
     pupil = build_pupil(parse_pupil(p1_pupil, "pupil"))
     basis = WavefrontBasis(pupil, reference_wavelength_m=5e-7)
     global_nolls, segment_nolls = (4, 5, 6, 7), (1, 2, 3)
+    if mode_source == "packaged_drift":
+        prior, _ = load_prior(ModeWeightPriorSpec("packaged", "jwst_wss_drift_v1", None, None))
+        global_nolls, segment_nolls = tuple(prior.global_weights), tuple(prior.segment_weights)
     transform = ApertureBasisTransform(basis, global_nolls=global_nolls, segment_nolls=segment_nolls)
     mask = pupil.illuminated_mask
     segment_mask = mask & (np.asarray(pupil.segments[3]) > 0.5)
@@ -47,3 +52,16 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil):
             assert [value != 0.0 for _, _, value in raw.segment_hexikes()] == [True, False, False]
     with pytest.raises(ValueError, match="exactly the transform modes"):
         transform.to_raw(global_={4: 1.0})
+    if mode_source == "packaged_drift":
+        # Independent sign-fixed QR and projection on every real packaged global mode.
+        values = basis.zernike_samples(global_nolls, mask)
+        q_matrix, r_matrix = np.linalg.qr(values, mode="reduced")
+        signs = np.where(np.diag(r_matrix) < 0.0, -1.0, 1.0)
+        orthonormal = np.sqrt(values.shape[0]) * q_matrix * signs[np.newaxis, :]
+        draw = draw_global_orthonormal(np.random.default_rng(20260806), prior, 1.0)
+        expected = np.array([draw[noll] for noll in global_nolls])
+        raw = transform.to_raw(global_=draw)
+        realized = basis.opd_nm(raw).ravel()[mask]
+        np.testing.assert_allclose(realized, orthonormal @ expected, rtol=1e-10, atol=1e-11)
+        recovered = np.linalg.lstsq(orthonormal, realized, rcond=None)[0]
+        np.testing.assert_allclose(recovered, expected, rtol=1e-10, atol=1e-11)
