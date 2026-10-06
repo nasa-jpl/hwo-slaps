@@ -16,7 +16,8 @@ scene:
   subhalo: {type: NFW, concentration: {kind: moline2017_eq7, x_sub: 1.0}}
   injection: {mass_msun: 1.0e8, position: {kind: angle, angle_deg: 90.0}}
 psf:
-  truth: {kind: kernel, path: minimal_kernel.npy, pixel_scale_arcsec: 0.1}
+  truth: {kind: kernel, path: minimal_kernel.npy, pixel_scale_arcsec: 0.1,
+          file_sha256: 91ab6202ae01ceaef61efbe65be3aeb4543fa6998861fec43e7ad75e78a1ef4e}
 instrument:
   detector: {gain_e_per_adu: 1.0, read_noise_e: 0.2, dark_current_e_per_s: 0.002}
 observation:
