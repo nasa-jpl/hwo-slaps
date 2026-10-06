@@ -15,7 +15,7 @@ def test_optics_plots_preserve_values_and_requested_log_scale(plt):
     from hwoslaps.scene.spec import pixel_centres_yx
     from hwoslaps.optics.pupils import build_pupil, parse_pupil
 
-    kernel = DetectorPSF.from_array(np.arange(9.).reshape(3, 3), .2)
+    kernel = DetectorPSF.from_array(np.arange(9.).reshape(3, 3), .2, normalize=True)
     _, provided = plt.subplots()
     assert plot_kernel(kernel, log=False, ax=provided) is provided
     np.testing.assert_array_equal(provided.images[0].get_array(), kernel.kernel)

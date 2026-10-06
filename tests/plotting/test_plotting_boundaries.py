@@ -23,7 +23,7 @@ def test_plot_functions_leave_saving_and_console_output_to_the_caller(plt, forec
 
     monkeypatch.setattr(Figure, "savefig", forbidden_save)
     pupil = build_pupil(parse_pupil({"kind": "circular", "diameter_m": 1., "pixels": 16}, "pupil"))
-    kernel = DetectorPSF.from_array([[0., 1, 0], [1, 4, 1], [0, 1, 0]], .05)
+    kernel = DetectorPSF.from_array([[0., 1, 0], [1, 4, 1], [0, 1, 0]], .05, normalize=True)
     capsys.readouterr()
     artists = [plot_statistic_map(forecast_product, "q_asimov", mass_index=0),
                plot_detection_map(forecast_product, q_threshold=1, mass_index=0),
