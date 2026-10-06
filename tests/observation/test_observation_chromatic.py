@@ -68,8 +68,9 @@ def test_compact_actual_component_conserves_flux_under_a_unit_chromatic_kernel(m
     mapping["forecast"]["nuisances"]={"fixed":["*"],"background_offset":False}
     with prepare_forecast(mapping) as prepared:
         image=prepared.scene.light_images["source:light"]
-        # Explicit unit-sum condition; the finite optical support's captured power remains
-        # recorded and unrenormalized in production.
+        # Independent unit-sum flux condition on the actual compact component.
+        # Optical nodes are support-normalized; their original captured fractions
+        # stay recorded separately and the effective combination is not renormalized.
         kernel=DetectorPSF.from_array(prepared.psfs.truth_kernels.single.kernel,.03,normalize=True)
         convolved=convolve_real_space(image,kernel.kernel,.03)
         assert convolved.sum()==pytest.approx(image.sum(),rel=1.e-12,abs=0.)

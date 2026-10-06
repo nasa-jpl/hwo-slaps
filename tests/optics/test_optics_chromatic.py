@@ -104,6 +104,7 @@ def test_broadband_circular_kernel_matches_weighted_analytic_airy():
     actual=effective_kernel(provider.kernels(),sed_weights(band,sed,provider.wavelengths_m),pitch,source={}).kernel
     # Independent Airy probability density, pixel-integrated on the specified 3x3 centres.
     # 64 wavelength bins carry exact flat-fnu dln(lambda) weights, without the spectral helper.
+    # Normalize each independent analytic node on the same support, as the detector kernel requires.
     edges=np.linspace(450.e-9,550.e-9,65);nodes=(edges[:-1]+edges[1:])/2
     weights=np.log(edges[1:]/edges[:-1])/math.log(550./450.)
     yy,xx=np.mgrid[-15:16,-15:16];expected=np.zeros((31,31))
@@ -117,7 +118,7 @@ def test_broadband_circular_kernel_matches_weighted_analytic_airy():
                 airy=np.ones_like(v);nonzero=v!=0
                 airy[nonzero]=(2*j1(v[nonzero])/v[nonzero])**2
                 node+=math.pi*2.**2/(4*wavelength**2)*airy*omega
-        expected+=weight*node
+        expected+=weight*node/node.sum()
     assert np.max(np.abs(actual-expected))/expected.max()<5.e-4
 
 

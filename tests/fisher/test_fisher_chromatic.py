@@ -18,7 +18,7 @@ def chromatic_mapping(mapping,*,count=5,relation="matched"):
         "model":{"kind":relation}}
     if relation=="knowledge_error":
         mapping["psf"]["model"]["draw"]={"prior":{"packaged":"jwst_wss_drift_v1"},
-            "amplitude_rms_nm":10.,"seed":20261005}
+            "amplitude_rms_nm":10.,"seed":20261005,"family":"global"}
     mapping["instrument"]["bandpass"]={"kind":"top_hat","min_nm":450.,"max_nm":550.,"throughput":.21}
     source=mapping["scene"]["source"]["light"]
     source["light"]["sed"]={"kind":"power_law","index":-3.}
