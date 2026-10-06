@@ -225,8 +225,13 @@ class BatchSpec:
                            'execution': self.execution.to_mapping()})
 
     def digest(self):
-        return mapping_digest({'spec': self.to_mapping(), 'config_digest': self.base.digest(),
-                               'population_digest': None if self.population is None else self.population.spec.digest()})
+        return self.captured_digest(base_config_digest=self.base.digest(),
+            population_digest=None if self.population is None else self.population.spec.digest())
+
+    def captured_digest(self, *, base_config_digest, population_digest):
+        """Identity from the inputs captured by a plan, without reopening their paths."""
+        return mapping_digest({'spec': self.to_mapping(), 'config_digest': base_config_digest,
+                               'population_digest': population_digest})
 
 
 _ARM_TABLE = Table((Key('name', _NAME, 'arm name'), Key('overrides', _Mapping(), 'configuration overrides', {}),
@@ -273,7 +278,7 @@ _NONLINEAR_TABLE = Table((
 ))
 BATCH_TABLE = Table((
     Key('name', _NAME, 'batch name'), Key('seed', Integer(min=0), 'batch noise/sampler/direction entropy'),
-    Key('config', Union(_Mapping(), Text(), ListOf(Text(), min_length=1)), 'configuration files or effective mapping'),
+    Key('config', Union(ROOT_TABLE, Text(), ListOf(Text(), min_length=1)), 'configuration files or effective mapping'),
     Key('overrides', _Mapping(), 'base configuration overlay', {}),
     Key('population', Nullable(_POPULATION_TABLE), 'member population', None),
     Key('arms', ListOf(_ARM_TABLE, min_length=1), 'configuration arms', [{'name': 'base'}]),
@@ -290,6 +295,11 @@ def _arms(values):
 
 def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
     directory = Path(base_dir).expanduser().resolve()
+    if isinstance(mapping, Mapping) and isinstance(mapping.get('config'), Mapping):
+        def resolve_path(filename, check):
+            path = Path(filename).expanduser()
+            return str((path if path.is_absolute() else directory / path).resolve())
+        mapping = {**mapping, 'config': ROOT_TABLE.transform_paths(mapping['config'], resolve_path)}
     values = BATCH_TABLE.read(mapping, '')
     source = values['config']
     if isinstance(source, Mapping):

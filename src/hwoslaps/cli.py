@@ -44,6 +44,21 @@ def build_parser():
     validate = commands.add_parser("validate", help="check composed configuration and its digest")
     simulate = commands.add_parser("simulate", help="simulate an injection or a smooth control")
     forecast = commands.add_parser("forecast", help="forecast the supplied subhalo masses")
+    batch = commands.add_parser("batch", help="plan, run or inspect a resumable batch")
+    batch_commands = batch.add_subparsers(dest="batch_command", required=True)
+    batch_plan = batch_commands.add_parser("plan", help="validate every member and print the job plan")
+    batch_run = batch_commands.add_parser("run", help="run selected missing batch jobs")
+    batch_status = batch_commands.add_parser("status", help="inspect completion markers and failures")
+    batch_plan.add_argument("spec", type=Path)
+    batch_run.add_argument("spec", type=Path)
+    batch_run.add_argument("-o", "--output-dir", type=Path, required=True)
+    batch_run.add_argument("--fresh", action="store_true")
+    batch_run.add_argument("--devices")
+    batch_run.add_argument("--workers-per-device", type=_positive_integer)
+    batch_run.add_argument("--select", metavar="GLOB")
+    batch_run.add_argument("--verify", action="store_true")
+    batch_run.add_argument("--require-single-revision", action="store_true")
+    batch_status.add_argument("output_dir", type=Path)
     reference = commands.add_parser("reference", help="print the configuration reference")
     reference.add_argument("section", nargs="?")
     for command in (validate, simulate, forecast):
@@ -101,6 +116,8 @@ def main(argv=None):
     command = list(sys.argv[1:] if argv is None else argv)
     parser = build_parser()
     args = parser.parse_args(command)
+    if args.command == "batch":
+        return _batch_main(args, parser)
     try:
         if args.command == "reference":
             print(render_reference([("Engine configuration", ROOT_TABLE)], section=args.section))
@@ -157,3 +174,67 @@ def main(argv=None):
             root.removeHandler(handler)
             handler.close()
         logging.captureWarnings(False)
+
+
+def _batch_main(args, parser):
+    from collections import Counter
+    from dataclasses import replace
+    import json
+    from .batch import (BatchConflict, BatchIncomplete, BatchLocked, load_batch_spec, open_batch,
+                        plan_batch, run_batch)
+    from .population import PopulationError
+    try:
+        if args.batch_command == "status":
+            results = open_batch(args.output_dir)
+            counts = Counter((job.kind, job.status) for job in results.jobs)
+            print(json.dumps({"counts": {f"{kind}:{status}": count for (kind, status), count in sorted(counts.items())},
+                              "failed": [{"job_id": job.job_id, "path": str(job.path)}
+                                         for job in results.jobs if job.status == "failed"]}, sort_keys=True))
+            return 0
+        spec = load_batch_spec(args.spec)
+        if args.batch_command == "plan":
+            print(json.dumps(plan_batch(spec).to_mapping(), sort_keys=True))
+            return 0
+        updates = {}
+        if args.devices is not None:
+            if args.devices == "cpu":
+                updates["devices"] = "cpu"
+            else:
+                try:
+                    updates["devices"] = tuple(int(value) for value in args.devices.split(","))
+                except ValueError as error:
+                    raise ConfigError("execution.devices", "must be cpu or comma-separated non-negative indices") from error
+        if args.workers_per_device is not None:
+            updates["workers_per_device"] = args.workers_per_device
+        execution = replace(spec.execution, **updates)
+        root, handlers = _configure_logging(args.log_level)
+        try:
+            report = run_batch(spec, args.output_dir, resume=not args.fresh, execution=execution,
+                               select=args.select, verify=args.verify, require_single_revision=args.require_single_revision)
+            print(json.dumps(report.to_mapping(), sort_keys=True))
+            return 0
+        except (BatchIncomplete, BatchConflict, BatchLocked, ConfigError, PopulationError, KeyboardInterrupt):
+            raise
+        except Exception:
+            destination = args.output_dir.expanduser().resolve()
+            destination.mkdir(parents=True, exist_ok=True)
+            log = logging.FileHandler(destination / "run.log")
+            root.addHandler(log)
+            try:
+                root.exception("batch operation failed")
+            finally:
+                root.removeHandler(log)
+                log.close()
+            raise
+        finally:
+            for handler in handlers:
+                root.removeHandler(handler)
+                handler.close()
+            logging.captureWarnings(False)
+    except (ConfigError, PopulationError, BatchConflict, BatchLocked) as error:
+        parser.error(str(error))
+    except BatchIncomplete as error:
+        print(json.dumps(error.report.to_mapping(), sort_keys=True))
+        return 3
+    except KeyboardInterrupt:
+        return 130

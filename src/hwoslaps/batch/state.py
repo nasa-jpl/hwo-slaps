@@ -9,10 +9,48 @@ from pathlib import Path
 import re
 import time
 from collections.abc import Iterator, Mapping
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, get_args
 
+from ..analysis.nonlinear import CaseStatus, StatusResult
 from ..artifacts import write_json
+from ..config.checks import ConfigError, Key, ListOf, Sha256, Table, Text
 from ..identity import canonical_json, file_digest
+from ..inference.result import RoleStatus
+
+
+_VERDICT_TABLE = Table((
+    Key('status', Text(choices=get_args(CaseStatus)), 'actual worker classification'),
+    Key('role_statuses', Table(tuple(Key(role, Text(choices=tuple(value.value for value in RoleStatus)),
+                                        'actual role classification') for role in ('smooth', 'subhalo'))), 'role classifications'),
+    Key('reasons', ListOf(Text()), 'actual classifier reasons'),
+    Key('policy_digest', Sha256(), 'retry policy used by the classifier'),
+    Key('case_sha256', Sha256(), 'fully validated case artifact bytes'),
+))
+
+
+@dataclass(frozen=True)
+class RetryVerdict:
+    """Typed transport of CLASS's outcome bound to the validated scientific artifact."""
+
+    status: StatusResult
+    policy_digest: str
+    case_sha256: str
+
+    def to_mapping(self):
+        return {'status': self.status.status,
+                'role_statuses': {role: value.value for role, value in self.status.role_statuses.items()},
+                'reasons': list(self.status.reasons), 'policy_digest': self.policy_digest, 'case_sha256': self.case_sha256}
+
+    @classmethod
+    def from_mapping(cls, mapping):
+        try:
+            values = _VERDICT_TABLE.read(mapping, 'retry_verdict')
+        except ConfigError as error:
+            raise BatchConflict(str(error)) from error
+        status = StatusResult(values['status'], {role: RoleStatus(value) for role, value in values['role_statuses'].items()},
+                              tuple(values['reasons']))
+        return cls(status, values['policy_digest'], values['case_sha256'])
 
 
 class BatchError(RuntimeError):
@@ -167,3 +205,12 @@ class EventLog:
 
     def close(self) -> None:
         self._stream.close()
+
+
+def source_revision(provenance: Mapping[str, Any]) -> str:
+    """Readable source key used consistently by session, worker and completed jobs."""
+    source = provenance['source']
+    if source is None:
+        return 'version:' + str(provenance['hwoslaps_version'])
+    commit = source['commit']
+    return commit if not source['dirty'] else commit + '+worktree:' + source['worktree_sha256']
