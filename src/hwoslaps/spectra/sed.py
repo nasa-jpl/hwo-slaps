@@ -153,7 +153,11 @@ class SED:
             evaluated, result = self._table_evaluation(wavelengths, logarithmic=True)
             if self.spec.quantity == "flambda":
                 result = result + 2.0*np.log(evaluated)
-        if np.any(np.isnan(result)) or np.any(np.isposinf(result)):
+        # Analytic shapes are strictly positive: neither sign of infinity is a
+        # physical zero. Tabulated zeros alone may retain their -inf log values.
+        invalid = (np.isnan(result) | np.isposinf(result) if isinstance(self.spec, TableSED)
+                   else ~np.isfinite(result))
+        if np.any(invalid):
             raise ValueError("SED produced an unrepresentable logarithmic spectral shape")
         return np.asarray(result)
 
