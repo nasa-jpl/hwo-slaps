@@ -99,9 +99,15 @@ def test_truncated_nfw_class_traces_under_jax():
     parent_profile = al.mp.NFWTruncatedSph(kappa_s=0.03, scale_radius=1., truncation_radius=10.)
     adapter_profile = TruncatedNFWSph(kappa_s=0.03, scale_radius=1., truncation_radius=10.)
     for name in ("coord_func_f", "coord_func_g"):
-        for radius in (0.8, 1., 1.2, np.array([0.8, 1., 1.2], dtype=complex)):
+        for radius in (0.8, 1.2, np.array([0.8, 1., 1.2], dtype=complex)):
             np.testing.assert_array_equal(getattr(adapter_profile, name)(radius, xp=jnp),
                                           getattr(parent_profile, name)(radius, xp=jnp))
+        # Scalar G(1) in the parent rounds to complex64; the regular correction is float64.
+        regular_value = 1. if name == "coord_func_f" else 1. / 3.
+        for xp in (np, jnp):
+            actual = np.asarray(getattr(adapter_profile, name)(1., xp=xp))
+            assert actual.dtype == np.dtype("complex128")
+            np.testing.assert_array_equal(actual, np.array([regular_value], dtype=complex))
 
     def density_at_radius(radius):
         return 100. / ((100. + radius**2) * radius * (1. + radius)**2)
