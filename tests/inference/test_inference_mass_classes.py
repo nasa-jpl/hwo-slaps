@@ -72,7 +72,7 @@ def test_truncated_nfw_class_traces_under_jax():
     import jax
     import jax.numpy as jnp
     from hwoslaps.inference.backend import ensure_jax_x64
-    from hwoslaps.inference.subhalo_classes import TruncatedNFWSph
+    from hwoslaps.scene.halo_profiles import TruncatedNFWSph
     from hwoslaps.inference.subhalo_classes import TNFWM200SubhaloSph, mass_mapping
     from hwoslaps.scene.halos import FixedConcentration
     from scipy.integrate import quad
@@ -167,11 +167,18 @@ def test_truncated_nfw_class_traces_under_jax():
     critical_radii = (np.nextafter(0.98, 0.), np.nextafter(0.98, 1.),
                       np.nextafter(1., 0.), np.nextafter(1., 2.),
                       np.nextafter(1.02, 1.), np.nextafter(1.02, 2.))
+    truth_halo = replace(_halo("TNFW", truncation=TauTruncation(10.)), position_yx_arcsec=(0., 0.),
+                         model=HaloModel("TNFW", FixedConcentration(12.), TauTruncation(10.)))
+    truth_profile = truth_halo.autolens_profile()
+    assert truth_profile.__class__.__module__ == "hwoslaps.scene.halo_profiles"
+    assert truth_profile.__class__.__name__ == truth_halo.model.profile_class
     for radius in critical_radii:
         point_grid = al.Grid2DIrregular(values=[[radius, 0.]])
         kappa, radial_derivative = projected_density(radius, 0.03)
         alpha = projected_deflection(radius, 0.03)
         expected_values = np.array([alpha, 0., kappa])
+        np.testing.assert_allclose(geometry_values(TruncatedNFWSph, arguments, np), expected_values,
+                                   rtol=1e-12, atol=1e-14)
         np.testing.assert_allclose(jax.jit(lambda value: geometry_values(TruncatedNFWSph, value, jnp))(arguments),
                                    expected_values, rtol=1e-12, atol=1e-14)
         expected_gradient = np.array([[2 * (alpha - radius * kappa), -(2 * kappa - alpha / radius), 0.],
@@ -181,6 +188,14 @@ def test_truncated_nfw_class_traces_under_jax():
             gradient = jax.jit(derivative_operator(lambda value: geometry_values(TruncatedNFWSph, value, jnp)))(arguments)
             np.testing.assert_allclose(gradient, expected_gradient, rtol=1e-10, atol=1e-12,
                                        err_msg=f"TNFW critical-neighborhood derivative at radius/scale={radius}")
+        scale = truth_profile.scale_radius
+        truth_grid = al.Grid2DIrregular(values=[[radius * scale, 0.]])
+        truth_kappa, _ = projected_density(radius, truth_profile.kappa_s)
+        truth_alpha = projected_deflection(radius, truth_profile.kappa_s) * scale
+        np.testing.assert_allclose(truth_profile.deflections_yx_2d_from(grid=truth_grid).array[0],
+                                   [truth_alpha, 0.], rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(truth_profile.convergence_2d_from(grid=truth_grid).array, [truth_kappa],
+                                   rtol=1e-12, atol=1e-14)
 
     halo = replace(_halo("TNFW", truncation=TauTruncation(10.)), position_yx_arcsec=(0., 0.),
                    model=HaloModel("TNFW", FixedConcentration(12.), TauTruncation(10.)))

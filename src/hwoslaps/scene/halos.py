@@ -51,7 +51,7 @@ _MOLINE_A1, _MOLINE_A2, _MOLINE_A3 = -0.195, 0.089, 0.089
 _MOLINE_B = -0.54
 _MOLINE_MAX_X_SUB = 1.5
 
-_PROFILE_CLASSES = {"PointMass": "PointMass", "SIS": "IsothermalSph", "NFW": "NFWSph", "TNFW": "NFWTruncatedSph"}
+_PROFILE_CLASSES = {"PointMass": "PointMass", "SIS": "IsothermalSph", "NFW": "NFWSph", "TNFW": "TruncatedNFWSph"}
 
 
 def _finite(value: Any, name: str) -> float:
@@ -442,7 +442,11 @@ class Halo:
         """The AutoLens mass profile of this halo, at ``centre`` when given (radial tables use the origin)."""
         import autolens as al
 
-        profile_class = getattr(al.mp, self.model.profile_class)
+        if self.model.type == "TNFW":
+            from .halo_profiles import TruncatedNFWSph
+            profile_class = TruncatedNFWSph
+        else:
+            profile_class = getattr(al.mp, self.model.profile_class)
         return profile_class(centre=self.position_yx_arcsec if centre is None else tuple(centre),
                              **self.lensing().parameters)
 
