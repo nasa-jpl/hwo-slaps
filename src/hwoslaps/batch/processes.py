@@ -54,7 +54,9 @@ def _cookie(pid):
 
 
 def _exited(descriptor):
-    return bool(select.select([descriptor], [], [], 0.)[0])
+    poller = select.poll()
+    poller.register(descriptor, select.POLLIN | select.POLLHUP | select.POLLERR)
+    return bool(poller.poll(0))
 
 
 def worker_record(pid, *, slot, device, identity):
