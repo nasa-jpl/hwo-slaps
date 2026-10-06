@@ -1,0 +1,19 @@
+# Illustrative: round instrument values that describe no observatory.
+psf:
+  truth:
+    kind: optical
+    pupil: {kind: circular, diameter_m: 2.0, pixels: 256, supersampling: 4, obscuration_ratio: 0.25,
+            spiders: {count: 3, width_m: 0.02}}
+    focal_length_m: 20.0
+    wavelength_nm: 700.0
+    detector_oversampling: 4
+    kernel_shape: [41, 41]
+instrument:
+  name: illustrative_2m_monolith
+  detector: {gain_e_per_adu: 2.0, read_noise_e: 3.0, dark_current_e_per_s: 0.005}
+  collecting_area_m2: null
+  bandpass: {kind: top_hat, min_nm: 600.0, max_nm: 800.0, throughput: 0.4, label: system}
+observation:
+  exposure_time_s: 2400.0
+  exposure_count: 3
+  sky: {ab_mag_per_arcsec2: 22.0}

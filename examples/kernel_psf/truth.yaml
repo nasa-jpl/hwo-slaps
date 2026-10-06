@@ -1,0 +1,3 @@
+# Illustrative overlay: pixel-integrated Moffat truth, beta 3, FWHM 2.0 pixels.
+psf:
+  truth: {kind: kernel, path: truth_kernel.npy, pixel_scale_arcsec: 0.1}
