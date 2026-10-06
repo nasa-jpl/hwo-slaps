@@ -1,6 +1,8 @@
 """Freed-profile scale transport, supported mass domain and real spawned-process reconstruction."""
 
 import multiprocessing
+import os
+import pickle
 
 import numpy as np
 import pytest
@@ -20,8 +22,17 @@ def _profile_scales(kind, mapping, log10_mass):
 
 
 def _spawned_scales(inputs):
-    kind, mapping, mass = inputs
-    return tuple(float(value) for value in _profile_scales(kind, mapping, mass))
+    import autolens as al
+
+    kind, mapping, mass, profile_bytes, model_bytes = inputs
+    profile, model = pickle.loads(profile_bytes), pickle.loads(model_bytes)
+    assert model.cls is type(profile)
+    assert profile.__class__.__qualname__ == profile.__class__.__name__
+    points = al.Grid2DIrregular(values=[[0.12, 0.23], [-0.17, 0.09]])
+    values = np.asarray(profile.deflections_yx_2d_from(grid=points))
+    assert np.all(np.isfinite(values))
+    return (os.getpid(), profile.__class__.__module__,
+            tuple(float(value) for value in _profile_scales(kind, mapping, mass)), values)
 
 
 @pytest.mark.parametrize("family", ["NFW-moline", "NFW-moline-h0.7", "NFW-powerlaw", "SIS", "PointMass"])
@@ -53,15 +64,24 @@ def test_freed_classes_match_halo_scales(family, prepared_forecast):
         assert abs(mapping.profile_scales(7.0)["kappa_s"] / inferred.profile_scales(7.0)["kappa_s"] - 1.0) > 1.0e-6
 
 
-def test_freed_classes_pickle_into_spawned_workers(prepared_forecast):
-    from hwoslaps.inference.subhalo_classes import mass_mapping
+@pytest.mark.parametrize("kind", ["NFW", "SIS", "PointMass"])
+def test_freed_classes_pickle_into_spawned_workers(kind, prepared_forecast):
+    import autofit as af
+    from hwoslaps.inference.subhalo_classes import freed_profile_class, mass_mapping
 
-    halo = prepared_forecast.hypothesis(1.0e8, (0.2, -0.3))
+    relation = Moline2017(1.0, None) if kind == "NFW" else None
+    halo = Halo(HaloModel(kind, relation, None), 1.0e7, (0.2, -0.3), 0.2, 0.6,
+                prepared_forecast.scene.cosmology)
     mapping = mass_mapping(halo, halo.cosmology, MassSupport(6.0, 9.7))
-    inputs = ("NFW", mapping, 8.0)
+    profile_class = freed_profile_class(kind)
+    profile = profile_class(centre=halo.position_yx_arcsec, log10_m200=7.0, mass_mapping=mapping)
+    inputs = (kind, mapping, 7.0, pickle.dumps(profile), pickle.dumps(af.Model(profile_class)))
+    expected = _spawned_scales(inputs)
     with multiprocessing.get_context("spawn").Pool(1) as pool:
         actual = pool.apply_async(_spawned_scales, (inputs,)).get(timeout=60)
-    assert actual == _spawned_scales(inputs)
+    assert actual[0] != os.getpid()
+    assert actual[1:3] == expected[1:3]
+    np.testing.assert_array_equal(actual[3], expected[3])
 
 
 @pytest.mark.parametrize("support", [(5.9, 9.7), (6.0, 12.1), (6.0, 9.7)])
