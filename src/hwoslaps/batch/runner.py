@@ -215,36 +215,56 @@ def _signal_group(slot, number):
 
 
 def _close_slots(slots, *, interrupt):
-    for slot in slots:
-        if interrupt:
-            _signal_group(slot, signal.SIGTERM)
-        elif slot.connection is not None and slot.process.poll() is None:
-            try:
-                slot.connection.send({'type': 'stop'})
-            except (EOFError, BrokenPipeError, ConnectionResetError):
-                pass
-    deadline = time.monotonic() + (30. if interrupt else 60.)
-    while any(_live(slot.ownership) for slot in slots) and time.monotonic() < deadline:
+    errors, blocked = [], set()
+    def guarded(slot, operation):
+        if slot.process.pid in blocked:
+            return False
+        try:
+            return operation()
+        except BatchError as error:
+            errors.append(error)
+            blocked.add(slot.process.pid)
+            return False
+    def live(slot):
+        return guarded(slot, lambda: _live(slot.ownership))
+    try:
         for slot in slots:
-            slot.process.poll()
-        time.sleep(.05)
-    # A reaped leader is not authority to abandon its actual inherited descendants.
-    remaining = [slot for slot in slots if _live(slot.ownership)]
-    kill_deadline = time.monotonic() + 5.
-    while remaining:
-        for slot in remaining:
-            _signal_group(slot, signal.SIGKILL)
-            slot.process.poll()
-        remaining = [slot for slot in remaining if _live(slot.ownership)]
-        if remaining and time.monotonic() >= kill_deadline:
-            raise BatchError('verified owned worker descendants did not drain after pinned SIGKILL; inspect worker records')
-        if remaining:
+            if slot.connection is not None and not slot.connection.closed and slot.process.poll() is None:
+                try:
+                    slot.connection.send({'type': 'stop'})
+                except (EOFError, BrokenPipeError, ConnectionResetError):
+                    pass
+            if interrupt:
+                guarded(slot, lambda: _signal_group(slot, signal.SIGTERM))
+        deadline = time.monotonic() + (30. if interrupt else 60.)
+        while any(live(slot) for slot in slots) and time.monotonic() < deadline:
+            for slot in slots:
+                slot.process.poll()
             time.sleep(.05)
-    for slot in slots:
-        slot.process.wait(timeout=1.)
-        if slot.connection is not None:
-            slot.connection.close()
-        slot.log.close()
+        remaining = [slot for slot in slots if live(slot)]
+        kill_deadline = time.monotonic() + 5.
+        while remaining:
+            for slot in remaining:
+                guarded(slot, lambda: _signal_group(slot, signal.SIGKILL))
+                slot.process.poll()
+            remaining = [slot for slot in remaining if live(slot)]
+            if remaining and time.monotonic() >= kill_deadline:
+                errors.append(BatchError('verified owned worker descendants did not drain after pinned SIGKILL; inspect worker records'))
+                break
+            if remaining:
+                time.sleep(.05)
+        for slot in slots:
+            try:
+                slot.process.wait(timeout=1.)
+            except subprocess.TimeoutExpired:
+                errors.append(BatchError(f'worker {slot.process.pid} remains after safe cleanup; no unverified signal was sent'))
+    finally:
+        for slot in slots:
+            if slot.connection is not None:
+                slot.connection.close()
+            slot.log.close()
+    if errors:
+        raise BatchError('worker ownership cleanup failed: ' + '; '.join(str(error) for error in errors)) from errors[0]
 
 
 def _ready_slot(listener, slots, revision, records, events):
@@ -467,8 +487,8 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                                 events.append({'type': 'failed', 'job_id': job.job_id, 'failure': failure})
                                 slot.busy = None
                             events.append({'type': 'worker_exit', 'slot': slot.number, 'pid': slot.process.pid})
-                            _close_slots([slot], interrupt=False)
                             slots.remove(slot)
+                            _close_slots([slot], interrupt=False)
                             if stop_error is None and (pending or any(worker.busy is not None for worker in slots)):
                                 replacement = _start_slot(slot.number, slot.device, session_dir, session, execution, listener)
                                 slots.append(replacement)
@@ -476,8 +496,9 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                                     _ready_slot(listener, slots, revision, records, events)
                                 except BatchError as error:
                                     stop_error = error
-                    _close_slots(slots, interrupt=False)
+                    closing = list(slots)
                     slots.clear()
+                    _close_slots(closing, interrupt=False)
                     if stop_error is not None:
                         current = report()
                         write_json(session_dir / 'report.json', current.to_mapping())
@@ -486,11 +507,19 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
             current = report()
             write_json(session_dir / 'report.json', current.to_mapping())
             report_written = True
-        except BaseException:
-            _close_slots(slots, interrupt=True)
+        except BaseException as original:
+            closing = list(slots)
             slots.clear()
+            cleanup_error = None
+            try:
+                _close_slots(closing, interrupt=True)
+            except BatchError as error:
+                cleanup_error = error
             if not report_written:
-                write_json(session_dir / 'report.json', {**report().to_mapping(), 'interrupted': True})
+                write_json(session_dir / 'report.json', {**report().to_mapping(), 'interrupted': True,
+                    'cleanup_error': None if cleanup_error is None else str(cleanup_error)})
+            if cleanup_error is not None:
+                raise cleanup_error from original
             raise
         finally:
             if listener is not None:
