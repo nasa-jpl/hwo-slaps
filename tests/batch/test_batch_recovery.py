@@ -38,6 +38,16 @@ def _worker_records(root):
     records = []
     for path in (root / 'sessions').glob('*/workers.jsonl'):
         records.extend(json.loads(line) for line in path.read_text().splitlines(keepends=True) if line.endswith('\n'))
+    # Preserve actual worker identities even in the keeper that deliberately erases
+    # its authoritative workers.jsonl to exercise duplicate publication recovery.
+    for record in records:
+        path = root / '.test-ownership' / f"worker_{record['pid']}_{record['identity']}.ownership.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            with path.open('x', encoding='utf-8') as metadata:
+                metadata.write(json.dumps(record) + '\n')
+                metadata.flush()
+                os.fsync(metadata.fileno())
     return records
 
 
@@ -68,6 +78,10 @@ def _controller(spec, root, tmp_path, label, extra=(), program=None):
                   'session_id': process.pid, 'identity': identity, 'identity_env': OWNER_ENV,
                   'uid': os.getuid(), 'start_time': None, 'boot_id': generation_boot}
         record = worker_record(process.pid, slot=0, device='cpu', identity=identity, identity_env=OWNER_ENV)
+        with (tmp_path / (label + '.ownership.json')).open('w', encoding='utf-8') as metadata:
+            metadata.write(json.dumps(record) + '\n')
+            metadata.flush()
+            os.fsync(metadata.fileno())
         process.stdin.write(b'go\n')
         process.stdin.close()
         return process, record, log
