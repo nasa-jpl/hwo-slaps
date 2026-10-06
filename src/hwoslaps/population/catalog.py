@@ -125,9 +125,17 @@ def load_catalog(spec: CatalogSpec) -> Catalog:
                     expected = "U" if variable in spec.text_columns else "fiu"
                     if array.ndim != 1 or array.dtype.kind not in expected:
                         raise PopulationError(f"catalog {spec.path}, column {column}: expected1-D {'unicode' if variable in spec.text_columns else 'numeric'} array")
-                    if variable not in spec.text_columns and not np.all(np.isfinite(array)):
-                        index = int(np.flatnonzero(~ np.isfinite(array))[0])
-                        raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: non-finite number")
+                    if variable not in spec.text_columns:
+                        if not np.all(np.isfinite(array)):
+                            index = int(np.flatnonzero(~np.isfinite(array))[0])
+                            raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: non-finite number")
+                        # A finite extended-precision source can overflow the returned float.
+                        with np.errstate(over="ignore", invalid="ignore"):
+                            array = np.asarray(array, dtype=float)
+                        if not np.all(np.isfinite(array)):
+                            index = int(np.flatnonzero(~np.isfinite(array))[0])
+                            raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: "
+                                                  "number is not representable as a finite Python float")
                     columns[variable] = np.array(array, copy = True)
         lengths = {len(array) for array in columns.values()}
         if len(lengths) != 1:
