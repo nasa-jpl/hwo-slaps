@@ -1,64 +1,61 @@
-# HWO-SLAPS
+# hwoslaps
 
-A configurable strong-lensing pipeline for subhalo sensitivity forecasts,
-source-morphology comparisons, instrument/PSF experiments, and targeted nonlinear
-validation. The scientific path is explicit: prepare a scene and observation,
-evaluate masses and positions, reduce the result, and choose how to save it.
+hwoslaps computes the profiled linear-Gaussian statistic of a dark-matter subhalo over masses and positions in a strong-lens image. It supports studies of mass reach, source morphology, PSF quality, PSF knowledge error and chromatic imaging. Lens and source parameters, background and supported wavefront modes can enter the nuisance model. AutoLens and Nautilus provide nonlinear comparisons under specified fit bounds.
 
-```python
-from hwoslaps import prepare_forecast, forecast, summarize_forecast, mass_reach
-from hwoslaps.config import load_config
-
-prepared = prepare_forecast(load_config("configs/master_config.yaml"))
-result = forecast(prepared, masses=[1e7, 3e7, 1e8, 3e8, 1e9])
-summary = summarize_forecast(result, q_threshold=10)
-reach = mass_reach(result.masses_msun, summary.detectable_fraction, target=0.1)
-result.save_npz("forecast.npz")
-```
-
-Masses are solar masses; positions are `(y, x)` arcseconds. Thresholds, area
-fractions, population distributions, selection policy, PSFs and execution
-settings are explicit inputs. Source assets can be analytic or image based.
-The reference renderer and validated JAX acceleration share the same numerical
-contracts. External detector-sampled PSFs use the same public forecasting path.
-
-Run the small, explicitly synthetic example in the supported backend environment:
-
-```bash
-python examples/quickstart.py --output-dir new-example --backend jax
-```
-
-It creates a detector-integrated Gaussian kernel, computes a mass bank, reports
-sensitive fractions/censoring, and saves replayable inputs and results.
+> Draft documentation: final CLI, example, installation and generated-reference checks are pending. The commands below describe the staged interfaces; no new example runtime or chromatic convergence result is claimed.
 
 ## Start here
 
-- [Engine API and research workflows](docs/ENGINE_GUIDE.md)
+- [Engine guide](docs/ENGINE_GUIDE.md)
 - [Scientific conventions and limits](docs/SCIENCE.md)
-- [Migration to the explicit API](docs/engineering/MIGRATION.md)
-- [Testing and ownership](tests/README.md)
+- [Migration](docs/MIGRATION.md)
+- [Configuration reference](docs/CONFIG.md), generated from the final owning tables when integration is ready
+- [Test instructions](tests/README.md), pending final test-tooling reconciliation
 
-The base package provides configuration, array-level statistics, populations,
-and result I/O. Scene rendering and nonlinear inference require the supported
-scientific backend; `install.sh` describes its pinned developer environment.
-In that environment, install this checkout with
-`python -m pip install -e . --no-deps`.
+The Python core supplies configuration and array reductions. Rendering and nonlinear fitting need the supported science stack. These installation routes are defined by the package/installer and still need final environment verification:
 
 ```bash
-hwoslaps validate -c configs/master_config.yaml
-hwoslaps forecast -c configs/master_config.yaml --output-dir new-results --masses 1e7 1e8 1e9
-hwoslaps simulate -c configs/master_config.yaml --output-dir new-observation
+python -m pip install .
+bash install.sh --gpu
 ```
 
-Output directories and files refuse overwrite. Python calculations create no
-plots or result artifacts automatically. Use `simulate` for injected/noisy/null
-observations, `prepare_forecast` for the smooth expectation, and
-`validate_nonlinear` for explicitly requested fitting.
+The staged quick start uses positional configuration files and a new output directory:
 
-Study reproduction machinery, fixed cohorts, production asset banks, release
-controllers, and historical replay routes have been removed. Git history retains
-the submitted implementation; new studies use ordinary configurations and
-iterators over the same engine API.
+```bash
+hwoslaps validate configs/minimal.yaml
+hwoslaps forecast configs/minimal.yaml --masses 1e7 1e8 1e9 -o out/minimal
+```
+
+Use the typed configuration owner and supply the analysis threshold yourself. Masses are solar masses, positions are `(y, x)` arcseconds, and `interpolation` selects how values cross a target in log mass.
+
+```python
+from hwoslaps.config.schema import load_config
+from hwoslaps.fisher.api import prepare_forecast, forecast
+from hwoslaps.analysis.reductions import summarize
+from hwoslaps.analysis.reach import mass_reach
+
+config = load_config("configs/minimal.yaml")
+with prepare_forecast(config) as prepared:
+    result = forecast(prepared, masses_msun=[1e7, 1e8, 1e9])
+summary = summarize(result, q_threshold=10.0)  # a caller choice
+reach = mass_reach(summary, quantity="detectable_fraction", target=0.1, interpolation="linear")
+```
+
+## Examples awaiting execution
+
+The current example sources distinguish reproduction inputs from illustrative instrument choices. Their final README and runtime records are pending.
+
+| Example | Purpose | Input label | Execution status |
+|---|---|---|---|
+| `examples/hwo_reference/` | Paper HWO pupil, SEI throughput and source/sky derivations | Reproduction targets | Unexecuted current drivers |
+| `examples/monolithic_illustrative/` | A configurable monolithic instrument | Illustrative, no Euclid measurement claim | Unexecuted |
+| `examples/chromatic/` | Multiple SED groups and a monochromatic fitted PSF comparison | Approximation with required convergence study | Unexecuted; no convergence claim |
+| `examples/kernel_psf/` | External matched/mismatched kernels and area reductions | Illustrative detector kernels | Generator and driver unexecuted |
+| `examples/population/` | Member streams and resumable forecast/nonlinear jobs | Illustrative population | Source defined; producer/runtime checks pending |
+
+A threshold of 10 in an example command is a reader choice, not a package detection rule. The generated products record the chosen threshold, input identities and execution settings.
+
+The submitted RASTI implementation is retained at tag `rasti-26-183-submitted` (commit `41621de`). Paper fixtures in `tests/parity/` pin reference CPU and JAX GPU quantities; those named anchors establish their own numerical reproduction, not accuracy for every scene or calibrated blind-search significance. The final citation text and assembled package validation remain pending.
 
 ## Copyright
 
