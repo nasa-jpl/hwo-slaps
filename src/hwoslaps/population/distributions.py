@@ -270,7 +270,7 @@ _LAWS = {law.kind: law for law in (Constant, Choice, Uniform, LogUniform, Normal
 
 REFERENCE_TABLE = Table((Key("var", Text(pattern=r"[A-Za-z_][A-Za-z0-9_]*(?:\[[0-9]+\])?"),
                                   "earlier variable, optionally indexed"),))
-VALUE_CHECK = Union((Real(), REFERENCE_TABLE))
+VALUE_CHECK = Union(Real(), REFERENCE_TABLE)
 
 _DISTRIBUTION_TABLES = {}
 for _kind, _law in _LAWS.items():

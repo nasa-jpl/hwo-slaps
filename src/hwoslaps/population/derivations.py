@@ -107,7 +107,7 @@ _TABLES = {
     "multipole_components": Table((Key("strength", VALUE_CHECK, "multipole strength"), Key("angle_deg", VALUE_CHECK, "multipole angle"),
                                   Key("order", Integer(min = 1), "multipole order"))),
     "function": Table((Key("function", Text(pattern = r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*"), "module:function"),
-                      Key("inputs", MapOf(Text(), Union((VALUE_CHECK, ListOf(VALUE_CHECK)))), "keyword inputs", {}))),
+                      Key("inputs", MapOf(Text(), Union(VALUE_CHECK, ListOf(VALUE_CHECK))), "keyword inputs", {}))),
 }
 
 
