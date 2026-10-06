@@ -292,6 +292,7 @@ GUARD_CHILD = textwrap.dedent("""
 """)
 
 
+@pytest.mark.xtx_gpu
 @pytest.mark.parametrize("fault", ["ineffective_enable", "missing_apis"])
 def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault):
     """Real installed guards refuse before any delegating real analysis construction."""
