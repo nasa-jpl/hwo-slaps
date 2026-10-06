@@ -38,20 +38,34 @@ def _cli(arguments):
            'uid': os.getuid(), 'start_time': None, 'boot_id': generation_boot}
     known, errors, blocked = {}, [], set()
     def records():
+        required = {'slot', 'device', 'pid', 'process_group', 'session_id', 'identity',
+                    'identity_env', 'uid', 'start_time', 'boot_id'}
         if output is not None:
             for path in (output / 'sessions').glob('*/workers.jsonl'):
                 try:
-                    for line in path.read_text().splitlines(keepends=True):
-                        if not line.endswith('\n'):
-                            continue
-                        record = json.loads(line)
-                        if record['identity_env'] != OWNER_ENV:
-                            raise ValueError('foreign ownership environment name')
-                        known[(record['pid'], record['identity'])] = record
-                except (OSError, ValueError, KeyError, TypeError) as error:
+                    lines = path.read_text().splitlines(keepends=True)
+                except OSError as error:
                     message = f'{path}: {error}'
                     if message not in errors:
                         errors.append(message)
+                    continue
+                for line in lines:
+                    if not line.endswith('\n'):
+                        continue
+                    try:
+                        record = json.loads(line)
+                        if not isinstance(record, dict) or set(record) != required or record['identity_env'] != OWNER_ENV:
+                            raise ValueError('invalid ownership shape or environment name')
+                        for field in ('pid', 'process_group', 'session_id', 'start_time', 'uid'):
+                            if isinstance(record[field], bool) or not isinstance(record[field], int) or record[field] < 0:
+                                raise ValueError(f'invalid ownership field {field}')
+                        if not isinstance(record['identity'], str) or not isinstance(record['boot_id'], str):
+                            raise ValueError('invalid ownership identity or boot')
+                        known[(record['pid'], record['identity'])] = record
+                    except (ValueError, KeyError, TypeError) as error:
+                        message = f'{path}: {error}'
+                        if message not in errors:
+                            errors.append(message)
         return [own, *known.values()]
     def guarded(record, number=None):
         key = (record['pid'], record['identity'])
