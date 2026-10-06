@@ -23,6 +23,7 @@ The CPU reference driver forecasts a 1e8 solar-mass NFW halo and writes expected
 observation, forecast and run record. Add `--plot` to save maps. Resolved rates,
 collecting area and actual sampling of each light group appear in the run record.
 
-Budget: 120 s CPU. Measured runtime: pending. Lens/source sampling: pending. Sampling
-describes the configured discretization; the example supplies no mission performance
-prediction or detection-accuracy claim based on that diagnostic alone.
+Budget: 120 s CPU. On XTX on 2026-10-06, Python 3.11 and BLAS threads 1, the run reached
+its 120 s external limit before completing. Lens/source sampling remains unreported by
+that interrupted run. Sampling describes the configured discretization; the example supplies
+no mission performance prediction or detection-accuracy claim based on that diagnostic alone.
