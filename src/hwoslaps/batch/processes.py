@@ -24,11 +24,16 @@ def require_process_support():
             or not hasattr(os, 'pidfd_open') or not hasattr(signal, 'pidfd_send_signal')):
         raise BatchError('batch runtime requires Linux /proc and pidfd identity-safe process signaling')
     try:
+        boot_id()
+        _stat(os.getpid())
+        _cookie(os.getpid())
         descriptor = os.pidfd_open(os.getpid())
+        try:
+            signal.pidfd_send_signal(descriptor, 0)
+        finally:
+            os.close(descriptor)
     except OSError as error:
         raise BatchError('pidfd ownership support is unavailable; no workers were started') from error
-    else:
-        os.close(descriptor)
 
 
 def boot_id():

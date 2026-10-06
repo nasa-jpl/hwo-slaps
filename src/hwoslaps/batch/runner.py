@@ -165,6 +165,7 @@ def _devices(execution):
 
 
 def _start_slot(number, device, session_dir, session, execution, listener):
+    generation_boot = boot_id()
     directory = session_dir / 'workers' / f'w{number}'
     directory.mkdir(parents=True, exist_ok=True)
     log = (session_dir / 'workers' / f'w{number}.log').open('ab', buffering=0)
@@ -180,27 +181,31 @@ def _start_slot(number, device, session_dir, session, execution, listener):
         environment['XLA_PYTHON_CLIENT_MEM_FRACTION'] = f'{execution.memory_fraction / execution.workers_per_device:.4f}'
     source = str(Path(__file__).resolve().parents[2])
     environment['PYTHONPATH'] = source + (os.pathsep + environment['PYTHONPATH'] if environment.get('PYTHONPATH') else '')
-    try:
-        process = subprocess.Popen([sys.executable, '-m', 'hwoslaps.batch.worker'], env=environment,
-            cwd=directory, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-    except BaseException:
-        log.close()
-        raise
-    slot = _Slot(number, device, process, log)
+    slot = _Slot(number, device, None, log)
     # Before releasing bootstrap, capture this actual spawned generation. The provisional
     # cookie/session record is used only to clean up a startup failure, never persisted.
-    slot.ownership = {'slot': number, 'device': device, 'pid': process.pid, 'process_group': process.pid,
-                      'session_id': process.pid, 'identity': identity, 'uid': os.getuid(),
-                      'start_time': None, 'boot_id': boot_id()}
+    slot.ownership = {'slot': number, 'device': device, 'pid': None, 'process_group': None,
+                      'session_id': None, 'identity': identity, 'uid': os.getuid(),
+                      'start_time': None, 'boot_id': generation_boot}
     startup = {'address': listener.address, 'authkey': listener.authkey.hex(), 'slot': number,
                'session': session, 'device': device, 'execution': execution.to_mapping()}
     try:
-        slot.ownership = worker_record(process.pid, slot=number, device=device, identity=identity)
-        process.stdin.write((canonical_json(startup) + '\n').encode())
-        process.stdin.close()
+        slot.process = subprocess.Popen([sys.executable, '-m', 'hwoslaps.batch.worker'], env=environment,
+            cwd=directory, stdin=subprocess.PIPE, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        pid = slot.process.pid
+        slot.ownership.update(pid=pid, process_group=pid, session_id=pid)
+        slot.ownership = worker_record(pid, slot=number, device=device, identity=identity)
+        slot.process.stdin.write((canonical_json(startup) + '\n').encode())
+        slot.process.stdin.close()
     except BaseException:
-        process.stdin.close()
-        _close_slots([slot], interrupt=True)
+        if slot.process is None:
+            log.close()
+        else:
+            pid = slot.process.pid
+            if slot.ownership['pid'] is None:
+                slot.ownership.update(pid=pid, process_group=pid, session_id=pid)
+            slot.process.stdin.close()
+            _close_slots([slot], interrupt=True)
         raise
     return slot
 
