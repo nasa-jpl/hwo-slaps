@@ -1,12 +1,12 @@
 # Engine guide
 
-> Draft: the typed Python owners below are source-checked. Final exports, CLI/batch integration, example runs and generated configuration-reference validation remain pending.
+> Public exports, CLI transport, the generated reference and four example families have passed scoped validation. Batch execution and final combined validation remain open.
 
 ## Configuration and preparation
 
 `EngineConfig` holds a scene, cosmology, truth/model PSFs, instrument, exposure and optional forecast setup. Create it through `config.schema.load_config`, `parse_config` or `resolve_config`. A direct constructor and `dataclasses.replace` are unsupported; use `config.replace(overrides)` so key and cross-section checks run together. The configuration is immutable, and `to_mapping()` returns an independent effective mapping.
 
-Configuration files compose in order. Asset paths belong to the file that supplies them. Changing an alternative's `kind` or `type` replaces that alternative; scalar/list overrides replace values, while named components preserve their ordering. Misspelled keys fail with their path. The final `docs/CONFIG.md` will be generated once through `hwoslaps reference` from the real owning tables; this guide does not duplicate its key inventory.
+Configuration files compose in order. Asset paths belong to the file that supplies them. Changing an alternative's `kind` or `type` replaces that alternative; scalar/list overrides replace values, while named components preserve their ordering. Misspelled keys fail with their path. [CONFIG.md](CONFIG.md) is generated through `hwoslaps reference` from the owning tables.
 
 ```python
 from hwoslaps.config.schema import load_config
@@ -95,13 +95,13 @@ Population members use named per-member streams, so extending a pool or changing
 
 Batch source is defined and its integration/runtime checks are still pending. The source interfaces plan jobs, run/resume into an output directory and open metadata. A run report distinguishes completed, skipped, failed, duplicate, not-selected and orphaned jobs, preparations and revision counts. Resume verifies the recorded case/policy identity; a changed policy conflicts rather than silently reclassifying old outcomes. Full scientific case reading can require a backend, while controller/metadata imports stay separate. The current source signature is `run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False)`. `open_batch` reads metadata; product accessors load forecasts, observations and cases. Final acceptance still needs the integrated producer and its tests.
 
-Current artifacts record arrays, kernels, effective configuration, input hashes, code/environment provenance and schemas. Old study archives have no compatibility loader. Final CLI/artifact transport and generated-reference checks are pending integration. Keep the data, mask, kernel, covariance and nuisance span fixed when making a numerical comparison.
+Current artifacts record arrays, kernels, effective configuration, input hashes, code/environment provenance and schemas. Old study archives have no compatibility loader. The minimal CLI forecast, expected/noisy simulations and effective-configuration replay have passed; replay preserves the complete scientific arrays bit for bit. Keep the data, mask, kernel, covariance and nuisance span fixed when making a numerical comparison.
 
-The plotting producer returns Axes and leaves saving to callers. It uses current lattice geometry, retains sparse/floor gaps and labels expected source S/N. Shared public helpers `plotting.axes.axes_or_new` and `pixel_extent` support those consumers; final plot runtime proof is pending.
+The plotting producer returns Axes and leaves saving to callers. It uses current lattice geometry, retains sparse/floor gaps and labels expected source S/N. Shared public helpers `plotting.axes.axes_or_new` and `pixel_extent` support those consumers. Its CPU/Agg tests and producer mutation checks have passed.
 
-## Staged command examples
+## Command examples
 
-These command forms come from the current staged CLI/example sources and are unexecuted in this draft. Use new output directories and the final integrated input assets.
+Use new output directories and the committed input assets. The minimal CLI and HWO, monolithic, chromatic and kernel examples have executed successfully; the population batch example awaits batch validation.
 
 ```bash
 hwoslaps validate configs/minimal.yaml
@@ -115,4 +115,4 @@ hwoslaps batch run examples/population/batch.yaml -o out/population --devices cp
 hwoslaps batch status out/population
 ```
 
-Repeating the same batch run command resumes missing jobs. `--fresh` refuses an existing batch, `--verify` checks completed artifact hashes, and `--require-single-revision` enforces the recorded revision constraint. These source-defined forms are unexecuted here. The example budgets are acceptance targets, not measured runtimes. Chromatic sampling/support variants and arms have no convergence claim until their actual product comparisons pass.
+Repeating the same batch run command resumes missing jobs. `--fresh` refuses an existing batch, `--verify` checks completed artifact hashes, and `--require-single-revision` enforces the recorded revision constraint. Final batch acceptance remains open. [Example READMEs](../examples/README.md) report measured runtimes, their budgets and the chromatic wavelength/support comparison.

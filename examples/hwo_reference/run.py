@@ -16,6 +16,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--quick", action="store_true")
+    parser.add_argument("--reference-workers", type=int, default=8, help="CPU workers for --quick")
     parser.add_argument("--seed", type=int, default=11, help="seed for the smooth noisy observation")
     parser.add_argument("--q-threshold", type=positive_number, required=True)
     parser.add_argument("--overlay", type=Path, action="append", default=[])
@@ -23,6 +24,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.seed < 0:
         parser.error("--seed must be non-negative")
+    if args.reference_workers < 1:
+        parser.error("--reference-workers must be positive")
     from hwoslaps.config.schema import load_config
 
     directory = Path(__file__).resolve().parent
@@ -35,7 +38,8 @@ def main(argv=None):
     run_product(config, args.output, masses=[1e7, 1e8, 1e9], engine="reference" if args.quick else "jax",
                 q_threshold=args.q_threshold, budget_s=120 if args.quick else 600,
                 command=sys.argv if argv is None else [str(__file__), *argv], noise_seed=args.seed,
-                extra={"quick": args.quick, "sei": sei}, plot=args.plot, started_at=started)
+                extra={"quick": args.quick, "sei": sei}, plot=args.plot, started_at=started,
+                reference_workers=args.reference_workers if args.quick else 1)
     return 0
 
 

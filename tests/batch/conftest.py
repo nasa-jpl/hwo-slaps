@@ -4,7 +4,6 @@ from copy import deepcopy
 import pytest
 
 from hwoslaps.batch import parse_batch
-from hwoslaps.config.loading import merge_configs
 
 
 @pytest.fixture
@@ -24,7 +23,10 @@ def tiny_batch_spec(tmp_path, minimal_mapping):
                    'forecast': {'masses_msun': [1e8]},
                    'execution': {'devices': 'cpu', 'workers_per_device': 2}}
         for key, value in sections.items():
-            mapping[key] = merge_configs(mapping[key], value) if key in ('population', 'execution') and value is not None else value
+            if key in ('population', 'execution') and value is not None:
+                mapping[key].update(deepcopy(value))
+            else:
+                mapping[key] = value
         return parse_batch(mapping, base_dir=tmp_path)
     return build
 

@@ -57,7 +57,7 @@ def new_output(path):
 
 
 def run_product(config, output, *, masses, engine, q_threshold, budget_s, command, noise_seed=None,
-                extra=None, plot=False, started_at=None):
+                extra=None, plot=False, started_at=None, reference_workers=1):
     from hwoslaps.analysis.reductions import summarize
     from hwoslaps.artifacts import save_forecast, save_observation, write_json
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
@@ -66,7 +66,7 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
     from hwoslaps.simulation import simulate
 
     started = time.perf_counter() if started_at is None else started_at
-    with prepare_forecast(config, execution=Execution(engine=engine)) as prepared:
+    with prepare_forecast(config, execution=Execution(engine=engine, reference_workers=reference_workers)) as prepared:
         # Let the actual backend install its startup settings before querying JAX devices.
         lane = require_lane(engine)
         environment = capture_provenance(command=command)

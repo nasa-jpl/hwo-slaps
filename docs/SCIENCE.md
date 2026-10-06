@@ -1,6 +1,6 @@
 # Scientific conventions and limits
 
-> Draft: the conventions below follow inspected producer source and named evidence. Final assembled release, example/convergence and remaining performance acceptance are incomplete.
+> The conventions below follow inspected producer source and named evidence. Final combined validation and batch performance acceptance remain open.
 
 ## Units, coordinates and models
 
@@ -37,7 +37,7 @@ For chromatic imaging, each source/lens SED group uses photon-weighted node kern
 
 AB flux conversion, collecting area, throughput and photon energy determine absolute detected rates. Throughput acts once on light; a supplied detected sky/dark rate is not multiplied by throughput again. Exposure variance in electrons squared is `max(light_rate,0)*t + sky_rate*t + dark_rate*t + exposure_count*read_noise**2`; its ADU variance divides by gain squared. Mean and noisy draws preserve the recorded operation order. The detector model omits saturation, cosmic rays, interpixel capacitance and flat-field errors.
 
-Chromatic node kernels are normalized on their finite support, preserving the monochromatic paper route. If physical node power P_k has captured fraction f_k, the effective represented kernel contains weighted terms P_k/f_k. This moves off-support power into the support with a wavelength-dependent effect. Chromatic accuracy therefore needs actual wavelength/support convergence checks. The authored six-product example comparison is unexecuted, and no blanket chromatic convergence claim is made. Tests `test_sed_bin_weights_follow_independent_photon_equations` and `test_arbitrary_table_normalization_preserves_relative_weights_and_effective_kernel` protect bin arithmetic/scaling; they do not establish accuracy for every scene.
+Chromatic node kernels are normalized on their finite support, preserving the monochromatic paper route. If physical node power P_k has captured fraction f_k, the effective represented kernel contains weighted terms P_k/f_k. This moves off-support power into the support with a wavelength-dependent effect. Chromatic accuracy therefore needs actual wavelength/support convergence checks. The [six-product example comparison](../examples/chromatic/README.md) passed its unchanged 1e-2 bound, with maximum relative q change below 0.001315 across its wavelength and support comparisons. This result applies to those inputs. Tests `test_sed_bin_weights_follow_independent_photon_equations` and `test_arbitrary_table_normalization_preserves_relative_weights_and_effective_kernel` protect bin arithmetic/scaling; they do not establish accuracy for every scene.
 
 ## Native-pixel sampling diagnostic
 
@@ -87,4 +87,4 @@ Paper CPU/GPU fixtures and the N1/B4 owners pin their specified data, likelihood
 
 Deferred C10 keeps the critical-density H(z) convention above. C12 reserves halo-arithmetic unification because paper freed-fit values can move by one or two ulp. C13 reserves the scaled Gram cutoff. These are distinct from the evidenced project gradient/profile corrections already applied.
 
-The recorded Sersic B5 case gives 3261.602649861229 nodes/s against confirmation 4245.567371029686 nodes/s, ratio 0.768237. It misses the original 0.80 steady-throughput target. On 2026-10-06, the user accepted a 0.75 floor for this case; the measured ratio passes that criterion with unchanged scientific arithmetic. No throughput optimization was applied. Current chromatic examples, final installation/export/configuration-reference checks and full release acceptance are also pending.
+The recorded Sersic B5 case gives 3261.602649861229 nodes/s against confirmation 4245.567371029686 nodes/s, ratio 0.768237. It misses the original 0.80 steady-throughput target. On 2026-10-06, the user accepted a 0.75 floor for this case; the measured ratio passes that criterion with unchanged scientific arithmetic. No throughput optimization was applied. Batch performance and final combined validation remain open.

@@ -50,9 +50,27 @@ repeated scientific inputs. The report's `passed` field covers numerical converg
 `all_products_within_budget` separately records the six runtime-budget results. A numerical
 pass does not waive an exceeded runtime budget.
 
-Budgets: 600 s per GPU product. Measured runtimes, wavelength convergence, support
-convergence, per-group sampling and captured fractions: pending. Chromatic accuracy is
-claimed only where both gates pass. A nonlinear fit requires one shared model kernel.
+Budgets: 600 s per GPU product. On XTX on 2026-10-06, one NVIDIA B200 visible,
+Python 3.11 and BLAS threads 1, all six ring products completed within budget:
+
+| Nodes / support | Matched runtime (s) | Monochromatic runtime (s) |
+|---|---:|---:|
+| 11 / 901 | 134.9195 | 165.4700 |
+| 22 / 901 | 139.1775 | 170.1850 |
+| 11 / 601 | 97.7286 | 109.2301 |
+
+Both masses passed the unchanged 1e-2 wavelength and support gates. The largest
+relative maximum-q change was 0.00131434 (support comparison, monochromatic arm,
+1e8 solar masses). The largest spurious-q change divided by matched maximum q was
+1.51542e-8. These results cover the prescribed comparisons and these inputs.
+Actual sampling was `lens:bulge = 0.14503789176869344`,
+`source:clump = 0.11777160550304527` and `source:disk = 0.024480394447703186`.
+Per-node captured fractions and wavelengths are listed in [CAPTURED_FRACTIONS.md](CAPTURED_FRACTIONS.md)
+and retained in each run record. These sampling diagnostics do not establish general
+discretization accuracy. The default grid command completed in 137.4071 s with
+3721 positions and the same sampling diagnostics, within its 600 s budget.
+
+A nonlinear fit requires one shared model kernel.
 The group-mean monochromatic arms here can still have multiple distinct model kernels,
 as can matched chromatic arms. For nonlinear fitting, use one common external kernel or
 set an explicit common model wavelength; keep the convergence inputs above unchanged.

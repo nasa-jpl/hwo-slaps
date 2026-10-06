@@ -1,10 +1,10 @@
 # Migration to the current engine
 
-> Draft: this mapping follows the inspected typed owners and staged CLI. Final export/artifact/command integration checks remain pending. Old study files and archives have no compatibility loader.
+> The typed owners, public exports, CLI and artifact transport have passed scoped validation. Batch execution and final combined validation remain open. Old study files and archives have no compatibility loader.
 
 ## Configuration and ownership
 
-Construct `EngineConfig` through `config.schema.load_config` or `parse_config`. The retained `config.loading.load_config` wrapper belongs to the previous raw-mapping route and is not the typed entry point used here. Replace inputs through `config.replace(overrides)`; direct construction or `dataclasses.replace` bypasses the supported factory.
+Construct `EngineConfig` through `config.schema.load_config` or `parse_config`. The previous raw-mapping `config.loading.load_config` wrapper has been removed. Replace inputs through `config.replace(overrides)`; direct construction or `dataclasses.replace` bypasses the supported factory.
 
 The final configuration reference is generated from owning tables, not maintained as another manual schema. Supply detector, observation, scene and PSFs through their current sections. Execution settings and analysis thresholds belong to operation arguments. Asset paths resolve against their declaring files. A changed discriminator replaces the old alternative instead of leaving keys from both kinds.
 
@@ -47,8 +47,8 @@ Signed q, positive-amplitude forecast detection, threshold/marginal choices and 
 
 ## Files, commands and reproducibility
 
-The staged CLI uses positional configuration files, `--engine`, required masses/output directory, and `--noise-seed N` or `--expected`. `--smooth` requests the no-subhalo control. Final batch commands and resume behavior await their integrated producer. `python -m hwoslaps` is the module entry point; old runner/config selectors do not define the new workflow.
+The CLI uses positional configuration files, `--engine`, required masses/output directory, and `--noise-seed N` or `--expected`. `--smooth` requests the no-subhalo control. Final batch validation remains open. `python -m hwoslaps` is the module entry point; old runner/config selectors do not define the new workflow.
 
 Current forecast/observation/case artifacts keep their current schemas, typed values and scientific identities. Historical NPZ, case paths, draw IDs and configuration digests are not interchangeable with current records. Retain the old study in git when reproduction needs the submitted implementation. New calculations must record current configuration/file/kernel/mask/noise identities and execution provenance.
 
-Source import names, package exports, installer verification and the single generated CONFIG.md are finalization tasks, not proof supplied by this draft. Study-specific cohorts, thresholds, time limits and telescope assumptions remain caller/example inputs.
+Public import boundaries, wheel entry points, isolated installation and generated CONFIG.md equality have passed their scoped checks. Study-specific cohorts, thresholds, time limits and telescope assumptions remain caller/example inputs.

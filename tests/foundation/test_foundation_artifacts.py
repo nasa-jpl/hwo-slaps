@@ -147,8 +147,16 @@ def test_publish_refuses_existing_destination_and_preserves_original_bytes(tmp_p
     assert list(tmp_path.iterdir()) == [path]
 
 
-@pytest.mark.parametrize("defect", ["old_version", "unknown_member", "object_array", "partial_grid", "bad_statistic"])
+@pytest.mark.parametrize("defect", ["old_version", "unknown_member", "object_array", "partial_grid", "bad_statistic",
+                                    "nonmapping_provenance", "missing_q_asimov", "reshaped_q_same_bytes"])
 def test_forecast_loader_refuses_other_schemas_members_and_pickle(tmp_path, defect):
+    """Preserve archive key/metadata domains and statistic axes independently of bytes.
+
+    The typed roundtrip keeper protects valid transport; it cannot reject a list
+    provenance record, an omitted derived statistic or transposed statistic axes.
+    Omitting the respective mapping/member/shape producer guard must fail this
+    existing primary loader keeper. Real save/load boundaries need no new seam.
+    """
     path = save_forecast(forecast_value(), tmp_path / "valid.npz")
     with np.load(path, allow_pickle=False) as stored:
         members = {name: stored[name] for name in stored.files}
@@ -160,10 +168,25 @@ def test_forecast_loader_refuses_other_schemas_members_and_pickle(tmp_path, defe
         members["masses_msun"] = np.array([{}], dtype=object)
     elif defect == "partial_grid":
         del members["grid_indices"]
+    elif defect == "nonmapping_provenance":
+        members["provenance_json"] = np.asarray("[]")
+    elif defect == "missing_q_asimov":
+        del members["q_asimov"]
+    elif defect == "reshaped_q_same_bytes":
+        original = members["q_asimov"]
+        members["q_asimov"] = original.T
+        assert original.shape[0] == 1 and original.shape[1] > 1
+        assert members["q_asimov"].shape != original.shape
+        assert members["q_asimov"].tobytes() == original.tobytes()
     else:
         members["q_asimov"] = members["q_asimov"] + 1.0
     np.savez(tmp_path / "invalid.npz", **members)
-    with pytest.raises(ValueError):
+    diagnostics = {
+        "nonmapping_provenance": "provenance must be a mapping",
+        "missing_q_asimov": "invalid forecast artifact member set",
+        "reshaped_q_same_bytes": "forecast statistic q_asimov is inconsistent with the stored information",
+    }
+    with pytest.raises(ValueError, match=diagnostics.get(defect)):
         load_forecast(tmp_path / "invalid.npz")
 
 
