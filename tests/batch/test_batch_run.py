@@ -262,3 +262,46 @@ def test_preparation_refuses_real_input_swap_between_cache_key_and_capture(tiny_
         assert path.read_bytes() == original
     finally:
         cache.close()
+
+
+def test_preparation_cache_closes_evicted_and_invalid_actual_entries(tiny_batch_spec):
+    import autoarray as aa
+    from hwoslaps.batch.worker import PreparationCache
+    spec = tiny_batch_spec(population={'count': 1})
+    config = plan_batch(spec).jobs[0].config
+    changed = config.replace({'observation': {'exposure_time_s': 1800.}})
+    cache = PreparationCache(1, spec.execution.forecast)
+    convolver = original = None
+    try:
+        first, hit, _ = cache.get(config)
+        assert hit is False
+        second, hit, _ = cache.get(changed)
+        assert hit is False
+        with pytest.raises(RuntimeError, match='reference engine is closed'):
+            forecast(first, masses_msun=[1e8])
+        invalid, hit, _ = cache.get(config)
+        assert hit is False
+        with pytest.raises(RuntimeError, match='reference engine is closed'):
+            forecast(second, masses_msun=[1e8])
+        kernel = invalid.psfs.truth_kernels.single
+        convolver = kernel.convolver()
+        original = convolver.kernel
+        values = np.array(original.native)
+        values[3, 3] += .01
+        convolver.kernel = aa.Array2D.no_mask(values=values, pixel_scales=kernel.pixel_scale_arcsec)
+        with pytest.raises(ValueError, match='truth convolver kernel 0 changed'):
+            cache.get(config)
+        assert cache.keys == ()
+        convolver.kernel = original
+        with pytest.raises(RuntimeError, match='reference engine is closed'):
+            forecast(invalid, masses_msun=[1e8])
+        fresh, hit, _ = cache.get(config)
+        assert hit is False and fresh is not invalid
+        assert forecast(fresh, masses_msun=[1e8]).fisher_raw.shape == (1, 25)
+        cache.close()
+        with pytest.raises(RuntimeError, match='reference engine is closed'):
+            forecast(fresh, masses_msun=[1e8])
+    finally:
+        if convolver is not None:
+            convolver.kernel = original
+        cache.close()
