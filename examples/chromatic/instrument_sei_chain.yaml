@@ -11,4 +11,4 @@ instrument:
          value_key: reflectivity, wavelength_unit: nm, power: 13, label: coatings}
       - {kind: table, path: ../hwo_reference/sei_v0.1.9/Teledyne_COSMOS_CMOS_QE.yaml,
          wavelength_key: wavelength, value_key: QE, wavelength_unit: nm, label: detector_qe}
-      - {kind: constant, value: 0.832, label: filter}
+      - {kind: constant, value: 0.832}
