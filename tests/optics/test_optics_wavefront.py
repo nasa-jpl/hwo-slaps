@@ -21,7 +21,12 @@ from hwoslaps.optics.wavefront import (
     ({"zernikes": {4: True}}, "wf.zernikes.4"),
     ({"segment_hexikes": {3: {}}}, "wf.segment_hexikes.3"),
     ({"pistons": {0: 1.0}}, "wf.pistons"),
-], ids=["bool-key", "noll-0", "negative-segment", "nan", "bool-value", "empty-segment", "unknown-family"])
+    ({"segment_hexikes": {"0": {1: 1.0}}}, "wf.segment_hexikes.0"),
+    ({"zernikes": {"4": 1.0}}, "wf.zernikes.4"),
+    ({"segment_hexikes": {0: {0: 1.0}}}, "wf.segment_hexikes.0.0"),
+    ({"segment_hexikes": {0: {2: [1.0]}}}, "wf.segment_hexikes.0.2"),
+], ids=["bool-key", "noll-0", "negative-segment", "nan", "bool-value", "empty-segment", "unknown-family",
+        "string-segment", "string-noll", "segment-noll-0", "coefficient-list"])
 def test_coefficients_parse_rejects_with_the_key_path(mapping, path):
     with pytest.raises(ConfigError) as caught:
         WavefrontCoefficients.from_mapping(mapping, "wf")
@@ -82,6 +87,8 @@ def test_selection_grammar_and_order(p1_pupil, circular_pupil):
                            ({}, path),
                            ({"zernikes": {"nolls": [4, 4]}}, f"{path}.zernikes.nolls[1]"),
                            ({"segment_hexikes": {"segments": "every", "nolls": [1]}},
+                            f"{path}.segment_hexikes.segments"),
+                           ({"segment_hexikes": {"segments": ["zero"], "nolls": [1]}},
                             f"{path}.segment_hexikes.segments")]:
         with pytest.raises(ConfigError) as caught:
             parse_wavefront_selection(mapping, path)
