@@ -17,7 +17,7 @@ from ..fisher.positions import explicit_positions, grid_positions, ring_position
 from ..identity import file_digest, json_ready, mapping_digest, text_digest
 from ..inference.settings import RefineSettings, SamplerSettings
 from ..optics.providers import KnowledgeErrorModel
-from ..population import iter_population_members
+from ..population.sampling import iter_population_members
 from ..scene.cosmology import Cosmology
 from ..scene.subhalo import configured_injection
 from ..seeding import derived_seed
