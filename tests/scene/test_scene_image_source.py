@@ -291,11 +291,14 @@ def _edge_frame():
     ("point", {}, "unresolved"),
     ("non-finite", {}, "finite 2-D array"),
     ("galaxy", {"bin_factor": 0}, "bin_factor"),
+    ("galaxy", {"bin_factor": -1}, "bin_factor"),
+    ("galaxy", {"bin_factor": 1.5}, "bin_factor"),
+    ("galaxy", {"bin_factor": True}, "bin_factor"),
     ("galaxy", {"pixel_scale_arcsec": 0.01}, "exactly one"),
     ("galaxy", {"half_light_radius_arcsec": None}, "exactly one"),
     ("galaxy", {"half_light_radius_arcsec": None, "pixel_scale_arcsec": -0.01}, "positive and finite"),
 ], ids=["footprint-at-the-edge", "nothing-above-the-threshold", "unresolved-centre", "non-finite-input",
-        "bin-factor-zero", "both-scales", "no-scale", "negative-pixel-scale"])
+        "bin-factor-zero", "bin-factor-negative", "bin-factor-fraction", "bin-factor-bool", "both-scales", "no-scale", "negative-pixel-scale"])
 def test_prepare_image_asset_refuses_unusable_inputs(image, keywords, fragment):
     frames = {"edge": _edge_frame, "galaxy": _galaxy_frame, "point": lambda: np.pad(np.ones((1, 1)), 20),
               "non-finite": lambda: np.where(np.indices((96, 96))[0] == 50, np.inf, _galaxy_frame())}
