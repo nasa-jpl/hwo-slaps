@@ -37,9 +37,11 @@ def _spawned_scales(inputs):
 
 @pytest.mark.parametrize("family", ["NFW-moline", "NFW-moline-h0.7", "NFW-powerlaw", "SIS", "PointMass"])
 def test_freed_classes_match_halo_scales(family, prepared_forecast):
+    import autolens as al
     import jax
+    import jax.numpy as jnp
     from hwoslaps.inference.backend import ensure_jax_x64
-    from hwoslaps.inference.subhalo_classes import mass_mapping
+    from hwoslaps.inference.subhalo_classes import freed_profile_class, mass_mapping
 
     ensure_jax_x64()
     kind = family.split("-")[0]
@@ -62,6 +64,27 @@ def test_freed_classes_match_halo_scales(family, prepared_forecast):
         inferred = mass_mapping(inferred_halo, halo.cosmology, mapping.support)
         assert inferred.h == 0.6774
         assert abs(mapping.profile_scales(7.0)["kappa_s"] / inferred.profile_scales(7.0)["kappa_s"] - 1.0) > 1.0e-6
+
+    # Original T7 transport: actual profile deflections, changed mass and an
+    # independent NumPy finite difference, beyond the shared scale algebra.
+    grid = al.Grid2D.uniform(shape_native=(3, 3), pixel_scales=0.14, origin=(0.04, -0.02))
+    profile_class = freed_profile_class(kind)
+
+    def deflections(value, xp):
+        profile = profile_class(centre=(0.02, -0.03), log10_m200=value, mass_mapping=mapping)
+        return profile.deflections_yx_2d_from(grid=grid, xp=xp).array
+
+    persistent = jax.jit(lambda value: deflections(value, jnp))
+    first = np.asarray(jax.block_until_ready(persistent(jnp.asarray(7.0))))
+    changed = np.asarray(jax.block_until_ready(persistent(jnp.asarray(7.2))))
+    np.testing.assert_allclose(first, np.asarray(deflections(7.0, np)), rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(changed, np.asarray(deflections(7.2, np)), rtol=1e-12, atol=1e-12)
+    assert not np.array_equal(first, changed)
+    derivative = float(jax.jit(jax.grad(lambda value: jnp.sum(deflections(value, jnp))))(jnp.asarray(7.0)))
+    finite_difference = (float(np.asarray(deflections(7.0 + 1e-5, np)).sum())
+                         - float(np.asarray(deflections(7.0 - 1e-5, np)).sum())) / (2e-5)
+    assert np.isfinite(derivative) and np.isfinite(finite_difference)
+    assert abs(derivative - finite_difference) <= 1e-6 * abs(finite_difference) + 1e-8
 
 
 @pytest.mark.parametrize("kind", ["NFW", "SIS", "PointMass"])
