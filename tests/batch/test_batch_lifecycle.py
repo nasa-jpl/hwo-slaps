@@ -209,65 +209,177 @@ def test_pidfd_ownership_works_above_the_select_descriptor_limit(tmp_path):
         resource.setrlimit(resource.RLIMIT_NOFILE, limits)
 
 
-def test_cleanup_drains_clear_groups_and_preserves_mixed_cookie_group(tmp_path):
-    from multiprocessing import Pipe
-    from hwoslaps.batch.runner import _Slot, _close_slots
+def test_cleanup_drains_clear_groups_and_preserves_mixed_cookie_group(tiny_batch_spec, tmp_path, monkeypatch):
+    import hashlib
+    from multiprocessing.connection import Listener
+    import threading
+    from hwoslaps.batch import run_batch
+    import hwoslaps.batch.worker as worker
+    import hwoslaps.fisher.api as api
     from hwoslaps.batch.state import BatchError
-    ready = tmp_path / 'foreign-child.json'
-    foreign_cookie = 'f' * 64
-    script = f'''
-import json, os, subprocess, sys, time
-from pathlib import Path
-environment = dict(os.environ)
-environment[{OWNER_ENV!r}] = {foreign_cookie!r}
-child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(90)'], env=environment)
-Path({str(ready)!r}).write_text(json.dumps(child.pid))
-time.sleep(90)
-'''
-    slots, descriptors = [], []
-    try:
-        for index, program in enumerate((script, 'import time\ntime.sleep(90)\n',
-                                         'import time\ntime.sleep(90)\n')):
-            process, record, log = _start(program, tmp_path, f'cleanup-{index}')
-            connection, peer = Pipe()
-            peer.close()
-            slots.append(_Slot(index, 'cpu', process, log, connection, ownership=record))
+    root = tmp_path / 'public-mixed'
+    foreign_cookie = os.urandom(32).hex()
+    source = {name: {'path': str(Path(module.__file__).resolve()),
+                     'sha256': hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()}
+              for name, module in [('worker', worker), ('forecast', api)]}
+    entry = tmp_path / 'actual-mixed-worker.py'
+    entry.write_text(f'''
+if __name__ == '__main__':
+    import hashlib, json, os, subprocess, sys
+    from pathlib import Path
+    import hwoslaps.batch.worker as worker
+    actual_worker = worker.run_job
+    assert str(Path(worker.__file__).resolve()) == {source['worker']['path']!r}
+    assert hashlib.sha256(Path(worker.__file__).read_bytes()).hexdigest() == {source['worker']['sha256']!r}
+    def actual_job(payload, cache, session, **keywords):
+        import hwoslaps.fisher.api as api
+        assert str(Path(api.__file__).resolve()) == {source['forecast']['path']!r}
+        assert hashlib.sha256(Path(api.__file__).read_bytes()).hexdigest() == {source['forecast']['sha256']!r}
+        actual_forecast = api.forecast
+        def observed_forecast(prepared, **arguments):
+            slot = keywords['worker']['slot']
+            record = {{'slot': slot, 'pid': os.getpid(), 'config_digest': payload.config_digest,
+                       'source': {source!r}}}
+            if slot == 0:
+                environment = {{**os.environ, {OWNER_ENV!r}: {foreign_cookie!r}}}
+                child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'], env=environment)
+                fields = Path(f'/proc/{{child.pid}}/stat').read_text().rsplit(')', 1)[1].split()
+                record['foreign'] = {{'pid': child.pid, 'start_time': int(fields[19]),
+                                     'process_group': int(fields[2]), 'session_id': int(fields[3])}}
+            destination = Path({str(tmp_path)!r}) / f'forecast-entered-{{slot}}.json'
+            partial = destination.with_suffix('.partial')
+            with partial.open('x') as stream:
+                stream.write(json.dumps(record) + '\\n')
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(partial, destination)
+            return actual_forecast(prepared, **arguments)
+        api.forecast = observed_forecast
+        try:
+            return actual_worker(payload, cache, session, **keywords)
+        finally:
+            api.forecast = actual_forecast
+    worker.run_job = actual_job
+    raise SystemExit(worker.main())
+''')
+    actual_popen, actual_accept, actual_listener_close = subprocess.Popen, Listener.accept, Listener.close
+    processes, logs, connections, descriptors = [], [], [], []
+    listener_addresses, closed_listeners = {}, []
+    def observed_popen(command, *arguments, **keywords):
+        is_worker = isinstance(command, (list, tuple)) and list(command) == [sys.executable, '-m', 'hwoslaps.batch.worker']
+        process = actual_popen([sys.executable, str(entry)] if is_worker else command, *arguments, **keywords)
+        if is_worker:
+            processes.append(process)
+            logs.append(keywords['stdout'])
             descriptors.append(open_pidfd(process.pid))
-        _wait(ready.exists, timeout=10.)
-        child_pid = json.loads(ready.read_text())
-        child_descriptor = open_pidfd(child_pid)
-        descriptors.append(child_descriptor)
-        assert slots[0].process.poll() is None
-        fields = Path(f'/proc/{child_pid}/stat').read_text().rsplit(')', 1)[1].split()
-        assert int(fields[2]) == slots[0].process.pid
-        assert (OWNER_ENV + '=' + foreign_cookie).encode() in Path(f'/proc/{child_pid}/environ').read_bytes().split(b'\0')
+        return process
+    def observed_accept(listener):
+        connection = actual_accept(listener)
+        connections.append(connection)
+        return connection
+    def observed_listener_close(listener):
+        if listener not in listener_addresses:
+            listener_addresses[listener] = listener.address
+        result = actual_listener_close(listener)
+        closed_listeners.append(listener)
+        return result
+    monkeypatch.setattr(subprocess, 'Popen', observed_popen)
+    monkeypatch.setattr(Listener, 'accept', observed_accept)
+    monkeypatch.setattr(Listener, 'close', observed_listener_close)
+    spec = tiny_batch_spec(population={'count': 3}, execution={'workers_per_device': 3},
+        forecast_positions={'kind': 'grid', 'spacing_arcsec': .01, 'half_width_arcsec': .6})
+    cancel, synchronized, synchronization_errors = threading.Event(), [], []
+    controller = open_pidfd(os.getpid())
+    previous_term = signal.getsignal(signal.SIGTERM)
+    foreign_descriptor = None
+    def pin_foreign(observation):
+        nonlocal foreign_descriptor
+        if foreign_descriptor is not None:
+            return
+        foreign = observation['foreign']
+        descriptor = open_pidfd(foreign['pid'])
+        try:
+            fields = Path(f"/proc/{foreign['pid']}/stat").read_text().rsplit(')', 1)[1].split()
+            assert int(fields[19]) == foreign['start_time']
+            assert int(fields[2]) == int(fields[3]) == observation['pid']
+            assert (OWNER_ENV + '=' + foreign_cookie).encode() in Path(f"/proc/{foreign['pid']}/environ").read_bytes().split(b'\0')
+            assert not pidfd_exited(descriptor)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        foreign_descriptor = descriptor
+        descriptors.append(descriptor)
+    def interrupt_actual_forecasts():
+        try:
+            deadline = time.monotonic() + 90.
+            paths = [tmp_path / f'forecast-entered-{slot}.json' for slot in range(3)]
+            while not all(path.exists() for path in paths):
+                if paths[0].exists():
+                    pin_foreign(json.loads(paths[0].read_text()))
+                if cancel.wait(.01):
+                    return
+                if time.monotonic() >= deadline:
+                    raise AssertionError('three actual forecast boundaries did not publish within90s')
+            observations = [json.loads(path.read_text()) for path in paths]
+            assert all(record['source'] == source for record in observations)
+            assert len({record['config_digest'] for record in observations}) == 3
+            pin_foreign(observations[0])
+            assert [record['pid'] for record in observations] == [process.pid for process in processes]
+            assert len(processes) == 3 and all(process.poll() is None for process in processes)
+            synchronized.extend(observations)
+            signal.pidfd_send_signal(controller, signal.SIGTERM)
+        except BaseException as error:
+            synchronization_errors.append(error)
+    interrupter = threading.Thread(target=interrupt_actual_forecasts)
+    interrupter.start()
+    try:
         with pytest.raises(BatchError, match='worker ownership cleanup failed') as refused:
-            _close_slots(slots, interrupt=True)
-        assert isinstance(refused.value.__cause__, BatchError)
-        assert 'ambiguous/foreign pids=' in str(refused.value.__cause__)
-        assert str(child_pid) in str(refused.value.__cause__)
-        assert slots[0].process.poll() is None, 'the actual mixed group must remain unsignaled'
-        signal.pidfd_send_signal(child_descriptor, 0)
-        assert all(slot.process.poll() == -signal.SIGTERM for slot in slots[1:])
-        assert all(slot.connection.closed and slot.log.closed for slot in slots)
+            run_batch(spec, root, resume=False)
+        cancel.set()
+        interrupter.join(timeout=5.)
+        assert not interrupter.is_alive() and not synchronization_errors
+        assert len(synchronized) == 3
+        assert isinstance(refused.value.__cause__, KeyboardInterrupt)
+        assert 'ambiguous/foreign pids=' in str(refused.value)
+        assert str(synchronized[0]['foreign']['pid']) in str(refused.value)
+        assert not pidfd_exited(foreign_descriptor, 50), 'the actual foreign descendant must remain unsignaled'
+        assert not pidfd_exited(descriptors[0], 50), 'the actual mixed worker must remain unsignaled'
+        assert all(process.poll() == -signal.SIGTERM for process in processes[1:]), 'clear actual workers must drain despite a mixed group'
+        assert len(connections) == 3 and all(connection.closed for connection in connections)
+        assert all(log.closed and process.stdin.closed for process, log in zip(processes, logs, strict=True))
+        assert listener_addresses and all(listener in closed_listeners for listener in listener_addresses)
+        assert all(not Path(address).exists() for address in listener_addresses.values())
+        assert signal.getsignal(signal.SIGTERM) == previous_term
+        report = json.loads((root / 'sessions/1/report.json').read_text())
+        assert report['interrupted'] and 'ambiguous/foreign pids=' in report['cleanup_error']
     finally:
-        # These independently retained actual descriptors remain authoritative even
-        # while a deliberately mixed cookie makes the production group scanner refuse.
+        cancel.set()
+        interrupter.join(timeout=5.)
+        os.close(controller)
+        foreign_cleanup_error = None
+        if foreign_descriptor is None and (tmp_path / 'forecast-entered-0.json').exists():
+            try:
+                pin_foreign(json.loads((tmp_path / 'forecast-entered-0.json').read_text()))
+            except BaseException as error:
+                foreign_cleanup_error = error
+        # Intentionally mixed fixtures require independently retained kernel handles;
+        # the scanner under test never certifies their final cleanup.
         for descriptor in reversed(descriptors):
             try:
                 signal.pidfd_send_signal(descriptor, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        for slot in slots:
-            slot.process.wait(timeout=10.)
-            slot.connection.close()
-            slot.log.close()
-        import select
+        for process, log in zip(processes, logs, strict=True):
+            process.wait(timeout=10.)
+            process.stdin.close()
+            log.close()
+        for connection in connections:
+            connection.close()
         for descriptor in descriptors:
-            poller = select.poll()
-            poller.register(descriptor, select.POLLIN)
-            _wait(lambda: bool(poller.poll(0)), timeout=10.)
+            _wait(lambda: pidfd_exited(descriptor), timeout=10.)
             os.close(descriptor)
+        if foreign_cleanup_error is not None:
+            raise foreign_cleanup_error
 
 
 def test_real_training_descendants_remain_owned_after_leader_sigkill(tmp_path):
