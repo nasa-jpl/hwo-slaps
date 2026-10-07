@@ -8,7 +8,7 @@ import pytest
 from hwoslaps.config.checks import ConfigError
 from hwoslaps.inference.fit_model import autofit_model
 from hwoslaps.inference.hypotheses import build_role_models
-from hwoslaps.inference.settings import FitSpec, PriorWidths
+from hwoslaps.inference.settings import FitSpec, MassSupport, PriorWidths
 from hwoslaps.scene.parameters import scene_parameters
 
 pytestmark = pytest.mark.backend
@@ -138,43 +138,56 @@ def _family_overrides(family,image_asset):
         "ell_comps":[.14516129,.25142673],"intensity":1.,"effective_radius":.12,"sersic_index":4.}}}
     elif family=="image":overrides["scene"]["source"]={"light":{"light":{"type":"Image","centre":[-.03,.08],
         "asset_path":str(image_asset),"rotation_deg":12.,"total_flux":.2}}}
+    elif family in {"freed_sis","freed_point_mass"}:
+        overrides["scene"]["subhalo"]={"type":"SIS" if family=="freed_sis" else "PointMass",
+                                          "concentration":None}
     return overrides
 
 
-def _fitness_pair(prepared):
+def _fitness_pair(prepared, *, role="smooth"):
     from hwoslaps.inference.api import prepare_case
     from autofit.non_linear.fitness import Fitness
 
-    halo=prepared.hypothesis(1.e8,(.1,-.15));fit=FitSpec(mode="fixed_template")
+    halo=prepared.hypothesis(1.e8,(.1,-.15))
+    fit=FitSpec(mode="freed",mass_support=MassSupport(6.,9.7)) if role=="subhalo" else FitSpec(mode="fixed_template")
     numpy_case=prepare_case(prepared,halo,prepared.observation,fit=fit,use_jax=False)
     jax_case=prepare_case(prepared,halo,prepared.observation,fit=fit,use_jax=True)
-    model=jax_case.autofit_models["smooth"]
+    model=jax_case.autofit_models[role]
     merit=-1.23456789e99
     jfit=Fitness(model=model,analysis=jax_case.analysis,paths=None,fom_is_log_likelihood=True,
                  resample_figure_of_merit=merit,use_jax_vmap=True,batch_size=3)
-    nfit=Fitness(model=numpy_case.autofit_models["smooth"],analysis=numpy_case.analysis,paths=None,
+    nfit=Fitness(model=numpy_case.autofit_models[role],analysis=numpy_case.analysis,paths=None,
                  fom_is_log_likelihood=True,resample_figure_of_merit=merit,use_jax_vmap=False)
     columns=np.linspace(-.03,.03,model.prior_count)
     rows=np.linspace(-.04,.04,3)[:,None]
     a=np.asarray([model.vector_from_unit_vector(row) for row in .40+rows+columns])
     b=np.asarray([model.vector_from_unit_vector(row) for row in .60-rows-columns])
     assert np.all(np.any(a!=b,axis=0))
+    if role=="subhalo":
+        names=jax_case.model(role).parameter_names
+        mass_index=next(i for i,name in enumerate(names) if name.endswith(".subhalo.log10_m200"))
+        assert np.all(a[:,mass_index]!=b[:,mass_index]), "both batches must change the actual freed mass"
     return jfit,nfit,merit,a,b
 
 
 @pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
-@pytest.mark.parametrize("family",["power_law","multipoles","shear","sersic","all","image"])
+@pytest.mark.parametrize("family",["power_law","multipoles","shear","sersic","all","image","freed_sis","freed_point_mass"])
 def test_real_persistent_fitness_matches_numpy_for_each_family(gpu,family,prepared_forecast_factory,image_asset):
     import jax
 
     prepared=prepared_forecast_factory(_family_overrides(family,image_asset))
-    jfit,nfit,_,a,b=_fitness_pair(prepared)
+    role="subhalo" if family in {"freed_sis","freed_point_mass"} else "smooth"
+    jfit,nfit,_,a,b=_fitness_pair(prepared,role=role)
     assert jax.default_backend()==("gpu" if gpu else "cpu")
+    reports=[]
     for batch in (a,b):
         actual=np.asarray(jax.block_until_ready(jfit.call_wrap(batch)))
         expected=np.asarray([nfit.call_wrap(row) for row in batch])
         assert actual.dtype==np.float64 and np.all(np.isfinite(actual))
         np.testing.assert_allclose(actual,expected,rtol=1e-10,atol=1e-5)
+        reports.append(actual)
+    if role=="subhalo":
+        assert np.any(reports[0]!=reports[1]), "changed freed-role batches must change the actual likelihood"
 
 
 @pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
