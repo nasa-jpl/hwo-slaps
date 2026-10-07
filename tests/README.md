@@ -34,8 +34,19 @@ committed inputs before using a regenerated anchor. Reference execution requires
 the extracted submitted-paper tree and explicit work/GPU arguments. No source
 or numerical change is certified by a snapshot from another head.
 
-Retained old suites and their required source remain until their exact declarations
-are reconciled against actual keepers. A mention inventory does not authorize
-retirement. The final full core/CPU/GPU/static gates run after the reviewed retirement
-manifest is applied; provisional retained dependencies are never hidden by weaker
-test selection or import exceptions.
+Keep one primary owner per observable behavior. Before adding a test, identify the
+behavior, the credible regression it catches, why an existing owner is insufficient,
+and the production boundary exercised. Extend an existing parameter table where
+possible. Expected science values come from independent equations, frozen paper
+fixtures or a genuinely independent backend.
+
+Import the real package. Avoid fake backend modules, broad runtime skips and
+production exports needed only by tests. Optional absence is explicit; a broken
+pinned backend is a failure. Keep units, flux, nuisance projection, signed statistics,
+input identity, real process cleanup and reference/JAX parity at their owning boundaries.
+
+Before retiring a suite, account for every original declaration and collected case:
+retain, consolidate into a named current owner, or remove with a precise scope reason.
+Missing imports or baseline failures do not justify deletion. Validate defect fixes
+on the same failing/passing harness and restore producer bytes after fault controls.
+Run the combined core, CPU, GPU, parity and architecture checks after assembly.

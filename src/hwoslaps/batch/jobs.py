@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,7 +17,7 @@ from ..fisher.positions import explicit_positions, grid_positions, ring_position
 from ..identity import file_digest, json_ready, mapping_digest, text_digest
 from ..inference.settings import RefineSettings, SamplerSettings
 from ..optics.providers import KnowledgeErrorModel
-from ..population import iter_population_members
+from ..population.sampling import iter_population_members
 from ..scene.cosmology import Cosmology
 from ..scene.subhalo import configured_injection
 from ..seeding import derived_seed
@@ -66,7 +67,7 @@ class JobPayload:
     execution: Mapping[str, Any]
 
     def to_mapping(self):
-        return json_ready(self.__dict__)
+        return deepcopy(self.__dict__)
 
 
 @dataclass(frozen=True)
@@ -93,7 +94,7 @@ class Job:
 
     def payload(self, output_dir: Path, session: int, execution: BatchExecution) -> JobPayload:
         return JobPayload(self.job_id, self.kind, str(output_dir / self.job_id), self.digest(),
-                          self.config.to_mapping(), self.config_digest, json_ready(self.parameters),
+                          self.config.to_mapping(), self.config_digest, deepcopy(self.parameters),
                           dict(self.seeds), session, json_ready(execution.to_mapping()))
 
 

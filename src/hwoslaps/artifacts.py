@@ -19,7 +19,7 @@ from typing import Any, TYPE_CHECKING
 import numpy as np
 
 from .config.loading import dump_yaml
-from .identity import canonical_json, json_ready, read_file_snapshot
+from .identity import canonical_json, json_ready, native_ready, read_file_snapshot
 
 if TYPE_CHECKING:
     from .fisher.result import ForecastResult
@@ -126,7 +126,7 @@ def write_json(path, payload: Mapping[str, Any]) -> Path:
 
 
 def write_yaml(path, mapping: Mapping[str, Any]) -> Path:
-    text = dump_yaml(json_ready(mapping))
+    text = dump_yaml(native_ready(mapping))
     return _publish(path, lambda stream: stream.write(text.encode("utf-8")))
 
 

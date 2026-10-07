@@ -34,13 +34,16 @@ def _kernel(seed, shape=(5, 5)):
     (np.zeros((3, 3)), {}, "positive finite flux"),
     (np.pad([[1.0 + 1e-9]], 1), {"normalize": False}, "sum to one"),
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": 0.0}, "pixel_scale_arcsec"),
-    (np.pad([[1.0]], 1), {"pixel_scale_arcsec": -0.03}, "pixel_scale_arcsec"),
+    (np.pad([[1.0]], 1), {"pixel_scale_arcsec": -1.0}, "pixel_scale_arcsec"),
+    (np.pad([[1.0]], 1), {"pixel_scale_arcsec": np.nan}, "pixel_scale_arcsec"),
+    (np.pad([[1.0]], 1), {"pixel_scale_arcsec": np.inf}, "pixel_scale_arcsec"),
     (np.pad([[1.0]], 1), {"pixel_scale_arcsec": True}, "pixel_scale_arcsec"),
+    (np.pad([[1.0]], 1), {"pixel_scale_arcsec": "0.1"}, "pixel_scale_arcsec"),
     (np.pad([[1.0]], 1), {"source": {"kind": "array"}}, "must record 'captured_power_fraction'"),
     (np.pad([[1.0]], 1), {"source": {"kind": "optical", "captured_power_fraction": 1.5}},
      r"None or a number in \(0, 1\]"),
 ], ids=["even-rows", "even-columns", "1-d", "3-d", "nan", "complex-nonzero", "complex-nonfinite", "negative", "zero-flux", "unnormalized", "zero-scale",
-        "negative-scale", "bool-scale", "no-captured-fraction", "captured-fraction-above-one"])
+        "negative-scale", "nan-scale", "inf-scale", "bool-scale", "text-scale", "no-captured-fraction", "captured-fraction-above-one"])
 def test_detector_psf_validation(values, keywords, message):
     arguments = {"pixel_scale_arcsec": SCALE, "normalize": True, **keywords}
     with pytest.raises(ValueError, match=message):
@@ -57,6 +60,16 @@ def test_detector_psf_normalizes_once_into_a_private_read_only_copy():
     with pytest.raises(ValueError):
         psf.kernel[3, 2] = 0.0
     assert dict(psf.source) == {"kind": "array", "captured_power_fraction": None}
+
+    source = {"kind": "array", "captured_power_fraction": None,
+              "calibration": {"label": "test-calibration"}}
+    explicit = DetectorPSF.from_array(psf.kernel, SCALE, normalize=False, source=source)
+    source["kind"] = "changed"
+    source["calibration"]["label"] = "changed"
+    assert dict(explicit.source) == {"kind": "array", "captured_power_fraction": None,
+                                     "calibration": {"label": "test-calibration"}}
+    with pytest.raises(TypeError):
+        explicit.source["kind"] = "changed"
     identity = psf.kernel_identity()
     assert (identity.sha256, identity.shape, identity.pixel_scale_arcsec) == (array_digest(psf.kernel), (7, 5), SCALE)
 

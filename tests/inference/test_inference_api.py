@@ -18,7 +18,7 @@ POWER_LAW = {"kind": "power_law", "c0": 20.0, "mass_pivot_msun": 1.0e8,
 
 
 @pytest.mark.parametrize("defect", ["config", "truth_kernel", "injection", "redshift", "support", "noisy_anchor",
-                                  "identity_kernel", "covariance", "model_sis", "model_concentration"])
+                                  "identity_kernel", "covariance", "model_sis", "model_concentration", "refine_cpu"])
 def test_prepare_case_refuses_incoherent_inputs_before_any_backend_object(defect, prepared_forecast_factory,
                                                                          tiny_gaussian_kernel, tmp_path, monkeypatch):
     from hwoslaps.inference import api
@@ -70,11 +70,20 @@ def test_prepare_case_refuses_incoherent_inputs_before_any_backend_object(defect
 
     def recording_build(*args, **kwargs):
         built.append(True)
+        if defect == "refine_cpu":
+            pytest.fail("CPU refinement reached fit-data construction before its public entry refusal")
         return original(*args, **kwargs)
 
     monkeypatch.setattr(api, "build_fit_data", recording_build)
-    with pytest.raises(ValueError, match=messages[defect]):
-        prepare_case(prepared, trial, observation, fit=fit, use_jax=False)
+    if defect == "refine_cpu":
+        output = tmp_path / "refine_cpu"
+        with pytest.raises(ValueError, match=r"refinement requires sampler\.use_jax"):
+            validate_nonlinear(prepared, trial, observation, fit=fit, sampler=SamplerSettings(use_jax=False),
+                               sampler_seed=7, refine=RefineSettings(), output_dir=output)
+        assert not output.exists()
+    else:
+        with pytest.raises(ValueError, match=messages[defect]):
+            prepare_case(prepared, trial, observation, fit=fit, use_jax=False)
     assert built == []
 
 

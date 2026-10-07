@@ -24,7 +24,7 @@ from hwoslaps.identity import file_digest
     ('forecast_argmax', .15, [-2., 3., 2.], None),
     ('forecast_argmax', None, [np.nan, np.nan, np.nan], None),
 ])
-def test_follow_ups_from_completed_forecast_artifacts(tiny_batch_spec, tmp_path, kind, radius, amplitudes, expected):
+def test_follow_ups_from_completed_forecasts(tiny_batch_spec, tmp_path, kind, radius, amplitudes, expected):
     selector = {'kind': kind, 'masses_msun': [1e8]}
     if kind == 'forecast_argmax':
         selector['aperture_radius_arcsec'] = radius

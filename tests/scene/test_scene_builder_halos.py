@@ -1,6 +1,9 @@
 """Plane assembly of halos: lens-plane deflections, the two-plane lens equation, summation order."""
 
 import math
+import hashlib
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -141,9 +144,42 @@ def test_off_plane_halo_follows_the_two_plane_lens_equation(scene_mapping, planc
 
 
 @pytest.mark.backend
-@pytest.mark.parametrize("model", [POINT_MASS, SIS, NFW], ids=["point-mass", "sis", "nfw"])
-def test_subhalo_and_perturbers_sum_in_the_assembly_order(scene_mapping, planck15, model):
+@pytest.mark.parametrize("scene_kind, model", [
+    ("assembly", POINT_MASS), ("assembly", SIS), ("assembly", NFW),
+    ("gold64", POINT_MASS), ("gold64", SIS), ("gold64", NFW),
+], ids=["point-mass", "sis", "nfw", "point-mass-gold64", "sis-gold64", "nfw-gold64"])
+def test_subhalo_and_perturbers_sum_in_the_assembly_order(scene_mapping, planck15, scene_kind, model):
     import autolens as al
+
+    if scene_kind == "gold64":
+        # Exact physical inputs of974 tests/test_lensing_physics_integration.py.
+        # grid.pixel_scale -> pixel_scale_arcsec; missing old subsize default is4.
+        # lens/source_galaxy become named plane components; enabled/direct subhalo
+        # becomes an explicit real Halo at the same(y,x); null h uses Planck15.
+        mapping = {
+            "grid": {"shape": [64, 64], "pixel_scale_arcsec": 0.00716, "over_sample_size": 4},
+            "lens": {"redshift": 0.2, "mass": {"main": {
+                "type": "Isothermal", "centre": [0.0, 0.0], "einstein_radius": 1.0, "ell_comps": [0.1, 0.0]}}},
+            "source": {"redshift": 0.6, "light": {"disk": {
+                "type": "Exponential", "centre": [-0.03, 0.08], "ell_comps": [0.14516129, 0.25142673],
+                "intensity": 2.0, "effective_radius": 0.11}}},
+            "subhalo": {"type": model.type},
+        }
+        if model.type == "NFW":
+            mapping["subhalo"]["concentration"] = {"kind": "moline2017_eq7", "x_sub": 1.0, "h": None}
+        spec = parse_scene(mapping)
+        mass = 1.0e9 if model.type == "NFW" else 1.0e8
+        injected = make_halo(model, mass, (0.08, -0.05), redshift=0.2, source_redshift=0.6, cosmology=planck15)
+        scene = build_scene(spec, planck15, subhalo=injected)
+        image = scene.light_images["source"]
+        fixture = Path(__file__).resolve().parents[1] / "fixtures/scene/halo_anchors.json"
+        assert hashlib.sha256(fixture.read_bytes()).hexdigest() == "1167b2cc3916468b9b77f2d4df3f24ca0d5c9d8a70f3ded05d753ef3e15e1026"
+        expected = json.loads(fixture.read_text())["integration_image_summary"][model.type.lower()]
+        assert list(image.shape) == expected["shape"]
+        assert np.all(np.isfinite(image))
+        assert float(np.sum(image)) == pytest.approx(expected["total_flux"], rel=1.0e-10)
+        assert float(np.max(image)) == pytest.approx(expected["peak"], rel=1.0e-10)
+        return
 
     scene_mapping["perturbers"] = {"halos": [{"type": "NFW", "concentration": {"kind": "moline2017_eq7", "x_sub": 1.0},
                                               "mass_msun": 5.0e8, "centre": [-0.5, 0.6]}]}

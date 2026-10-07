@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import importlib.util
+import runpy
 from pathlib import Path
 
 import numpy as np
@@ -13,9 +13,7 @@ from hwoslaps.optics.mode_priors import load_prior, parse_prior
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = PROJECT_ROOT / 'scripts' / 'derive_jwst_mode_weight_tables.py'
-SPEC = importlib.util.spec_from_file_location('derive_jwst_weights', SCRIPT_PATH)
-DERIVATION = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(DERIVATION)
+DERIVATION = runpy.run_path(str(SCRIPT_PATH), run_name='derive_jwst_weights')
 
 
 def _synthetic_segmented_problem():
@@ -48,9 +46,9 @@ def test_sequential_decomposition_recovers_synthetic_coefficients():
     aperture, segment_masks, global_raw, segment_raw = (
         _synthetic_segmented_problem()
     )
-    global_basis = DERIVATION.orthonormalize_basis(global_raw, aperture)
+    global_basis = DERIVATION["orthonormalize_basis"](global_raw, aperture)
     segment_bases = np.asarray([
-        DERIVATION.orthonormalize_basis(raw, mask)
+        DERIVATION["orthonormalize_basis"](raw, mask)
         for raw, mask in zip(segment_raw, segment_masks)
     ])
     expected_global = np.array([5.0])
@@ -64,7 +62,7 @@ def test_sequential_decomposition_recovers_synthetic_coefficients():
         opd += np.tensordot(coefficients, basis, axes=1)
 
     global_coefficients, segment_coefficients, residual = (
-        DERIVATION.decompose_opd_map(
+        DERIVATION["decompose_opd_map"](
             opd, aperture, global_raw, segment_masks, segment_raw
         )
     )
@@ -78,7 +76,7 @@ def test_sequential_decomposition_recovers_synthetic_coefficients():
     assert np.linalg.norm(residual[aperture]) < 1e-10
 
     global_weights, segment_weights, fraction = (
-        DERIVATION.aggregate_mode_statistics(
+        DERIVATION["aggregate_mode_statistics"](
             global_coefficients[np.newaxis, :],
             segment_coefficients[np.newaxis, :, :],
             np.full(3, 1 / 3),
@@ -101,7 +99,7 @@ def test_k_step_differences_return_expected_maps_and_pairs():
         (1, 2, 3)
     )
 
-    differences, pairs = DERIVATION.difference_opd_series(series, step=2)
+    differences, pairs = DERIVATION["difference_opd_series"](series, step=2)
 
     assert differences.shape == (4, 2, 3)
     np.testing.assert_array_equal(differences, np.full((4, 2, 3), 2.0))
@@ -115,22 +113,22 @@ def test_drift_pair_keep_mask_excludes_correction_spanning_pairs():
     flags = np.array([False, False, True, False, False, False])
     series = np.zeros((6, 2, 2))
 
-    _, pairs_step1 = DERIVATION.difference_opd_series(series, step=1)
-    keep_step1 = DERIVATION.drift_pair_keep_mask(flags, pairs_step1)
+    _, pairs_step1 = DERIVATION["difference_opd_series"](series, step=1)
+    keep_step1 = DERIVATION["drift_pair_keep_mask"](flags, pairs_step1)
     np.testing.assert_array_equal(
         keep_step1, np.array([True, False, True, True, True])
     )
 
-    _, pairs_step2 = DERIVATION.difference_opd_series(series, step=2)
-    keep_step2 = DERIVATION.drift_pair_keep_mask(flags, pairs_step2)
+    _, pairs_step2 = DERIVATION["difference_opd_series"](series, step=2)
+    keep_step2 = DERIVATION["drift_pair_keep_mask"](flags, pairs_step2)
     np.testing.assert_array_equal(
         keep_step2, np.array([False, False, True, True])
     )
 
     with pytest.raises(ValueError, match='one-dimensional'):
-        DERIVATION.drift_pair_keep_mask(flags[np.newaxis, :], pairs_step1)
+        DERIVATION["drift_pair_keep_mask"](flags[np.newaxis, :], pairs_step1)
     with pytest.raises(ValueError, match='outside the flag series'):
-        DERIVATION.drift_pair_keep_mask(flags[:3], pairs_step1)
+        DERIVATION["drift_pair_keep_mask"](flags[:3], pairs_step1)
 
 
 def test_weight_aggregation_matches_hand_computed_rms():
@@ -143,7 +141,7 @@ def test_weight_aggregation_matches_hand_computed_rms():
     areas = np.array([0.25, 0.75])
 
     global_weights, segment_weights, fraction = (
-        DERIVATION.aggregate_mode_statistics(
+        DERIVATION["aggregate_mode_statistics"](
             global_coefficients, segment_coefficients, areas
         )
     )
@@ -168,25 +166,25 @@ def test_weight_aggregation_matches_hand_computed_rms():
 
 def test_weight_table_writer_round_trips_through_public_loader(tmp_path):
     """Write safe YAML that the public prior loader reads identically."""
-    document = DERIVATION.make_weight_document(
+    document = DERIVATION["make_weight_document"](
         'offline-derived',
         [4, 5],
         [3.0, 4.0],
         [1, 2],
         [5.0, 12.0],
         0.37,
-        {'decomposition_method': DERIVATION.DECOMPOSITION_METHOD},
+        {'decomposition_method': DERIVATION["DECOMPOSITION_METHOD"]},
     )
     path = tmp_path / 'derived.yaml'
 
-    DERIVATION.write_weight_table(path, document)
+    DERIVATION["write_weight_table"](path, document)
     prior, _ = load_prior(parse_prior({'path': str(path)}, 'prior'))
 
     assert prior.name == 'offline-derived'
     assert prior.global_weights == pytest.approx({4: 0.6, 5: 0.8})
     assert prior.segment_weights == pytest.approx({1: 5 / 13, 2: 12 / 13})
     assert prior.segment_variance_fraction == pytest.approx(0.37)
-    assert prior.metadata['decomposition_method'] == DERIVATION.DECOMPOSITION_METHOD
+    assert prior.metadata['decomposition_method'] == DERIVATION["DECOMPOSITION_METHOD"]
     assert (
         prior.metadata['basis_convention']
         == 'sequential_orthonormal_aperture'
@@ -197,12 +195,12 @@ def test_promoted_functions_preserve_derivation_round_trip():
     """The offline script recovers injected coefficients and their aperture OPD."""
     rows, columns = np.indices((9, 11), dtype=float)
     mask = ((rows - 4.0) / 3.5)**2 + ((columns - 5.0) / 4.5)**2 <= 1.0
-    raw = DERIVATION.build_raw_noll_basis(columns, rows, mask, (4, 5, 6, 7))
-    basis = DERIVATION.orthonormalize_basis(raw, mask)
+    raw = DERIVATION["build_raw_noll_basis"](columns, rows, mask, (4, 5, 6, 7))
+    basis = DERIVATION["orthonormalize_basis"](raw, mask)
     expected = np.array([2.0, -1.5, 0.25, 3.0])
     opd = np.tensordot(expected, basis, axes=1)
-    coefficients, model = DERIVATION.fit_orthonormal_basis(opd, mask, basis)
+    coefficients, model = DERIVATION["fit_orthonormal_basis"](opd, mask, basis)
 
     np.testing.assert_allclose(coefficients, expected, rtol=1e-13, atol=1e-13)
     np.testing.assert_allclose(model, opd, rtol=1e-13, atol=1e-13)
-    assert DERIVATION.noll_to_zernike(11) == (4, 0)
+    assert DERIVATION["noll_to_zernike"](11) == (4, 0)

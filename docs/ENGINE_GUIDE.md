@@ -1,6 +1,6 @@
 # Engine guide
 
-> Public exports, CLI transport, the generated reference and four example families have passed scoped validation. Batch execution and final combined validation remain open.
+> Public exports, CLI transport, the generated reference, batch correctness checks and five example families have passed scoped validation. Batch timing acceptance and final combined validation remain open.
 
 ## Configuration and preparation
 
@@ -93,7 +93,7 @@ Sampler recovery, weighted sampler quantiles and refined recovery are separate f
 
 Population members use named per-member streams, so extending a pool or changing chunking does not redefine existing members. A ranking policy supplies cuts, weighted standardized terms and top-k size. No library paper cohort, threshold or instrument selection policy is inferred.
 
-Batch source is defined and its integration/runtime checks are still pending. The source interfaces plan jobs, run/resume into an output directory and open metadata. A run report distinguishes completed, skipped, failed, duplicate, not-selected and orphaned jobs, preparations and revision counts. Resume verifies the recorded case/policy identity; a changed policy conflicts rather than silently reclassifying old outcomes. Full scientific case reading can require a backend, while controller/metadata imports stay separate. The current source signature is `run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False)`. `open_batch` reads metadata; product accessors load forecasts, observations and cases. Final acceptance still needs the integrated producer and its tests.
+Batch interfaces plan jobs, run/resume into an output directory and open metadata. A run report distinguishes completed, skipped, failed, duplicate, not-selected and orphaned jobs, preparations and revision counts. Resume verifies the recorded case/policy identity; a changed policy conflicts rather than silently reclassifying old outcomes. Full scientific case reading can require a backend, while controller/metadata imports stay separate. The signature is `run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False)`. `open_batch` reads metadata; product accessors load forecasts, observations and cases. The CPU lifecycle, two-GPU comparison and population example have passed their scoped checks; final combined validation remains open.
 
 Current artifacts record arrays, kernels, effective configuration, input hashes, code/environment provenance and schemas. Old study archives have no compatibility loader. The minimal CLI forecast, expected/noisy simulations and effective-configuration replay have passed; replay preserves the complete scientific arrays bit for bit. Keep the data, mask, kernel, covariance and nuisance span fixed when making a numerical comparison.
 
@@ -101,7 +101,7 @@ The plotting producer returns Axes and leaves saving to callers. It uses current
 
 ## Command examples
 
-Use new output directories and the committed input assets. The minimal CLI and HWO, monolithic, chromatic and kernel examples have executed successfully; the population batch example awaits batch validation.
+Use new output directories and the committed input assets. The minimal CLI and HWO, monolithic, chromatic, kernel and selected-member population examples have executed successfully.
 
 ```bash
 hwoslaps validate configs/minimal.yaml

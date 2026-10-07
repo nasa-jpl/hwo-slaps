@@ -47,7 +47,9 @@ def test_prepared_configuration_cannot_relabel_cached_science(minimal_mapping):
 
 
 @pytest.mark.parametrize("asset_kind", ["kernel", "model_kernel", "image"])
-def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, image_asset, asset_kind):
+def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, image_asset, asset_kind, tmp_path):
+    import hashlib
+    from hwoslaps.artifacts import load_forecast, save_forecast
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
     if asset_kind == "image":
@@ -71,6 +73,16 @@ def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, i
             assert str(path) in prepared.record["file_digests"]
             assert str(truth_path) in prepared.record["file_digests"]
         before = forecast(prepared, masses_msun=[1.0e8])
+        if asset_kind == "image":
+            image_digest = hashlib.sha256(original).hexdigest()
+            assert prepared.record["file_digests"][str(path)] == image_digest
+            assert before.provenance["file_digests"][str(path)] == image_digest
+            assert before.provenance["nuisance_names"] == list(prepared.nuisances.names)
+            assert before.provenance["nuisance_names"]
+            stored = load_forecast(save_forecast(before, tmp_path / "image-forecast.npz"))
+            assert stored.provenance == before.provenance
+            assert stored.provenance["file_digests"][str(path)] == image_digest
+            assert stored.provenance["nuisance_names"] == list(prepared.nuisances.names)
         try:
             path.write_bytes(original + b"changed")
             with pytest.raises(ValueError, match=rf"referenced file {re.escape(str(path))} changed"):
@@ -122,6 +134,10 @@ def test_identical_model_kernel_is_the_matched_limit(minimal_mapping):
 def test_execution_does_not_enter_configuration_digest(minimal_mapping):
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
 
+    # Execution left the config schema, but invalid pool sizes still refuse before preparation.
+    for workers in (0, -2, 1.5, True):
+        with pytest.raises(ValueError, match="reference_workers must be an integer >= 1"):
+            Execution(reference_workers=workers)
     with prepare_forecast(minimal_mapping) as reference, prepare_forecast(minimal_mapping, execution=Execution(engine="jax")) as jax:
         assert reference.record["config_digest"] == jax.record["config_digest"]
         assert reference.record["comparison_digest"] == jax.record["comparison_digest"]
@@ -132,15 +148,33 @@ def test_execution_does_not_enter_configuration_digest(minimal_mapping):
 
 
 @pytest.mark.parametrize("amplitude", [0.0, 1.0])
-def test_small_knowledge_error_has_matched_limit_and_quadratic_spurious_response(amplitude):
+def test_small_knowledge_error_has_matched_limit_and_quadratic_spurious_response(amplitude, tmp_path):
+    from hwoslaps.artifacts import load_forecast, save_forecast
     from hwoslaps.config.schema import load_config
     from hwoslaps.fisher.api import forecast, prepare_forecast
+    from hwoslaps.identity import json_ready
 
     path = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity" / "engine" / "p2_delta_knowledge_error.yaml"
     config = load_config(path)
     altered = config.replace({"psf": {"model": {"draw": {"amplitude_rms_nm": amplitude}}}})
     with prepare_forecast(altered) as prepared:
         result = forecast(prepared, masses_msun=[1.0e8], positions=[[0.0, 0.4]])
+        if amplitude == 1.0:
+            realized = prepared.psfs.model.knowledge_error
+            assert realized is not None
+            expected_draw = json_ready(realized.to_mapping())
+            assert expected_draw["draw"]["orthonormal_segment"] and expected_draw["draw"]["orthonormal_global"]
+            assert expected_draw["draw"]["coefficients"] == json_ready(realized.draw.coefficients.to_mapping())
+            expected_truth = prepared.psfs.truth_kernels.to_mapping()
+            expected_model = prepared.psfs.model_kernels.to_mapping()
+            assert result.provenance["knowledge_error"] == expected_draw
+            stored = load_forecast(save_forecast(result, tmp_path / "knowledge-error.npz"))
+            assert stored.provenance["knowledge_error"] == expected_draw
+            assert stored.provenance["truth_kernels"] == expected_truth
+            assert stored.provenance["model_kernels"] == expected_model
+            assert stored.provenance["file_digests"] == prepared.record["file_digests"]
+            for name in ("fisher_raw", "fisher_profiled", "amplitude_hat", "amplitude_spurious"):
+                np.testing.assert_array_equal(getattr(stored, name), getattr(result, name))
     if amplitude == 0.0:
         matched = config.replace({"psf": {"model": {"kind": "matched"}}})
         with prepare_forecast(matched) as prepared:
@@ -189,6 +223,7 @@ def test_closed_preparation_refuses_forecast(minimal_mapping, engine):
 
 
 def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_mapping, tmp_path):
+    from hwoslaps.artifacts import load_forecast, save_forecast
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
     kernel_path = tmp_path / "delta.npy"
@@ -207,6 +242,20 @@ def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_map
         result = forecast(prepared, masses_msun=[1.0e8])
         assert result.provenance["nuisance_rank"] == 0
         assert result.provenance["gram_condition_number"] is None
+        assert result.provenance["nuisance_names"] == ["source.light.light.centre_y"]
+        stored = load_forecast(save_forecast(result, tmp_path / "rank-zero.npz"))
+        assert stored.provenance == result.provenance
+        assert stored.provenance["nuisance_names"] == ["source.light.light.centre_y"]
+    minimal_mapping["forecast"]["nuisances"]["fixed"] = ["*"]
+    with prepare_forecast(minimal_mapping) as prepared:
+        assert prepared.nuisances.names == ()
+        assert prepared.nuisances.images.shape == (0, *prepared.mask.shape)
+        result = forecast(prepared, masses_msun=[1.0e8])
+        assert result.provenance["nuisance_names"] == []
+        np.testing.assert_array_equal(result.fisher_profiled, result.fisher_raw)
+        stored = load_forecast(save_forecast(result, tmp_path / "empty-nuisances.npz"))
+        assert stored.provenance == result.provenance
+        assert stored.provenance["nuisance_names"] == []
 
 
 @pytest.mark.parametrize("publication", ["after_capture", "after_read"])

@@ -33,6 +33,13 @@ Read a batch with `hwoslaps.batch.open_batch(output_dir)`, and products with
 completed paths, member values, loaded catalog identity when present, source revisions
 and job seeds.
 
-Budget: 900 s CPU for the selected member. Measured runtime and light-group sampling:
-pending. Forecast provenance and saved observations retain actual sampling mappings.
-Scientific interpretation requires case acceptance and sampler-convergence checks.
+Budget: 900 s CPU for the selected member. On 2026-10-07, source `b086d97` completed
+both selected jobs in 305.46 s on XTX using the reference engine, one CPU worker and
+one thread per BLAS library. This includes startup, preparation, publication and cleanup;
+the separate plan and status commands took 0.665 s and 0.465 s. No owned workers remained.
+
+The matched forecast covers 169 positions; its source light-group within-pixel variation
+is 0.13233923708414147. The nonlinear case records generation, light-profile and blurring
+oversampling of 4. Both nonlinear roles returned `sampler_only`; the signed statistic
+was 12154.744271680733. These illustrative results establish no posterior-convergence
+claim. Scientific interpretation requires case acceptance and sampler-convergence checks.

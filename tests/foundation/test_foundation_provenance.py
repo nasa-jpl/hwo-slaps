@@ -82,7 +82,14 @@ def test_capture_records_the_imported_package_from_an_unrelated_working_director
     assert Path(record["package_path"]) == actual_package
     assert record["hwoslaps_version"] == "1.0.0"
     assert record["command"] == ["validate"]
+    assert record["python"] == ".".join(map(str, sys.version_info[:3]))
     assert record["packages"]["numpy"]["version"] == importlib.metadata.version("numpy")
+    try:
+        autolens_version = importlib.metadata.version("autolens")
+    except importlib.metadata.PackageNotFoundError:
+        assert record["packages"]["autolens"] is None
+    else:
+        assert record["packages"]["autolens"]["version"] == autolens_version
 
 
 def test_capture_reports_live_blas_thread_counts():

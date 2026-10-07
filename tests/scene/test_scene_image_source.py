@@ -4,6 +4,8 @@ import hashlib
 import json
 import math
 import pickle
+import multiprocessing
+import os
 
 import numpy as np
 import pytest
@@ -47,6 +49,8 @@ LOADER_ROWS = [
     ("one-dimensional", dict(sb=np.full(8, 1.0 / (0.04 * 8))), "2-D"),
     ("side-below-8", dict(sb=np.full((8, 7), 1.0 / (0.04 * 56))), "between 8 and 4096"),
     ("side-above-4096", dict(sb=np.full((8, 4097), 1.0 / (0.04 * 8 * 4097))), "between 8 and 4096"),
+    ("first-side-below-8", dict(sb=np.full((7, 8), 1.0 / (0.04 * 56))), "between 8 and 4096"),
+    ("first-side-above-4096", dict(sb=np.full((4097, 8), 1.0 / (0.04 * 4097 * 8))), "between 8 and 4096"),
     ("float32-samples", dict(sb=_unit_sb().astype(np.float32)), "float64"),
     ("zero-pixel-scale", dict(pixel_scale=np.asarray(0.0)), "positive"),
     ("float32-pixel-scale", dict(pixel_scale=np.asarray(0.2, dtype=np.float32)), "float64 scalar"),
@@ -154,6 +158,8 @@ def test_image_profile_samples_bilinearly_with_a_zero_pad():
     assert edge_low == pytest.approx(0.5 * amplitude * sb[0, 3], rel=1.0e-14)
     assert edge_high == pytest.approx(0.5 * amplitude * sb[ny - 1, 3], rel=1.0e-14)
     assert outside_low == outside_high == outside_right == 0.0
+    with pytest.raises(NotImplementedError, match="not radially symmetric"):
+        profile.image_2d_via_radii_from(np.asarray([0.1]))
 
 
 @pytest.mark.backend
@@ -198,10 +204,36 @@ def test_image_profile_matches_lenstronomy_interpolation():
 
 @pytest.mark.backend
 def test_image_profile_survives_pickling():
+    from hwoslaps.fisher.engines.reference import ordered_process_map
+
     profile = _profile(rotation_deg=10.0, flux_scale=1.3, size_scale=1.2)
     points = [(0.3, -0.2), (0.1, -0.1)]
     before = _evaluate(profile, points)
-    np.testing.assert_array_equal(_evaluate(pickle.loads(pickle.dumps(profile)), points), before)
+    payload = pickle.dumps(profile)
+    np.testing.assert_array_equal(_evaluate(pickle.loads(payload), points), before)
+    previous_children = {child.pid for child in multiprocessing.active_children()}
+    child_pid, start_method, actual_class, values = list(ordered_process_map(
+        _spawn_image_profile_evaluation, [(payload, points)], workers=1,
+        initializer=_spawn_image_profile_initializer, initargs=()))[0]
+    assert child_pid != os.getpid() and start_method == "spawn"
+    assert actual_class == "hwoslaps.scene.image_profile.ImageLightProfile"
+    assert np.all(np.isfinite(values))
+    np.testing.assert_array_equal(values, before)
+    assert {child.pid for child in multiprocessing.active_children()} <= previous_children
+
+
+def _spawn_image_profile_initializer():
+    pass
+
+
+def _spawn_image_profile_evaluation(arguments):
+    from hwoslaps.scene.image_profile import ImageLightProfile
+
+    payload, points = arguments
+    profile = pickle.loads(payload)
+    assert type(profile) is ImageLightProfile
+    return (os.getpid(), multiprocessing.get_start_method(),
+            type(profile).__module__ + "." + type(profile).__name__, _evaluate(profile, points))
 
 
 SIGMA_PIXELS = 6.0
@@ -259,11 +291,14 @@ def _edge_frame():
     ("point", {}, "unresolved"),
     ("non-finite", {}, "finite 2-D array"),
     ("galaxy", {"bin_factor": 0}, "bin_factor"),
+    ("galaxy", {"bin_factor": -1}, "bin_factor"),
+    ("galaxy", {"bin_factor": 1.5}, "bin_factor"),
+    ("galaxy", {"bin_factor": True}, "bin_factor"),
     ("galaxy", {"pixel_scale_arcsec": 0.01}, "exactly one"),
     ("galaxy", {"half_light_radius_arcsec": None}, "exactly one"),
     ("galaxy", {"half_light_radius_arcsec": None, "pixel_scale_arcsec": -0.01}, "positive and finite"),
 ], ids=["footprint-at-the-edge", "nothing-above-the-threshold", "unresolved-centre", "non-finite-input",
-        "bin-factor-zero", "both-scales", "no-scale", "negative-pixel-scale"])
+        "bin-factor-zero", "bin-factor-negative", "bin-factor-fraction", "bin-factor-bool", "both-scales", "no-scale", "negative-pixel-scale"])
 def test_prepare_image_asset_refuses_unusable_inputs(image, keywords, fragment):
     frames = {"edge": _edge_frame, "galaxy": _galaxy_frame, "point": lambda: np.pad(np.ones((1, 1)), 20),
               "non-finite": lambda: np.where(np.indices((96, 96))[0] == 50, np.inf, _galaxy_frame())}

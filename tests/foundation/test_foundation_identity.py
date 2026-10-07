@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.identity import (
-    KernelIdentity, array_digest, canonical_json, file_digest, mapping_digest, text_digest,
+    KernelIdentity, array_digest, canonical_json, file_digest, mapping_digest, native_ready, text_digest,
 )
 
 BASE = np.arange(6, dtype="<f8").reshape(2, 3)
@@ -63,6 +63,12 @@ def test_array_digest_format(values, expected):
 def test_mapping_digest_canonical_form(value, text):
     assert canonical_json(value) == text
     assert mapping_digest(value) == hashlib.sha256(text.encode("utf-8")).hexdigest()
+    native = native_ready(value)
+    assert canonical_json(native) == text and mapping_digest(native) == mapping_digest(value)
+    if any(isinstance(key, int) for key in value):
+        assert native == {4: "a", 10: "b"}
+    else:
+        assert native == json.loads(text)
 
 
 @pytest.mark.parametrize("value, error", [
@@ -77,6 +83,11 @@ def test_mapping_digest_canonical_form(value, text):
 def test_mapping_digest_refuses_values_without_one_canonical_form(value, error):
     with pytest.raises(error):
         mapping_digest(value)
+    if isinstance(value, dict):
+        with pytest.raises(error):
+            native_ready(value)
+    else:
+        assert native_ready(value) == [["a", 1]]  # only mapping_digest requires a top-level mapping
 
 
 def test_file_digest_streams_large_files(tmp_path):

@@ -94,15 +94,43 @@ VALID_TABLE = {"name": "flight_prior", "segment_variance_fraction": 0.4, "global
      {4: 2 / np.sqrt(53), 5: 7 / np.sqrt(53)}, {}),
 ], ids=("both-sides-and-metadata", "original-global-only"))
 def test_prior_file_load_normalizes_and_preserves_normalized_reload(tmp_path, document,
-                                                                  global_expected, segment_expected):
+                                                                  global_expected, segment_expected, monkeypatch):
     first_path = tmp_path / "raw.yaml"
     first_path.write_text(yaml.safe_dump(document), encoding="utf-8")
-    first, _ = load_prior(ModeWeightPriorSpec("path", None, first_path, None))
+    original = first_path.read_bytes()
+    replacement = yaml.safe_dump({"name": "published_later", "segment_variance_fraction": 0.7,
+                                  "global_weights": {4: 12.0, 5: 5.0},
+                                  "metadata": {"source": "later_epoch"}}).encode()
+    read_actual_bytes = Path.read_bytes
+    published = []
+
+    def publish_after_actual_read(path):
+        content = read_actual_bytes(path)
+        if path == first_path and not published:
+            first_path.write_bytes(replacement)
+            published.append(True)
+        return content
+
+    try:
+        with monkeypatch.context() as scope:
+            scope.setattr(Path, "read_bytes", publish_after_actual_read)
+            first, captured_sha = load_prior(ModeWeightPriorSpec("path", None, first_path, None))
+        assert published == [True] and first_path.read_bytes() == replacement
+        assert captured_sha == hashlib.sha256(original).hexdigest()
+    finally:
+        first_path.write_bytes(original)
     assert dict(first.global_weights) == pytest.approx(global_expected, rel=1e-15, abs=0)
     assert dict(first.segment_weights) == pytest.approx(segment_expected, rel=1e-15, abs=0)
     assert first.name == document["name"]
     assert first.segment_variance_fraction == document["segment_variance_fraction"]
     assert dict(first.metadata) == document.get("metadata", {})
+    expected_modes = tuple(sorted(global_expected))
+    expected_values = np.random.default_rng(11).standard_normal(len(expected_modes)) * np.array(
+        [global_expected[noll] for noll in expected_modes])
+    expected_values *= 17.0 / np.linalg.norm(expected_values)
+    actual_draw = draw_global_orthonormal(np.random.default_rng(11), first, 17.0)
+    np.testing.assert_allclose([actual_draw[noll] for noll in expected_modes], expected_values,
+                               rtol=1e-15, atol=0)
     normalized = {"name": first.name, "segment_variance_fraction": first.segment_variance_fraction,
                   "global_weights": dict(first.global_weights), "segment_weights": dict(first.segment_weights),
                   "metadata": dict(first.metadata)}

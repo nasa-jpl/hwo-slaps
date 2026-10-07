@@ -1,6 +1,0 @@
-# Illustrative configurable exposure/noise experiment; no mission forecast implied.
-run_name: exposure_comparison
-plotting:
-  enabled: false
-observation:
-  exposure_time: 2000.0
