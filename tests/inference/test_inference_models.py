@@ -139,8 +139,7 @@ def _family_overrides(family,image_asset):
     elif family=="image":overrides["scene"]["source"]={"light":{"light":{"type":"Image","centre":[-.03,.08],
         "asset_path":str(image_asset),"rotation_deg":12.,"total_flux":.2}}}
     elif family in {"freed_sis","freed_point_mass"}:
-        overrides["scene"]["subhalo"]={"type":"SIS" if family=="freed_sis" else "PointMass",
-                                          "concentration":None}
+        overrides["scene"]["subhalo"]={"type":"SIS" if family=="freed_sis" else "PointMass"}
     return overrides
 
 
