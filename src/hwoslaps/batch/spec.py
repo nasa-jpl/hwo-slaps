@@ -13,7 +13,7 @@ from ..config.checks import (Boolean, ConfigError, Integer, Key, ListOf, MapOf, 
 from ..config.loading import read_yaml
 from ..config.schema import EngineConfig, ROOT_TABLE, compose_config, resolve_config
 from ..fisher.api import Execution
-from ..identity import json_ready, mapping_digest
+from ..identity import mapping_digest, native_ready
 from ..inference.result import RoleStatus
 from ..inference.settings import FitSpec, RefineSettings, SamplerSettings
 from ..population.sampling import POPULATION_TABLE, PopulationSpec
@@ -24,17 +24,6 @@ _COUNT = Integer(min=1)
 _NAME = Text(pattern=r'[A-Za-z0-9_.-]+')
 _ARMS = Nullable(ListOf(_NAME, min_length=1, unique=True))
 _MASSES = ListOf(_POSITIVE, min_length=1, unique=True)
-
-
-def _native_keys(native, normalized):
-    """Keep normalized portable leaves without coercing scientific mapping keys."""
-    if isinstance(native, Mapping):
-        return {(key if isinstance(key, str) else int(key)): _native_keys(
-                    value, normalized[key if isinstance(key, str) else str(int(key))])
-                for key, value in native.items()}
-    if isinstance(native, (list, tuple)):
-        return [_native_keys(value, normalized[index]) for index, value in enumerate(native)]
-    return normalized
 
 
 @dataclass(frozen=True)
@@ -234,7 +223,7 @@ class BatchSpec:
                            'forecast': None if self.forecast is None else self.forecast.to_mapping(),
                            'nonlinear': {family.name: family.to_mapping() for family in self.nonlinear},
                            'execution': self.execution.to_mapping()}
-        return _native_keys(native, json_ready(native))
+        return native_ready(native)
 
     def digest(self):
         return self.captured_digest(base_config_digest=self.base.digest(),

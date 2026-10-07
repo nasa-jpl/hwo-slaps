@@ -28,7 +28,7 @@ from numpy.typing import ArrayLike
 
 __all__ = [
     "KernelIdentity", "array_digest", "canonical_json", "file_digest", "json_ready",
-    "mapping_digest", "read_file_snapshot", "text_digest", "validate_file_manifest", "validate_loaded_file",
+    "mapping_digest", "native_ready", "read_file_snapshot", "text_digest", "validate_file_manifest", "validate_loaded_file",
 ]
 
 _BLOCK_BYTES = 1 << 20
@@ -50,9 +50,10 @@ def _is_integer(value: Any) -> bool:
     return isinstance(value, Integral) and not isinstance(value, (bool, np.bool_))
 
 
-def _ready(value: Any, path: str) -> Any:
+def _ready(value: Any, path: str, *, native_keys: bool = False) -> Any:
     if isinstance(value, Mapping):
-        rendered: dict[str, Any] = {}
+        rendered: dict[str | int, Any] = {}
+        names = set()
         for key, item in value.items():
             if isinstance(key, str):
                 name = key
@@ -60,12 +61,15 @@ def _ready(value: Any, path: str) -> Any:
                 name = str(int(key))
             else:
                 raise TypeError(f"{path or 'mapping'}: key {key!r} is neither a string nor an integer")
-            if name in rendered:
+            if name in names:
                 raise ValueError(f"{path or 'mapping'}: keys {key!r} and {name!r} render to the same text")
-            rendered[name] = _ready(item, f"{path}.{name}" if path else name)
+            names.add(name)
+            output_key = key if isinstance(key, str) else int(key)
+            rendered[output_key if native_keys else name] = _ready(
+                item, f"{path}.{name}" if path else name, native_keys=native_keys)
         return rendered
     if isinstance(value, (list, tuple)):
-        return [_ready(item, f"{path}[{index}]") for index, item in enumerate(value)]
+        return [_ready(item, f"{path}[{index}]", native_keys=native_keys) for index, item in enumerate(value)]
     if isinstance(value, (bool, np.bool_)):
         return bool(value)
     if _is_integer(value):
@@ -93,6 +97,15 @@ def json_ready(value: Any) -> Any:
     colliding keys, arrays and other types raise, naming the key path.
     """
     return _ready(value, "")
+
+
+def native_ready(value: Any) -> Any:
+    """Apply the portable value policy while preserving string/integer mapping keys.
+
+    Native configuration and YAML transport use this form; canonical JSON and
+    digests keep ``json_ready``. All leaf normalization and collision rules agree.
+    """
+    return _ready(value, "", native_keys=True)
 
 
 def canonical_json(value: Any) -> str:

@@ -19,7 +19,7 @@ from typing import Any, TYPE_CHECKING
 import numpy as np
 
 from .config.loading import dump_yaml
-from .identity import canonical_json, json_ready, read_file_snapshot
+from .identity import canonical_json, json_ready, native_ready, read_file_snapshot
 
 if TYPE_CHECKING:
     from .fisher.result import ForecastResult
@@ -125,19 +125,8 @@ def write_json(path, payload: Mapping[str, Any]) -> Path:
     return _publish(path, lambda stream: stream.write(text.encode("utf-8")))
 
 
-def _yaml_keys(native, normalized):
-    """Keep validated JSON-normalized leaves with the native YAML mapping keys."""
-    if isinstance(native, Mapping):
-        return {(key if isinstance(key, str) else int(key)): _yaml_keys(
-                    value, normalized[key if isinstance(key, str) else str(int(key))])
-                for key, value in native.items()}
-    if isinstance(native, (list, tuple)):
-        return [_yaml_keys(value, normalized[index]) for index, value in enumerate(native)]
-    return normalized
-
-
 def write_yaml(path, mapping: Mapping[str, Any]) -> Path:
-    text = dump_yaml(_yaml_keys(mapping, json_ready(mapping)))
+    text = dump_yaml(native_ready(mapping))
     return _publish(path, lambda stream: stream.write(text.encode("utf-8")))
 
 
