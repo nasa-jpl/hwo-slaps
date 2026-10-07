@@ -52,6 +52,7 @@ def test_nonlinear_reference_uses_the_actual_999_forecast_arm(optical_batch_spec
     optical = deepcopy(base.to_mapping()['config']['psf']['truth'])
     # The physical pupil period must exceed the actual 999-pixel kernel extent.
     optical['pupil']['pixels'] = 512
+    optical['wavefront'] = {'segment_hexikes': {0: {4: .5}}, 'zernikes': {4: .25}}
     wide = {**optical, 'kernel_shape': [999, 999]}
     narrow = {**optical, 'kernel_shape': [51, 51]}
     family = {'arms': ['fit'], 'forecast_arm': 'fore', 'trials': {'kind': 'explicit', 'explicit': [
