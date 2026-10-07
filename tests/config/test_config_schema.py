@@ -291,6 +291,10 @@ def test_cross_section_rules(row, path, minimal_mapping):
     ("nuisances", {"wavefront": {"modes": {"zernikes": {"nolls": [1]}}}}, "forecast.nuisances.wavefront.modes.zernikes.nolls"),
     ("nuisances", {"wavefront": {"modes": {"zernikes": {"nolls": [4]}}, "step_nm": {"segment_hexikes": 1}}},
      "forecast.nuisances.wavefront.step_nm"),
+    pytest.param("mask", {"kind": "annulus", "inner_arcsec": 0.2, "outer_arcsec": 0.3, "radius": 1.0},
+                 "forecast.mask.radius", id="mask_annulus_unknown_key"),
+    pytest.param("nuisances", {"fixed": ["lens.*", 3]},
+                 "forecast.nuisances.fixed[1]", id="fixed_nontext_item"),
 ))
 def test_forecast_inputs_reject_invalid_layout_mask_and_nuisance_values(section, value, path, minimal_mapping):
     candidate = (load_config(PARITY / "p1_optical_matched.yaml").to_mapping()
