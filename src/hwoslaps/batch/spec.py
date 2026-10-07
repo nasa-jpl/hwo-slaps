@@ -296,10 +296,10 @@ def _arms(values):
 
 def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
     directory = Path(base_dir).expanduser().resolve()
+    def resolve_path(filename, check):
+        path = Path(filename).expanduser()
+        return str((path if path.is_absolute() else directory / path).resolve())
     if isinstance(mapping, Mapping) and isinstance(mapping.get('config'), Mapping):
-        def resolve_path(filename, check):
-            path = Path(filename).expanduser()
-            return str((path if path.is_absolute() else directory / path).resolve())
         mapping = {**mapping, 'config': ROOT_TABLE.transform_paths(mapping['config'], resolve_path)}
     values = BATCH_TABLE.read(mapping, '')
     source = values['config']
@@ -311,7 +311,8 @@ def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
                  else directory / Path(path).expanduser() for path in paths]
         composed = compose_config(paths, overrides=values['overrides'], base_dir=directory)
     base = resolve_config(composed, base_dir=directory)
-    arms = tuple(Arm(**record) for record in values['arms'])
+    arms = tuple(Arm(**{**record, 'overrides': ROOT_TABLE.transform_paths(record['overrides'], resolve_path)})
+                 for record in values['arms'])
     names = [arm.name for arm in arms]
     if len(set(names)) != len(names):
         raise ConfigError('arms', 'arm names must be unique')
