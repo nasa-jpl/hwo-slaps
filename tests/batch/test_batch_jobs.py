@@ -21,7 +21,9 @@ def _seed(entropy, name, *indices):
                .generate_state(1, dtype=np.uint64)[0])
 
 
-def test_plan_enumerates_job_ids_in_canonical_order(tiny_batch_spec):
+def test_plan_enumerates_job_ids_in_canonical_order(tiny_batch_spec, tmp_path):
+    from multiprocessing import Pipe
+    from hwoslaps.config.schema import parse_config
     spec = tiny_batch_spec(arms=[{'name': 'a'}, {'name': 'b'}],
                           simulate={'inject': True, 'noise': True, 'replicates': 2},
                           nonlinear={'n': deepcopy(_FAMILY)})
@@ -35,6 +37,22 @@ def test_plan_enumerates_job_ids_in_canonical_order(tiny_batch_spec):
                 'nonlinear/n/m1.000000e+08_y+0.100000_x+0.200000/r001/a0'))
     assert [job.job_id for job in plan.jobs] == expected
     assert len(plan.jobs) == 20
+    for job in plan.jobs:
+        original = job.config.to_mapping()
+        receiver, sender = Pipe(duplex=False)
+        try:
+            sender.send(job.payload(tmp_path, 1, spec.execution).to_mapping())
+            received = receiver.recv()
+        finally:
+            receiver.close()
+            sender.close()
+        assert received['config_mapping'] == original
+        assert received['parameters'] == job.parameters
+        assert parse_config(received['config_mapping']).digest() == job.config_digest
+        if job.kind == 'nonlinear':
+            assert parse_config(received['parameters']['forecast_config_mapping']).digest() == job.parameters['forecast_config_digest']
+        received['config_mapping']['run_name'] = 'caller_mutated'
+        assert job.config.to_mapping() == original
 
 
 def test_job_seeds_follow_the_documented_names(tiny_batch_spec):
