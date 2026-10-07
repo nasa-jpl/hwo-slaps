@@ -33,6 +33,22 @@ def test_detector_response_matches_hand_equations(count, read_variance):
     assert exposure.signal_adu(7.0) == 28.0
     assert exposure.rate_from_adu(28.0) == 7.0
 
+    # The original source-SNR observable, derived from current detector products.
+    source = np.array([[0.2, 0.5, 1.0], [1.5, 2.0, 3.0], [0.4, 0.8, 1.2]])
+    snr_maps = []
+    for time in (50.0, 200.0, 800.0):
+        depth = Exposure(Detector(2.0, 3.0, 0.01), exposure_time_s=time, sky_rate_e_per_s=0.4)
+        expected_snr = source * time / np.sqrt(source * time + 0.01 * time + 0.4 * time + 3.0**2)
+        actual_snr = depth.signal_adu(source) / depth.noise_map_adu(source)
+        np.testing.assert_allclose(actual_snr, expected_snr, rtol=1e-12, atol=1e-12)
+        assert float(actual_snr.max()) == pytest.approx(float(expected_snr.max()))
+        snr_maps.append(actual_snr)
+    assert np.all(snr_maps[1] > snr_maps[0])
+    assert np.all(snr_maps[2] > snr_maps[1])
+    blank = Exposure(Detector(1.0, 0.0, 0.0), exposure_time_s=100.0, sky_rate_e_per_s=1.0)
+    assert np.max(blank.signal_e(np.zeros((5, 5)))) == 0.0
+    assert np.max(blank.signal_adu(np.zeros((5, 5))) / blank.noise_map_adu(np.zeros((5, 5)))) == 0.0
+
 
 def test_detector_moments_follow_the_paper_operation_order():
     # The P1 and P3 block of the parity anchors, on rates whose sums round in binary.
