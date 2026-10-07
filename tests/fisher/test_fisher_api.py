@@ -47,7 +47,9 @@ def test_prepared_configuration_cannot_relabel_cached_science(minimal_mapping):
 
 
 @pytest.mark.parametrize("asset_kind", ["kernel", "model_kernel", "image"])
-def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, image_asset, asset_kind):
+def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, image_asset, asset_kind, tmp_path):
+    import hashlib
+    from hwoslaps.artifacts import load_forecast, save_forecast
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
     if asset_kind == "image":
@@ -71,6 +73,16 @@ def test_rewritten_referenced_file_is_refused_before_forecast(minimal_mapping, i
             assert str(path) in prepared.record["file_digests"]
             assert str(truth_path) in prepared.record["file_digests"]
         before = forecast(prepared, masses_msun=[1.0e8])
+        if asset_kind == "image":
+            image_digest = hashlib.sha256(original).hexdigest()
+            assert prepared.record["file_digests"][str(path)] == image_digest
+            assert before.provenance["file_digests"][str(path)] == image_digest
+            assert before.provenance["nuisance_names"] == list(prepared.nuisances.names)
+            assert before.provenance["nuisance_names"]
+            stored = load_forecast(save_forecast(before, tmp_path / "image-forecast.npz"))
+            assert stored.provenance == before.provenance
+            assert stored.provenance["file_digests"][str(path)] == image_digest
+            assert stored.provenance["nuisance_names"] == list(prepared.nuisances.names)
         try:
             path.write_bytes(original + b"changed")
             with pytest.raises(ValueError, match=rf"referenced file {re.escape(str(path))} changed"):
@@ -211,6 +223,7 @@ def test_closed_preparation_refuses_forecast(minimal_mapping, engine):
 
 
 def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_mapping, tmp_path):
+    from hwoslaps.artifacts import load_forecast, save_forecast
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
     kernel_path = tmp_path / "delta.npy"
@@ -229,6 +242,20 @@ def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_map
         result = forecast(prepared, masses_msun=[1.0e8])
         assert result.provenance["nuisance_rank"] == 0
         assert result.provenance["gram_condition_number"] is None
+        assert result.provenance["nuisance_names"] == ["source.light.light.centre_y"]
+        stored = load_forecast(save_forecast(result, tmp_path / "rank-zero.npz"))
+        assert stored.provenance == result.provenance
+        assert stored.provenance["nuisance_names"] == ["source.light.light.centre_y"]
+    minimal_mapping["forecast"]["nuisances"]["fixed"] = ["*"]
+    with prepare_forecast(minimal_mapping) as prepared:
+        assert prepared.nuisances.names == ()
+        assert prepared.nuisances.images.shape == (0, *prepared.mask.shape)
+        result = forecast(prepared, masses_msun=[1.0e8])
+        assert result.provenance["nuisance_names"] == []
+        np.testing.assert_array_equal(result.fisher_profiled, result.fisher_raw)
+        stored = load_forecast(save_forecast(result, tmp_path / "empty-nuisances.npz"))
+        assert stored.provenance == result.provenance
+        assert stored.provenance["nuisance_names"] == []
 
 
 @pytest.mark.parametrize("publication", ["after_capture", "after_read"])
