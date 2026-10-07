@@ -49,6 +49,8 @@ LOADER_ROWS = [
     ("one-dimensional", dict(sb=np.full(8, 1.0 / (0.04 * 8))), "2-D"),
     ("side-below-8", dict(sb=np.full((8, 7), 1.0 / (0.04 * 56))), "between 8 and 4096"),
     ("side-above-4096", dict(sb=np.full((8, 4097), 1.0 / (0.04 * 8 * 4097))), "between 8 and 4096"),
+    ("first-side-below-8", dict(sb=np.full((7, 8), 1.0 / (0.04 * 56))), "between 8 and 4096"),
+    ("first-side-above-4096", dict(sb=np.full((4097, 8), 1.0 / (0.04 * 4097 * 8))), "between 8 and 4096"),
     ("float32-samples", dict(sb=_unit_sb().astype(np.float32)), "float64"),
     ("zero-pixel-scale", dict(pixel_scale=np.asarray(0.0)), "positive"),
     ("float32-pixel-scale", dict(pixel_scale=np.asarray(0.2, dtype=np.float32)), "float64 scalar"),
@@ -156,6 +158,8 @@ def test_image_profile_samples_bilinearly_with_a_zero_pad():
     assert edge_low == pytest.approx(0.5 * amplitude * sb[0, 3], rel=1.0e-14)
     assert edge_high == pytest.approx(0.5 * amplitude * sb[ny - 1, 3], rel=1.0e-14)
     assert outside_low == outside_high == outside_right == 0.0
+    with pytest.raises(NotImplementedError, match="not radially symmetric"):
+        profile.image_2d_via_radii_from(np.asarray([0.1]))
 
 
 @pytest.mark.backend
