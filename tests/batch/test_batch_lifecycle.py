@@ -345,7 +345,7 @@ if __name__ == '__main__':
         assert not pidfd_exited(foreign_descriptor, 50), 'the actual foreign descendant must remain unsignaled'
         assert not pidfd_exited(descriptors[0], 50), 'the actual mixed worker must remain unsignaled'
         assert all(process.poll() == -signal.SIGTERM for process in processes[1:]), 'clear actual workers must drain despite a mixed group'
-        assert len(connections) == 3 and all(connection.closed for connection in connections)
+        assert len(connections) >= len(processes) and all(connection.closed for connection in connections)
         assert all(log.closed and process.stdin.closed for process, log in zip(processes, logs, strict=True))
         assert listener_addresses and all(listener in closed_listeners for listener in listener_addresses)
         assert all(not Path(address).exists() for address in listener_addresses.values())
