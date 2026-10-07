@@ -48,6 +48,15 @@ def tiny_gaussian_kernel():
 
 
 @pytest.fixture
+def integer_wavefront_truth():
+    """Small real hex pupil with nonempty integer global and segment coefficient keys."""
+    return {"kind": "optical", "pupil": {"kind": "hex_segmented", "diameter_m": 1.1,
+            "pixels": 32, "supersampling": 1, "rings": 0, "segment_point_to_point_m": 1.0, "gap_m": 0.0},
+            "focal_length_m": 20.0, "wavelength_nm": 500.0, "detector_oversampling": 4,
+            "kernel_shape": [11, 11], "wavefront": {"zernikes": {4: 2.0}, "segment_hexikes": {0: {2: 1.0}}}}
+
+
+@pytest.fixture
 def image_asset(tmp_path):
     """Path of an image asset prepared from three elliptical Gaussians on 48 x 48 pixels at 0.01 arcsec.
 

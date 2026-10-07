@@ -200,6 +200,19 @@ def test_text_writers_use_finite_canonical_values_and_refuse_duplicate_json_keys
     malformed.write_text('{"schema":"hwoslaps.case","version":1,"version":2,"result":{}}')
     with pytest.raises(ValueError, match="duplicate"):
         load_case(malformed)
+    from hwoslaps.config.loading import read_yaml
+    native = {"coefficients": {np.int64(0): {np.int64(2): np.float64(1.25)}}, "signed_zero": -0.0,
+              "path": tmp_path / "kernel.npy", "flags": (np.bool_(True), None)}
+    yaml_path = write_yaml(tmp_path / "native.yaml", native)
+    restored = read_yaml(yaml_path)
+    assert restored["coefficients"] == {0: {2: 1.25}}
+    assert restored["path"] == str(tmp_path / "kernel.npy") and restored["flags"] == [True, None]
+    assert restored["signed_zero"] == 0.0 and not np.signbit(restored["signed_zero"])
+    for name, invalid in (("nonfinite", {"value": np.inf}), ("collision", {4: 1, "4": 2})):
+        destination = tmp_path / (name + ".yaml")
+        with pytest.raises(ValueError):
+            write_yaml(destination, invalid)
+        assert not destination.exists()
 
 
 @pytest.mark.parametrize("defect,match", [

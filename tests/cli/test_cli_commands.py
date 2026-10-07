@@ -91,9 +91,13 @@ def test_forecast_usage_errors_write_nothing(minimal_mapping, write_config, tmp_
 
 
 @pytest.mark.backend
-def test_simulate_and_forecast_write_loadable_artifacts_and_replay_exactly(minimal_mapping, write_config, tmp_path):
+@pytest.mark.parametrize("psf_kind", ["kernel", "integer_wavefront"])
+def test_simulate_and_forecast_write_loadable_artifacts_and_replay_exactly(
+        minimal_mapping, write_config, tmp_path, psf_kind, integer_wavefront_truth):
     from hwoslaps.artifacts import load_forecast, load_observation
     from hwoslaps.config.schema import load_config
+    if psf_kind == "integer_wavefront":
+        minimal_mapping["psf"]["truth"] = integer_wavefront_truth
     minimal_mapping["scene"]["injection"] = {"mass_msun": 1e8, "position": {"kind": "direct", "centre": [0.0, 0.8]}}
     path = write_config(minimal_mapping)
     for name, flags in (("expected", ["--expected"]), ("noisy", ["--noise-seed", "11"]),
@@ -107,6 +111,8 @@ def test_simulate_and_forecast_write_loadable_artifacts_and_replay_exactly(minim
         record = json.loads((output / "provenance.json").read_text())
         assert record["operation"] == "simulate"
         assert record["config_digest"] == observed.config_digest
+        effective = output / "effective_config.yaml"
+        assert load_config(effective).digest() == load_config(path).digest()
     output = tmp_path / "forecast"
     completed = run_cli("forecast", path, "--masses", "1e7", "1e8", "1e9", "-o", output)
     assert completed.returncode == 0, completed.stderr
@@ -114,6 +120,9 @@ def test_simulate_and_forecast_write_loadable_artifacts_and_replay_exactly(minim
     assert json.loads((output / "provenance.json").read_text())["config_digest"] == first.provenance["config_digest"]
     effective = output / "effective_config.yaml"
     assert load_config(effective).digest() == load_config(path).digest()
+    if psf_kind == "integer_wavefront":
+        truth = load_config(effective).to_mapping()["psf"]["truth"]["wavefront"]
+        assert truth["zernikes"] == {4: 2.0} and truth["segment_hexikes"] == {0: {2: 1.0}}
     replay = tmp_path / "replay"
     completed = run_cli("forecast", effective, "--masses", "1e7", "1e8", "1e9", "-o", replay)
     assert completed.returncode == 0, completed.stderr
