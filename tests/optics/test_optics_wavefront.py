@@ -89,7 +89,7 @@ def test_selection_grammar_and_order(p1_pupil, circular_pupil):
                            ({"segment_hexikes": {"segments": "every", "nolls": [1]}},
                             f"{path}.segment_hexikes.segments"),
                            ({"segment_hexikes": {"segments": ["zero"], "nolls": [1]}},
-                            f"{path}.segment_hexikes.segments")]:
+                            f"{path}.segment_hexikes.segments[0]")]:
         with pytest.raises(ConfigError) as caught:
             parse_wavefront_selection(mapping, path)
         assert caught.value.path == where
