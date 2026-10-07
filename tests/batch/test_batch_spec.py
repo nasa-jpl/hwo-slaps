@@ -91,3 +91,37 @@ def test_batch_spec_effective_mapping_round_trips(tiny_batch_spec, integer_wavef
     original_plan, loaded_plan = plan_batch(native), plan_batch(loaded)
     assert [arm.config_digest for arm in loaded_plan.arm_configs] == [arm.config_digest for arm in original_plan.arm_configs]
     assert [arm.config.to_mapping() for arm in loaded_plan.arm_configs] == [arm.config.to_mapping() for arm in original_plan.arm_configs]
+
+    # Saved specs may live outside the directory that declared partial arm paths.
+    import shutil
+    import numpy as np
+    declared = tmp_path / "declared"
+    declared.mkdir()
+    truth_path = declared / "truth.npy"
+    shutil.copyfile(first.base.to_mapping()["psf"]["truth"]["path"], truth_path)
+    model_path = declared / "model.npz"
+    np.savez(model_path, **{"model.npy": np.load(truth_path, allow_pickle=False)})
+    write_yaml(declared / "base.yaml", first.base.to_mapping())
+    relative = {"psf": {"truth": {"path": "truth.npy"}, "model": {
+        "kind": "kernel", "path": "model.npz", "array_key": "model.npy", "pixel_scale_arcsec": 0.05}}}
+    saved = tmp_path / "saved"
+    saved.mkdir()
+    for index, source in enumerate((first.base.to_mapping(), "base.yaml", ["base.yaml"])):
+        mapping = first.to_mapping()
+        mapping["config"] = source
+        mapping["arms"] = [{"name": "files", "overrides": deepcopy(relative)}]
+        original = parse_batch(mapping, base_dir=declared)
+        before = deepcopy(mapping)
+        written = write_yaml(saved / f"batch_{index}.yaml", original.to_mapping())
+        restored = load_batch_spec(written)
+        original_plan, restored_plan = plan_batch(original), plan_batch(restored)
+        assert [arm.config_digest for arm in restored_plan.arm_configs] == [arm.config_digest for arm in original_plan.arm_configs]
+        assert [arm.config.to_mapping() for arm in restored_plan.arm_configs] == [arm.config.to_mapping() for arm in original_plan.arm_configs]
+        assert restored.digest() == original.digest()
+        assert mapping == before
+        expected = deepcopy(relative)
+        expected["psf"]["truth"]["path"] = str(truth_path)
+        expected["psf"]["model"]["path"] = str(model_path)
+        assert original.arms[0].overrides == expected
+        assert restored.arms[0].overrides == expected
+        assert restored.arms[0].overrides["psf"]["model"]["array_key"] == "model.npy"
