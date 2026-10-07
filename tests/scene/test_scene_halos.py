@@ -127,13 +127,14 @@ def test_halo_scales_satisfy_the_lensing_mass_identities():
     (Moline2017(1.0, 0.6774), 1.0e6, 0.2, 28.915897079765447),
     (Moline2017(1.0, 0.6774), 1.0e8, 0.2, 20.560847592361515),
     (Moline2017(1.0, 0.6774), 1.0e9, 0.2, 16.792762422153395),
+    (Moline2017(1.5, 0.6774), 1.0e9, 0.2, 16.792762422153395 * (1.0 - 0.54 * math.log10(1.5))),
     (Moline2017(0.5, 0.6774), 5.0e9, 0.2, 16.720675479468554),
     (Moline2017(0.3, 0.70), 1.0e10, 0.2, 17.138469176898678),
     (Moline2017(1.0, None), 1.0e12, 0.2, 8.136344788704443),
     (PowerLawConcentration(5.71, 2.0e12 / 0.6774, -0.084, -0.47), 1.0e9, 0.5,
      5.71 * (1.0e9 / (2.0e12 / 0.6774)) ** -0.084 * 1.5 ** -0.47),
     (FixedConcentration(12.5), 1.0e7, 0.9, 12.5),
-], ids=["moline-1e6", "moline-1e8", "moline-1e9", "moline-x0.5", "moline-h0.70", "moline-h-from-cosmology",
+], ids=["moline-1e6", "moline-1e8", "moline-1e9", "moline-x1.5", "moline-x0.5", "moline-h0.70", "moline-h-from-cosmology",
         "duffy-2008-power-law", "fixed"])
 def test_concentration_relations_follow_their_published_forms(relation, mass, redshift, expected):
     assert concentration(relation, mass, redshift, 0.6774) == pytest.approx(expected, rel=1.0e-12)
