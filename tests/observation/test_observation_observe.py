@@ -123,12 +123,18 @@ def test_kernel_sampling_must_match_the_grid():
 
 
 @pytest.mark.parametrize("lens_light", [False, True], ids=["source-only", "lens-light"])
-def test_expected_observation_is_seedless_and_read_only(lens_light):
+def test_expected_observation_is_seedless_and_read_only(lens_light, monkeypatch):
     scene = _scene(lens_light=lens_light)
     binding = KernelBinding.uniform(DetectorPSF.from_array(_gaussian_kernel(5, 1.0), PIXEL_SCALE, normalize=False),
                                     list(scene.light_groups))
 
     sampling = {key: 0.375 + index / 100 for index, key in enumerate(scene.light_groups)}
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("expected observation attempted a random draw")
+
+    monkeypatch.setattr(np.random, "default_rng", forbidden)
+    monkeypatch.setattr("hwoslaps.observation.observation.draw_noisy_adu", forbidden)
     observation = observe(scene, binding, EXPOSURE, config_digest=None, photometry=None, sampling=sampling)
 
     assert observation.kind == "expected"
@@ -142,6 +148,11 @@ def test_expected_observation_is_seedless_and_read_only(lens_light):
     else:
         assert list(by_plane) == ["source"]
         assert by_plane["source"] is observation.light_rate_e_per_s
+    rate = observation.light_rate_e_per_s
+    mean = ((rate * 900.0 + 900.0) + 0.002 * 900.0) / 1.0
+    variance = (np.maximum(rate, 0.0) * 900.0 + 0.002 * 900.0) + 900.0 + 0.2**2
+    np.testing.assert_allclose(observation.expected_adu, mean, rtol=0.0, atol=1e-12)
+    np.testing.assert_allclose(observation.noise_map_adu, np.sqrt(variance), rtol=0.0, atol=1e-12)
     for array in (observation.data_adu, observation.noise_map_adu, observation.light_rate_e_per_s,
                   *by_plane.values()):
         assert array.shape == (32, 32)
