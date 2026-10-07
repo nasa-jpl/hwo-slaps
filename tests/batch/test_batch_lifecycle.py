@@ -104,7 +104,9 @@ def test_real_pidfd_descriptor_is_pinned_and_noninheritable():
 def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
     from hwoslaps.batch.state import BatchError
     process, record, log = _start('import time\ntime.sleep(60)\n', tmp_path, 'foreign')
+    descriptor = None
     try:
+        descriptor = open_pidfd(process.pid)
         with pytest.raises(BatchError, match='cookie_matches=False'):
             worker_record(process.pid, slot=0, device='cpu', identity='0' * 64, identity_env=OWNER_ENV)
         mismatches = ({**record, 'identity': '0' * 64}, {**record, 'start_time': record['start_time'] + 1},
@@ -112,10 +114,15 @@ def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
         for wrong in mismatches:
             assert group_members(wrong) == ()
             signal_owned(wrong, signal.SIGKILL)
+            assert pidfd_exited(descriptor, 50) is False, 'a real foreign identity must remain alive after an unverified signal request'
             assert process.poll() is None, 'a real foreign identity must remain alive'
         assert [member['pid'] for member in group_members(record)] == [process.pid]
     finally:
-        _close(process, record, log)
+        try:
+            _close(process, record, log)
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
 
 
 def test_missing_bootstrap_cookie_refuses_and_actual_worker_eof_skips_science(tmp_path):
