@@ -26,6 +26,17 @@ _ARMS = Nullable(ListOf(_NAME, min_length=1, unique=True))
 _MASSES = ListOf(_POSITIVE, min_length=1, unique=True)
 
 
+def _native_keys(native, normalized):
+    """Keep normalized portable leaves without coercing scientific mapping keys."""
+    if isinstance(native, Mapping):
+        return {(key if isinstance(key, str) else int(key)): _native_keys(
+                    value, normalized[key if isinstance(key, str) else str(int(key))])
+                for key, value in native.items()}
+    if isinstance(native, (list, tuple)):
+        return [_native_keys(value, normalized[index]) for index, value in enumerate(native)]
+    return normalized
+
+
 @dataclass(frozen=True)
 class _Mapping:
     def accepts(self, value):
@@ -216,13 +227,14 @@ class BatchSpec:
     execution: BatchExecution
 
     def to_mapping(self):
-        return json_ready({'name': self.name, 'seed': self.seed, 'config': self.base.to_mapping(), 'overrides': {},
+        native = {'name': self.name, 'seed': self.seed, 'config': self.base.to_mapping(), 'overrides': {},
                            'population': None if self.population is None else self.population.to_mapping(),
                            'arms': [arm.to_mapping() for arm in self.arms],
                            'simulate': None if self.simulate is None else self.simulate.to_mapping(),
                            'forecast': None if self.forecast is None else self.forecast.to_mapping(),
                            'nonlinear': {family.name: family.to_mapping() for family in self.nonlinear},
-                           'execution': self.execution.to_mapping()})
+                           'execution': self.execution.to_mapping()}
+        return _native_keys(native, json_ready(native))
 
     def digest(self):
         return self.captured_digest(base_config_digest=self.base.digest(),
