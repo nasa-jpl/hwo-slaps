@@ -2,7 +2,7 @@
 
 hwoslaps computes the profiled linear-Gaussian statistic of a dark-matter subhalo over masses and positions in a strong-lens image. It supports studies of mass reach, source morphology, PSF quality, PSF knowledge error and chromatic imaging. Lens and source parameters, background and supported wavefront modes can enter the nuisance model. AutoLens and Nautilus provide nonlinear comparisons under specified fit bounds.
 
-> Validation in progress: the public CLI, isolated installation, generated reference and four example families have passed their scoped checks. Batch execution and final combined validation remain open.
+> Validation in progress: the public CLI, isolated installation, generated reference, batch correctness checks and five example families have passed their scoped checks. Batch timing acceptance and final combined validation remain open.
 
 ## Start here
 
@@ -45,7 +45,7 @@ reach = mass_reach(summary, quantity="detectable_fraction", target=0.1, interpol
 
 ## Examples
 
-The examples distinguish reproduction inputs from illustrative instrument choices. These runtimes were measured on XTX on 2026-10-06; each linked README records the inputs and numerical limits.
+The examples distinguish reproduction inputs from illustrative instrument choices. These runtimes were measured on XTX on 2026-10-06 and 2026-10-07; each linked README records the inputs and numerical limits.
 
 | Example | Purpose | Input label | Execution status |
 |---|---|---|---|
@@ -53,7 +53,7 @@ The examples distinguish reproduction inputs from illustrative instrument choice
 | [Monolithic instrument](examples/monolithic_illustrative/README.md) | A configurable monolithic instrument | Illustrative, no Euclid measurement claim | CPU 24.75 s |
 | [Chromatic](examples/chromatic/README.md) | Multiple SED groups and a monochromatic fitted PSF comparison | Finite-support approximation | GPU grid 137.41 s; six-product convergence comparison passed |
 | [Kernel PSF](examples/kernel_psf/README.md) | External matched/mismatched kernels and area reductions | Illustrative detector kernels | CPU pair 8.88 s |
-| [Population](examples/population/README.md) | Member streams and resumable forecast/nonlinear jobs | Illustrative population | Batch validation pending |
+| [Population](examples/population/README.md) | Member streams and resumable forecast/nonlinear jobs | Illustrative population | Selected CPU member 305.46 s |
 
 A threshold of 10 in an example command is a reader choice, not a package detection rule. The generated products record the chosen threshold, input identities and execution settings.
 
