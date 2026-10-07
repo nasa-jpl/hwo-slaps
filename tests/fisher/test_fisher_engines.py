@@ -141,23 +141,61 @@ def test_image_evaluator_refuses_reference_convention_drift(image_asset, tiny_su
         build_light_evaluator(profile, points)
 
 
-def test_affine_log_lookup_equals_general_interpolation_at_knots_and_neighbours():
+@pytest.mark.parametrize("samples, r_min, r_max", [
+    (samples, r_min, r_max)
+    for r_min, r_max in ((1.0e-6, 2.0), (1.0e-5, 40.0), (3.0e-8, 300.0))
+    for samples in (8192, 32768, 131072)
+])
+def test_affine_log_lookup_equals_general_interpolation_at_knots_and_neighbours(samples, r_min, r_max):
     import jax
     import jax.numpy as jnp
     from hwoslaps.fisher.engines.radial import affine_log_grid_parameters, interpolate_log_grid
 
     jax.config.update("jax_enable_x64", True)
-    knots = np.log(np.logspace(-6.0, 2.0, 257))
-    values = np.sin(knots) + np.arange(knots.size) / 10.0
-    queries = np.concatenate((knots, np.nextafter(knots, -np.inf), np.nextafter(knots, np.inf), [-np.inf, np.inf, np.nan]))
+    knots = np.log(np.logspace(np.log10(r_min), np.log10(r_max), samples))
+    values = (np.sin(np.linspace(-2.0, 3.0, samples))
+              + 0.17 * np.cos(np.linspace(0.0, 19.0, samples) ** 1.3))
+    queries = np.concatenate((knots, np.nextafter(knots, -np.inf), np.nextafter(knots, np.inf),
+                              0.5 * (knots[:-1] + knots[1:]),
+                              [knots[0] - 1.0, knots[-1] + 1.0, -np.inf, np.inf, np.nan]))
     affine = affine_log_grid_parameters(knots)
     assert affine is not None
+    assert affine[0] == float(knots[0]) and np.isfinite(affine[1]) and affine[1] > 0.0
     actual = interpolate_log_grid(jnp.asarray(queries), jnp.asarray(knots), jnp.asarray(values), affine)
     expected = jnp.interp(jnp.asarray(queries), jnp.asarray(knots), jnp.asarray(values))
-    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=2.0e-14, atol=0.0, equal_nan=True)
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected), rtol=2.0e-14, atol=2.0e-15, equal_nan=True)
+    # Continuity alone cannot distinguish which interval owns an exact knot.
+    # Its public derivative must use the right-hand slope, like jnp.interp.
+    direct = lambda query: interpolate_log_grid(query, jnp.asarray(knots), jnp.asarray(values), affine)
+    slopes = jax.jit(jax.vmap(jax.grad(direct)))(jnp.asarray(knots[1:-1]))
+    np.testing.assert_allclose(np.asarray(slopes), np.diff(values)[1:] / np.diff(knots)[1:],
+                               rtol=2.0e-14, atol=2.0e-15)
+
+    # The original zero/tiny-value, scalar shape, knot dtype and query dtype contracts.
+    small_knots = np.log(np.logspace(-6.0, np.log10(5.0), 129))
+    small_values = np.array([0.0, *np.geomspace(1.0e-300, 1.0e-12, 128)])
+    small_affine = affine_log_grid_parameters(small_knots)
+    assert small_affine is not None
+    small_direct = lambda query: interpolate_log_grid(query, jnp.asarray(small_knots),
+                                                     jnp.asarray(small_values), small_affine)
+    for dtype in (np.float32, np.float64):
+        small_queries = jnp.asarray([small_knots[0], 0.5 * (small_knots[3] + small_knots[4]),
+                                     small_knots[-1], -np.inf, np.inf, np.nan], dtype=dtype)
+        scalar = small_direct(small_queries[1])
+        assert np.asarray(scalar).shape == () and scalar.dtype == jnp.asarray(small_values).dtype
+        small_expected = jnp.interp(small_queries, jnp.asarray(small_knots), jnp.asarray(small_values))
+        for result in (small_direct(small_queries), jax.jit(small_direct)(small_queries),
+                       jax.jit(jax.vmap(small_direct))(small_queries)):
+            np.testing.assert_allclose(np.asarray(result), np.asarray(small_expected),
+                                       equal_nan=True, rtol=2.0e-14, atol=0.0)
     irregular = np.array([0.0, 0.01, 0.05, 0.9, 1.0])
     assert affine_log_grid_parameters(irregular) is None
-    for refused in (np.array([0.0, np.nan]), np.array([0.0, 0.0]), np.array([1.0, 0.0]), knots.astype(np.float32)):
+    duplicated_last = np.array([*small_knots[:-1], small_knots[-2], small_knots[-1]])
+    perturbed = small_knots.copy()
+    perturbed[len(perturbed) // 2] += 0.75 * np.median(np.diff(perturbed))
+    for refused in (np.array([0.0, np.nan]), np.array([0.0, 0.0]), np.array([1.0, 0.0]),
+                    small_knots.astype(np.float32), small_knots[:1], small_knots.reshape(-1, 1),
+                    duplicated_last, perturbed):
         assert affine_log_grid_parameters(refused) is None
     np.testing.assert_array_equal(
         np.asarray(interpolate_log_grid(jnp.array([0.03, 0.8]), jnp.asarray(irregular), jnp.arange(5.0), None)),
