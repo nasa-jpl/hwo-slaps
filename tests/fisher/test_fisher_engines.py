@@ -88,16 +88,21 @@ def test_light_evaluator_refuses_unsupported_profile():
 
 
 def test_fast_fft_length_is_smallest_seven_smooth_bound():
-    from hwoslaps.fisher.engines.fft import next_fast_length
+    from hwoslaps.fisher.engines.fft import convolution_fft_shape, next_fast_length
 
     def smooth(value):
         for factor in (2, 3, 5, 7):
             while value % factor == 0:
                 value //= factor
         return value == 1
-    for target in [1, 11, 17, 31, 73, 107, 257, 499]:
-        expected = next(value for value in range(target, 2 * target + 1) if smooth(value))
+    # Retain the independent exhaustive original oracle, including production geometry.
+    smooth_values = [value for value in range(1, 20001) if smooth(value)]
+    for target in range(1, 10001):
+        expected = min(value for value in smooth_values if value >= target)
         assert next_fast_length(target) == expected
+    assert next_fast_length(1312) == 1323
+    assert next_fast_length(1024) == 1024
+    assert convolution_fft_shape((314, 314), (999, 999)) == (1323, 1323)
 
 
 def test_padded_fft_convolution_matches_direct_real_space():
