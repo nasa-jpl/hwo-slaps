@@ -106,7 +106,11 @@ def test_wheel_contains_priors_console_script_and_backend_free_command(tmp_path)
     environment = dict(os.environ, PYTHONPATH=str(installed))
     config = ROOT / "configs/minimal.yaml"
     origin = "\nimport hwoslaps; from pathlib import Path; assert Path(hwoslaps.__file__).resolve().is_relative_to(Path(" + repr(str(installed)) + ").resolve()), hwoslaps.__file__"
-    program = (BLOCKER + origin + "\nassert hwoslaps.__version__ == " + repr(metadata_version)
+    provenance = ("\nfrom hwoslaps.provenance import capture_provenance\nrecord = capture_provenance()"
+                  + "\nassert record['source'] is None"
+                  + "\nassert Path(record['package_path']).resolve() == Path("
+                  + repr(str(installed / "hwoslaps")) + ").resolve()")
+    program = (BLOCKER + origin + provenance + "\nassert hwoslaps.__version__ == " + repr(metadata_version)
                + "\nfrom importlib.metadata import EntryPoint\nimport sys\nsys.argv = "
                + repr(["hwoslaps", "validate", str(config)])
                + "\nresult = EntryPoint(name='hwoslaps', value=" + repr(console_target)
