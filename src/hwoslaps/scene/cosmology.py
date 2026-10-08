@@ -45,7 +45,7 @@ _FLAT_LCDM_TABLE = Table((
 
 COSMOLOGY_TABLE = Table(
     keys=(Key("name", Nullable(Text()),
-              "named astropy flat Lambda-CDM realization (Planck15 preserves the paper backend)", None),
+              "named astropy flat Lambda-CDM realization, such as Planck15 (the RASTI paper)", None),
           Key("flat_lcdm", Nullable(_FLAT_LCDM_TABLE), "custom flat Lambda-CDM parameters", None)),
     exactly_one=(("name", "flat_lcdm"),),
     doc="The cosmology of distances, critical densities and halo scales.",

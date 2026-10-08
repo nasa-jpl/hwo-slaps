@@ -1,10 +1,10 @@
 # Captured fractions
 
-Measured on XTX on 2026-10-06 from the prescribed six-product ring cohort.
-Each value is copied from the actual product spectral record. Matched model kernels
-use the same node stack as their truth. Monochromatic model nodes use the recorded
-photon-weighted group means. Normalized finite-support kernels and these fractions
-do not establish general rendering accuracy.
+The fraction of each wavelength node's PSF power that falls inside its kernel, from the
+six ring runs of the convergence check. Matched model kernels use the same wavelength nodes
+as the truth; monochromatic model kernels use each light group's photon-weighted mean
+wavelength. A captured fraction near one shows that little power lies outside the kernel;
+it does not by itself show that the forecast has converged.
 
 ## 11_901 matched
 

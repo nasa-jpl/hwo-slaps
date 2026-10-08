@@ -200,3 +200,7 @@ LSSTDocstringGuide.txt
 scratch/
 outputs/
 .claude/
+# Generated documentation
+docs/api/
+docs/_generated/
+.venv-docs/

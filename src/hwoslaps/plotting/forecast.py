@@ -46,7 +46,7 @@ def _map(result: ForecastResult, row: np.ndarray, ax):
 
 
 def plot_statistic_map(result: ForecastResult, statistic: str, *, mass_index: int, ax=None) -> "Axes":
-    """Show one statistic row; absent statistics or a non-grid result refuse."""
+    """Show one statistic at one mass; raises ValueError for an absent statistic or a non-grid result."""
     index = _mass_index(result, mass_index)
     if statistic not in _STATISTICS:
         raise ValueError(f"statistic must be one of {_STATISTICS}, got {statistic!r}")

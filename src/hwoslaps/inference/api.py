@@ -124,6 +124,31 @@ def _check_inputs(prepared: PreparedForecast, trial: Halo, observation: Observat
 
 def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observation, *, fit: FitSpec,
                  use_jax: bool) -> PreparedCase:
+    """Build the nonlinear data, models and analysis for one physical trial.
+
+    Parameters
+    ----------
+    prepared : PreparedForecast
+        Forecast preparation supplying the model PSF and scene parameters.
+    trial : Halo
+        Hypothesis to compare with the smooth model.
+    observation : Observation
+        Expected or noisy detector observation compatible with the preparation.
+    fit : FitSpec
+        Role models, parameter support, mask and H1 strategy.
+    use_jax : bool
+        Request the supported JAX fitness path and its x64 checks.
+
+    Returns
+    -------
+    PreparedCase
+        Fit data, smooth/subhalo models, analysis and comparison record.
+
+    Notes
+    -----
+    Detector ADU data and noise are converted to e-/s for the nonlinear fit.
+    This function prepares the comparison but does not run a sampler search.
+    """
     kernel = _check_inputs(prepared, trial, observation, fit)
     from .backend import ensure_jax_x64, make_analysis, require_jax_fitness_api
 
@@ -157,6 +182,45 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
                        sampler: SamplerSettings, sampler_seed: int, output_dir: str | os.PathLike[str],
                        refine: RefineSettings | None = None, session: BackendSession | None = None,
                        forecast_reference: ForecastReference | None = None, case_id: str | None = None) -> CaseResult:
+    """Compare smooth and subhalo roles through the configured nonlinear searches.
+
+    Parameters
+    ----------
+    prepared : PreparedForecast
+        Preparation compatible with the trial and observation.
+    trial : Halo
+        Physical subhalo hypothesis.
+    observation : Observation
+        Detector data in ADU, with their captured configuration identity.
+    fit : FitSpec
+        Fit mode, masks, parameter bounds and H1 search or truth-anchor strategy.
+    sampler : SamplerSettings
+        Search settings and requested likelihood path.
+    sampler_seed : int
+        Nonnegative sampler seed, separate from scene and observation noise seeds.
+    output_dir : path-like
+        Parent directory for this case's backend output.
+    refine : RefineSettings or None
+        Optional refinement; requires ``sampler.use_jax``.
+    session : BackendSession or None
+        Active caller-owned session, or None to create and close one for this call.
+    forecast_reference : ForecastReference or None
+        Optional forecast record at the same trial mass and position.
+    case_id : str or None
+        Nonempty directory basename, or None for a deterministic generated name.
+        Its directory under output_dir must be absent or empty.
+
+    Returns
+    -------
+    CaseResult
+        Role outcomes, available likelihood/evidence differences, recovery,
+        forecast reference and execution provenance. Inspect role statuses;
+        a returned record does not imply that both searches succeeded.
+
+    Notes
+    -----
+    The caller keeps ownership of the forecast preparation and any supplied session.
+    """
     if refine is not None and not sampler.use_jax:
         raise ValueError("refinement requires sampler.use_jax")
     if isinstance(sampler_seed, bool) or not isinstance(sampler_seed, (int, np.integer)) or sampler_seed < 0:

@@ -225,7 +225,7 @@ def parse_forecast(mapping: Mapping[str, Any], path: str = "forecast") -> Foreca
 
 
 def check_nuisance_spec(scene: SceneSpec, spec: NuisanceSpec, *, model_has_basis: bool) -> None:
-    """Refuse unresolved parameter names and wavefront nuisances without a model basis."""
+    """Raise ConfigError for unresolved parameter names and for wavefront nuisances without a model basis."""
     names = scene_parameter_names(scene)
     match_parameters(names, spec.fixed, path="forecast.nuisances.fixed")
     kinds = get_args(ParameterKind)
@@ -260,5 +260,5 @@ def _check_forecast(root: Mapping[str, Any], path: str) -> None:
                               "component with an Einstein radius")
 
 
-CROSS_RULES = (Rule("nuisance names resolve; wavefront modes need a model basis and existing segments (X7); "
-                    "an Einstein-radius ring needs exactly one radius (X8)", _check_forecast),)
+CROSS_RULES = (Rule("nuisance names resolve; wavefront modes need a model basis and existing segments; "
+                    "an Einstein-radius ring needs exactly one radius", _check_forecast),)

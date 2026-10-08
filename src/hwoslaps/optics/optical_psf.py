@@ -55,7 +55,7 @@ class OpticalSpec:
 
 
 def check_sampling(spec: OpticalSpec, *, pixel_scale_arcsec: float, wavelength_m: float) -> None:
-    """Refuse an aliased or under-resolved kernel at ``wavelength_m``.
+    """Raise ValueError for an aliased or under-resolved kernel at ``wavelength_m``.
 
     Aliasing: a pupil of ``pixels`` samples over ``diameter_m`` makes the focal plane periodic
     with period ``pixels * wavelength / diameter_m``, which must exceed the kernel extent.

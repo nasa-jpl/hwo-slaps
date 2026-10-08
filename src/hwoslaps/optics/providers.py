@@ -353,10 +353,10 @@ OPTICAL_TABLE = Table((
         unit="nm", default=None),
     Key("wavelength_samples", Nullable(Integer(min=1)), "number of caller-supplied bandpass nodes", default=None),
     Key("detector_oversampling", Integer(min=1),
-        "sub-samples per detector pixel side for the pixel integral (paper 3)"),
+        "sub-samples per detector pixel side for the pixel integral (3 in the RASTI paper)"),
     Key("kernel_shape", Shape(odd=True), "kernel support (ny, nx), both odd", unit="pixels"),
-    Key("wavefront", WAVEFRONT_TABLE, "truth wavefront coefficients", default={}),
-    Key("draw", Nullable(DRAW_TABLE), "truth wavefront drawn from a prior at an exact RMS", default=None),
+    Key("wavefront", WAVEFRONT_TABLE, "wavefront coefficients", default={}),
+    Key("draw", Nullable(DRAW_TABLE), "wavefront drawn from a prior at an exact RMS", default=None),
 ), exactly_one=(("wavelength_nm", "wavelength_samples"),),
     rules=(Rule("draw excludes listed wavefront coefficients", _check_optical),))
 
@@ -522,10 +522,10 @@ def _check_spectral_inputs(root: Mapping[str, Any], path: str) -> None:
 
 
 CROSS_RULES: tuple[Rule, ...] = (
-    Rule("every kernel file is sampled at scene.grid.pixel_scale_arcsec (X1)", _check_kernel_pixel_scales),
-    Rule("optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale (X4)",
+    Rule("every kernel file is sampled at scene.grid.pixel_scale_arcsec", _check_kernel_pixel_scales),
+    Rule("optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale",
          _check_truth_sampling),
-    Rule("wavelength_samples requires a bandpass and component SEDs (X5)", _check_spectral_inputs),
+    Rule("wavelength_samples requires a bandpass and component SEDs", _check_spectral_inputs),
 )
 """Rules spanning ``psf`` and ``scene``; ``config.schema`` runs them on the read root values."""
 
