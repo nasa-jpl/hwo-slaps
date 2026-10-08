@@ -1,52 +1,54 @@
-# Scientific contract tests
+# Tests
 
-The test lanes use current package owners through ordinary imports. Run all science
-in the supported XTX environment; never install or execute the scientific stack on
-the local Mac. Source snapshots and receipts identify the tested code.
+Tests are grouped by package. Run them from the repository root:
 
 ```bash
+# Configuration, reductions and file formats, with the scientific libraries blocked:
 python tools/run_core_tests.py tests -q
+
+# Everything that runs on a CPU:
 python tools/run_backend_tests.py tests -q -m 'not xtx_gpu and not xtx_multi_gpu'
-python tools/run_backend_tests.py --require-gpu --numba-jit enabled tests -q -m 'xtx_gpu and not xtx_multi_gpu'
+
+# Tests that need one GPU, and tests that need two:
+CUDA_VISIBLE_DEVICES=0 JAX_ENABLE_X64=1 python tools/run_backend_tests.py \
+    --require-gpu --numba-jit enabled tests -q -m 'xtx_gpu and not xtx_multi_gpu'
+CUDA_VISIBLE_DEVICES=0,1 JAX_ENABLE_X64=1 python tools/run_backend_tests.py \
+    --require-gpu --numba-jit enabled tests -q -m xtx_multi_gpu
 ```
 
-The core launcher blocks actual scientific backend loading, permits harmless
-optional-dependency discovery and verifies that none loaded after execution. Its
-marker expression is fixed. The backend launcher supplies the pinned AutoArray
-configuration in a temporary directory. GPU lanes require assigned devices and fail
-when the requested CUDA runtime is absent. Runtime defaults, backend flags and JIT
-settings are not changed by ordinary fixtures.
+The core runner blocks the scientific libraries and checks that none was imported, so
+configuration handling and result loading keep working without them. It sets its own
+marker expression. The backend runner supplies the pinned AutoArray configuration in a
+temporary directory. GPU runs fail if the requested CUDA runtime is missing. Batch tests
+need Linux.
 
-Markers and packaging metadata have one owner, pyproject.toml. Installed-boundary
-tests build a real wheel with no build isolation, extract it into a temporary
-directory and invoke the command from outside the source checkout. They assert
-the actual imported wheel origin, package data and backend-free validation. They
-do not install a wheel or modify the current environment.
+Markers and packaging metadata are defined in `pyproject.toml`. The installed-package
+tests build a wheel without build isolation, unpack it into a temporary directory and run
+the command from outside the source tree; they never install into the current
+environment.
 
-Paper input generation is separate from paper execution:
+## Paper parity
+
+`tests/parity/` compares the forecast, optics and nonlinear likelihood with fixtures
+computed by the RASTI code. The fixtures and their inputs come from
+`tests/scripts/generate_paper_parity.py`. To regenerate only the inputs and compare them
+with the committed ones:
 
 ```bash
 python tests/scripts/generate_paper_parity.py --inputs-only --out /path/to/new-inputs
 ```
 
-Compare the five generated engine YAML files and synthetic assets with their
-committed inputs before using a regenerated anchor. Reference execution requires
-the extracted submitted-paper tree and explicit work/GPU arguments. No source
-or numerical change is certified by a snapshot from another head.
+Regenerating the expected values requires a checkout of the tagged RASTI code and a GPU.
 
-Keep one primary owner per observable behavior. Before adding a test, identify the
-behavior, the credible regression it catches, why an existing owner is insufficient,
-and the production boundary exercised. Extend an existing parameter table where
-possible. Expected science values come from independent equations, frozen paper
-fixtures or a genuinely independent backend.
+## Writing tests
 
-Import the real package. Avoid fake backend modules, broad runtime skips and
-production exports needed only by tests. Optional absence is explicit; a broken
-pinned backend is a failure. Keep units, flux, nuisance projection, signed statistics,
-input identity, real process cleanup and reference/JAX parity at their owning boundaries.
-
-Before retiring a suite, account for every original declaration and collected case:
-retain, consolidate into a named current owner, or remove with a precise scope reason.
-Missing imports or baseline failures do not justify deletion. Validate defect fixes
-on the same failing/passing harness and restore producer bytes after fault controls.
-Run the combined core, CPU, GPU, parity and architecture checks after assembly.
+- Test one behaviour in one place. Extend an existing test or parameter table before
+  adding a new file.
+- Take expected values from an independent source: closed-form physics, the parity
+  fixtures, or a comparison between the reference and JAX engines.
+- Import the real package and the real scientific libraries. Do not add fake backend
+  modules, broad skips, or production code that exists only for tests.
+- A missing optional dependency should be explicit; a broken pinned dependency is a
+  failure.
+- When a test injects a fault to check that another test catches it, restore the
+  original file afterwards.

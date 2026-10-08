@@ -59,8 +59,8 @@ def with_parameter(spec: SceneSpec, name: str, value: float) -> SceneSpec:
 
     The value is checked against the parameter's own domain, then the joint rules of its
     component's table run on the replaced values. Nothing else is read again, so no file is
-    touched: a finite-difference step inside a preparation works on its loaded assets. A
-    refused value raises ``ConfigError`` naming the parameter and the value.
+    touched: a finite-difference step inside a preparation works on its loaded assets. An
+    invalid value raises ``ConfigError`` naming the parameter and the value.
     """
     for galaxy, component in _components(spec):
         for definition in PROFILE_TYPES[component.type].parameters(component.values):

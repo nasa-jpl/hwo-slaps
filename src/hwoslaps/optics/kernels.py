@@ -148,7 +148,7 @@ class DetectorPSF:
         """A kernel read from ``.npy`` (``array_key`` None) or ``.npz`` (the named member).
 
         When ``file_sha256`` is given the file bytes must have that SHA-256 before the
-        file is parsed. Pickled object arrays are refused.
+        file is parsed. Pickled object arrays raise an error.
         """
         location = Path(path)
         content, digest = read_file_snapshot(location)

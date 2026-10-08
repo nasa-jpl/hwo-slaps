@@ -20,7 +20,7 @@ def plot_kernel(psf: DetectorPSF, *, log: bool, ax=None) -> "Axes":
 
     Kernel values are preserved, with no peak normalization or added floor.
     Zero kernel values are masked in logarithmic colour space. Native row zero
-    has positive y, matching the actual convolved point image.
+    has positive y, matching the convolved point image.
     """
     if not isinstance(log, (bool, np.bool_)):
         raise ValueError("log must be boolean")

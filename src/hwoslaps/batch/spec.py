@@ -204,6 +204,37 @@ class NonlinearFamily:
 
 @dataclass(frozen=True)
 class BatchSpec:
+    """Parsed batch inputs for members, configuration arms and job families.
+
+    Parameters
+    ----------
+    name : str
+        Batch label.
+    seed : int
+        Root entropy for named batch noise, sampler and PSF-direction streams.
+    base : EngineConfig
+        Resolved base configuration.
+    base_dir : Path
+        Directory that declared Python overlays and population path values.
+    population : PopulationBlock or None
+        Cohort definition, or None for the base configuration as one member.
+    arms : tuple of Arm
+        Named partial configuration overlays and optional PSF direction expansion.
+    simulate : SimulateFamily or None
+        Requested observation jobs.
+    forecast : ForecastFamily or None
+        Requested forecast masses and participating arms.
+    nonlinear : tuple of NonlinearFamily
+        Requested comparisons, trial selectors and optional retry policies.
+    execution : BatchExecution
+        Worker placement, engine, cache and thread controls.
+
+    Notes
+    -----
+    Use ``parse_batch`` or ``load_batch_spec`` to resolve and validate inputs.
+    ``to_mapping()`` preserves native integer scientific keys and resolved arm
+    file paths for YAML replay. Planning captures the consumed input identities.
+    """
     name: str
     seed: int
     base: EngineConfig
@@ -295,6 +326,27 @@ def _arms(values):
 
 
 def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
+    """Read a batch mapping and resolve paths against its declaration directory.
+
+    Parameters
+    ----------
+    mapping : mapping
+        Batch fields. ``config`` accepts an effective mapping, a YAML filename
+        or an ordered sequence of filenames; arm overrides remain partial.
+    base_dir : path-like
+        Directory for relative input filenames, overlays and population paths.
+        Paths inside configuration files belong to those declaring files.
+
+    Returns
+    -------
+    BatchSpec
+        Typed inputs with native scientific keys and absolute arm file paths.
+
+    Notes
+    -----
+    At least one job family is required. This reads input domains and family
+    relationships; ``plan_batch`` additionally realizes members and validates jobs.
+    """
     directory = Path(base_dir).expanduser().resolve()
     def resolve_path(filename, check):
         path = Path(filename).expanduser()
@@ -373,5 +425,17 @@ def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
 
 
 def load_batch_spec(path) -> BatchSpec:
+    """Load batch YAML with paths owned by its declaring directory.
+
+    Parameters
+    ----------
+    path : path-like
+        Batch YAML filename.
+
+    Returns
+    -------
+    BatchSpec
+        Parsed inputs suitable for planning or execution.
+    """
     filename = Path(path).expanduser().resolve()
     return parse_batch(read_yaml(filename), base_dir=filename.parent)

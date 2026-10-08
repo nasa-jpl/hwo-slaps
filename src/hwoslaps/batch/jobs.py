@@ -207,6 +207,25 @@ def _nonlinear_jobs(plan, arm, family, mass, position, *, attempt=0, resolved_tr
 
 
 def plan_batch(spec: BatchSpec) -> BatchPlan:
+    """Realize members and configuration arms, then construct deterministic jobs.
+
+    Parameters
+    ----------
+    spec : BatchSpec
+        Parsed base inputs, optional population, arms and job families.
+
+    Returns
+    -------
+    BatchPlan
+        Members, resolved arms, initial jobs, deferred-family descriptions and
+        captured configuration, population and referenced-file identities.
+
+    Notes
+    -----
+    Planning reads referenced inputs and checks trial domains and arm/family
+    relationships without starting backend workers. Forecast-selected trials and
+    retries become follow-up jobs after their prerequisite artifacts are available.
+    """
     base_identity = spec.base.capture_identity()
     manifest = dict(base_identity['file_digests'])
     def config_identity(config):

@@ -13,11 +13,11 @@ Engine configuration. Section-local rules run before these cross-section rules.
 | `observation` | mapping, see `observation` | required |  | exposure and sky background |
 | `forecast` | null or mapping, see `forecast` | `null` |  | Fisher forecast inputs |
 
-- every kernel file is sampled at scene.grid.pixel_scale_arcsec (X1)
-- optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale (X4)
-- wavelength_samples requires a bandpass and component SEDs (X5)
-- AB source or sky inputs require a bandpass and a collecting area (X6)
-- nuisance names resolve; wavefront modes need a model basis and existing segments (X7); an Einstein-radius ring needs exactly one radius (X8)
+- every kernel file is sampled at scene.grid.pixel_scale_arcsec
+- optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale
+- wavelength_samples requires a bandpass and component SEDs
+- AB source or sky inputs require a bandpass and a collecting area
+- nuisance names resolve; wavefront modes need a model basis and existing segments; an Einstein-radius ring needs exactly one radius
 
 ## cosmology
 
@@ -943,10 +943,10 @@ Selected by `kind: optical`.
 | `focal_length_m` | number > 0 | required | m | effective focal length |
 | `wavelength_nm` | null or number > 0 | `null` | nm | wavelength of the monochromatic kernel |
 | `wavelength_samples` | null or integer >= 1 | `null` |  | number of caller-supplied bandpass nodes |
-| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (paper 3) |
+| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (3 in the RASTI paper) |
 | `kernel_shape` | pair of odd positive integers | required | pixels | kernel support (ny, nx), both odd |
-| `wavefront` | mapping, see `psf.truth.wavefront` | `{}` |  | truth wavefront coefficients |
-| `draw` | null or mapping, see `psf.truth.draw` | `null` |  | truth wavefront drawn from a prior at an exact RMS |
+| `wavefront` | mapping, see `psf.truth.wavefront` | `{}` |  | wavefront coefficients |
+| `draw` | null or mapping, see `psf.truth.draw` | `null` |  | wavefront drawn from a prior at an exact RMS |
 
 - exactly one of `wavelength_nm`, `wavelength_samples` is set; write null to clear one
 - draw excludes listed wavefront coefficients
@@ -1058,10 +1058,10 @@ Selected by `kind: optical`.
 | `focal_length_m` | number > 0 | required | m | effective focal length |
 | `wavelength_nm` | null or number > 0 | `null` | nm | wavelength of the monochromatic kernel |
 | `wavelength_samples` | null or integer >= 1 | `null` |  | number of caller-supplied bandpass nodes |
-| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (paper 3) |
+| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (3 in the RASTI paper) |
 | `kernel_shape` | pair of odd positive integers | required | pixels | kernel support (ny, nx), both odd |
-| `wavefront` | mapping, see `psf.model.wavefront` | `{}` |  | truth wavefront coefficients |
-| `draw` | null or mapping, see `psf.model.draw` | `null` |  | truth wavefront drawn from a prior at an exact RMS |
+| `wavefront` | mapping, see `psf.model.wavefront` | `{}` |  | wavefront coefficients |
+| `draw` | null or mapping, see `psf.model.draw` | `null` |  | wavefront drawn from a prior at an exact RMS |
 
 - exactly one of `wavelength_nm`, `wavelength_samples` is set; write null to clear one
 - draw excludes listed wavefront coefficients
@@ -1522,7 +1522,7 @@ No keys.
 | `segment_hexikes` | null or mapping, see `forecast.nuisances.wavefront.modes.segment_hexikes` | `null` |  | segment hexike modes |
 | `zernikes` | null or mapping, see `forecast.nuisances.wavefront.modes.zernikes` | `null` |  | global Zernike modes |
 
-- at least one family; global Zernike Noll 1 is refused
+- at least one family; global Zernike Noll 1 is not allowed
 
 ## forecast.nuisances.wavefront.modes.segment_hexikes
 
@@ -1535,7 +1535,7 @@ No keys.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `nolls` | list of at least 1 items, each integer >= 1, no repeats | required |  | global Zernike Noll indices (Noll 1 is refused) |
+| `nolls` | list of at least 1 items, each integer >= 1, no repeats | required |  | global Zernike Noll indices (Noll 1, piston, is not allowed) |
 
 ## population
 
@@ -1819,11 +1819,11 @@ Engine configuration. Section-local rules run before these cross-section rules.
 | `observation` | mapping, see `batch.config.observation` | required |  | exposure and sky background |
 | `forecast` | null or mapping, see `batch.config.forecast` | `null` |  | Fisher forecast inputs |
 
-- every kernel file is sampled at scene.grid.pixel_scale_arcsec (X1)
-- optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale (X4)
-- wavelength_samples requires a bandpass and component SEDs (X5)
-- AB source or sky inputs require a bandpass and a collecting area (X6)
-- nuisance names resolve; wavefront modes need a model basis and existing segments (X7); an Einstein-radius ring needs exactly one radius (X8)
+- every kernel file is sampled at scene.grid.pixel_scale_arcsec
+- optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale
+- wavelength_samples requires a bandpass and component SEDs
+- AB source or sky inputs require a bandpass and a collecting area
+- nuisance names resolve; wavefront modes need a model basis and existing segments; an Einstein-radius ring needs exactly one radius
 
 ## batch.config.cosmology
 
@@ -2749,10 +2749,10 @@ Selected by `kind: optical`.
 | `focal_length_m` | number > 0 | required | m | effective focal length |
 | `wavelength_nm` | null or number > 0 | `null` | nm | wavelength of the monochromatic kernel |
 | `wavelength_samples` | null or integer >= 1 | `null` |  | number of caller-supplied bandpass nodes |
-| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (paper 3) |
+| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (3 in the RASTI paper) |
 | `kernel_shape` | pair of odd positive integers | required | pixels | kernel support (ny, nx), both odd |
-| `wavefront` | mapping, see `batch.config.psf.truth.wavefront` | `{}` |  | truth wavefront coefficients |
-| `draw` | null or mapping, see `batch.config.psf.truth.draw` | `null` |  | truth wavefront drawn from a prior at an exact RMS |
+| `wavefront` | mapping, see `batch.config.psf.truth.wavefront` | `{}` |  | wavefront coefficients |
+| `draw` | null or mapping, see `batch.config.psf.truth.draw` | `null` |  | wavefront drawn from a prior at an exact RMS |
 
 - exactly one of `wavelength_nm`, `wavelength_samples` is set; write null to clear one
 - draw excludes listed wavefront coefficients
@@ -2864,10 +2864,10 @@ Selected by `kind: optical`.
 | `focal_length_m` | number > 0 | required | m | effective focal length |
 | `wavelength_nm` | null or number > 0 | `null` | nm | wavelength of the monochromatic kernel |
 | `wavelength_samples` | null or integer >= 1 | `null` |  | number of caller-supplied bandpass nodes |
-| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (paper 3) |
+| `detector_oversampling` | integer >= 1 | required |  | sub-samples per detector pixel side for the pixel integral (3 in the RASTI paper) |
 | `kernel_shape` | pair of odd positive integers | required | pixels | kernel support (ny, nx), both odd |
-| `wavefront` | mapping, see `batch.config.psf.model.wavefront` | `{}` |  | truth wavefront coefficients |
-| `draw` | null or mapping, see `batch.config.psf.model.draw` | `null` |  | truth wavefront drawn from a prior at an exact RMS |
+| `wavefront` | mapping, see `batch.config.psf.model.wavefront` | `{}` |  | wavefront coefficients |
+| `draw` | null or mapping, see `batch.config.psf.model.draw` | `null` |  | wavefront drawn from a prior at an exact RMS |
 
 - exactly one of `wavelength_nm`, `wavelength_samples` is set; write null to clear one
 - draw excludes listed wavefront coefficients
@@ -3328,7 +3328,7 @@ No keys.
 | `segment_hexikes` | null or mapping, see `batch.config.forecast.nuisances.wavefront.modes.segment_hexikes` | `null` |  | segment hexike modes |
 | `zernikes` | null or mapping, see `batch.config.forecast.nuisances.wavefront.modes.zernikes` | `null` |  | global Zernike modes |
 
-- at least one family; global Zernike Noll 1 is refused
+- at least one family; global Zernike Noll 1 is not allowed
 
 ## batch.config.forecast.nuisances.wavefront.modes.segment_hexikes
 
@@ -3341,7 +3341,7 @@ No keys.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `nolls` | list of at least 1 items, each integer >= 1, no repeats | required |  | global Zernike Noll indices (Noll 1 is refused) |
+| `nolls` | list of at least 1 items, each integer >= 1, no repeats | required |  | global Zernike Noll indices (Noll 1, piston, is not allowed) |
 
 ## batch.population
 
@@ -3719,7 +3719,7 @@ Selected by `kind: forecast_argmax`.
 | `h1` | one of: search, truth_anchor | `search` |  | H1 by a sampler search, or by the truth vector on expected data |
 | `anchor_chi2_tolerance` | number > 0 | `1e-08` |  | largest chi-square at which the truth vector is the H1 maximum |
 
-- mass_support is required with mode freed and refused otherwise
+- mass_support is required with mode freed and not allowed otherwise
 
 ## fit.prior_widths
 

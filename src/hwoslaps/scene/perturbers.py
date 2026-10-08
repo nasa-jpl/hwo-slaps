@@ -203,8 +203,8 @@ def draw_population(spec: HaloPopulationSpec, *, seed: int, index: int,
 def realize_perturbers(spec: SceneSpec, cosmology: Cosmology, *, seed: int) -> tuple[Halo, ...]:
     """The scene's perturbers as halos, listed halos in list order.
 
-    ``seed`` is the configuration seed, whose named streams draw the halo populations of
-    W2-PERTURB; listed halos use no randomness.
+    ``seed`` is the configuration seed, whose named streams draw the halo populations;
+    listed halos use no randomness.
     """
     listed = tuple(
         make_halo(halo.model, halo.mass_msun, halo.centre_yx,

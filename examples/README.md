@@ -1,22 +1,15 @@
 # Examples
 
-Run commands from the repository root in the installed science environment. The HWO example
-uses a pinned instrument reference; the other examples illustrate engine features. Choose a
-new output directory for each run. Threshold 10 in the commands is a caller choice.
-Thresholds have no driver default.
+Run the commands from the repository root in the scientific environment. Each run needs a
+new output directory, and every driver takes a required `--q-threshold`.
 
-| Example | What it shows | Inputs | Budget | Measured runtime |
-|---|---|---|---|---|
-| [HWO reference](hwo_reference/README.md) | AB normalization, optical PSF and paper overlays | SEI v0.1.9 and a study band | CPU quick: 120 s; one-GPU full: 600 s | CPU 75.3120 s; GPU 55.3556 s |
-| [Monolithic instrument](monolithic_illustrative/README.md) | Obscuration, spiders, shear, Sersic lens light and source-S/N mask | Illustrative round values | CPU: 120 s | 24.7548 s |
-| [Chromatic](chromatic/README.md) | Two source SEDs and a monochromatic model arm | SEI curves with an assumed filter | One GPU: 600 s per run | Default grid 137.4071 s; all six convergence products within budget |
-| [Kernel PSF](kernel_psf/README.md) | Matched and mismatched kernels, knowledge-error areas | Illustrative | CPU pair: 120 s | 8.8843 s |
-| [Population](population/README.md) | Named member streams, forecasts and nonlinear batch jobs | Illustrative minimal scene | Selected member on CPU: 900 s | 305.4582 s |
+| Example | What it shows | Runs on | Handbook page |
+|---|---|---|---|
+| [HWO reference](hwo_reference/README.md) | The RASTI paper's HWO set-up: segmented telescope, AB photometry and saved products | CPU (reduced) or one GPU | `docs/examples/hwo.md` |
+| [Monolithic telescope](monolithic_illustrative/README.md) | A circular telescope with obscuration and spiders, lens light, shear and a signal-to-noise mask | CPU | `docs/examples/monolithic.md` |
+| [Chromatic PSF](chromatic/README.md) | Broadband PSFs for sources of different colours, with a convergence check | One GPU | `docs/examples/chromatic.md` |
+| [Kernel PSFs](kernel_psf/README.md) | PSF kernel files and PSF knowledge-error areas | CPU | `docs/examples/kernel_psf.md` |
+| [Population batch](population/README.md) | A population of lenses run as a resumable batch, with a nonlinear fit | CPU or GPUs | `docs/examples/population.md` |
 
-Every forecast driver prints and saves the actual light-group values of
-`Observation.sampling` in `run.json`. This is relative within-pixel variation of lensed
-light at the configured oversampling. It does not by itself establish convergence of a
-detection statistic. The chromatic example has separate wavelength and support checks.
-Runtimes were measured on XTX on 2026-10-06 and 2026-10-07 with one BLAS thread per process. The HWO
-quick and monolithic drivers use eight CPU workers; GPU runs use one NVIDIA B200.
-Individual READMEs record sampling values and the scope of the convergence comparison.
+Only the HWO reference reproduces a published set-up. The other examples use illustrative
+values chosen to exercise features of hwoslaps.

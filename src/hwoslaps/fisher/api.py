@@ -41,6 +41,23 @@ __all__ = ["Execution", "PreparedForecast", "forecast", "prepare_forecast"]
 
 @dataclass(frozen=True)
 class Execution:
+    """Choose the forecast engine and its execution controls.
+
+    Parameters
+    ----------
+    engine : {'reference', 'jax'}
+        Template evaluation backend. JAX execution requires its supported runtime.
+    reference_workers : int
+        Positive number of reference workers; one evaluates in the calling process.
+    batch_size : int
+        Positive number of positions in a JAX evaluation batch.
+    progress : bool
+        Whether the engine reports progress.
+
+    Notes
+    -----
+    Execution controls do not change the scientific configuration identity.
+    """
     engine: Literal["reference", "jax"] = "reference"
     reference_workers: int = 1
     batch_size: int = 16
@@ -59,6 +76,18 @@ class Execution:
 
 @dataclass(frozen=True, eq=False)
 class PreparedForecast:
+    """Reuse a prepared scene, detector response and nuisance projection.
+
+    Created by ``prepare_forecast``. The smooth observation, model mean and
+    noise map are in ADU; positions use the scene's ``(y, x)`` arcsec frame.
+    The record captures the configuration, input-file and kernel identities.
+    Forecast and simulation entry points revalidate these captured inputs.
+
+    Notes
+    -----
+    Use this value as a context manager, or call ``close()`` to release its
+    engine resources. ``config`` returns a copy of the effective configuration.
+    """
     _config: EngineConfig
     scene: Scene
     psfs: PsfPair
@@ -173,6 +202,29 @@ def _validate_loaded_files(manifest: Mapping[str, str], assets: Mapping[str, Any
 
 def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution(),
                      base_dir: PathLike[str] | None = None) -> PreparedForecast:
+    """Prepare the smooth scene and linear-Gaussian forecast workspace.
+
+    Parameters
+    ----------
+    config : EngineConfig, mapping, path or sequence of paths
+        Engine inputs with a forecast section. YAML files compose in order.
+    execution : Execution
+        Engine, worker and batch controls.
+    base_dir : path-like or None
+        Directory for relative paths in Python mappings. YAML paths belong
+        to their declaring files; Python paths default to the current directory.
+
+    Returns
+    -------
+    PreparedForecast
+        Prepared scene, truth/model PSFs, smooth observation, data space,
+        nuisance design and engine with captured input identities.
+
+    Notes
+    -----
+    Close the returned value or use it in a ``with`` block. A changed referenced
+    file or kernel requires a new preparation.
+    """
     resolved = deepcopy(resolve_config(config, base_dir=base_dir))
     if resolved.forecast is None:
         raise ConfigError("forecast", "a forecast section is required to prepare a forecast")
@@ -276,6 +328,29 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
 
 def forecast(prepared: PreparedForecast, *, masses_msun: ArrayLike,
              positions: PositionSet | ArrayLike | None = None) -> ForecastResult:
+    """Evaluate profiled template statistics at the requested masses and positions.
+
+    Parameters
+    ----------
+    prepared : PreparedForecast
+        Open preparation whose captured input identities still match.
+    masses_msun : array-like
+        Nonempty one-dimensional vector of positive finite masses in solar
+        masses, using the configured halo's mass convention.
+    positions : PositionSet, array-like or None
+        Positions in ``(y, x)`` arcsec order, within the prepared domain.
+        An array has shape ``(n_positions, 2)``; None uses the prepared layout.
+
+    Returns
+    -------
+    ForecastResult
+        Read-only mass-by-position statistics and captured provenance. Mismatch
+        amplitudes are present for declared PSF relations other than ``matched``.
+
+    Notes
+    -----
+    The caller retains ownership of the preparation; evaluation does not close it.
+    """
     if not isinstance(prepared, PreparedForecast):
         raise TypeError("prepare a forecast with prepare_forecast first")
     prepared.validate_identity()

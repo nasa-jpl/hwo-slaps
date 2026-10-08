@@ -26,7 +26,7 @@ __all__ = [
 def check_finite_number(name: str, value: Any, *, positive: bool) -> float:
     """``value`` as a float when it is a finite number, > 0 if ``positive`` and >= 0 otherwise.
 
-    Booleans are refused, an integer too large for a float is not finite, and the bound applies
+    Booleans are rejected, an integer too large for a float is not finite, and the bound applies
     to the float returned. A value outside the domain raises a ValueError whose message starts
     with ``name``; ``Detector``, ``Exposure`` and ``Observation.sampling`` check their numbers
     with it.
@@ -46,9 +46,9 @@ def check_finite_number(name: str, value: Any, *, positive: bool) -> float:
 class Detector:
     """Noise parameters of one detector pixel; values are normalized to float.
 
-    Construction refuses values outside the physical domain (gain > 0, read noise >= 0,
-    dark current >= 0, all finite numbers, booleans refused) with a ValueError whose
-    message starts with the field name.
+    Construction raises a ValueError, whose message starts with the field name, for values
+    outside the physical domain: gain > 0, read noise >= 0 and dark current >= 0, all finite
+    numbers and not booleans.
     """
 
     gain_e_per_adu: float

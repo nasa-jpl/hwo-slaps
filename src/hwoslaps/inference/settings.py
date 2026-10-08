@@ -209,10 +209,12 @@ DEFAULT_BOX_RULES: tuple[tuple[str, BoxRule], ...] = (
     ("source.sersic_index", BoxRule(0.3, fractional=True)),
     ("source.size", BoxRule(0.3, fractional=True)),
 )
-"""Box rules keyed ``<galaxy>.<parameter kind>``, sorted by key. The widths are those of 41621de
-autolens_model_builder.py:22-34; the lens light rows reuse the source widths, and the orientation
-rows (degrees, an Image ``rotation_deg``) match the analytic source's orientation freedom at the P1
-ellipticity (SCI-16)."""
+"""Default box rules keyed ``<galaxy>.<parameter kind>``, sorted by key.
+
+The widths are the defaults of the RASTI code. Lens-light rows reuse the source widths, and the
+orientation rows (degrees, for an Image ``rotation_deg``) give the orientation freedom of the
+analytic source ellipticity box in the paper's first test scene. The adopted nonlinear runs of
+the paper used wider boxes; the nonlinear-fits guide shows how to set them."""
 
 _RULE_KEYS = tuple(name for name, _ in DEFAULT_BOX_RULES)
 
@@ -415,7 +417,7 @@ FIT_TABLE = Table((
         _default(FitSpec, "h1")),
     Key("anchor_chi2_tolerance", _POSITIVE, "largest chi-square at which the truth vector is the H1 maximum",
         _default(FitSpec, "anchor_chi2_tolerance")),
-), rules=(Rule("mass_support is required with mode freed and refused otherwise", _check_mass_support),))
+), rules=(Rule("mass_support is required with mode freed and not allowed otherwise", _check_mass_support),))
 
 _FIT_CHECKS = {key.name: key.check for key in FIT_TABLE.keys}
 
@@ -507,7 +509,7 @@ SAMPLER_TABLE = _settings_table(
 class RefineSettings:
     """Multistart L-BFGS-B refinement of a role maximum and its acceptance gates.
 
-    Defaults are the paper procedure (41621de fresh_profile.py:62-76).
+    The defaults are the refinement settings of the RASTI paper.
     """
 
     original_start_count: int = 8

@@ -119,6 +119,21 @@ def _float_array(members, name):
 
 
 def write_json(path, payload: Mapping[str, Any]) -> Path:
+    """Publish finite JSON values without replacing an existing destination.
+
+    Parameters
+    ----------
+    path : path-like
+        Destination; missing parent directories are created.
+    payload : mapping
+        Portable values. Integer keys become JSON strings; colliding keys,
+        non-finite values and unsupported objects raise an error.
+
+    Returns
+    -------
+    Path
+        Destination after atomic publication. Existing files raise FileExistsError.
+    """
     if not isinstance(payload, Mapping):
         raise TypeError("write_json requires a mapping")
     text = json.dumps(json_ready(payload), indent=2, sort_keys=True, allow_nan=False) + "\n"
@@ -126,11 +141,51 @@ def write_json(path, payload: Mapping[str, Any]) -> Path:
 
 
 def write_yaml(path, mapping: Mapping[str, Any]) -> Path:
+    """Publish portable YAML while preserving native integer scientific keys.
+
+    Parameters
+    ----------
+    path : path-like
+        Destination; missing parent directories are created.
+    mapping : mapping
+        Finite portable values, including integer-keyed wavefront maps. Path
+        values become strings, tuples become lists and signed zero is normalized.
+
+    Returns
+    -------
+    Path
+        Destination after atomic publication. Existing files raise FileExistsError.
+
+    Notes
+    -----
+    Key collisions and unsupported values raise an error before anything is written.
+    Unlike JSON transport, YAML retains string and integer mapping key types.
+    """
     text = dump_yaml(native_ready(mapping))
     return _publish(path, lambda stream: stream.write(text.encode("utf-8")))
 
 
 def save_forecast(result: ForecastResult, path) -> Path:
+    """Publish a version-2 forecast NPZ archive without overwriting a file.
+
+    Parameters
+    ----------
+    result : ForecastResult
+        Mass-by-position statistics, layout and captured metadata. Masses use
+        solar masses and positions use ``(y, x)`` arcsec coordinates.
+    path : path-like
+        Destination filename.
+
+    Returns
+    -------
+    Path
+        Published archive, including available mismatch/spurious amplitudes.
+
+    Notes
+    -----
+    Configuration and provenance are stored in JSON form. This preserves result
+    metadata rather than reconstructing a live preparation.
+    """
     from .fisher.result import ForecastResult
     if not isinstance(result, ForecastResult):
         raise TypeError("save_forecast requires a ForecastResult")
@@ -158,6 +213,24 @@ def save_forecast(result: ForecastResult, path) -> Path:
 
 
 def load_forecast(path) -> ForecastResult:
+    """Load and validate the current forecast archive without unpickling.
+
+    Parameters
+    ----------
+    path : path-like
+        Version-2 forecast NPZ filename.
+
+    Returns
+    -------
+    ForecastResult
+        Read-only arrays, spatial layout, PSF relation and JSON-form metadata.
+
+    Notes
+    -----
+    The loader checks member sets, array types/shapes, grouped optional fields
+    and byte equality of stored derived statistics with the reconstructed result.
+    It does not reopen the original referenced scene or PSF files.
+    """
     from .fisher.positions import GridIndex, PositionSet
     from .fisher.result import ForecastResult
     members = _read_npz(path)
@@ -203,6 +276,22 @@ def load_forecast(path) -> ForecastResult:
 
 
 def save_observation(observation: Observation, path) -> Path:
+    """Publish a version-1 detector observation NPZ without overwriting a file.
+
+    Parameters
+    ----------
+    observation : Observation
+        Expected or noisy images and noise map in ADU, light-rate maps in e-/s,
+        exposure, distinct detector kernels, sampling and captured identities.
+    path : path-like
+        Destination filename.
+
+    Returns
+    -------
+    Path
+        Published archive. Expected observations reuse their expected image
+        as data; noisy observations additionally store their sampled data.
+    """
     from .observation.observation import Observation
     if not isinstance(observation, Observation):
         raise TypeError("save_observation requires an Observation")
@@ -225,6 +314,24 @@ def save_observation(observation: Observation, path) -> Path:
 
 
 def load_observation(path) -> Observation:
+    """Reconstruct a detector observation from its current NPZ archive.
+
+    Parameters
+    ----------
+    path : path-like
+        Version-1 observation NPZ filename.
+
+    Returns
+    -------
+    Observation
+        Validated detector arrays, exposure, kernel identities, light planes,
+        sampling and optional injected halo, in their original units.
+
+    Notes
+    -----
+    Pickled members raise an error. Kernel bytes must match their recorded identity;
+    injected halo reconstruction retains its normal physical validation requirements.
+    """
     from .instrument import Detector
     from .observation.expected import Exposure
     from .observation.normalization import PhotometryRecord
@@ -283,6 +390,20 @@ def load_observation(path) -> Observation:
 
 
 def save_case(result: CaseResult, path) -> Path:
+    """Publish a version-1 nonlinear case JSON archive without overwriting a file.
+
+    Parameters
+    ----------
+    result : CaseResult
+        Typed physical trial, observation record, role outcomes and provenance.
+    path : path-like
+        Destination filename.
+
+    Returns
+    -------
+    Path
+        Published case archive with portable finite JSON values.
+    """
     from .inference.result import CaseResult
     if not isinstance(result, CaseResult):
         raise TypeError("save_case requires a CaseResult")
@@ -290,11 +411,37 @@ def save_case(result: CaseResult, path) -> Path:
 
 
 def load_case(path) -> CaseResult:
+    """Load a case through the full typed physical archive validator.
+
+    Parameters
+    ----------
+    path : path-like
+        Version-1 nonlinear case JSON filename.
+
+    Returns
+    -------
+    CaseResult
+        Reconstructed trial, observation and role records. Physical validation
+        retains the normal runtime dependencies of those values.
+    """
     return load_case_snapshot(path)[0]
 
 
 def load_case_snapshot(path) -> tuple[CaseResult, str]:
-    """The fully validated case and SHA-256 of the same UTF-8 artifact bytes."""
+    """Validate a case and identify the exact bytes consumed by its loader.
+
+    Parameters
+    ----------
+    path : path-like
+        Version-1 nonlinear case JSON filename.
+
+    Returns
+    -------
+    CaseResult
+        Fully validated typed case.
+    str
+        Full SHA-256 hex digest of the same UTF-8 bytes decoded for the case.
+    """
     from .inference.result import CaseResult
     content, digest = read_file_snapshot(path)
     value = _json_value(content.decode("utf-8"))

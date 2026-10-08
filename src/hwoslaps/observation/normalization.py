@@ -39,7 +39,7 @@ def _ab_inputs(root: Mapping[str, Any], path: str) -> None:
         raise ConfigError("instrument.collecting_area_m2", "AB photometry needs a collecting area or an optical truth pupil")
 
 
-CROSS_RULES = (Rule("AB source or sky inputs require a bandpass and a collecting area (X6)", _ab_inputs),)
+CROSS_RULES = (Rule("AB source or sky inputs require a bandpass and a collecting area", _ab_inputs),)
 
 
 @dataclass(frozen=True)

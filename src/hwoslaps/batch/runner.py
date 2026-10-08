@@ -344,6 +344,46 @@ def _choose_job(slot, pending, slots):
 
 
 def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False):
+    """Execute selected missing jobs with owned workers and completion markers.
+
+    Parameters
+    ----------
+    spec : BatchSpec
+        Parsed inputs to plan and execute.
+    output_dir : path-like
+        Batch storage directory; one controller holds its exclusive lock.
+    resume : bool
+        Reuse matching completed jobs and wait for recorded earlier workers.
+        False requires missing or empty storage.
+    execution : BatchExecution or None
+        Override runtime placement and controls, or None for the spec's settings.
+    select : str or None
+        Case-sensitive glob over job IDs for missing jobs; None selects all.
+    verify : bool
+        Recheck completed artifact SHA-256 values, in addition to structural and
+        size checks performed when inspecting completion markers.
+    require_single_revision : bool
+        Refuse completed jobs recorded under another source revision.
+
+    Returns
+    -------
+    BatchReport
+        Session counts, participating source revisions and job failures.
+
+    Raises
+    ------
+    BatchIncomplete
+        Jobs failed; the exception carries the completed session report.
+    BatchError
+        Runtime, ownership or storage prevents safe completion. Subclasses
+        distinguish conflicting storage and an already-held controller lock.
+
+    Notes
+    -----
+    Execution requires Linux /proc and pidfd support. Only verified owned worker
+    identities are signaled during cleanup; scientific completion is authorized by
+    validated completion markers, not directory presence.
+    """
     require_process_support()
     output = Path(output_dir).expanduser().resolve()
     if not resume and output.exists() and any(output.iterdir()):

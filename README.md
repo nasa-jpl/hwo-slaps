@@ -1,63 +1,56 @@
 # hwoslaps
 
-hwoslaps computes the profiled linear-Gaussian statistic of a dark-matter subhalo over masses and positions in a strong-lens image. It supports studies of mass reach, source morphology, PSF quality, PSF knowledge error and chromatic imaging. Lens and source parameters, background and supported wavefront modes can enter the nuisance model. AutoLens and Nautilus provide nonlinear comparisons under specified fit bounds.
+hwoslaps forecasts how well a telescope can detect dark-matter subhalos in galaxy-scale
+strong gravitational lenses. Describe a lens, a source, an optical system and an exposure
+in a configuration file, and hwoslaps predicts the detection significance of a subhalo of
+a given mass at every position around the lensed arc. It can also simulate the
+observation, fit it with full PyAutoLens lens models, and run populations of lenses as
+resumable batches on CPUs or GPUs.
 
-> Validation in progress: the public CLI, isolated installation, generated reference, batch correctness checks and five example families have passed their scoped checks. Batch timing acceptance and final combined validation remain open.
+![A simulated HWO observation of a lensed ring and the forecast detection statistic for a 10^8 solar-mass subhalo](docs/_static/hwo-reference.png)
 
-## Start here
-
-- [Engine guide](docs/ENGINE_GUIDE.md)
-- [Scientific conventions and limits](docs/SCIENCE.md)
-- [Migration](docs/MIGRATION.md)
-- [Configuration reference](docs/CONFIG.md), generated from the owning tables
-- [Test instructions](tests/README.md), pending final test-tooling reconciliation
-
-The Python core supplies configuration and array reductions. Rendering and nonlinear fitting need the supported science stack. The CPU installer and import-origin checks passed in an isolated XTX environment; GPU calculations were validated separately in the existing science environment. Choose the installer mode for your hardware:
+## Install
 
 ```bash
-python -m pip install .
-bash install.sh --cpu
-# For a CUDA installation:
-bash install.sh --gpu
+git clone https://github.com/nasa-jpl/hwo-slaps.git
+cd hwo-slaps
+bash install.sh --cpu --env-name hwo-slaps     # or --gpu on a CUDA 12 machine
+conda activate hwo-slaps
 ```
 
-The quick start uses positional configuration files and a new output directory:
+## Run a forecast
 
 ```bash
-hwoslaps validate configs/minimal.yaml
-hwoslaps forecast configs/minimal.yaml --masses 1e7 1e8 1e9 -o out/minimal
+hwoslaps forecast configs/minimal.yaml --masses 1e6 3e6 1e7 3e7 1e8 -o out/quickstart
 ```
-
-Use the typed configuration owner and supply the analysis threshold yourself. Masses are solar masses, positions are `(y, x)` arcseconds, and `interpolation` selects how values cross a target in log mass.
 
 ```python
-from hwoslaps.config.schema import load_config
-from hwoslaps.fisher.api import prepare_forecast, forecast
-from hwoslaps.analysis.reductions import summarize
-from hwoslaps.analysis.reach import mass_reach
+from hwoslaps import load_forecast, mass_reach, summarize
 
-config = load_config("configs/minimal.yaml")
-with prepare_forecast(config) as prepared:
-    result = forecast(prepared, masses_msun=[1e7, 1e8, 1e9])
-summary = summarize(result, q_threshold=10.0)  # a caller choice
-reach = mass_reach(summary, quantity="detectable_fraction", target=0.1, interpolation="linear")
+result = load_forecast("out/quickstart/forecast.npz")
+summary = summarize(result, q_threshold=10.0)
+reach = mass_reach(summary, quantity="q_max", target=10.0, interpolation="log")
+print(f"smallest detectable mass: {reach.mass_msun:.3g} solar masses")
 ```
 
-## Examples
+## Documentation
 
-The examples distinguish reproduction inputs from illustrative instrument choices. These runtimes were measured on XTX on 2026-10-06 and 2026-10-07; each linked README records the inputs and numerical limits.
+The handbook in `docs/` covers installation, a quickstart, how the forecast works, a
+user guide for each task, worked examples including the HWO reference telescope, and the
+full API and configuration reference. To build it:
 
-| Example | Purpose | Input label | Execution status |
-|---|---|---|---|
-| [HWO reference](examples/hwo_reference/README.md) | Paper HWO pupil, SEI throughput and source/sky derivations | Reproduction targets | CPU quick 75.31 s; GPU full 55.36 s |
-| [Monolithic instrument](examples/monolithic_illustrative/README.md) | A configurable monolithic instrument | Illustrative, no Euclid measurement claim | CPU 24.75 s |
-| [Chromatic](examples/chromatic/README.md) | Multiple SED groups and a monochromatic fitted PSF comparison | Finite-support approximation | GPU grid 137.41 s; six-product convergence comparison passed |
-| [Kernel PSF](examples/kernel_psf/README.md) | External matched/mismatched kernels and area reductions | Illustrative detector kernels | CPU pair 8.88 s |
-| [Population](examples/population/README.md) | Member streams and resumable forecast/nonlinear jobs | Illustrative population | Selected CPU member 305.46 s |
+```bash
+python -m pip install -r docs/requirements.txt .
+python -m sphinx -b html docs docs/_build/html
+```
 
-A threshold of 10 in an example command is a reader choice, not a package detection rule. The generated products record the chosen threshold, input identities and execution settings.
+then open `docs/_build/html/index.html`.
 
-The submitted RASTI implementation is retained at tag `rasti-26-183-submitted` (commit `41621de`). Paper fixtures in `tests/parity/` pin reference CPU and JAX GPU quantities; those named anchors establish their own numerical reproduction, not accuracy for every scene or calibrated blind-search significance. The final citation text and assembled package validation remain pending.
+## The RASTI paper
+
+The code used for the RASTI paper is kept at the git tag `rasti-26-183-submitted`. This
+version reproduces its forecasts for the paper's test scenes exactly; see
+`docs/migration.md` for the interface changes.
 
 ## Copyright
 

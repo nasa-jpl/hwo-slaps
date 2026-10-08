@@ -57,7 +57,7 @@ def _optional_float(value: Any) -> float | None:
 
 
 class RoleStatus(StrEnum):
-    """Acceptance status of one role fit; the strings are the values 8fa6209 and the paper recorded."""
+    """Acceptance status of one role fit; the string values are those recorded by the RASTI code."""
 
     ACCEPTED = "accepted_repeatable_profile"
     UNRESOLVED = "unresolved_optimization"

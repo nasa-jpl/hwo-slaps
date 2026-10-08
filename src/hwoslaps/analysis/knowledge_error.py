@@ -157,7 +157,7 @@ def knowledge_error_tolerance(retention: Mapping[float, Mapping[Hashable, float]
     """Apply both gates to one fixed cohort of eligible member/direction keys.
 
     Every amplitude and both maps must contain the same keys, including the
-    ineligible ones. An eligible nonfinite value refuses rather than changing
+    ineligible ones. An eligible non-finite value raises ValueError instead of changing
     the cohort. The caller omits any endpoint anchor from these maps.
     """
     amplitudes = _amplitudes(retention, "retention")

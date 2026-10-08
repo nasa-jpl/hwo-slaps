@@ -221,9 +221,9 @@ WAVEFRONT_SELECTION_TABLE = Table((
             "segment indices, or all: every active segment of the model pupil"),
         Key("nolls", _NOLLS, "hexike Noll indices on each listed segment"),
     ))), "segment hexike modes", default=None),
-    Key("zernikes", Nullable(Table((Key("nolls", _NOLLS, "global Zernike Noll indices (Noll 1 is refused)"),))),
+    Key("zernikes", Nullable(Table((Key("nolls", _NOLLS, "global Zernike Noll indices (Noll 1, piston, is not allowed)"),))),
         "global Zernike modes", default=None),
-), rules=(Rule("at least one family; global Zernike Noll 1 is refused", _check_selection),))
+), rules=(Rule("at least one family; global Zernike Noll 1 is not allowed", _check_selection),))
 
 
 def parse_wavefront_selection(mapping: Mapping[str, Any], path: str) -> WavefrontSelection:
