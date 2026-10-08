@@ -1,0 +1,61 @@
+{
+  "description": "First ten random() draws of hwoslaps.population._rng(seed, index, name) on the base tree (8fa6209 API), the oracle of seeding.stream_rng(seed, name, index).",
+  "generator": "<rundir>/probes/probe_streams.py --fixture-out (W1-FND ledger)",
+  "base": {
+    "commit": "974cee9585a73e59b8665e79336e16e25ffa8989",
+    "tree": "b95290a9763885e015ec05aefb82a80ff0750574"
+  },
+  "cases": [
+    {
+      "seed": 0,
+      "index": 0,
+      "name": "lensing.lens_galaxy.mass.einstein_radius",
+      "random": [
+        0.3590613445449372,
+        0.9862926036130993,
+        0.9213231660182681,
+        0.26688009834540916,
+        0.41994880778817467,
+        0.7722433777853461,
+        0.08849336411097553,
+        0.641719008101672,
+        0.05197897210480584,
+        0.3110997640148154
+      ]
+    },
+    {
+      "seed": 20261005,
+      "index": 7,
+      "name": "lensing.source_galaxy.light.intensity",
+      "random": [
+        0.608495163754582,
+        0.8862202453292254,
+        0.2945847481113939,
+        0.22146182520820656,
+        0.1632711364011319,
+        0.19350750683219387,
+        0.9791470480414127,
+        0.16088734199737753,
+        0.2369700077105903,
+        0.6098209221327393
+      ]
+    },
+    {
+      "seed": 1180591620717411303427,
+      "index": 110170,
+      "name": "population/scene.source.light.disk.effective_radius",
+      "random": [
+        0.7157775198409054,
+        0.4743490528630845,
+        0.1660854509510289,
+        0.18533085430103668,
+        0.9808375162429398,
+        0.51723356226033,
+        0.16058571259680843,
+        0.29790141295702954,
+        0.11671119044660783,
+        0.4279420038363858
+      ]
+    }
+  ]
+}

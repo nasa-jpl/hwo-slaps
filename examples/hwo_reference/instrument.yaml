@@ -1,0 +1,19 @@
+# Reference: HWO EAC1 HRI UVIS inputs from SEI v0.1.9 and the cited study band.
+psf:
+  truth:
+    kind: optical
+    pupil: {kind: hex_segmented, diameter_m: 7.225765, pixels: 512, supersampling: 4,
+            rings: 2, segment_point_to_point_m: 1.65, gap_m: 0.006}
+    focal_length_m: 144.0
+    wavelength_nm: 500.0
+    detector_oversampling: 3
+    kernel_shape: [999, 999]
+instrument:
+  name: hwo_eac1_hri_uvis
+  detector: {gain_e_per_adu: 1.0, read_noise_e: 0.28284271247461906, dark_current_e_per_s: 0.002}
+  collecting_area_m2: null
+  bandpass: {kind: top_hat, min_nm: 450.0, max_nm: 550.0, throughput: 0.21, label: system}
+observation:
+  exposure_time_s: 2000.0
+  exposure_count: 1
+  sky: {ab_mag_per_arcsec2: 23.0}

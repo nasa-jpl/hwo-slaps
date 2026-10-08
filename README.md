@@ -1,60 +1,57 @@
 # HWO-SLAPS
 
-HWO-SLAPS is an end-to-end strong-lensing simulation and Fisher-forecast pipeline for connecting Habitable Worlds Observatory PSF stability to low-mass dark-matter subhalo detectability.
+HWO-SLAPS forecasts how well a telescope can detect dark-matter subhalos in galaxy-scale
+strong gravitational lenses. Describe a lens, a source, an optical system and an exposure
+in a configuration file, and HWO-SLAPS predicts the detection significance of a subhalo of
+a given mass at every position around the lensed arc. It can also simulate the
+observation, fit it with full PyAutoLens lens models, and run populations of lenses as
+resumable batches on CPUs or GPUs.
+The Python package and its command-line tool are both named `hwoslaps`.
 
-The immediate study target is a controlled SPIE 2026 proceedings/poster analysis, followed by an expanded RASTI HWO Special Issue paper. See:
+![A simulated HWO observation of a lensed ring and the forecast detection statistic for a 10^8 solar-mass subhalo](docs/_static/hwo-reference.png)
 
-- [Venue plan](docs/study/venue_plan.md)
-- [Study roadmap](docs/study/study_roadmap.md)
-
-## Pipeline
-
-The package has four active modules:
-
-1. `lensing`: galaxy-galaxy strong-lensing scenes with optional subhalos.
-2. `psf`: segmented-aperture HWO-style PSFs with controlled aberrations.
-3. `observation`: PSF convolution and detector-noise simulation.
-4. `modeling`: Fisher / Asimov subhalo detectability.
-
-The missing study layer is intentional next work: canonical study configs, sweep manifests, aggregation, and publication figures.
-
-## Quick Start
-
-Create the conda environment and install the developer dependency checkouts:
+## Install
 
 ```bash
-bash install.sh
+git clone https://github.com/nasa-jpl/hwo-slaps.git
+cd hwo-slaps
+bash install.sh --cpu --env-name hwo-slaps     # or --gpu on a CUDA 12 machine
+conda activate hwo-slaps
 ```
 
-This clones or updates PyAutoLens and HCIPy as editable GitHub installs in the
-parent directory of this repo by default. Override the checkout location with
-`--checkout-root` or `HWOSLAPS_DEV_ROOT`.
-
-For an NVIDIA GPU machine such as a B200 node, install the same environment with
-CUDA-enabled JAX:
+## Run a forecast
 
 ```bash
-bash install.sh --gpu
+hwoslaps forecast configs/minimal.yaml --masses 1e6 3e6 1e7 3e7 1e8 -o out/quickstart
 ```
 
-Run a config:
+```python
+from hwoslaps import load_forecast, mass_reach, summarize
+
+result = load_forecast("out/quickstart/forecast.npz")
+summary = summarize(result, q_threshold=10.0)
+reach = mass_reach(summary, quantity="q_max", target=10.0, interpolation="log")
+print(f"smallest detectable mass: {reach.mass_msun:.3g} solar masses")
+```
+
+## Documentation
+
+The handbook in `docs/` covers installation, a quickstart, how the forecast works, a
+user guide for each task, worked examples including the HWO reference telescope, and the
+full API and configuration reference. To build it:
 
 ```bash
-python runner.py --config configs/master_config.yaml
+python -m pip install -r docs/requirements.txt .
+python -m sphinx -b html docs docs/_build/html
 ```
 
-Run the core tests:
+then open `docs/_build/html/index.html`.
 
-```bash
-python -m pytest -q
-```
+## The RASTI paper
 
-## Repository Notes
-
-- `configs/master_config.yaml` is the current runnable example config.
-- `outputs/` is ignored and used for run artifacts.
-- `scratch/` is ignored and used for prototypes, archived runs, and local notes.
-- Planning docs that should persist live under `docs/`.
+The code used for the RASTI paper is kept at the git tag `rasti-26-183-submitted`. This
+version reproduces its forecasts for the paper's test scenes exactly; see
+`docs/migration.md` for the interface changes.
 
 ## Copyright
 

@@ -1,0 +1,34 @@
+--- a/autoarray/mask/mask_2d_util.py
++++ b/autoarray/mask/mask_2d_util.py
+@@ -592,7 +592,6 @@
+ 
+     ky, kx = kernel_shape_native
+     pad_y, pad_x = ky // 2, kx // 2
+-    structure = np.ones((ky, kx), dtype=bool)
+ 
+     # Unmasked region (True where unmasked)
+     unmasked = ~mask_2d
+@@ -605,10 +604,21 @@
+         constant_values=False,
+     )
+ 
+-    # Pixels within kernel footprint of any unmasked pixel
++    # Pixels within kernel footprint of any unmasked pixel. The (ky, kx) box
++    # is the Minkowski sum of a (ky, 1) and a (1, kx) segment, and ndimage
++    # centres every structure at (size // 2), so two 1D dilations give the
++    # exact dense-box result for all parities at O(pixels * (ky + kx)) cost;
++    # a dense ones((ky, kx)) structure makes scipy's generic morphology cost
++    # O(pixels * ky * kx) in both time and scratch memory, which is
++    # prohibitive for image-sized kernels.
+     from scipy.ndimage import binary_dilation
+ 
+-    near_unmasked_padded = binary_dilation(unmasked_padded, structure=structure)
++    near_unmasked_padded = binary_dilation(
++        binary_dilation(
++            unmasked_padded, structure=np.ones((ky, 1), dtype=bool)
++        ),
++        structure=np.ones((1, kx), dtype=bool),
++    )
+     near_unmasked = near_unmasked_padded[
+         pad_y : pad_y + mask_2d.shape[0],
+         pad_x : pad_x + mask_2d.shape[1],

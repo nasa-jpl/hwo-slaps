@@ -1,0 +1,5 @@
+# Reference geometry with an illustrative 10 nm knowledge-error direction.
+psf:
+  model:
+    kind: knowledge_error
+    draw: {prior: {packaged: jwst_wss_drift_v1}, amplitude_rms_nm: 10.0, seed: 1, family: combined}

@@ -1,286 +1,177 @@
 #!/usr/bin/env bash
-#
-# Install HWO-SLAPS and its developer dependencies.
-#
-# The science stack currently requires GitHub checkouts of PyAutoLens and HCIPy:
-# PyAutoLens for the current nonlinear-validation backend, and HCIPy for the
-# hexike API that is not available in released packages used by this project.
-
+# Install the validated scientific stack; dependency pins live in pyproject.toml.
 set -euo pipefail
-
-ENV_NAME="hwo-slaps"
-PYTHON_VERSION="3.11"
-INSTALL_GPU_JAX=0
-UPDATE_GIT_REPOS=1
-JAX_VERSION="0.4.38"
-PYAUTOLENS_COMMIT="10bfea51ea95"
-HCIPY_COMMIT="cc853b392463"
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHECKOUT_ROOT="${HWOSLAPS_DEV_ROOT:-$(dirname "$SCRIPT_DIR")}"
-
-PYAUTOLENS_REPO_URL="${PYAUTOLENS_REPO_URL:-https://github.com/PyAutoLabs/PyAutoLens.git}"
-HCIPY_REPO_URL="${HCIPY_REPO_URL:-https://github.com/ehpor/hcipy.git}"
-PYAUTOLENS_DIR="${PYAUTOLENS_DIR:-$CHECKOUT_ROOT/PyAutoLens}"
-HCIPY_DIR="${HCIPY_DIR:-$CHECKOUT_ROOT/hcipy}"
-
+TASK_SOURCE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+TASK_ENV=hwo-slaps
+TASK_PREFIX=
+TASK_PYTHON=3.11
+TASK_GPU=0
+TASK_EDITABLE=
+TASK_ENV_SELECTED=0
 usage() {
-    cat <<EOF
-Usage: bash install.sh [options]
-
-Options:
-  --env-name NAME       Conda environment name. Default: hwo-slaps
-  --python VERSION     Python version for new envs. Default: 3.11
-  --gpu                Install JAX with CUDA 12 support for NVIDIA GPUs.
-  --cpu                Install CPU JAX. Default.
-  --checkout-root DIR  Directory for PyAutoLens and HCIPy checkouts.
-                       Default: parent directory of this repo.
-  --no-pull            Do not pull existing dependency checkouts.
-  --help               Show this message.
-
-Environment overrides:
-  HWOSLAPS_DEV_ROOT    Default checkout root.
-  PYAUTOLENS_REPO_URL  PyAutoLens Git URL.
-  HCIPY_REPO_URL       HCIPy Git URL.
-  PYAUTOLENS_DIR       Existing or desired PyAutoLens checkout path.
-  HCIPY_DIR            Existing or desired HCIPy checkout path.
-EOF
+    cat <<'HELP'
+Usage: bash install.sh [--env-name NAME | --prefix DIR] [--python VERSION]
+                      [--cpu | --gpu] [--editable-backends DIR]
+Dependency pins are read from pyproject.toml. Patches are applied only to the
+selected environment and must match the packaged original/patched hashes.
+HELP
 }
-
-while [[ $# -gt 0 ]]; do
+while [ $# -gt 0 ]; do
     case "$1" in
         --env-name)
-            ENV_NAME="$2"
-            shift 2
-            ;;
-        --python)
-            PYTHON_VERSION="$2"
-            shift 2
-            ;;
-        --gpu)
-            INSTALL_GPU_JAX=1
-            shift
-            ;;
-        --cpu)
-            INSTALL_GPU_JAX=0
-            shift
-            ;;
-        --checkout-root)
-            CHECKOUT_ROOT="$2"
-            PYAUTOLENS_DIR="$CHECKOUT_ROOT/PyAutoLens"
-            HCIPY_DIR="$CHECKOUT_ROOT/hcipy"
-            shift 2
-            ;;
-        --no-pull)
-            UPDATE_GIT_REPOS=0
-            shift
-            ;;
-        --help|-h)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            usage
-            exit 1
-            ;;
+            [ -z "$TASK_PREFIX" ] || { usage; exit 2; }
+            TASK_ENV=${2:?--env-name requires NAME}; TASK_ENV_SELECTED=1; shift 2;;
+        --prefix)
+            [ "$TASK_ENV_SELECTED" -eq 0 ] || { usage; exit 2; }
+            TASK_PREFIX=${2:?--prefix requires DIR}; shift 2;;
+        --python) TASK_PYTHON=${2:?--python requires VERSION}; shift 2;;
+        --gpu) TASK_GPU=1; shift;;
+        --cpu) TASK_GPU=0; shift;;
+        --editable-backends) TASK_EDITABLE=${2:?--editable-backends requires DIR}; shift 2;;
+        --help|-h) usage; exit 0;;
+        *) usage; exit 2;;
     esac
 done
-
-echo "================================================"
-echo "     HWO-SLAPS Developer Installation"
-echo "================================================"
-echo ""
-echo "Environment:       $ENV_NAME"
-echo "Python:            $PYTHON_VERSION"
-echo "Checkout root:     $CHECKOUT_ROOT"
-echo "PyAutoLens dir:    $PYAUTOLENS_DIR"
-echo "HCIPy dir:         $HCIPY_DIR"
-if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
-    echo "JAX mode:          CUDA 12 GPU"
-else
-    echo "JAX mode:          CPU"
-fi
-echo "JAX version:       $JAX_VERSION"
-echo ""
-
-if ! command -v conda >/dev/null 2>&1; then
-    echo "Conda not found. Install Miniconda or Anaconda first."
-    exit 1
-fi
-
-if ! command -v git >/dev/null 2>&1; then
-    echo "git not found. Install git first."
-    exit 1
-fi
-
 source "$(conda info --base)/etc/profile.d/conda.sh"
-
-if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
-    echo "Found existing conda env '$ENV_NAME'."
-else
-    echo "Creating conda env '$ENV_NAME' with Python $PYTHON_VERSION."
-    conda create -n "$ENV_NAME" "python=$PYTHON_VERSION" -y
-fi
-
-conda activate "$ENV_NAME"
-
-python -m pip install --upgrade pip setuptools wheel
-
-clone_or_update() {
-    local repo_url="$1"
-    local target_dir="$2"
-    local label="$3"
-    local commit="$4"
-
-    if [[ -d "$target_dir/.git" ]]; then
-        echo "Found existing $label checkout at $target_dir."
-        if [[ "$UPDATE_GIT_REPOS" -eq 1 ]]; then
-            echo "Updating $label with git pull --ff-only."
-            git -C "$target_dir" pull --ff-only
-        else
-            echo "Skipping pull for $label."
-        fi
-    elif [[ -e "$target_dir" ]]; then
-        echo "$target_dir exists but is not a git checkout."
-        echo "Set ${label}_DIR to a valid checkout or remove the directory."
-        exit 1
-    else
-        echo "Cloning $label from $repo_url to $target_dir."
-        mkdir -p "$(dirname "$target_dir")"
-        git clone "$repo_url" "$target_dir"
+if [ -n "$TASK_PREFIX" ]; then
+    if [ ! -d "$TASK_PREFIX/conda-meta" ]; then
+        conda create --prefix "$TASK_PREFIX" "python=$TASK_PYTHON" -y
     fi
-
-    if ! git -C "$target_dir" cat-file -e "${commit}^{commit}" 2>/dev/null; then
-        if [[ "$UPDATE_GIT_REPOS" -ne 1 ]]; then
-            echo "Pinned $label commit $commit is not available locally."
-            exit 1
-        fi
-        git -C "$target_dir" fetch --quiet origin "$commit"
-    fi
-    git -C "$target_dir" checkout --detach "$commit"
-    [[ "$(git -C "$target_dir" rev-parse HEAD)" == \
-       "$(git -C "$target_dir" rev-parse "${commit}^{commit}")" ]]
-}
-
-clone_or_update "$PYAUTOLENS_REPO_URL" "$PYAUTOLENS_DIR" "PyAutoLens" "$PYAUTOLENS_COMMIT"
-clone_or_update "$HCIPY_REPO_URL" "$HCIPY_DIR" "HCIPy" "$HCIPY_COMMIT"
-
-echo "Installing base runtime and test dependencies."
-python -m pip install \
-    "numpy==1.26.4" \
-    "scipy==1.17.1" \
-    "scikit-learn==1.8.0" \
-    "threadpoolctl==3.6.0" \
-    matplotlib \
-    pyyaml \
-    astropy \
-    tqdm \
-    numba \
-    pytest \
-    "nautilus-sampler==1.0.5" \
-    "autoarray==2026.5.14.2" \
-    "autofit==2026.5.14.2" \
-    "autogalaxy==2026.5.14.2" \
-    "autoconf==2026.5.14.2" \
-    "jax==0.4.38" \
-    "jaxlib==0.4.38"
-
-echo "Installing PyAutoLens from editable Git checkout."
-python -m pip install -e "$PYAUTOLENS_DIR"
-
-echo "Installing HCIPy from editable Git checkout."
-python -m pip install -e "$HCIPY_DIR"
-
-echo "Installing HWO-SLAPS from editable checkout."
-python -m pip install -e "$SCRIPT_DIR"
-
-if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
-    echo "Installing JAX $JAX_VERSION with CUDA 12 support."
-    python -m pip install \
-        "jax-cuda12-plugin==0.4.38" \
-        "jax-cuda12-pjrt==0.4.38"
+    conda activate "$TASK_PREFIX"
 else
-    echo "Installing CPU JAX $JAX_VERSION."
+    if ! conda env list --json | python -c 'import json,sys,pathlib; raise SystemExit(not any(pathlib.Path(p).name == sys.argv[1] for p in json.load(sys.stdin)["envs"]))' "$TASK_ENV"; then
+        conda create --name "$TASK_ENV" "python=$TASK_PYTHON" -y
+    fi
+    conda activate "$TASK_ENV"
 fi
-
-echo "Reasserting the validated runtime pins after editable installs."
-python -m pip install --upgrade --no-deps \
-    "numpy==1.26.4" \
-    "scipy==1.17.1" \
-    "scikit-learn==1.8.0" \
-    "threadpoolctl==3.6.0" \
-    "nautilus-sampler==1.0.5" \
-    "autoarray==2026.5.14.2" \
-    "autofit==2026.5.14.2" \
-    "autogalaxy==2026.5.14.2" \
-    "autoconf==2026.5.14.2" \
-    "jax==0.4.38" \
-    "jaxlib==0.4.38"
-if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
-    python -m pip install --upgrade --no-deps \
-        "jax-cuda12-plugin==0.4.38" \
-        "jax-cuda12-pjrt==0.4.38"
+TASK_EXTRAS=all
+if [ "$TASK_GPU" -eq 1 ]; then TASK_EXTRAS=all,cuda12; fi
+python -m pip install -e "$TASK_SOURCE[$TASK_EXTRAS]"
+if [ -n "$TASK_EDITABLE" ]; then
+    python - "$TASK_SOURCE/pyproject.toml" "$TASK_EDITABLE" <<'PY'
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tomllib
+from urllib.parse import urlparse
+project = tomllib.loads(Path(sys.argv[1]).read_text())["project"]
+root = Path(sys.argv[2]).resolve()
+root.mkdir(parents=True, exist_ok=True)
+def repository_url(url):
+    if url.startswith("git@github.com:"):
+        url = "https://github.com/" + url.split(":", 1)[1]
+    parsed = urlparse(url)
+    return parsed.hostname, parsed.path.rstrip("/").removesuffix(".git").lower()
+def git(directory, *arguments):
+    return subprocess.run(["git", "--no-optional-locks", "-C", str(directory), *arguments],
+                          check=True, capture_output=True, text=True).stdout.strip()
+for extra, checkout in (("lensing", "PyAutoLens"), ("optics", "hcipy")):
+    requirement = next(value for value in project["optional-dependencies"][extra] if "git+" in value)
+    match = re.fullmatch(r"\S+ @ git\+(.+)@([0-9a-f]{40})", requirement)
+    if match is None:
+        raise ValueError(f"expected a pinned Git requirement, got {requirement}")
+    url, commit = match.groups()
+    directory = root / checkout
+    if not directory.exists():
+        subprocess.run(["git", "clone", url, str(directory)], check=True)
+    else:
+        if Path(git(directory, "rev-parse", "--show-toplevel")).resolve() != directory.resolve():
+            raise RuntimeError(f"{directory}: expected a standalone dependency checkout")
+        origin = git(directory, "remote", "get-url", "origin")
+        if repository_url(origin) != repository_url(url):
+            raise RuntimeError(f"{directory}: origin {origin!r} differs from the pinned repository {url!r}")
+        if git(directory, "status", "--porcelain=v1", "--untracked-files=all"):
+            raise RuntimeError(f"{directory}: refusing to install a dirty dependency checkout")
+    subprocess.run(["git", "-C", str(directory), "fetch", "origin", commit], check=True)
+    subprocess.run(["git", "-C", str(directory), "checkout", "--detach", commit], check=True)
+    if git(directory, "rev-parse", "HEAD") != commit or git(directory, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise RuntimeError(f"{directory}: checkout does not match the clean pinned source")
+    subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", str(directory)], check=True)
+PY
 fi
-
-echo ""
-echo "Running import and backend checks."
-python - <<'PY'
-import autolens as al
-import autofit as af
+python - "$TASK_SOURCE/tools/patches/autoarray-2026.5.14.2" "$CONDA_PREFIX" <<'PY'
+import hashlib
+import importlib.metadata
+import importlib.util
+import json
+from pathlib import Path
+import subprocess
+import sys
+import sysconfig
+prefix = Path(sys.prefix).resolve(strict=True)
+if prefix != Path(sys.argv[2]).resolve(strict=True) or not Path(sys.executable).resolve(strict=True).is_relative_to(prefix):
+    raise RuntimeError("the patch interpreter does not belong to the selected conda environment")
+distributions = [dist for dist in importlib.metadata.distributions()
+                 if dist.metadata["Name"].lower().replace("_", "-") == "autoarray"]
+if len(distributions) != 1:
+    raise RuntimeError("autoarray must have exactly one distribution in the selected environment")
+distribution = distributions[0]
+if distribution.version != "2026.5.14.2":
+    raise RuntimeError("the autoarray patches require version 2026.5.14.2")
+site = Path(distribution.locate_file("")).resolve(strict=True)
+install_roots = {Path(sysconfig.get_path(name)).resolve(strict=True) for name in ("purelib", "platlib")}
+if site not in install_roots or not site.is_relative_to(prefix):
+    raise RuntimeError("autoarray distribution metadata is outside the selected environment install root")
+direct_url = distribution.read_text("direct_url.json")
+if direct_url is not None and json.loads(direct_url).get("dir_info", {}).get("editable", False):
+    raise RuntimeError("refusing to patch an editable autoarray checkout")
+files = distribution.files
+if files is None:
+    raise RuntimeError("autoarray distribution has no installed-file ownership record")
+owned_files = {str(filename) for filename in files}
+metadata_files = [Path(distribution.locate_file(filename)).resolve(strict=True) for filename in files
+                  if filename.name in ("METADATA", "PKG-INFO")]
+if len(metadata_files) != 1 or not metadata_files[0].is_relative_to(site):
+    raise RuntimeError("autoarray distribution metadata has an ambiguous or external origin")
+spec = importlib.util.find_spec("autoarray")
+package = site / "autoarray"
+init = package / "__init__.py"
+if (spec is None or spec.origin is None or "autoarray/__init__.py" not in owned_files
+        or init.resolve(strict=True) != init
+        or Path(spec.origin).resolve(strict=True) != init
+        or tuple(Path(location).resolve(strict=True) for location in (spec.submodule_search_locations or ())) != (package,)):
+    raise RuntimeError("autoarray module is shadowed or does not belong to the selected environment distribution")
+patches = Path(sys.argv[1])
+expected = {}
+for line in (patches / "SHA256SUMS").read_text().splitlines():
+    digest, state, filename = line.split()
+    expected.setdefault(filename, {})[state] = digest
+targets = {}
+for filename, digests in expected.items():
+    target = site / filename
+    resolved = target.resolve(strict=True)
+    if (filename not in owned_files or resolved != target or not resolved.is_relative_to(package)
+            or not resolved.is_relative_to(prefix)):
+        raise RuntimeError(f"{filename}: patch target is not owned by the selected environment distribution")
+    actual = hashlib.sha256(resolved.read_bytes()).hexdigest()
+    if actual not in digests.values():
+        raise RuntimeError(f"{filename}: unexpected SHA-256 {actual}; refusing to patch")
+    targets[filename] = resolved
+for filename, digests in expected.items():
+    target = targets[filename]
+    if hashlib.sha256(target.read_bytes()).hexdigest() == digests["patched"]:
+        continue
+    diff = patches / (target.stem + ".diff")
+    subprocess.run(["patch", "--batch", "--forward", "-p1", "-d", str(site), "-i", str(diff.resolve())], check=True)
+    actual = hashlib.sha256(target.read_bytes()).hexdigest()
+    if actual != digests["patched"]:
+        raise RuntimeError(f"{filename}: patched SHA-256 {actual} differs from the validated patch")
+PY
+python - "$TASK_GPU" <<'PY'
+import sys
+import autolens
+import autofit
 import hcipy
 import hwoslaps
 import jax
-import numpy
-import yaml
-
-print("autolens", getattr(al, "__version__", "unknown"), al.__file__)
-print("autofit", getattr(af, "__version__", "unknown"), af.__file__)
-print("hcipy", getattr(hcipy, "__version__", "unknown"), hcipy.__file__)
-print("hwoslaps", getattr(hwoslaps, "__version__", "unknown"), hwoslaps.__file__)
-print("jax", jax.__version__)
-print("jax devices", jax.devices())
-print("jax backend", jax.default_backend())
-
-required_hexike = [
-    "make_hexike_basis",
-    "SegmentedHexikeSurface",
-    "make_segment_hexike_surface_from_hex_aperture",
-]
-missing = [name for name in required_hexike if not hasattr(hcipy, name)]
+required = ("make_hexike_basis", "SegmentedHexikeSurface", "make_segment_hexike_surface_from_hex_aperture")
+missing = [name for name in required if not hasattr(hcipy, name)]
 if missing:
-    raise RuntimeError(
-        "HCIPy checkout is missing required hexike symbols: "
-        + ", ".join(missing)
-    )
-
-print("All import checks passed.")
+    raise RuntimeError(f"HCIPy is missing the validated hexike API: {missing}")
+if sys.argv[1] == "1" and jax.default_backend() != "gpu":
+    raise RuntimeError("--gpu requires a working CUDA JAX backend")
+print("hwoslaps", hwoslaps.__version__, hwoslaps.__file__)
+print("jax", jax.__version__, jax.devices())
 PY
-
-if [[ "$INSTALL_GPU_JAX" -eq 1 ]]; then
-    echo ""
-    echo "Verifying CUDA JAX backend was selected."
-    python - <<'PY'
-import jax
-
-backend = jax.default_backend()
-if backend != "gpu":
-    raise RuntimeError(
-        f"Expected JAX GPU backend for --gpu install, got {backend!r}. "
-        "Check NVIDIA driver, CUDA compatibility, and JAX CUDA wheel install."
-    )
-print("CUDA JAX backend verified.")
-PY
-fi
-
-echo ""
-echo "================================================"
-echo "     Installation complete"
-echo "================================================"
-echo ""
-echo "Activate with:"
-echo "    conda activate $ENV_NAME"
-echo ""
-echo "Recommended validation checks:"
-echo "    python -m pytest -q tests/test_installation.py"
-echo "    python -m pytest -q tests/test_nonlinear_dataset_builder.py tests/test_nonlinear_autolens_model_builder_runtime.py tests/test_nonlinear_autolens_runner.py"
+printf '%s\n' 'Validate with: python tools/run_backend_tests.py tests -q -m "not xtx_gpu and not xtx_multi_gpu"'
