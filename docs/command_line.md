@@ -22,7 +22,8 @@ Installing hwoslaps adds the `hwoslaps` command. `python -m hwoslaps` is equival
   The value is read as YAML. Repeat the option to change several values.
 
 `-o DIR`, `--output-dir DIR`
-: The output directory. It must not exist.
+: The output directory. For `forecast` and `simulate` it must not exist yet. `batch run`
+  creates it, or resumes the batch already in it.
 
 `--log-level {DEBUG,INFO,WARNING}`
 : Placed before the command, for example `hwoslaps --log-level WARNING forecast ...`.

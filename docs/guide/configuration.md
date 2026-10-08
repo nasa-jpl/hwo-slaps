@@ -79,7 +79,7 @@ recorded with each result.
 
 ## Combining files
 
-Configurations are usually split into reusable pieces: one file for the scene, one for
+Configurations are usually split into reusable files: one for the scene, one for
 the instrument, one for the forecast. Pass them in order; later files override earlier
 ones.
 
@@ -101,7 +101,7 @@ config = load_config([
 
 When files are combined:
 
-- mappings merge key by key, so an overlay only needs the keys it changes;
+- mappings merge key by key, so a later file (an *overlay*) only needs the keys it changes;
 - lists and single values replace the earlier value;
 - changing a `kind` or `type` replaces that whole block, so keys from the old kind do
   not leak into the new one;
@@ -109,7 +109,7 @@ When files are combined:
   so that a literal `intensity` can be used instead.
 
 File paths inside a configuration, such as a PSF kernel or an image source, are
-relative to the file that contains them. A fragment can be reused from any working
+relative to the file that contains them. A file can be reused from any working
 directory.
 
 ## Changing values

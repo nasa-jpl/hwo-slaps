@@ -30,8 +30,9 @@ RASTI code, or from comparisons between the reference and JAX engines.
 
 `tests/parity/` checks the forecast, optics and nonlinear likelihood against fixtures
 computed with the RASTI code for five test scenes. The reference engine must reproduce
-them bit for bit, the JAX engine on a GPU exactly, and the JAX engine on a CPU to a few
-parts per million. The fixtures were made by `tests/scripts/generate_paper_parity.py`,
+the RASTI reference-engine values bit for bit, and the JAX engine on a GPU must reproduce
+the RASTI GPU values bit for bit. The JAX engine on a CPU must agree to a few parts per
+million. The fixtures were made by `tests/scripts/generate_paper_parity.py`,
 which runs the tagged RASTI code. To check that the committed inputs still match:
 
 ```bash

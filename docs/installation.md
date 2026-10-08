@@ -61,7 +61,8 @@ hwoslaps --help
 hwoslaps validate configs/minimal.yaml
 ```
 
-The second command prints the configuration's name and digest:
+The second command prints the configuration's name and its digest, a hash of its
+scientific content:
 
 ```text
 minimal: valid, digest 783bbd948ef42e566ae6e711e240f4e7e7e8df5375ec380a7d18917daeff1ffa

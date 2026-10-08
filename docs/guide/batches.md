@@ -18,8 +18,8 @@ fits one injected subhalo in the first lens:
 The parts are:
 
 `name`, `seed`
-: The batch name and the seed for everything the batch draws itself: detector noise,
-  sampler seeds and PSF error directions.
+: The batch name and the seed for the random choices the batch makes itself: detector
+  noise, sampler seeds and PSF error directions. The population has its own seed.
 
 `config`
 : The base configuration: one file, a list of files combined in order, or an inline
@@ -66,8 +66,10 @@ bind:
   scene.lens.mass.main.einstein_radius: theta_e
 ```
 
-Every member has its own random stream, named by its index. Adding members, or changing
-`count` or `start`, never changes the members that already exist.
+`population.seed` sets the draws, `count` the number of members, and `start` the index of
+the first member (0 by default). Every member has its own random stream, named by its
+index, so adding members or changing `count` or `start` never changes the members that
+already exist.
 
 ## Arms
 
@@ -85,7 +87,7 @@ arms:
 
 `directions: 8` runs the arm eight times per member, each with a different PSF error
 pattern. Each direction's seed is derived from the batch seed, the member and the
-direction number.
+direction number, and replaces the `seed` written in the arm.
 
 ## Job families
 
@@ -112,10 +114,10 @@ The `trials` of a nonlinear family can be:
 
 Trials taken from a forecast run after that forecast finishes. If the fit and the
 forecast use different arms, for example a smaller PSF kernel for the fit, name the
-forecast's arm with `forecast_arm`. With `forecast_argmax`, every member's forecast needs
-at least one position with a finite *q* (and, for a mismatched PSF, a positive amplitude)
-inside the fit arm's region. A member without one stops the batch, and the batch will
-stop at the same point when resumed until you change the specification.
+forecast's arm with `forecast_arm`. With `forecast_argmax`, each member's forecast needs at
+least one position inside the fit arm's region with a finite *q* (and, for a mismatched PSF,
+a positive amplitude). If a member has none, the batch stops, and it stops at the same
+member on every resume until you change the batch file.
 
 `retry` gives a nonlinear family one follow-up attempt with different sampler or
 refinement settings, for cases whose roles did not reach an accepted status.

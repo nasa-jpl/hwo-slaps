@@ -166,10 +166,14 @@ def _api_pages(app, package):
 
 
 def _without_nested_engine_config(text):
-    """Drop the batch.config sections, which repeat the engine configuration verbatim."""
+    """Drop the batch.config sections, which repeat the engine configuration verbatim.
+
+    Headings such as ``scene.lens.mass.<name>`` escape ``<`` so Markdown keeps the placeholder.
+    """
     sections = text.split('\n## ')
     kept = [sections[0]] + [section for section in sections[1:] if not section.startswith('batch.config')]
-    return '\n## '.join(kept)
+    page = '\n## '.join(kept)
+    return '\n'.join(line.replace('<', '\\<') if line.startswith('## ') else line for line in page.split('\n'))
 
 
 def _configuration(app, root):

@@ -25,7 +25,7 @@ The cosmology of distances, critical densities and halo scales.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `name` | null or non-empty text | `null` |  | named astropy flat Lambda-CDM realization (Planck15 preserves the paper backend) |
+| `name` | null or non-empty text | `null` |  | named astropy flat Lambda-CDM realization, such as Planck15 (the RASTI paper) |
 | `flat_lcdm` | null or mapping, see `cosmology.flat_lcdm` | `null` |  | custom flat Lambda-CDM parameters |
 
 - exactly one of `name`, `flat_lcdm` is set; write null to clear one
@@ -1200,7 +1200,7 @@ detector noise parameters
 | `read_noise_e` | number | required | e- per pixel per exposure | read noise of one pixel in one exposure; must be >= 0 |
 | `dark_current_e_per_s` | number | required | e-/s per pixel | dark current of one pixel; must be >= 0 |
 
-- gain > 0, read noise >= 0 and dark current >= 0 (the Detector domain)
+- gain > 0, read noise >= 0 and dark current >= 0
 
 ## instrument.bandpass (kind: top_hat)
 
@@ -1794,7 +1794,7 @@ Selected by `kind: function`.
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
 | `name` | text matching [A-Za-z0-9_.-]+ | required |  | batch name |
-| `seed` | integer >= 0 | required |  | batch noise/sampler/direction entropy |
+| `seed` | integer >= 0 | required |  | seed for batch noise, sampler seeds and PSF error directions |
 | `config` | mapping, see `batch.config`, non-empty text, or list of at least 1 items, each non-empty text | required |  | configuration files or effective mapping |
 | `overrides` | mapping | `{}` |  | base configuration overlay |
 | `population` | null or mapping, see `batch.population` | `null` |  | member population |
@@ -1831,7 +1831,7 @@ The cosmology of distances, critical densities and halo scales.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `name` | null or non-empty text | `null` |  | named astropy flat Lambda-CDM realization (Planck15 preserves the paper backend) |
+| `name` | null or non-empty text | `null` |  | named astropy flat Lambda-CDM realization, such as Planck15 (the RASTI paper) |
 | `flat_lcdm` | null or mapping, see `batch.config.cosmology.flat_lcdm` | `null` |  | custom flat Lambda-CDM parameters |
 
 - exactly one of `name`, `flat_lcdm` is set; write null to clear one
@@ -3006,7 +3006,7 @@ detector noise parameters
 | `read_noise_e` | number | required | e- per pixel per exposure | read noise of one pixel in one exposure; must be >= 0 |
 | `dark_current_e_per_s` | number | required | e-/s per pixel | dark current of one pixel; must be >= 0 |
 
-- gain > 0, read noise >= 0 and dark current >= 0 (the Detector domain)
+- gain > 0, read noise >= 0 and dark current >= 0
 
 ## batch.config.instrument.bandpass (kind: top_hat)
 

@@ -79,7 +79,7 @@ DETECTOR_TABLE = Table(
         Key("dark_current_e_per_s", Real(), "dark current of one pixel; must be >= 0",
             unit="e-/s per pixel"),
     ),
-    rules=(Rule("gain > 0, read noise >= 0 and dark current >= 0 (the Detector domain)",
+    rules=(Rule("gain > 0, read noise >= 0 and dark current >= 0",
                 _detector_domain),),
     doc="detector noise parameters",
 )

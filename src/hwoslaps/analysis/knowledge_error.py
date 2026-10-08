@@ -125,7 +125,7 @@ def _amplitudes(values: Mapping[float, Any], name: str) -> tuple[float, ...]:
 
 @dataclass(frozen=True)
 class ToleranceCriterion:
-    """Linear quantiles and inclusive limits for the same eligible cohort."""
+    """Linear quantiles and inclusive limits, applied to one set of eligible keys."""
 
     retention_quantile: float
     retention_min: float
@@ -154,11 +154,15 @@ class ToleranceResult:
 def knowledge_error_tolerance(retention: Mapping[float, Mapping[Hashable, float]],
                               spurious: Mapping[float, Mapping[Hashable, float]], *,
                               eligible: Collection[Hashable], criterion: ToleranceCriterion) -> ToleranceResult:
-    """Apply both gates to one fixed cohort of eligible member/direction keys.
+    """Apply both gates to one fixed set of eligible keys, such as the directions of one lens.
+
+    ``retention`` maps each amplitude to the paper's R per key, which is
+    ``KnowledgeErrorAreas.detected_area_ratio``; ``spurious`` maps it to F, which is
+    ``spurious_ratio``.
 
     Every amplitude and both maps must contain the same keys, including the
     ineligible ones. An eligible non-finite value raises ValueError instead of changing
-    the cohort. The caller omits any endpoint anchor from these maps.
+    the set. Leave out of the maps any amplitude that is not part of the test.
     """
     amplitudes = _amplitudes(retention, "retention")
     _amplitudes(spurious, "spurious")

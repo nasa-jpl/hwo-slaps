@@ -33,7 +33,7 @@ random stream, so you can redraw the noise without changing the scene.
 ## Subhalos
 
 `prepared.hypothesis(mass_msun, (y, x))` returns a `Halo` of the type and concentration
-set in `scene.subhalo`, at the lens redshift. It is the same subhalo the forecast
+set in `scene.subhalo`, at the lens redshift, or at `scene.subhalo.redshift` if that is set. It is the same subhalo the forecast
 evaluates at that mass and position.
 
 A configuration can also describe one injected subhalo in `scene.injection`:
@@ -106,9 +106,11 @@ $$
 \sigma^2 = \max(\text{light}, 0)\,t + \text{sky}\,t + \text{dark}\,t + N\,r^2,
 $$
 
-for exposure time $t$, $N$ exposures and read noise $r$ per exposure. The image and
-noise map are converted to ADU with the detector gain. Throughput is applied once, to
-the light; sky and dark rates are given as detected rates. The detector model has no
+for total exposure time $t$ (summed over $N$ exposures) and read noise $r$ per exposure.
+The image and noise map are converted to ADU with the detector gain. The bandpass
+throughput is applied once, to light given as a magnitude, including a sky given in AB
+mag per square arcsecond. Rates given in electrons per second are already detected rates
+and are used as they are. The detector model has no
 saturation, cosmic rays, interpixel capacitance or flat-field errors.
 
 ## Photometry
@@ -126,13 +128,14 @@ print(prepared.observation.photometry.to_mapping())
 hwoslaps evaluates light on an oversampled grid, bins it to detector pixels, and then
 convolves it with a pixel-integrated PSF. This is exact when the light is nearly
 constant across each detector pixel. `observation.sampling` reports how far it is from
-that, as the relative variation of light within a pixel, per light group:
+that, as the relative variation of light within a pixel, for each light group (each light
+component with its own spectrum, or all the light of a plane when no spectra are set):
 
 ```python
 print(prepared.observation.sampling)     # {'source': 0.32274029790875214}
 ```
 
-In the tests that calibrate this check, values below about 0.06 kept the error in the
+In the tests that calibrated this diagnostic, values below 0.063 kept the error in the
 subhalo signal information below one percent. hwoslaps does not enforce a limit.
 For larger values, or a new kind of scene, compare against a configuration with finer
 pixels before relying on the result. The minimal example uses coarse pixels on

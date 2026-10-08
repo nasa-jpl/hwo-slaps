@@ -213,7 +213,7 @@ DEFAULT_BOX_RULES: tuple[tuple[str, BoxRule], ...] = (
 
 The widths are the defaults of the RASTI code. Lens-light rows reuse the source widths, and the
 orientation rows (degrees, for an Image ``rotation_deg``) give the orientation freedom of the
-analytic source ellipticity box in the paper's first test scene. The adopted nonlinear runs of
+analytic source ellipticity box in the paper's first test scene. The nonlinear runs reported in
 the paper used wider boxes; the nonlinear-fits guide shows how to set them."""
 
 _RULE_KEYS = tuple(name for name, _ in DEFAULT_BOX_RULES)

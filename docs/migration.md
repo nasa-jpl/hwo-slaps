@@ -3,7 +3,7 @@
 The code used for the RASTI paper is kept at the git tag `rasti-26-183-submitted`.
 This version reorganizes the package around one configuration file, one forecast
 interface and one set of result files. Parity tests check that forecasts of the paper's
-test scenes match the RASTI code exactly; the interfaces differ. Old result files cannot be read by
+test scenes match the RASTI code exactly. The interfaces differ. Old result files cannot be read by
 this version, so keep the tagged code if you need to reproduce or reread old products.
 
 ## Configuration

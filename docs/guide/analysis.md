@@ -1,8 +1,10 @@
 # Summaries and mass reach
 
 A forecast gives *q* for every mass and position. This page turns those maps into
-detection maps, fractions, areas and the smallest detectable mass. None of these steps
-needs the scientific stack, so they work on saved results on any machine.
+detection maps, fractions, areas and the smallest detectable mass. Summaries and mass
+reach need only the core package, so they work on saved results on any machine. Plots
+also need Matplotlib (`pip install ".[plot]"`), and `adaptive_mass_reach` runs new
+forecasts, so it needs the scientific stack.
 
 ```python
 from hwoslaps import load_forecast, mass_reach, summarize
@@ -41,7 +43,8 @@ error.
 
 If `boundary_detectable` is true, the detectable region reaches the edge of your grid,
 and a larger grid could find a larger area. Widen `half_width_arcsec` until it is false
-at the masses you care about.
+at the masses you care about. It checks the edge of the whole grid even when you pass a
+selection, so a small aperture well inside the grid can still report true.
 
 For the mismatch statistics, `q_max` counts a position with a negative fitted
 amplitude as zero.
@@ -86,8 +89,8 @@ The result's `status` says what was found:
 |---|---|---|
 | `sampled` | One of your masses hits the target exactly | That mass |
 | `bracketed` | The target lies between two of your masses | The interpolated mass |
-| `below_range` | Even your smallest mass exceeds the target | `None`; the reach is below `upper_mass_msun` |
-| `above_range` | No mass reaches the target | `None`; the reach is above `lower_mass_msun` |
+| `below_range` | Even your smallest mass exceeds the target | `None`; the reach is below your smallest mass, stored in `upper_mass_msun` |
+| `above_range` | No mass reaches the target | `None`; the reach is above your largest mass, stored in `lower_mass_msun` |
 | `non_monotonic` | The curve falls somewhere, so the crossing is not unique | `None` |
 
 hwoslaps never extrapolates beyond the masses you evaluated. If you get `below_range` or

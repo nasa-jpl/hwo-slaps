@@ -314,7 +314,7 @@ def save_observation(observation: Observation, path) -> Path:
 
 
 def load_observation(path) -> Observation:
-    """Reconstruct a detector observation from its current NPZ archive.
+    """Reconstruct a detector observation from its NPZ archive.
 
     Parameters
     ----------

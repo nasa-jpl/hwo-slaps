@@ -363,7 +363,7 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
         Recheck completed artifact SHA-256 values, in addition to structural and
         size checks performed when inspecting completion markers.
     require_single_revision : bool
-        Refuse completed jobs recorded under another source revision.
+        Raise an error if completed jobs come from another source revision.
 
     Returns
     -------

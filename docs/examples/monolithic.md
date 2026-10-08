@@ -31,7 +31,7 @@ parameters are profiled along with the lens mass and source.
 ```
 
 The `source_snr` mask keeps only pixels where the lensed source is detected at a
-signal-to-noise of at least 3. The noise in that ratio includes the lens light.
+signal-to-noise above 3. The noise in that ratio includes the lens light.
 
 ## Running it
 
@@ -55,7 +55,7 @@ hwoslaps validate examples/monolithic_illustrative/scene.yaml \
 ## Pixel sampling
 
 The 0.04 arcsec pixels are coarse for this lens. `run.json` records a sampling
-diagnostic of 0.31 for the lens light and 0.094 for the source, both above the 0.06
-level where the binned rendering was calibrated. Before using a configuration like this
+diagnostic of 0.31 for the lens light and 0.094 for the source, both above the calibrated
+level of 0.063. Before using a configuration like this
 for science, compare it against one with finer pixels. See
 [Observations](../guide/observations.md#pixel-sampling).

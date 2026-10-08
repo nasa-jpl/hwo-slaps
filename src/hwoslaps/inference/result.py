@@ -46,7 +46,7 @@ def finite_json(value: Any) -> Any:
 
 
 def check_record_keys(mapping: Mapping[str, Any], cls: type) -> None:
-    """Refuse a record of a dataclass whose keys are not exactly its field names."""
+    """Raise an error unless a record's keys are exactly the dataclass field names."""
     expected = [item.name for item in dataclasses.fields(cls)]
     if set(mapping) != set(expected):
         raise ValueError(f"{cls.__name__} record keys must be {expected}, got {sorted(map(str, mapping))}")

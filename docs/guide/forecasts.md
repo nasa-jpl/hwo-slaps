@@ -37,9 +37,13 @@ depends on the subhalo type in `scene.subhalo`:
 | `NFW` | $M_{200c}$, with the concentration set in the configuration |
 | `TNFW` | $M_{200c}$ of the parent NFW halo; the truncated total mass is recorded separately |
 
-The Moliné et al. (2017) concentration relation is calibrated for $M_{200c}$ between
-10⁶ and 10¹² M☉, and hwoslaps raises an error for masses outside that range. Use a
-fixed or power-law concentration for other masses.
+The NFW concentration is set in `scene.subhalo.concentration`. The minimal example uses
+the Moliné et al. (2017) relation for subhalos, `{kind: moline2017_eq7, x_sub: 1.0}`, where
+`x_sub` is the subhalo's distance from the host centre in units of the host virial radius. That
+relation is calibrated for $M_{200c}$ between 10⁶ and 10¹² M☉, and hwoslaps raises an error
+for masses outside that range. For other masses, use a fixed concentration,
+`{kind: fixed, value: 15.0}`, or a power law in mass and redshift (`kind: power_law`; see
+the [configuration reference](../configuration.md)).
 
 ## Trial positions
 
@@ -91,7 +95,7 @@ result = forecast(prepared, masses_msun=[1e7], positions=[[0.0, 1.0], [1.0, 0.0]
 | `all_pixels` | Every pixel of the image |
 | `psf_border` | Every pixel at least half a PSF width from the image edge |
 | `annulus` | Pixels between `inner_arcsec` and `outer_arcsec` from the lens centre (or from the grid centre with `about: grid`) |
-| `source_snr` | Pixels where the expected lensed-source signal-to-noise is at least `snr_min` |
+| `source_snr` | Pixels where the expected lensed-source signal-to-noise is above `snr_min` |
 
 `prepared.mask` is the resulting boolean image.
 
@@ -134,8 +138,8 @@ forecast:
 : Finite-difference steps used to compute each nuisance column, by parameter kind
   (`position`, `einstein_radius`, `ellipticity`, `slope`, `multipole`, `shear`,
   `amplitude`, `size`, `sersic_index`, `orientation`) or by full name. The defaults
-  are 10⁻³ for geometric parameters, 10⁻² for amplitudes and sizes, and 0.1 degrees
-  for orientations.
+  are 10⁻³ for geometric parameters, a relative step of 1% for amplitudes and sizes,
+  and 0.1 degrees for orientations.
 
 `background_offset`
 : Whether to profile a constant offset in ADU. On by default.
@@ -159,8 +163,8 @@ nonlinear fits still use independent pixels.
 
 ## Engines and execution
 
-`Execution` chooses how templates are computed. It does not change the result, and it
-is not part of the configuration digest.
+`Execution` chooses how templates are computed. It is not part of the configuration
+digest. The reference and JAX engines agree to a few parts per million.
 
 ```python
 from hwoslaps import Execution

@@ -120,12 +120,12 @@ def jax_objective(analysis: Any, model: Any, lower: Sequence[float], upper: Sequ
 
 
 def guard_circular_mass_gradient(objective: BoxObjective, model: FitModel) -> BoxObjective:
-    """Refuse singular free circular mass-shape gradients without changing values.
+    """Raise an error for gradients at singular free circular mass shapes, without changing values.
 
     Resolve each constructor element to its canonical physical-vector index (including
     linked priors) once. Unreachable and entirely fixed circular pairs need no guard.
     A circular PowerLaw with free ellipticity and slope !=2 has the additional
-    (2-slope)|ell_comps| normalization cusp (A2 1.3). Fixed ellipse and value-only
+    (2-slope)|ell_comps| normalization cusp. Fixed ellipse and value-only
     paths remain valid. The likelihood, residual and compiled graphs are unchanged.
     """
     pairs = []

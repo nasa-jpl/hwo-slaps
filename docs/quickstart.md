@@ -41,7 +41,7 @@ hwoslaps validate configs/minimal.yaml
 hwoslaps forecast configs/minimal.yaml --masses 1e6 3e6 1e7 3e7 1e8 -o out/quickstart
 ```
 
-The first command prints the configuration's digest. The second prints the path of
+The first command prints the configuration's digest, a hash of its scientific content. The second prints the path of
 its output directory when it finishes. PyAutoLens may also print notices
 about its JAX settings while it loads; they need no action.
 
@@ -51,7 +51,7 @@ The output directory must not exist yet. hwoslaps writes four files into it:
 |---|---|
 | `forecast.npz` | The forecast: statistics for every mass and position, with the configuration and provenance. |
 | `effective_config.yaml` | The complete configuration used, with every default filled in. |
-| `provenance.json` | The command, software versions and input file hashes. |
+| `provenance.json` | The command, start time, configuration digest, software versions and git revision. |
 | `run.log` | The log of the run. |
 
 ## Read the result in Python
@@ -142,8 +142,8 @@ releases the prepared resources when you are done.
 
 ## Next steps
 
-- [How hwoslaps works](concepts.md) explains what *q* measures and why some lens and
-  source parameters are marginalized.
+- [How hwoslaps works](concepts.md) explains what *q* measures and why the lens and
+  source parameters are profiled.
 - [Configuration files](guide/configuration.md) shows how to change the lens,
   instrument and exposure, and how to combine several files.
 - [The HWO reference example](examples/hwo.md) runs the same steps for a realistic

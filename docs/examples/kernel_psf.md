@@ -34,7 +34,9 @@ python examples/kernel_psf/run.py --q-threshold 10 --min-reference-count 1 --out
 ```
 
 The driver forecasts 10⁷, 10⁸ and 10⁹ M☉ twice, once with each model PSF, and compares
-the two with `knowledge_error_areas`. Both forecasts together take about ten seconds on
+the two with `knowledge_error_areas`. `--min-reference-count` is the number of matched
+detections below which the area ratios are left out (`NaN`); 1 keeps every mass in this
+small example. Both forecasts together take about ten seconds on
 a CPU. It writes `matched/` and `mismatched/` product directories and a
 `knowledge_error.json` summary.
 

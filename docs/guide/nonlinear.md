@@ -1,8 +1,8 @@
 # Nonlinear fits
 
 A forecast is a linear approximation. To check it, hwoslaps fits a simulated
-observation with full lens models: once with a smooth lens (the **smooth role**, H0)
-and once with a subhalo (the **subhalo role**, H1). It uses PyAutoLens for the model
+observation with full lens models: once with a smooth lens (the **smooth role**) and
+once with a subhalo (the **subhalo role**). It uses PyAutoLens for the model
 and the Nautilus nested sampler for the search, and can then polish each best fit with
 a gradient optimizer. The result is
 
@@ -128,8 +128,10 @@ the forecast's pixels, use the forecast mask instead:
 fit = FitSpec(mode="fixed_template", mask="forecast_mask_minus_psf_border")
 ```
 
-A `PixelMask` gives any custom boolean mask. The mask is recorded with the result, and a
-comparison with the forecast reports any difference between the two.
+For any other set of pixels, pass a boolean image with `True` for fitted pixels, as
+`mask=PixelMask(pixels)` (`PixelMask` is in `hwoslaps.inference`). The mask is recorded
+with the result, and a comparison with the forecast reports any difference between the
+two.
 
 ## Refinement
 
@@ -160,7 +162,9 @@ Each role's `acceptance_status` is one of:
 | `failed` | The search failed; there is no likelihood |
 
 Without `refine`, both roles are `sampler_only`, which is enough for exploring but not
-for the paper's classification rule below.
+for the paper's classification rule below. `verified_zero_residual_anchor` occurs only with
+`FitSpec(h1="truth_anchor")`, which evaluates the subhalo role at the true subhalo instead
+of searching, for checks on noise-free data.
 
 ## The result
 
@@ -225,18 +229,24 @@ For an `accepted` case, `detected` says whether `q_signed` reaches the threshold
 `stationarity_tolerance` adds an optional requirement that the projected gradient at
 each refined maximum be small. `None` leaves it out, as in the paper.
 
+`retry_log_likelihood_tolerance` matters when a case was fitted twice, for example by a
+batch `retry`. `select_attempt` uses the retry only if it is accepted and neither role's
+log-likelihood is lower than in the first attempt by more than this amount.
+
 ## Comparing with the forecast
 
-Pass `forecast_reference` to record the forecast's value at the same point, and use
-`detection_agreement` to compare a set of classified cases with their forecasts. For a
+Pass `forecast_reference` to record the forecast's value at the same point. Build it from
+a forecast result with `ForecastReference.from_result(result, mass_index=i, position_index=j)`
+(`ForecastReference` is in `hwoslaps.inference`). Then use `detection_agreement` to compare a set of classified cases with their forecasts. For a
 fair comparison:
 
 - fit noise-free data (`noise_seed=None`) with a matched PSF;
 - fit the forecast's pixels (`mask="forecast_mask_minus_psf_border"`);
 - keep the same free lens and source parameters.
 
-The forecast also profiles a background offset that the fit does not include. The
-comparison reports this and any other difference between the two set-ups.
+The forecast also profiles a background offset that the fit does not include; set
+`forecast.nuisances.background_offset: false` to remove it from the forecast. The comparison
+reports this and any other difference between the two set-ups.
 
 To estimate false detections, fit smooth controls with noise:
 `simulate(prepared, subhalo=None, noise_seed=seed)` for many seeds. A noise-free smooth

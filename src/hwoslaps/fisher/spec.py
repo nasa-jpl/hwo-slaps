@@ -225,7 +225,7 @@ def parse_forecast(mapping: Mapping[str, Any], path: str = "forecast") -> Foreca
 
 
 def check_nuisance_spec(scene: SceneSpec, spec: NuisanceSpec, *, model_has_basis: bool) -> None:
-    """Refuse unresolved parameter names and wavefront nuisances without a model basis."""
+    """Raise ConfigError for unresolved parameter names and for wavefront nuisances without a model basis."""
     names = scene_parameter_names(scene)
     match_parameters(names, spec.fixed, path="forecast.nuisances.fixed")
     kinds = get_args(ParameterKind)

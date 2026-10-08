@@ -21,10 +21,11 @@ step, and the limits of what a forecast or fit can tell you.
 ## Coordinates
 
 - Positions are `(y, x)` in arcseconds, with the origin at the centre of the image grid.
-- In detector images, row 0 has the largest *y*, and columns increase in *x*.
+- In detector images, row 0 has the largest *y*, and columns increase in *x*. Image-source
+  assets are the exception: their row 0 is the bottom row.
 - In plots and trial-position grids, *y* increases upward and *x* to the right.
 - Ellipticities use the PyAutoLens components $(e_1, e_2) = (f \sin 2\phi, f \cos 2\phi)$,
-  with $f = (1-q)/(1+q)$ for axis ratio $q$ and major-axis angle $\phi$ from +x.
+  with $f = (1-b/a)/(1+b/a)$ for axis ratio $b/a$ and major-axis angle $\phi$ from +x.
 
 ## Lens and source models
 
@@ -37,8 +38,8 @@ the chosen profiles.
 
 Multipole amplitudes must keep the total convergence positive. hwoslaps checks a
 sufficient condition at the configured values and, for nonlinear fits, at the corners of
-each prior box. The check can reject some valid combinations; it never narrows another
-parameter silently.
+each prior box. The check can reject some valid combinations. It does not change other
+parameters to make a combination pass.
 
 ## Subhalos
 
@@ -68,7 +69,7 @@ H(z) = H_0 \sqrt{\Omega_m (1+z)^3 + 1 - \Omega_m},
 $$
 
 which leaves out radiation and massive neutrinos even when the distance calculation
-includes them. This matches the code used for the RASTI paper.
+includes them. The RASTI paper used the same convention.
 
 ## Photometry and detector
 
@@ -97,7 +98,7 @@ otherwise. Increasing the oversampling cannot recover structure lost in the binn
 `Observation.sampling` measures the relative variation of the smooth scene's light
 within detector pixels, for each light group. In the calibration tests, values below
 0.063 kept the error in the subhalo signal information below 1% compared with a finer
-reference. The value is reported, not enforced. Some paper test scenes exceed it, and
+reference. The value is reported, not enforced. Some of the paper's test scenes exceed it, and
 small values do not guarantee small errors for every subhalo position. For a new kind of
 scene, compare against finer pixels.
 
@@ -130,14 +131,16 @@ model, the PSF kernels and the finite-difference steps.
 
 `q_asimov` is the profiled information on the subhalo amplitude, equal to the
 likelihood-ratio statistic for noise-free data containing the subhalo. With a
-mismatched model PSF, `q_mismatch` $= \hat a^2 F$ fits a free amplitude to data made with
-the truth PSF, and `q_spurious` fits an amplitude to the PSF error alone. A large *q*
+mismatched model PSF, `q_mismatch` fits a free amplitude $\hat a$ to data made with the truth
+PSF, giving $q_\mathrm{mismatch} = \hat a^2 F$, and `q_spurious` fits an amplitude to the PSF
+error alone. A large *q*
 from a negative fitted amplitude is not a subhalo, so mismatch detections also require a
 positive amplitude. *q* and $\sqrt{q}$ are local summaries for a subhalo of known mass
 and position; they do not include the cost of searching many positions.
 
 The nuisance fit uses a pseudo-inverse that drops eigen-directions smaller than
-$\max(r, p\,\epsilon)$ times the largest eigenvalue. The result is unchanged if every
+$\max(10^{-12}, p\,\epsilon)$ times the largest eigenvalue, where $p$ is the number of nuisance
+parameters and $\epsilon$ is the double-precision machine epsilon. The result is unchanged if every
 nuisance column is rescaled by the same factor, but it depends on the relative units of
 individual columns. Each result records the nuisance rank and the condition number so
 you can see when this cutoff acts.

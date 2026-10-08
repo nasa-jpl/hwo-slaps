@@ -18,7 +18,7 @@ of 0.832. The values are illustrative.
 ```
 
 The lens has Sérsic light with a red power-law spectrum. The source has a disk with a
-flat-*f*ν spectrum and a small, bluer clump. Each component with its own spectrum is a
+flat-$f_\nu$ spectrum and a small, bluer clump. Each component with its own spectrum is a
 separate light group with its own broadband PSF.
 
 ```{literalinclude} ../../examples/chromatic/instrument_sei_chain.yaml
@@ -73,8 +73,8 @@ python examples/chromatic/convergence.py --directory out/chromatic_convergence \
 ```
 
 `convergence.py` passes when, at each mass, the largest *q* changes by at most 1%
-between variants, for both the matched and the monochromatic model. In the reference
-runs the largest change was 0.13%. Each product takes two to three minutes on one GPU.
+between variants, for both the matched and the monochromatic model. In our runs
+the largest change was 0.13%. Each run takes two to three minutes on one GPU.
 
 ## Fitting chromatic data
 

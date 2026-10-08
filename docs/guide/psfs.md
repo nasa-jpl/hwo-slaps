@@ -15,7 +15,8 @@ psf:
 ```
 
 The kernel must be sampled at the detector pixel scale and have odd dimensions. It is
-normalized to unit sum unless you set `normalize: false`. Add `file_sha256` to make
+normalized to unit sum. With `normalize: false` it is used as it is, and must already sum
+to one within 10⁻¹⁰. Add `file_sha256` to make
 hwoslaps check the file's hash before reading it, so a changed file is caught.
 
 ## Optical PSFs
@@ -72,7 +73,7 @@ RMS amplitude:
 ```yaml
 psf:
   truth:
-    draw: {prior: {packaged: jwst_wss_static_v1}, amplitude_rms_nm: 35.0, seed: 20260835,
+    draw: {prior: {packaged: jwst_wss_static_v1}, amplitude_rms_nm: 35.0, seed: 7,
            family: combined}
 ```
 
@@ -114,8 +115,8 @@ When the model differs from the truth, forecasts report `q_mismatch` and
 ## PSF knowledge error
 
 A PSF knowledge-error study asks how large an error in the model PSF can be before it
-changes which subhalos are detected. It compares a **reference** forecast with a
-matched model against **mismatched** forecasts whose model PSF is wrong by a known
+changes which subhalos are detected. It compares a **matched** forecast, whose
+model PSF is correct, against **mismatched** forecasts whose model PSF is wrong by a known
 amount.
 
 The HWO reference includes one such overlay. It adds a 10 nm RMS drift-shaped error to
@@ -137,7 +138,7 @@ configuration on the same grid:
 from hwoslaps import load_forecast
 from hwoslaps.analysis import aperture_selection, knowledge_error_areas
 
-reference = load_forecast("out/matched/forecast.npz")
+reference = load_forecast("out/matched/forecast.npz")      # the matched forecast
 mismatched = load_forecast("out/ke_10nm_seed1/forecast.npz")
 
 aperture = aperture_selection(reference, centre_yx=(0.0, 0.0), radius_arcsec=1.5)
@@ -149,16 +150,16 @@ The two forecasts must agree in everything except the model PSF: the same compar
 digest, positions, pixel mask and nuisance parameters. hwoslaps checks this and raises an
 error otherwise.
 
-For each mass, `areas` holds counts and areas of detections, and three ratios to the
-reference detected area inside the selection:
+For each mass, `areas` holds counts and areas of detections, and three ratios to the area
+detected by the matched forecast inside the selection:
 
 | Field | Ratio |
 |---|---|
-| `detected_area_ratio` | Area detected with the wrong model PSF, divided by the reference area. This is *R* in the RASTI paper. |
-| `spurious_ratio` | Area of false detections caused by the PSF error alone, divided by the reference area. This is *F*. |
-| `retention` | Area detected by both the reference and the mismatched forecast, divided by the reference area. Always at most 1. |
+| `detected_area_ratio` | Area detected with the wrong model PSF, divided by the matched area. This is *R* in the RASTI paper. |
+| `spurious_ratio` | Area of false detections caused by the PSF error alone, divided by the matched area. This is *F* in the RASTI paper (not the information *F* of [How hwoslaps works](../concepts.md)). |
+| `retention` | Area detected by both the matched and the mismatched forecast, divided by the matched area. Always at most 1. |
 
-The ratios are `NaN` at masses where the reference detects fewer than
+The ratios are `NaN` at masses where the matched forecast detects fewer than
 `min_reference_count` positions, because a ratio of a few cells is too noisy to use.
 `spurious_area_arcsec2` covers every position, inside the selection or not.
 
@@ -172,7 +173,9 @@ lens and mass separately over that lens's eight directions, then reported the me
 across lenses.
 
 `knowledge_error_tolerance` applies the gates to one set of directions. Pass *R*
-(`detected_area_ratio`) as its first argument:
+(`detected_area_ratio`) as its first argument. Despite their names, that argument and the
+`retention_*` fields of `ToleranceCriterion` take *R*, not the `retention` field of the
+areas:
 
 ```python
 import numpy as np
@@ -204,9 +207,11 @@ def tolerance_nm(reference, mismatched, mass_index, aperture):
 # requirement_nm = np.median([value for value in values if value is not None])
 ```
 
-Leave out any amplitude used only as an endpoint anchor. `found.passing` lists every
-passing amplitude and `found.first_failing` the smallest failing one, which need not
-be adjacent to the tolerance.
+The tolerance is the largest passing amplitude, even if a smaller one failed.
+`found.passing` lists every passing amplitude and `found.first_failing` the smallest
+failing one; check both. Leave out of the maps any amplitude that is not part of the test.
+The paper, for example, also ran a 35 nm amplitude as a fixed end point and excluded it
+from the tolerance.
 
 `plot_knowledge_error(areas)` draws the three ratios against mass.
 
@@ -248,7 +253,7 @@ scene:
 
 Each light component with its own spectrum is a **light group** and gets its own
 effective PSF, weighted by its photon spectrum across the band. Spectra can be
-`flat_fnu`, `flat_flambda`, a `power_law` with $f_\nu \propto \nu^\mathrm{index}$, or a
+`flat_fnu`, `flat_flambda`, a `power_law` with $f_\nu \propto \nu^{\mathrm{index}}$, or a
 `table` read from a file.
 
 Each wavelength's kernel is normalized on its finite support, so power that falls

@@ -58,7 +58,9 @@ Each example is a set of configuration files and a driver script in the reposito
 | [Kernel PSFs](examples/kernel_psf.md) | PSF kernel files and PSF knowledge-error areas |
 | [Population batch](examples/population.md) | A population of lenses run as a resumable batch, with a nonlinear fit |
 
-Only the HWO reference reproduces a published set-up. The other examples use
+The HWO reference reproduces the observing set-up of the RASTI paper (Vassilakis et al.,
+*Point spread function requirements for dark matter subhalo detection with the Habitable
+Worlds Observatory*, submitted to RAS Techniques and Instruments). The other examples use
 illustrative values chosen to exercise features of hwoslaps.
 
 ```{toctree}

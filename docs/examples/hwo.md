@@ -1,10 +1,13 @@
 # HWO reference
 
 This example forecasts subhalo detection for a Habitable Worlds Observatory imaging
-observation. It uses the telescope and detector of exploratory analytic case EAC1 with
-the HRI UVIS camera, taken from the HWO Science-Engineering Interface (SEI) v0.1.9,
-and the observing band of the RASTI paper. SEI v0.1.9 describes pre-formulation
-concepts, so these are study inputs, not final instrument values.
+observation. It uses the telescope of exploratory analytic case EAC1 and the ultraviolet and
+visible (UVIS) channel of the High Resolution Imager (HRI), taken from the HWO
+Science-Engineering Interface (SEI) v0.1.9. The observing band, lens and source are those of
+the RASTI paper (Vassilakis et al., *Point spread function requirements for dark matter
+subhalo detection with the Habitable Worlds Observatory*, submitted to RAS Techniques and
+Instruments). SEI v0.1.9 describes pre-formulation concepts, so these are study inputs, not
+final instrument values.
 
 ```{figure} ../_static/hwo-reference.png
 :alt: Left, the simulated HWO ring in ADU. Right, the forecast q map for a 10^8 solar-mass NFW subhalo.
@@ -49,7 +52,7 @@ pupil: 33.61 m².
 
 An isothermal lens at redshift 0.2 with Einstein radius 1 arcsec, and an exponential
 source at redshift 0.6. The source's 24.845 AB magnitude is its intrinsic, unlensed
-brightness in the observing band. With the flat-*f*ν spectrum, bandpass and collecting
+brightness in the observing band. With the flat-$f_\nu$ spectrum, bandpass and collecting
 area, it gives a detected rate of 8.95 e⁻ s⁻¹. The sky gives 0.00251 e⁻ s⁻¹ per pixel.
 
 ### Forecast
@@ -179,7 +182,7 @@ start as separate processes.
 ## Pixel sampling
 
 With 7.16 mas pixels, the lensed source varies by about 2.4% across a pixel
-(`sampling` of 0.024), well below the 0.06 level used by the sampling check.
+(`sampling` of 0.024), well below the calibrated level of 0.063.
 See [Observations](../guide/observations.md#pixel-sampling).
 
 ## References

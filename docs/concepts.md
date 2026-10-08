@@ -46,7 +46,7 @@ Every forecast follows the same steps.
       <text x="88" y="104">lens, source</text>
       <text x="224" y="104">truth and model</text>
       <text x="360" y="104">image, noise</text>
-      <text x="496" y="104">q per mass, position</text>
+      <text x="496" y="104">q for each trial</text>
       <text x="682" y="104">areas, mass reach</text>
     </g>
     <g class="pipeline-arrow" stroke-width="2" fill="none">
@@ -103,7 +103,9 @@ $$
 F = s^\top s - (s^\top J)\,\left(J^\top J + P\right)^{-1}(J^\top s),
 $$
 
-where $P$ holds optional Gaussian prior precisions on the nuisance parameters.
+where $P$ holds optional Gaussian prior precisions on the nuisance parameters. Fitting
+the nuisance parameters at the same time as the subhalo amplitude, and keeping their best
+values, is called *profiling* them.
 
 The template is computed for a subhalo of the full physical mass, so the subhalo is
 present when $A = 1$. The **detection statistic** is then
@@ -144,7 +146,7 @@ fitted with the model PSF:
 
 `q_mismatch`
 : The data contain the subhalo and the PSF error. The subhalo amplitude is fitted
-  freely. A detection requires both *q* above your threshold and a positive fitted
+  freely. A detection requires both *q* at or above your threshold and a positive fitted
   amplitude, because a large *q* from a negative amplitude is not a subhalo.
 
 `q_spurious`

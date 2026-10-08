@@ -39,6 +39,7 @@ generated from the source code. [All modules](api/index.rst) lists every public 
 | {py:func}`~hwoslaps.analysis.knowledge_error.knowledge_error_areas` | Compare a matched and a mismatched forecast |
 | {py:func}`~hwoslaps.analysis.knowledge_error.knowledge_error_tolerance` | The largest PSF error amplitude passing two gates |
 | {py:func}`~hwoslaps.analysis.binomial.clopper_pearson` | Exact binomial confidence intervals |
+| {py:func}`~hwoslaps.analysis.selection.rank_pool`, {py:class}`~hwoslaps.analysis.selection.RankingPolicy` | Rank a pool of lenses by image features, with your own cuts and weights |
 
 ## Observations
 
@@ -53,12 +54,17 @@ generated from the source code. [All modules](api/index.rst) lists every public 
 | Name | Purpose |
 |---|---|
 | {py:func}`~hwoslaps.inference.api.validate_nonlinear` | Fit smooth and subhalo models to an observation |
+| {py:func}`~hwoslaps.inference.api.prepare_case` | Build the fit data, models and likelihood without running a search |
 | {py:class}`~hwoslaps.inference.settings.FitSpec` | Fit mode, mask, prior boxes and mass support |
 | {py:class}`~hwoslaps.inference.settings.SamplerSettings` | Nautilus settings and the JAX likelihood |
 | {py:class}`~hwoslaps.inference.settings.RefineSettings` | Gradient refinement and its acceptance checks |
 | {py:class}`~hwoslaps.inference.settings.PriorWidths`, {py:class}`~hwoslaps.inference.settings.BoxRule` | Prior box widths by parameter kind |
+| {py:class}`~hwoslaps.inference.settings.MassSupport`, {py:class}`~hwoslaps.inference.settings.PixelMask` | The freed-mass range, and a custom fitted-pixel mask |
+| {py:class}`~hwoslaps.inference.result.ForecastReference` | The forecast value at a fitted point, for comparisons |
 | {py:class}`~hwoslaps.inference.result.CaseResult` | The two role fits, `q_signed` and recovery |
+| {py:class}`~hwoslaps.analysis.nonlinear.ClassificationRule` | A detection rule: threshold, marginal band and accepted statuses |
 | {py:func}`~hwoslaps.analysis.nonlinear.classify_case` | Apply a detection rule to a case |
+| {py:func}`~hwoslaps.analysis.nonlinear.detection_agreement` | Compare classified cases with their forecasts |
 
 ## Batches and populations
 

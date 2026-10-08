@@ -309,7 +309,7 @@ _NONLINEAR_TABLE = Table((
     Key('retry', Nullable(_RETRY_TABLE), 'one follow-up attempt', None),
 ))
 BATCH_TABLE = Table((
-    Key('name', _NAME, 'batch name'), Key('seed', Integer(min=0), 'batch noise/sampler/direction entropy'),
+    Key('name', _NAME, 'batch name'), Key('seed', Integer(min=0), 'seed for batch noise, sampler seeds and PSF error directions'),
     Key('config', Union(ROOT_TABLE, Text(), ListOf(Text(), min_length=1)), 'configuration files or effective mapping'),
     Key('overrides', _Mapping(), 'base configuration overlay', {}),
     Key('population', Nullable(_POPULATION_TABLE), 'member population', None),
