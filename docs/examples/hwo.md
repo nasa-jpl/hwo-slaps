@@ -40,7 +40,7 @@ The configuration is split into three files, which the driver combines in order.
 | Exposure | One 2000 s exposure | Study choice |
 | Sky | 23 AB mag arcsec⁻² | Study choice |
 
-`collecting_area_m2: null` makes hwoslaps compute the collecting area from the sampled
+`collecting_area_m2: null` makes HWO-SLAPS compute the collecting area from the sampled
 pupil: 33.61 m².
 
 ### Lens and source

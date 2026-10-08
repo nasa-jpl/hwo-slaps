@@ -17,7 +17,7 @@ psf:
 The kernel must be sampled at the detector pixel scale and have odd dimensions. It is
 normalized to unit sum. With `normalize: false` it is used as it is, and must already sum
 to one within 10⁻¹⁰. Add `file_sha256` to make
-hwoslaps check the file's hash before reading it, so a changed file is caught.
+HWO-SLAPS check the file's hash before reading it, so a changed file is caught.
 
 ## Optical PSFs
 
@@ -42,7 +42,7 @@ psf:
 
 `focal_length_m`, `wavelength_nm`
 : Together with the detector pixel scale, these set how finely the PSF is sampled.
-  hwoslaps raises an error if the PSF would be under-sampled or aliased.
+  HWO-SLAPS raises an error if the PSF would be under-sampled or aliased.
 
 `detector_oversampling`
 : Sub-samples per detector pixel used to integrate the PSF over each pixel.
@@ -79,7 +79,7 @@ psf:
 
 `amplitude_rms_nm` is the piston-removed RMS over the illuminated pupil. `family`
 chooses global modes, segment modes or both (`combined`). Two priors ship with
-hwoslaps:
+HWO-SLAPS:
 
 | Prior | Shape of the mode weights |
 |---|---|
@@ -109,7 +109,7 @@ optical truth.
 
 When the model differs from the truth, forecasts report `q_mismatch` and
 `q_spurious` in addition to `q_asimov`, and `result.detection_metric` becomes
-`q_mismatch`. See [How hwoslaps works](../concepts.md#when-the-model-psf-is-wrong).
+`q_mismatch`. See [How HWO-SLAPS works](../concepts.md#when-the-model-psf-is-wrong).
 
 (psf-knowledge-error)=
 ## PSF knowledge error
@@ -147,7 +147,7 @@ areas = knowledge_error_areas(reference, mismatched, q_threshold=10.0,
 ```
 
 The two forecasts must agree in everything except the model PSF: the same comparison
-digest, positions, pixel mask and nuisance parameters. hwoslaps checks this and raises an
+digest, positions, pixel mask and nuisance parameters. HWO-SLAPS checks this and raises an
 error otherwise.
 
 For each mass, `areas` holds counts and areas of detections, and three ratios to the area
@@ -156,7 +156,7 @@ detected by the matched forecast inside the selection:
 | Field | Ratio |
 |---|---|
 | `detected_area_ratio` | Area detected with the wrong model PSF, divided by the matched area. This is *R* in the RASTI paper. |
-| `spurious_ratio` | Area of false detections caused by the PSF error alone, divided by the matched area. This is *F* in the RASTI paper (not the information *F* of [How hwoslaps works](../concepts.md)). |
+| `spurious_ratio` | Area of false detections caused by the PSF error alone, divided by the matched area. This is *F* in the RASTI paper (not the information *F* of [How HWO-SLAPS works](../concepts.md)). |
 | `retention` | Area detected by both the matched and the mismatched forecast, divided by the matched area. Always at most 1. |
 
 The ratios are `NaN` at masses where the matched forecast detects fewer than

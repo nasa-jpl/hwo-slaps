@@ -36,7 +36,7 @@ size and rotation are free; its pixel values are not. None of these models is a 
 source reconstruction, so a forecast is conditional on the source being described by
 the chosen profiles.
 
-Multipole amplitudes must keep the total convergence positive. hwoslaps checks a
+Multipole amplitudes must keep the total convergence positive. HWO-SLAPS checks a
 sufficient condition at the configured values and, for nonlinear fits, at the corners of
 each prior box. The check can reject some valid combinations. It does not change other
 parameters to make a combination pass.
@@ -55,7 +55,7 @@ range of $10^6$ to $10^{12}$ M☉. A subhalo off the lens plane is placed in the
 coordinates of its own plane.
 
 Line-of-sight halos, if configured, are drawn once from the configuration's `seed` and
-held fixed in both the smooth and subhalo models. hwoslaps applies no subhalo mass
+held fixed in both the smooth and subhalo models. HWO-SLAPS applies no subhalo mass
 function of its own.
 
 ## Cosmology
@@ -125,7 +125,7 @@ counts; absolute rates come from the photometry.
 ## The linear forecast
 
 The forecast linearizes the expected image around the smooth model and profiles a
-Gaussian likelihood over the nuisance parameters ([How hwoslaps works](concepts.md)).
+Gaussian likelihood over the nuisance parameters ([How HWO-SLAPS works](concepts.md)).
 Results depend on the parametric lens and source model, the pixel mask, the noise
 model, the PSF kernels and the finite-difference steps.
 
@@ -210,7 +210,7 @@ projected gradient.
 ## Gradients at special points
 
 Refinement needs gradients of the likelihood. A few profiles have no well-defined
-gradient at exact special values, and hwoslaps raises an error there instead of
+gradient at exact special values, and HWO-SLAPS raises an error there instead of
 returning a wrong gradient:
 
 - an `Isothermal` lens whose free ellipticity is exactly zero;

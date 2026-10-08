@@ -72,7 +72,7 @@ observation:
   sky: {ab_mag_per_arcsec2: 23.0}
 ```
 
-hwoslaps converts the magnitude to a detected rate using the bandpass, the collecting
+HWO-SLAPS converts the magnitude to a detected rate using the bandpass, the collecting
 area and the spectrum, then sets the profile's intensity so that its total flux
 matches. The [HWO reference](../examples/hwo.md) uses this form. The conversion is
 recorded with each result.
@@ -140,7 +140,7 @@ filled in. `config.to_mapping()` returns the same thing as a Python dictionary.
 
 ## YAML numbers
 
-hwoslaps reads YAML 1.2, so `1e8`, `1.0e8` and `100000000` are all numbers. (Many YAML
+HWO-SLAPS reads YAML 1.2, so `1e8`, `1.0e8` and `100000000` are all numbers. (Many YAML
 readers treat `1e8` as a string.) Duplicate keys are an error.
 
 ## Digests
@@ -155,7 +155,7 @@ print(config.comparison_digest())
 ```
 
 The **comparison digest** ignores the model PSF. Two forecasts that differ only in
-their model PSF share a comparison digest, which is how hwoslaps checks that a PSF
+their model PSF share a comparison digest, which is how HWO-SLAPS checks that a PSF
 comparison is like for like. See [PSF knowledge error](psfs.md#psf-knowledge-error).
 
 Results, observations and nonlinear fits all record the digest of the configuration

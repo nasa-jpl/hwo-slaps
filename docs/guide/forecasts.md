@@ -40,7 +40,7 @@ depends on the subhalo type in `scene.subhalo`:
 The NFW concentration is set in `scene.subhalo.concentration`. The minimal example uses
 the Moliné et al. (2017) relation for subhalos, `{kind: moline2017_eq7, x_sub: 1.0}`, where
 `x_sub` is the subhalo's distance from the host centre in units of the host virial radius. That
-relation is calibrated for $M_{200c}$ between 10⁶ and 10¹² M☉, and hwoslaps raises an error
+relation is calibrated for $M_{200c}$ between 10⁶ and 10¹² M☉, and HWO-SLAPS raises an error
 for masses outside that range. For other masses, use a fixed concentration,
 `{kind: fixed, value: 15.0}`, or a power law in mass and redshift (`kind: power_law`; see
 the [configuration reference](../configuration.md)).

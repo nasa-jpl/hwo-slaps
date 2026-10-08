@@ -45,7 +45,7 @@ The first command prints the configuration's digest, a hash of its scientific co
 its output directory when it finishes. PyAutoLens may also print notices
 about its JAX settings while it loads; they need no action.
 
-The output directory must not exist yet. hwoslaps writes four files into it:
+The output directory must not exist yet. HWO-SLAPS writes four files into it:
 
 | File | Contents |
 |---|---|
@@ -66,10 +66,10 @@ print(result.q_asimov.shape)     # (5, 169): one row per mass, one column per po
 
 `result.q_asimov[i, j]` is the detection statistic *q* for mass `i` at position `j`.
 Larger is more detectable; *q* is approximately the square of the detection
-significance in standard deviations. [How hwoslaps works](concepts.md) defines it.
+significance in standard deviations. [How HWO-SLAPS works](concepts.md) defines it.
 
 To turn the map into numbers, choose a detection threshold and summarize. The threshold
-is always your choice; hwoslaps has no default. This example uses *q* ≥ 10:
+is always your choice; HWO-SLAPS has no default. This example uses *q* ≥ 10:
 
 ```python
 summary = summarize(result, q_threshold=10.0)
@@ -142,7 +142,7 @@ releases the prepared resources when you are done.
 
 ## Next steps
 
-- [How hwoslaps works](concepts.md) explains what *q* measures and why the lens and
+- [How HWO-SLAPS works](concepts.md) explains what *q* measures and why the lens and
   source parameters are profiled.
 - [Configuration files](guide/configuration.md) shows how to change the lens,
   instrument and exposure, and how to combine several files.

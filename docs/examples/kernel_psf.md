@@ -20,7 +20,7 @@ the model has 2.04 pixels. They replace the PSF of the minimal configuration:
 :caption: examples/kernel_psf/knowledge_error.yaml
 ```
 
-The `file_sha256` entries make hwoslaps check each file before using it. To regenerate
+The `file_sha256` entries make HWO-SLAPS check each file before using it. To regenerate
 the kernels:
 
 ```bash

@@ -1,10 +1,11 @@
-# hwoslaps
+# HWO-SLAPS
 
-hwoslaps forecasts how well a telescope can detect dark-matter subhalos in
+HWO-SLAPS forecasts how well a telescope can detect dark-matter subhalos in
 galaxy-scale strong gravitational lenses. You describe a lens, a source, an
-optical system and an exposure in a configuration file. hwoslaps then predicts
+optical system and an exposure in a configuration file. HWO-SLAPS then predicts
 the detection significance of a subhalo of a given mass at every position
 around the lensed arc.
+The Python package and its command-line tool are both named `hwoslaps`.
 
 ```{figure} _static/hwo-reference.png
 :alt: Left, a simulated Einstein ring observed with the HWO reference telescope. Right, a map of the forecast detection statistic q for a 10^8 solar-mass subhalo, which is largest on the brightest parts of the arc.
@@ -14,7 +15,7 @@ A simulated HWO observation of a lensed ring (left) and the forecast detection
 statistic for a 10⁸ M☉ NFW subhalo at each position (right).
 ```
 
-With hwoslaps you can:
+With HWO-SLAPS you can:
 
 - map the detection statistic of a subhalo over mass and position;
 - find the smallest detectable subhalo mass for a lens and an instrument;
@@ -30,7 +31,7 @@ New users should read these in order:
 
 1. [Installation](installation.md) sets up the package and its scientific dependencies.
 2. [Quickstart](quickstart.md) runs a first forecast from the command line and from Python.
-3. [How hwoslaps works](concepts.md) explains the statistic and the steps behind it.
+3. [How HWO-SLAPS works](concepts.md) explains the statistic and the steps behind it.
 
 ## User guide
 
@@ -61,7 +62,7 @@ Each example is a set of configuration files and a driver script in the reposito
 The HWO reference reproduces the observing set-up of the RASTI paper (Vassilakis et al.,
 *Point spread function requirements for dark matter subhalo detection with the Habitable
 Worlds Observatory*, submitted to RAS Techniques and Instruments). The other examples use
-illustrative values chosen to exercise features of hwoslaps.
+illustrative values chosen to exercise features of HWO-SLAPS.
 
 ```{toctree}
 :hidden:

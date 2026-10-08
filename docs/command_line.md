@@ -1,6 +1,6 @@
 # Command line
 
-Installing hwoslaps adds the `hwoslaps` command. `python -m hwoslaps` is equivalent.
+Installing HWO-SLAPS adds the `hwoslaps` command. `python -m hwoslaps` is equivalent.
 
 | Command | Does |
 |---|---|

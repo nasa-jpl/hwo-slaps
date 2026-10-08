@@ -1,6 +1,6 @@
 # Nonlinear fits
 
-A forecast is a linear approximation. To check it, hwoslaps fits a simulated
+A forecast is a linear approximation. To check it, HWO-SLAPS fits a simulated
 observation with full lens models: once with a smooth lens (the **smooth role**) and
 once with a subhalo (the **subhalo role**). It uses PyAutoLens for the model
 and the Nautilus nested sampler for the search, and can then polish each best fit with

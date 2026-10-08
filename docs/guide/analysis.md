@@ -17,7 +17,7 @@ summary = summarize(result, q_threshold=10.0)
 
 A position is a **detection** at a given mass when *q* is at or above your threshold.
 For the mismatch statistics, the fitted subhalo amplitude must also be positive.
-hwoslaps has no default threshold; you always pass one.
+HWO-SLAPS has no default threshold; you always pass one.
 
 ```python
 detected = result.detections(q_threshold=10.0)   # boolean, shape (masses, positions)
@@ -72,7 +72,7 @@ reach = mass_reach(summary, quantity="q_max", target=10.0, interpolation="log")
 print(reach.status, reach.mass_msun)
 ```
 
-`quantity` is `q_max`, `detectable_fraction` or `detectable_area_arcsec2`. hwoslaps
+`quantity` is `q_max`, `detectable_fraction` or `detectable_area_arcsec2`. HWO-SLAPS
 finds the two evaluated masses on either side of the target and interpolates between
 them in log mass. `interpolation` sets how the quantity itself is interpolated:
 
@@ -93,7 +93,7 @@ The result's `status` says what was found:
 | `above_range` | No mass reaches the target | `None`; the reach is above your largest mass, stored in `lower_mass_msun` |
 | `non_monotonic` | The curve falls somewhere, so the crossing is not unique | `None` |
 
-hwoslaps never extrapolates beyond the masses you evaluated. If you get `below_range` or
+HWO-SLAPS never extrapolates beyond the masses you evaluated. If you get `below_range` or
 `above_range`, add masses on that side and forecast again.
 
 ### Refining the reach

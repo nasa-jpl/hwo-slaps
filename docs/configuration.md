@@ -1,6 +1,6 @@
 # Configuration reference
 
-This page lists every configuration key, generated from the tables hwoslaps uses to
+This page lists every configuration key, generated from the tables HWO-SLAPS uses to
 validate configurations. Each table gives the key, the allowed values, the default, the
 unit and the meaning. Bulleted lines under a table are rules that involve several keys.
 

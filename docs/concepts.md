@@ -1,8 +1,8 @@
-# How hwoslaps works
+# How HWO-SLAPS works
 
 A dark-matter subhalo inside a lens galaxy adds a small deflection to the light of the
 background source. In the image, this shows up as a slight distortion of the lensed
-arc near the subhalo. hwoslaps asks one question: for a given lens, instrument and
+arc near the subhalo. HWO-SLAPS asks one question: for a given lens, instrument and
 exposure, is that distortion large enough to detect?
 
 The answer depends on three things:
@@ -70,10 +70,10 @@ Every forecast follows the same steps.
 3. **Observation.** The lensed light is binned to detector pixels, convolved with the
    truth PSF and converted to detector counts. Sky, dark current, read noise and gain
    give the expected image and its noise map, both in ADU.
-4. **Forecast.** For each trial subhalo mass and position, hwoslaps computes how the
+4. **Forecast.** For each trial subhalo mass and position, HWO-SLAPS computes how the
    expected image would change if that subhalo were present, removes the part that
    the smooth model can mimic, and reports the detection statistic *q*.
-5. **Summaries.** You choose a detection threshold. hwoslaps then counts detectable
+5. **Summaries.** You choose a detection threshold. HWO-SLAPS then counts detectable
    positions, measures areas and finds the smallest detectable mass.
 
 Steps 1 to 3 happen once, in `prepare_forecast`. Step 4 happens in `forecast`, as
@@ -114,11 +114,11 @@ $$
 q = F .
 $$
 
-hwoslaps calls this `q_asimov`, because it is the value of the likelihood-ratio
+HWO-SLAPS calls this `q_asimov`, because it is the value of the likelihood-ratio
 statistic for noise-free ("Asimov") data that contain the subhalo. Its square root,
 `z_asimov`, is the local significance in standard deviations for a subhalo whose
 mass and position are known. A threshold such as *q* ≥ 10 is a choice you make
-when you summarize; hwoslaps never applies one for you.
+when you summarize; HWO-SLAPS never applies one for you.
 
 *q* is a local, linear summary. It does not account for searching many positions,
 and it assumes the smooth lens and source are described by the configured parametric
@@ -141,7 +141,7 @@ The list of profiled parameters is recorded with every result. See
 ## When the model PSF is wrong
 
 If the analysis assumes a PSF that differs from the true one, the data contain a
-residual even without a subhalo. hwoslaps then reports two further statistics, both
+residual even without a subhalo. HWO-SLAPS then reports two further statistics, both
 fitted with the model PSF:
 
 `q_mismatch`
@@ -164,13 +164,13 @@ pixels enter the statistic. On a grid, each position stands for a square cell, s
 counting detectable positions gives a **detectable area** in square arcseconds.
 
 The **mass reach** is the mass at which a summary quantity, such as the largest *q*,
-reaches a target. hwoslaps interpolates between the masses you evaluated and reports a
+reaches a target. HWO-SLAPS interpolates between the masses you evaluated and reports a
 bound, never an extrapolation, when the target lies outside them.
 
 (nonlinear-checks)=
 ## Nonlinear checks
 
-The forecast linearizes the model around the smooth lens. To test it, hwoslaps can fit
+The forecast linearizes the model around the smooth lens. To test it, HWO-SLAPS can fit
 a simulated observation with PyAutoLens and the Nautilus sampler, once without a
 subhalo and once with one, and report
 

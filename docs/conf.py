@@ -8,7 +8,7 @@ DOCS = Path(__file__).resolve().parent
 ROOT = DOCS.parent
 sys.path.insert(0, str(DOCS / "_ext"))
 
-project = "hwoslaps"
+project = "HWO-SLAPS"
 author = "Georgios Vassilakis"
 copyright = "2025, California Institute of Technology"
 version_tree = ast.parse((ROOT / "src/hwoslaps/_version.py").read_text())
@@ -41,7 +41,7 @@ autodoc_typehints = "signature"
 autodoc_member_order = "bysource"
 
 html_theme = "furo"
-html_title = "hwoslaps"
+html_title = "HWO-SLAPS"
 html_static_path = ["_static"]
 html_css_files = ["handbook.css"]
 html_theme_options = {

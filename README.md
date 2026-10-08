@@ -1,11 +1,12 @@
-# hwoslaps
+# HWO-SLAPS
 
-hwoslaps forecasts how well a telescope can detect dark-matter subhalos in galaxy-scale
+HWO-SLAPS forecasts how well a telescope can detect dark-matter subhalos in galaxy-scale
 strong gravitational lenses. Describe a lens, a source, an optical system and an exposure
-in a configuration file, and hwoslaps predicts the detection significance of a subhalo of
+in a configuration file, and HWO-SLAPS predicts the detection significance of a subhalo of
 a given mass at every position around the lensed arc. It can also simulate the
 observation, fit it with full PyAutoLens lens models, and run populations of lenses as
 resumable batches on CPUs or GPUs.
+The Python package and its command-line tool are both named `hwoslaps`.
 
 ![A simulated HWO observation of a lensed ring and the forecast detection statistic for a 10^8 solar-mass subhalo](docs/_static/hwo-reference.png)
 

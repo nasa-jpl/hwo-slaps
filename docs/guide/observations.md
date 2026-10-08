@@ -125,7 +125,7 @@ print(prepared.observation.photometry.to_mapping())
 
 ## Pixel sampling
 
-hwoslaps evaluates light on an oversampled grid, bins it to detector pixels, and then
+HWO-SLAPS evaluates light on an oversampled grid, bins it to detector pixels, and then
 convolves it with a pixel-integrated PSF. This is exact when the light is nearly
 constant across each detector pixel. `observation.sampling` reports how far it is from
 that, as the relative variation of light within a pixel, for each light group (each light
@@ -136,7 +136,7 @@ print(prepared.observation.sampling)     # {'source': 0.32274029790875214}
 ```
 
 In the tests that calibrated this diagnostic, values below 0.063 kept the error in the
-subhalo signal information below one percent. hwoslaps does not enforce a limit.
+subhalo signal information below one percent. HWO-SLAPS does not enforce a limit.
 For larger values, or a new kind of scene, compare against a configuration with finer
 pixels before relying on the result. The minimal example uses coarse pixels on
 purpose; the HWO reference has a value of about 0.024.

@@ -12,4 +12,4 @@ new output directory, and every driver takes a required `--q-threshold`.
 | [Population batch](population/README.md) | A population of lenses run as a resumable batch, with a nonlinear fit | CPU or GPUs | `docs/examples/population.md` |
 
 Only the HWO reference reproduces a published set-up. The other examples use illustrative
-values chosen to exercise features of hwoslaps.
+values chosen to exercise features of HWO-SLAPS.

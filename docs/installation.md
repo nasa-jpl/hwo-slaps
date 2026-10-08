@@ -1,6 +1,6 @@
 # Installation
 
-hwoslaps needs Python 3.11 or newer. It has two layers:
+HWO-SLAPS needs Python 3.11 or newer. It has two layers:
 
 - **The core package** reads and validates configurations and works with saved results.
   It depends only on NumPy, SciPy, PyYAML, Astropy and threadpoolctl.
@@ -38,7 +38,7 @@ The installer:
 
 - creates the environment if it does not exist, using Python 3.11 by default
   (`--python` selects another version, `--prefix` installs into a directory);
-- installs hwoslaps in editable mode with all optional dependencies;
+- installs HWO-SLAPS in editable mode with all optional dependencies;
 - applies two small performance patches to AutoArray. It first checks that the
   installed AutoArray version and file hashes are the ones the patches were written
   for, and stops if they differ.

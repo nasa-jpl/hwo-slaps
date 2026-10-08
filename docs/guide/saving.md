@@ -1,6 +1,6 @@
 # Saving and loading
 
-hwoslaps saves three kinds of product. Each file holds the arrays together with the
+HWO-SLAPS saves three kinds of product. Each file holds the arrays together with the
 configuration and provenance that produced them, so a saved result can be read and
 checked years later without the original scripts.
 
