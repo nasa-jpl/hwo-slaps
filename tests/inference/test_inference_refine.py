@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import itertools
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -360,9 +362,27 @@ def test_projected_gradient_ignores_outward_components_at_active_bounds(box_obje
     assert bounded_q - unrestricted_q == pytest.approx(4.0)
 
 
+def _assert_refinement_record(actual, expected, *, sampled_starts):
+    compared = copy.deepcopy(actual)
+    if sampled_starts:
+        def origins(record):
+            return ([start["origin"] for start in record["start_provenance"]]
+                    + [run["start_provenance"]["origin"] for run in record["runs"]])
+
+        # BLAS CPU kernels can round these vector norms differently. Keep selected
+        # starts, thresholds, gates and every optimizer/result field bit-exact.
+        for value, reference in zip(origins(compared), origins(expected), strict=True):
+            for key in ("separation_prior_normalized_l2", "separation_posterior_sigma"):
+                if key in reference:
+                    assert math.isfinite(value[key])
+                    np.testing.assert_array_max_ulp(value[key], reference[key], maxulp=4)
+                    value[key] = reference[key]
+    assert json.dumps(compared, sort_keys=True) == json.dumps(expected, sort_keys=True)
+
+
 @pytest.mark.parametrize("case", CASES, ids=[case["name"] for case in CASES])
 def test_refinement_reproduces_the_8fa6209_records(case, tmp_path, box_objective):
-    """Every record field, bit for bit, against the base tree's fresh-profile optimiser."""
+    """Exact solver and decision records; sampled-start norms allow bounded rounding."""
     settings = RefineSettings(**case["settings"])
     value, gradient = objective_functions(case["objective"])
     if "selection" in case:
@@ -370,13 +390,27 @@ def test_refinement_reproduces_the_8fa6209_records(case, tmp_path, box_objective
         write_search_files(tmp_path, selection["names"], selection["ml"], selection["ml_log_likelihood"],
                            selection["samples"])
         starts = select_starts(tmp_path, selection["names"], case["lower"], case["upper"], settings)
+        widths = tuple(high - low for low, high in zip(case["lower"], case["upper"], strict=True))
+        sigma = starts[0].origin["selection_rule"]["posterior_sigma_normalized"]
+        for index, start in enumerate(starts[1:], start=1):
+            # Independently check the minimum distances without the BLAS norm.
+            deltas = [tuple((x - y) / width for x, y, width in
+                            zip(start.physical, previous.physical, widths, strict=True))
+                      for previous in starts[:index]]
+            distances = {
+                "separation_prior_normalized_l2": min(math.hypot(*delta) for delta in deltas),
+                "separation_posterior_sigma": min(math.hypot(*(value / scale for value, scale in
+                                                           zip(delta, sigma, strict=True))) for delta in deltas),
+            }
+            for key, distance in distances.items():
+                np.testing.assert_array_max_ulp(start.origin[key], distance, maxulp=4)
     else:
         starts = starts_from(case["starts"]["points"], case["lower"], case["upper"],
                              case["starts"]["saved_log_likelihood"])
     outcome = refine(starts, box_objective(case["lower"], case["upper"], value, gradient), settings)
     expected = case["expected"]
     record = {key: value for key, value in outcome.record.items() if key != "procedure"}
-    assert json.dumps(record, sort_keys=True) == json.dumps(expected["record"], sort_keys=True)
+    _assert_refinement_record(record, expected["record"], sampled_starts="selection" in case)
     assert outcome.acceptance_status == expected["acceptance_status"]
     assert outcome.best_log_likelihood == expected["best_log_likelihood"]
     assert outcome.best_vector == (None if expected["best_vector"] is None else tuple(expected["best_vector"]))
