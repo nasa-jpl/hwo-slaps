@@ -70,16 +70,18 @@ def test_non_repository_is_null_and_failure_inside_tracked_repository_propagates
         git_revision(package)
 
 
-def test_capture_records_the_imported_package_from_an_unrelated_working_directory(source_repo):
+def test_capture_records_the_imported_package_from_an_unrelated_working_directory(source_repo, monkeypatch):
     import hwoslaps
     root, _ = source_repo
     actual_package = Path(hwoslaps.__file__).resolve().parent
+    # Pytest's source-path setting is not inherited by child interpreters.
+    monkeypatch.setenv("PYTHONPATH", str(actual_package.parent))
     expected = git(actual_package, "rev-parse", "HEAD").decode().strip()
     program = "from hwoslaps.provenance import capture_provenance; import json; print(json.dumps(capture_provenance(command=['validate'])))"
     output = subprocess.run([sys.executable, "-c", program], cwd=root, check=True, capture_output=True, text=True).stdout
     record = json.loads(output)
-    assert record["source"]["commit"] == expected
     assert Path(record["package_path"]) == actual_package
+    assert record["source"]["commit"] == expected
     assert record["hwoslaps_version"] == "1.0.0"
     assert record["command"] == ["validate"]
     assert record["python"] == ".".join(map(str, sys.version_info[:3]))
