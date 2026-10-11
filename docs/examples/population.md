@@ -41,12 +41,18 @@ from hwoslaps.batch import open_batch
 batch = open_batch("out/population")
 result = batch.forecast("system_000000", "matched")
 for job, case in batch.cases(family="injected"):
-    print(job.job_id, case.q_signed, case.smooth.acceptance_status)
+    print(job.job_id, job.attempt, case.q_signed, case.smooth.acceptance_status)
 ```
+
+This loop reads first attempts. If you add retries, read `batch.case_pairs()` and use
+`analysis.select_attempt` with your classification rule before pooling results.
 
 With no refinement, both roles of the fit are `sampler_only`. That is enough to show
 the workflow; a scientific comparison needs refined fits and converged sampling, as
 described in [Nonlinear fits](../guide/nonlinear.md).
+
+Keep function-hook code and its environment immutable. The population identity records
+the hook name and input values; it does not bind the source bytes.
 
 ## Knowledge-error arms
 

@@ -21,8 +21,10 @@ The save functions never overwrite an existing file; choose a new path for each 
 The load functions check the file's structure and contents, and read no pickled
 objects, so loading a file cannot run code.
 
-Loading needs only the core package. You can copy results from a GPU node and analyze
-them on a laptop.
+Forecast loading and array reductions need only the core package. Loading products
+that carry a physical halo also validates its lensing scales and needs the supported
+lensing dependencies. Recomputed halo scales allow relative differences up to 1e-12
+across hosts; physical inputs and file identities remain checked exactly.
 
 ## What a forecast file records
 

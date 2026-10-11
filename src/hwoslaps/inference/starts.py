@@ -22,9 +22,21 @@ import numpy as np
 
 from .settings import RefineSettings
 
-__all__ = ["RefineStart", "normalize", "posterior_sigma_normalized", "prior_box", "select_starts"]
+__all__ = ["InsufficientStartsError", "RefineStart", "normalize", "posterior_sigma_normalized", "prior_box", "select_starts"]
 
 SOURCES = ("sampler_ml", "sampler_sample")
+
+
+class InsufficientStartsError(ValueError):
+    """A completed search supplied too few separated starts or no posterior spread."""
+
+    def __init__(self, message: str, starts: tuple[RefineStart, ...]):
+        super().__init__(message)
+        self.starts = starts
+
+
+class _DegeneratePosteriorError(ValueError):
+    """Valid weighted samples have zero variance in at least one free parameter."""
 
 
 @dataclass(frozen=True)
@@ -132,8 +144,10 @@ def posterior_sigma_normalized(rows: Sequence[Mapping[str, Any]], names: Sequenc
     z = (vectors - lower) / widths
     mean = weights @ z
     sigma = np.sqrt(weights @ (z - mean) ** 2)
-    if not np.all(np.isfinite(sigma)) or np.any(sigma <= 0):
+    if not np.all(np.isfinite(sigma)):
         raise ValueError("posterior sigma must be positive and finite for every parameter")
+    if np.any(sigma <= 0):
+        raise _DegeneratePosteriorError("posterior cloud has zero spread in a free parameter")
     return sigma
 
 
@@ -150,7 +164,12 @@ def select_starts(files_dir: Path, names: Sequence[str], lower: Sequence[float],
     selected = [_finite_vector(maximum, lower_array, upper_array)]
     with (files_dir / "samples.csv").open(encoding="utf-8", newline="") as stream:
         rows = list(csv.DictReader(stream, skipinitialspace=True))
-    posterior_sigma = posterior_sigma_normalized(rows, names, lower_array, widths)
+    try:
+        posterior_sigma = posterior_sigma_normalized(rows, names, lower_array, widths)
+    except _DegeneratePosteriorError as error:
+        incumbent = RefineStart.from_physical(index=0, physical=selected[0], lower=lower_array, upper=upper_array,
+                                             source="sampler_ml", original=False, origin=maximum_origin)
+        raise InsufficientStartsError(f"{error}; refinement requires separated samples", (incumbent,)) from error
     origins: list[Mapping[str, Any]] = [{
         **maximum_origin,
         "selection_rule": {
@@ -182,10 +201,12 @@ def select_starts(files_dir: Path, names: Sequence[str], lower: Sequence[float],
                         "separation_posterior_sigma": min(sigma_l2)})
         if len(selected) == settings.original_start_count + 1:
             break
-    if len(selected) != settings.original_start_count + 1:
-        raise ValueError(f"the search supplied {len(selected) - 1} separated samples besides the "
-                         f"maximum-likelihood incumbent; refinement needs {settings.original_start_count}")
-    return tuple(RefineStart.from_physical(index=index, physical=vector, lower=lower_array, upper=upper_array,
+    starts = tuple(RefineStart.from_physical(index=index, physical=vector, lower=lower_array, upper=upper_array,
                                            source="sampler_ml" if index == 0 else "sampler_sample",
                                            original=index != 0, origin=origin)
                  for index, (vector, origin) in enumerate(zip(selected, origins)))
+    if len(selected) != settings.original_start_count + 1:
+        raise InsufficientStartsError(f"the search supplied {len(selected) - 1} separated samples besides the "
+                                      f"maximum-likelihood incumbent; refinement needs {settings.original_start_count}",
+                                      starts)
+    return starts

@@ -61,9 +61,10 @@ for every option.
 `bind` maps configuration paths to variables:
 
 ```yaml
-bind:
-  scene.source.light.disk.effective_radius: r_eff
-  scene.lens.mass.main.einstein_radius: theta_e
+population:
+  bind:
+    scene.source.light.disk.effective_radius: r_eff
+    scene.lens.mass.main.einstein_radius: theta_e
 ```
 
 `population.seed` sets the draws, `count` the number of members, and `start` the index of
@@ -116,8 +117,17 @@ Trials taken from a forecast run after that forecast finishes. If the fit and th
 forecast use different arms, for example a smaller PSF kernel for the fit, name the
 forecast's arm with `forecast_arm`. With `forecast_argmax`, each member's forecast needs at
 least one position inside the fit arm's region with a finite *q* (and, for a mismatched PSF,
-a positive amplitude). If a member has none, the batch stops, and it stops at the same
-member on every resume until you change the batch file.
+a positive amplitude). Selection filters this region before finding the maximum.
+If a member has no usable node, its follow-up is recorded as failed while other members
+continue. Resume reports that terminal diagnostic again and processes the remaining work.
+
+An aperture can use `aperture_radius_arcsec` in the hypothesis plane or
+`aperture_einstein_radius_multiple` for each member's Einstein radius. Set `metric`
+to `q_asimov` or `q_mismatch` when a specific statistic is needed, and
+`support_margin_arcsec` to keep a trial kernel away from the fit image edges.
+The planning-time domain check covers grid, explicit and numeric or Einstein-radius
+ring layouts. A critical-curve ring has no static radius at this stage; use an explicit
+aperture or image-support margin when you need a bound before selection.
 
 `retry` gives a nonlinear family one follow-up attempt with different sampler or
 refinement settings, for cases whose roles did not reach an accepted status.
@@ -127,7 +137,7 @@ refinement settings, for cases whose roles did not reach an accepted status.
 Batches run on Linux, because the runner uses `/proc` and process file descriptors to
 track and clean up its workers. Planning a batch and reading its results work anywhere.
 
-Check the batch first. `plan` validates every member and prints the job list:
+Check the batch first. `plan` validates every member and prints job counts:
 
 ```bash
 hwoslaps batch plan examples/population/batch.yaml
@@ -157,10 +167,21 @@ hwoslaps batch run batch.yaml -o out/campaign --devices 0,1,2,3
 Running the same command again resumes: completed jobs are skipped and the rest run.
 A batch whose specification changed in a way that alters a completed job's identity
 stops with a conflict instead of mixing results.
+The realized members and effective configurations are frozen at the first run. Resume
+loads those values instead of drawing them again on the current host, and checks their
+stored bytes, the scientific specification, catalogue identity and referenced input files.
+Increasing only the population count appends new absolute member indices. Earlier
+members and artifacts stay unchanged, with linked immutable plan revisions recording
+the extension. Shrinking the cohort or changing other scientific inputs is a conflict.
+Referenced PSF and scene assets must remain available at their recorded paths.
 
-Run long batches inside `tmux` or `screen`. If the controlling process is killed, its
-workers finish their current jobs and exit. A new `batch run` on the same directory
-waits for them, and logs their process IDs in case you want to stop them sooner.
+Set `execution.job_timeout_seconds` to bound one dispatched job. Its default is `null`.
+A timed-out owned worker is cleaned up, the failure is reported, and other jobs continue.
+
+Run long batches inside `tmux` or `screen`. SIGTERM interrupts the controller and cleans
+up its owned workers. After an abrupt controller death, surviving workers finish their
+current jobs and exit. A new `batch run` on the same directory waits for them and logs
+their process IDs in case you want to stop them sooner.
 
 ## Reading a batch
 
@@ -181,8 +202,13 @@ for member in batch.members:
 result = batch.forecast("system_000000", "matched")    # a ForecastResult
 observations = batch.observations("system_000000", "matched")
 for job, case in batch.cases(family="injected"):
-    print(job.job_id, case.q_signed)
+    print(job.job_id, job.family, job.attempt, case.q_signed)
 ```
+
+`cases()` returns first attempts by default. When retries are configured, use
+`case_pairs()` to obtain `(job, first_case, retry_case_or_none)` and pass the pair to
+`analysis.select_attempt` with the classification rule for your study. Use
+`cases(attempt=None)` only when you want both raw attempts.
 
 Each job has its own directory under `members/<member>/<arm>/`, holding its artifacts,
 `complete.json` and the log of every attempt.

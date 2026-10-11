@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,10 +79,11 @@ class Catalog:
             columns[name] = array
         object.__setattr__(self, "_columns", MappingProxyType(columns))
 
-    def row(self, index: int) -> dict[str, float | str]:
+    def row(self, index: int) -> dict[str, int | float | str]:
         if isinstance(index, bool) or not isinstance(index, (int, np.integer)) or not 0 <= index < self.rows:
-            raise PopulationError(f"catalog {self.spec.path}: row {index} outside0..{self.rows-1}")
-        return {name: str(array[index]) if name in self.spec.text_columns else float(array[index])
+            raise PopulationError(f"catalog {self.spec.path}: row {index} outside 0..{self.rows-1}")
+        return {name: (str(array[index]) if name in self.spec.text_columns else
+                       int(array[index]) if isinstance(array[index], (int, np.integer)) else float(array[index]))
                 for name, array in self._columns.items()}
 
 
@@ -109,13 +111,14 @@ def load_catalog(spec: CatalogSpec) -> Catalog:
                     if text is None:
                         raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: missing value")
                     try:
-                        value = text if variable in spec.text_columns else float(text)
+                        value = (text if variable in spec.text_columns else
+                                 int(text) if re.fullmatch(r"[+-]?[0-9]+", text.strip()) else float(text))
                     except ValueError:
                         raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: invalid number {text!r}") from None
-                    if variable not in spec.text_columns and not np.isfinite(value):
+                    if variable not in spec.text_columns and isinstance(value, float) and not np.isfinite(value):
                         raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: non-finite number")
                     values[variable].append(value)
-            columns = {name: np.asarray(value, dtype = str if name in spec.text_columns else float) for name, value in values.items()}
+            columns = {name: np.asarray(value, dtype = str if name in spec.text_columns else object) for name, value in values.items()}
         else:
             with np.load(io.BytesIO(content), allow_pickle = False) as archive:
                 for variable, column in selected.items():
@@ -124,18 +127,19 @@ def load_catalog(spec: CatalogSpec) -> Catalog:
                     array = archive[column]
                     expected = "U" if variable in spec.text_columns else "fiu"
                     if array.ndim != 1 or array.dtype.kind not in expected:
-                        raise PopulationError(f"catalog {spec.path}, column {column}: expected1-D {'unicode' if variable in spec.text_columns else 'numeric'} array")
+                        raise PopulationError(f"catalog {spec.path}, column {column}: expected 1-D {'unicode' if variable in spec.text_columns else 'numeric'} array")
                     if variable not in spec.text_columns:
                         if not np.all(np.isfinite(array)):
                             index = int(np.flatnonzero(~np.isfinite(array))[0])
                             raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: non-finite number")
-                        # A finite extended-precision source can overflow the returned float.
-                        with np.errstate(over="ignore", invalid="ignore"):
-                            array = np.asarray(array, dtype=float)
-                        if not np.all(np.isfinite(array)):
-                            index = int(np.flatnonzero(~np.isfinite(array))[0])
-                            raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: "
-                                                  "number is not representable as a finite Python float")
+                        if array.dtype.kind == "f":
+                            # A finite extended-precision source can overflow the returned float.
+                            with np.errstate(over="ignore", invalid="ignore"):
+                                array = np.asarray(array, dtype=float)
+                            if not np.all(np.isfinite(array)):
+                                index = int(np.flatnonzero(~np.isfinite(array))[0])
+                                raise PopulationError(f"catalog {spec.path}, column {column}, row {index}: "
+                                                      "number is not representable as a finite Python float")
                     columns[variable] = np.array(array, copy = True)
         lengths = {len(array) for array in columns.values()}
         if len(lengths) != 1:

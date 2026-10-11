@@ -204,3 +204,8 @@ def test_promoted_functions_preserve_derivation_round_trip():
     np.testing.assert_allclose(coefficients, expected, rtol=1e-13, atol=1e-13)
     np.testing.assert_allclose(model, opd, rtol=1e-13, atol=1e-13)
     assert DERIVATION["noll_to_zernike"](11) == (4, 0)
+
+
+def test_derivation_cli_defaults_to_outputs_outside_packaged_priors():
+    defaults = DERIVATION["_build_parser"]().parse_args([])
+    assert defaults.output_dir == "out/jwst_mode_weight_tables"

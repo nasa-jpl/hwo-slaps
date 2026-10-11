@@ -198,6 +198,9 @@ class RoleFit:
     otherwise, the truth value for the anchor, and None for a failed role.
     ``box_edge_margins`` is the retained best's distance to the nearer box edge per free
     parameter, in units of the box width.
+
+    ``status="success"`` means a finite likelihood was retained, including unresolved
+    refinement. Scientific acceptance is reported separately by ``acceptance_status``.
     """
 
     role: Literal["smooth", "subhalo"]

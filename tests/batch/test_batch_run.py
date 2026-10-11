@@ -97,9 +97,13 @@ def test_resume_runs_only_missing_jobs_and_verifies_artifacts(tiny_batch_spec, t
     extended = tiny_batch_spec(population={'count': 3})
     fourth = run_batch(extended, root)
     assert fourth.counts['completed'] == 1 and fourth.counts['skipped'] == 2
-    changed = tiny_batch_spec(forecast={'masses_msun': [1e7, 1e8]})
-    with pytest.raises(BatchConflict, match='job digest'):
+    changed = tiny_batch_spec(population={'count': 3}, forecast={'masses_msun': [1e7, 1e8]})
+    with pytest.raises(BatchConflict, match='scientific specification'):
         run_batch(changed, root)
+    accepted = open_batch(root)
+    assert accepted.spec['population']['count'] == 3
+    assert accepted.spec['forecast']['masses_msun'] == [1e8]
+    assert marker_path.read_bytes() == original
     marker = json.loads(original)
     artifact = marker_path.parent / marker['artifacts']['forecast']['path']
     content = artifact.read_bytes()

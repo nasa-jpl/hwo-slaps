@@ -79,6 +79,10 @@ def distribution_record(name):
 
 def capture_provenance(*, command=None):
     import hwoslaps
+    try:
+        from numpy._core._multiarray_umath import __cpu_features__
+    except ModuleNotFoundError:
+        from numpy.core._multiarray_umath import __cpu_features__
     from ._version import __version__
     package = Path(hwoslaps.__file__).resolve().parent
     revision = git_revision(package)
@@ -86,8 +90,11 @@ def capture_provenance(*, command=None):
             "source": None if revision is None else revision.to_mapping(),
             "python": platform.python_version(), "implementation": platform.python_implementation(),
             "platform": platform.platform(),
+            "numpy_cpu_features": {name: bool(enabled) for name, enabled in sorted(__cpu_features__.items())},
+            "numpy_cpu_environment": {"NPY_DISABLE_CPU_FEATURES": os.environ.get("NPY_DISABLE_CPU_FEATURES")},
             "packages": {name: distribution_record(name) for name in RECORDED_DISTRIBUTIONS},
-            "thread_pools": [{key: entry.get(key) for key in ("user_api", "internal_api", "num_threads", "version")}
+            "thread_pools": [{key: entry.get(key) for key in ("user_api", "internal_api", "num_threads", "version",
+                                                            "architecture", "threading_layer", "prefix", "filepath")}
                              for entry in threadpool_info()],
             "thread_environment": {name: os.environ.get(name) for name in THREAD_VARIABLES},
             "command": None if command is None else list(command)}

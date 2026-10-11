@@ -1,0 +1,19 @@
+# Python 3.11/3.12 scientific environment.
+# Recorded XTX versions: tests/fixtures/paper_parity/manifest.json,
+# scenes.p1_optical_matched.lanes.reference.versions.
+numpy==1.26.4
+scipy==1.17.1
+astropy==7.2.0
+PyYAML==6.0.3
+numba==0.65.1
+jax==0.4.38
+jaxlib==0.4.38
+autoarray==2026.5.14.2
+autogalaxy==2026.5.14.2
+autofit==2026.5.14.2
+autoconf==2026.5.14.2
+# Other versions already pinned in the validated package recipe.
+threadpoolctl==3.6.0
+nautilus-sampler==1.0.5
+scikit-learn==1.8.0
+pytest==9.0.3

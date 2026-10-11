@@ -118,8 +118,10 @@ def draw_wavefront(basis: WavefrontBasis, spec: WavefrontDrawSpec) -> WavefrontD
         raise ValueError(f"draw family must be one of {DRAW_FAMILIES}, got {spec.family!r}")
     if amplitude == 0.0:
         return WavefrontDraw(spec, prior_digest, {}, {}, WavefrontCoefficients.empty(), 0.0, pupil.dark_segments)
-    uses_segments = spec.family in ("combined", "segment")
-    uses_global = spec.family in ("combined", "global")
+    uses_segments = (spec.family == "segment" or
+                     spec.family == "combined" and prior.segment_variance_fraction > 0.0)
+    uses_global = (spec.family == "global" or
+                   spec.family == "combined" and prior.segment_variance_fraction < 1.0)
     if uses_segments and "segment_hexikes" not in basis.families:
         raise ValueError(f"a {spec.family} draw needs segment hexikes, which a {pupil.spec.kind} pupil does not have")
     if uses_segments and not pupil.active_segments:

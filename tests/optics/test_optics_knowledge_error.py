@@ -175,3 +175,24 @@ def test_draws_depend_only_on_pupil_prior_amplitude_and_seed(p1_truth):
     low, high = (draw_knowledge_error(truth, WavefrontDrawSpec(DRIFT, 10.0, seed, "combined"))
                  for seed in (2 ** 53, 2 ** 53 + 1))
     assert low.draw.coefficients != high.draw.coefficients and low.digest() != high.digest()
+
+
+@pytest.mark.parametrize("fraction", [0.0, 1.0])
+def test_combined_draw_omits_an_absent_zero_budget_side(p1_truth, circular_pupil, tmp_path, fraction):
+    if fraction == 0.0:
+        truth = _optics(_circular_truth(circular_pupil), scale=0.05)
+        weights = "global_weights: {4: 1, 5: 0.5}\n"
+        active_family = "global"
+    else:
+        truth = _optics(p1_truth)
+        weights = "segment_weights: {4: 1, 5: 0.5}\n"
+        active_family = "segment"
+    path = tmp_path / "one_side.yaml"
+    path.write_text(f"name: one_side\nsegment_variance_fraction: {fraction}\n" + weights)
+    prior = ModeWeightPriorSpec("path", None, path, None)
+    combined = draw_wavefront(truth.basis, WavefrontDrawSpec(prior, 10.0, SEED, "combined"))
+    single = draw_wavefront(truth.basis, WavefrontDrawSpec(prior, 10.0, SEED, active_family))
+    assert combined.coefficients == single.coefficients
+    assert combined.orthonormal_segment == single.orthonormal_segment
+    assert combined.orthonormal_global == single.orthonormal_global
+    assert _within_tolerance(combined.measured_rms_nm, 10.0)

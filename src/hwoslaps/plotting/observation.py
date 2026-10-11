@@ -36,5 +36,5 @@ def plot_observation(observation: Observation, quantity: Literal["data", "expect
               interpolation="nearest")
     ax.set_xlabel("x (arcsec)")
     ax.set_ylabel("y (arcsec)")
-    ax.set_title(_LABELS[quantity])
+    ax.set_title(_LABELS["expected"] if quantity == "data" and observation.kind == "expected" else _LABELS[quantity])
     return ax

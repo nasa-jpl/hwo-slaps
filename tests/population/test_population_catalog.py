@@ -62,3 +62,50 @@ def test_catalog_paths_resolve_from_population_base_directory(tmp_path,monkeypat
     monkeypatch.chdir(tmp_path.parent)
     spec=PopulationSpec.from_mapping(mapping,base_dir=tmp_path)
     assert spec.catalog.path==path and sample_population(spec,1,seed=1)[0]["zl"]==.2
+
+
+@pytest.mark.parametrize("format", ["csv", "npz"])
+def test_catalog_integer_fields_bind_to_integer_configuration_keys(format, minimal_mapping, tmp_path):
+    from hwoslaps.population import iter_population_members
+
+    path = tmp_path / ("grid." + format)
+    if format == "csv":
+        path.write_text("size\n31\n41\n")
+    else:
+        np.savez(path, size=np.array([31, 41], dtype=np.int64))
+    mapping = {"variables": {}, "catalog": {"path": str(path), "columns": {"size": "size"}},
+               "bind": {"scene.grid.shape.0": "size", "scene.grid.shape.1": "size"}}
+    rows = sample_population(mapping, 2, seed=1)
+    assert all(type(row["size"]) is int for row in rows)
+    members = list(iter_population_members(minimal_mapping, mapping, 2, seed=1))
+    assert [member.config.scene.grid.shape for member in members] == [(31, 31), (41, 41)]
+
+
+def test_csv_numeric_tokens_keep_integer_and_float_types_per_row(tmp_path):
+    path = tmp_path / "mixed.csv"
+    path.write_text("redshift,name\n2,a\n2.0,b\n2e0,c\n")
+    spec = PopulationSpec.from_mapping(catalog_spec(path))
+    rows = load_catalog(spec.catalog)
+    assert type(rows.row(0)["zl"]) is int
+    assert type(rows.row(1)["zl"]) is float
+    assert type(rows.row(2)["zl"]) is float
+
+
+def test_npz_uint_catalog_preserves_values_beyond_float_exact_range(tmp_path):
+    path = tmp_path / "integer.npz"
+    np.savez(path, redshift=np.array([2**63 + 1], dtype=np.uint64), name=np.array(["large"]))
+    spec = PopulationSpec.from_mapping(catalog_spec(path))
+    assert load_catalog(spec.catalog).row(0)["zl"] == 2**63 + 1
+
+
+def test_population_catalog_identity_uses_content_and_bindings_without_path(tmp_path):
+    first, second = tmp_path / "a.csv", tmp_path / "b.csv"
+    content = b"redshift,name\n0.2,a\n"
+    first.write_bytes(content)
+    second.write_bytes(content)
+    a, b = (PopulationSpec.from_mapping(catalog_spec(path)) for path in (first, second))
+    assert a.to_mapping() != b.to_mapping()
+    assert a.identity_mapping() == b.identity_mapping()
+    assert a.digest() == b.digest()
+    second.write_bytes(b"redshift,name\n0.3,a\n")
+    assert a.digest() != b.digest()

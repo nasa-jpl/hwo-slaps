@@ -69,8 +69,10 @@ fit = FitSpec(mode="freed", mass_support=MassSupport(log10_mass_min=6.0, log10_m
 `fixed_template` is the closest to the forecast and the fastest. `freed` is the closest
 to a real search.
 
-In every mode, the lens and source parameters are free in both roles, inside uniform
-boxes centred on their true values.
+In every mode, the lens and source parameters listed as scene nuisances in the
+prepared forecast are free in both roles, inside uniform boxes centred on their true
+values. Parameters in `forecast.nuisances.fixed` stay fixed in the fit too. The fit
+does not include the forecast's background-offset or wavefront nuisance directions.
 
 ## Prior boxes
 
@@ -97,9 +99,8 @@ defaults. To reproduce them, build the settings explicitly:
 ```python
 from hwoslaps import FitSpec, RefineSettings, SamplerSettings
 from hwoslaps.inference import BoxRule, MassSupport, PriorWidths
-from hwoslaps.inference.settings import DEFAULT_BOX_RULES
 
-rules = dict(DEFAULT_BOX_RULES) | {
+rules = {
     "lens.position": BoxRule(0.05),
     "lens.einstein_radius": BoxRule(0.25, fractional=True),
     "lens.ellipticity": BoxRule(0.2, clip=(-0.9, 0.9)),
@@ -112,26 +113,52 @@ fit = FitSpec(mode="freed", prior_widths=paper_widths,
 sampler = SamplerSettings(n_live_smooth=300, n_live_subhalo_fixed=300, n_live_subhalo_search=600,
                           n_eff=2000, n_like_max=2_000_000, f_live=0.01, n_shell=1,
                           discard_exploration=False, retain_search_internal=True,
-                          use_jax=True)
+                          use_jax=True, jax_n_batch=32)
 refine = RefineSettings()
 ```
 
 For an image (pixelized) source, the paper also widened the size scale to 50%:
-add `"source.size": BoxRule(0.5, fractional=True)` for those cases.
+include `"source.size": BoxRule(0.5, fractional=True)` in `rules` before constructing
+`paper_widths` for those cases.
+
+The paper fixed the image-source rotation. Before preparing the forecast, include
+this setting in its configuration, replacing `image` with the source component's name:
+
+```yaml
+forecast:
+  nuisances:
+    fixed: [source.light.image.rotation_deg]
+```
+
+HWO-SLAPS otherwise profiles and fits that rotation by default. For the paper's
+`slam1_retry` recovery searches, use the same boxes and refinement settings with
+larger sampler budgets:
+
+```python
+from dataclasses import replace
+
+retry_sampler = replace(sampler, n_live_smooth=600, n_live_subhalo_fixed=600,
+                        n_live_subhalo_search=1200, n_eff=4000,
+                        n_like_max=4_000_000)
+```
+
+This keeps `jax_n_batch=32` and the other sampler settings above. These are explicit
+settings for a new fit; requesting refinement does not schedule recovery searches.
 
 ## Masks
 
-The fit uses every pixel except a border half a PSF wide, by default. To fit exactly
-the forecast's pixels, use the forecast mask instead:
+The fit uses every pixel except a border half a model PSF wide, by default. To start
+with the forecast's mask and remove that border, use:
 
 ```python
 fit = FitSpec(mode="fixed_template", mask="forecast_mask_minus_psf_border")
 ```
 
 For any other set of pixels, pass a boolean image with `True` for fitted pixels, as
-`mask=PixelMask(pixels)` (`PixelMask` is in `hwoslaps.inference`). The mask is recorded
-with the result, and a comparison with the forecast reports any difference between the
-two.
+`mask=PixelMask(pixels)` (`PixelMask` is in `hwoslaps.inference`). The same PSF border
+is removed from custom masks. A fit uses exactly the forecast's pixels only when its
+mask has no pixels in that border. The final mask is recorded with the result, and a
+comparison with the forecast reports any difference between the two.
 
 ## Refinement
 
@@ -151,11 +178,16 @@ agrees, the gradient is finite, and the likelihood is consistent with a direct
 evaluation and with the sampler. Otherwise it is **unresolved**: its best value is kept,
 but it is not trusted for classification.
 
+A profile can have a finite likelihood at a point where its gradient is undefined.
+Refinement keeps that value and records the gradient refusal. If the search supplied
+too few separated starts, the sampler's maximum is kept with an unresolved status
+and the start-selection reason. Neither situation discards a completed search.
+
 Each role's `acceptance_status` is one of:
 
 | Status | Meaning |
 |---|---|
-| `accepted_repeatable_profile` | Refinement converged and passed every check |
+| `accepted_repeatable_profile` | Refinement passed every acceptance check |
 | `unresolved_optimization` | Refinement ran but did not pass every check |
 | `sampler_only` | No refinement was requested; the value is the sampler's maximum |
 | `verified_zero_residual_anchor` | The role was evaluated at the truth and fits the data exactly |
@@ -220,7 +252,7 @@ print(outcome.status, outcome.detected, outcome.marginal)
 
 For an `accepted` case, `detected` says whether `q_signed` reaches the threshold, and
 `marginal` flags values within `marginal_half_width` of it. Other cases have
-`detected = None`; they are never counted as non-detections.
+`detected = None` and `marginal = None`; they are never counted as non-detections.
 
 `require_retained_state=True` needs the sampler's internal files to be kept, which
 `SamplerSettings(retain_search_internal=True)` does. Without them, the case is
@@ -241,7 +273,8 @@ a forecast result with `ForecastReference.from_result(result, mass_index=i, posi
 fair comparison:
 
 - fit noise-free data (`noise_seed=None`) with a matched PSF;
-- fit the forecast's pixels (`mask="forecast_mask_minus_psf_border"`);
+- use `mask="forecast_mask_minus_psf_border"` and ensure the forecast mask already
+  excludes the model PSF border, so the fitted pixels agree;
 - keep the same free lens and source parameters.
 
 The forecast also profiles a background offset that the fit does not include; set

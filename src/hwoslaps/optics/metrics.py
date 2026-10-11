@@ -94,6 +94,10 @@ def fwhm_arcsec(field: FocalField) -> float:
 
 def captured_power_fraction(psf: OpticalPSF, wavelength_m: float | None = None, *,
                             coefficients: WavefrontCoefficients | None = None) -> float:
-    """Share of the pupil power that lands inside the kernel support, before normalization."""
+    """Integrated sampled periodic power inside the kernel support, before normalization.
+
+    Divided by sampled pupil power; repeated wings can bias this relative to physical
+    infinite-plane capture. Check convergence with pupil sampling for the chosen support.
+    """
     power = psf.detector_power(wavelength_m, coefficients=coefficients)
     return float(np.sum(power.ravel())) / psf.pupil.total_power

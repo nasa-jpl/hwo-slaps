@@ -3,9 +3,10 @@
 Every settings class is a frozen value checked when it is built, so a value outside its
 domain fails at construction with a ``ConfigError`` naming the field. ``from_mapping`` reads a
 mapping strictly: an unknown or misspelled key is an error at its dotted path, and an absent
-key takes the documented default. ``to_mapping`` writes the record a result stores;
-``from_mapping`` reads it back to an equal value (a custom ``PixelMask`` is recorded by digest
-only and exists only through the Python API).
+key takes the documented default. ``to_mapping`` and ``from_mapping`` round-trip ordinary
+settings. For a custom ``PixelMask``, ``FitSpec.to_mapping`` stores its digest, while
+``to_record`` and ``from_record`` preserve the mask pixels used by saved results. Custom
+masks are supplied through the Python API.
 """
 
 from __future__ import annotations
@@ -211,10 +212,10 @@ DEFAULT_BOX_RULES: tuple[tuple[str, BoxRule], ...] = (
 )
 """Default box rules keyed ``<galaxy>.<parameter kind>``, sorted by key.
 
-The widths are the defaults of the RASTI code. Lens-light rows reuse the source widths, and the
-orientation rows (degrees, for an Image ``rotation_deg``) give the orientation freedom of the
-analytic source ellipticity box in the paper's first test scene. The nonlinear runs reported in
-the paper used wider boxes; the nonlinear-fits guide shows how to set them."""
+The widths are the narrow engine defaults inherited from the RASTI code. Lens-light rows
+use the lens rules, as lens-mass rows do. Orientation widths are in degrees for an Image
+``rotation_deg``. The nonlinear runs reported in the paper used wider boxes; the
+nonlinear-fits guide shows how to set them."""
 
 _RULE_KEYS = tuple(name for name, _ in DEFAULT_BOX_RULES)
 
@@ -232,12 +233,12 @@ class PriorWidths:
         names = [entry[0] for entry in rules if isinstance(entry, tuple) and len(entry) == 2]
         if len(names) != len(rules) or not all(isinstance(rule, BoxRule) for _, rule in rules):
             raise ConfigError("rules", "must be (key, BoxRule) pairs")
-        if names != sorted(set(names)):
-            raise ConfigError("rules", f"keys must be distinct and sorted, got {names}")
+        if len(names) != len(set(names)):
+            raise ConfigError("rules", f"keys must be distinct, got {names}")
         unknown = sorted(set(names) - set(_RULE_KEYS))
         if unknown:
             raise ConfigError("rules", f"unknown keys {unknown}; known: {', '.join(_RULE_KEYS)}")
-        object.__setattr__(self, "rules", rules)
+        object.__setattr__(self, "rules", tuple(sorted((dict(DEFAULT_BOX_RULES) | dict(rules)).items())))
         for name in ("subhalo_local_window_arcsec", "subhalo_freed_window_arcsec"):
             object.__setattr__(self, name, _POSITIVE(getattr(self, name), name))
 

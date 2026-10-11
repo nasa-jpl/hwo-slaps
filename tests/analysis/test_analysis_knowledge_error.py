@@ -1,7 +1,9 @@
-"""Hand-counted areas, submitted-paper gate table and fixed keyed-cohort rules."""
+"""Hand-counted areas, archived Table 5 tolerances and fixed keyed-cohort rules."""
 
 from copy import deepcopy
 from dataclasses import replace
+import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -161,7 +163,7 @@ def test_area_refuses_invalid_floor_or_selection(floor, selection):
         knowledge_error_areas(reference, mismatch, q_threshold=4, min_reference_count=floor, selection=selection)
 
 
-def test_tolerance_reproduces_the_paper_gate_table():
+def test_tolerance_inclusive_limits_on_the_declared_gate_table():
     # Exact 41621de:tests/test_psf_knowledge.py:287 table. Endpoint35 is omitted by caller.
     keys = {(0, direction) for direction in (1, 2, 3)}
     retention = {1.0: dict.fromkeys(keys, 0.9), 5.0: dict.fromkeys(keys, 0.8)}
@@ -181,7 +183,7 @@ def test_tolerance_uses_one_eligible_cohort():
     retention[1.0][(9, 1)], retention[5.0][(9, 1)] = 0.91, np.nan
     spurious = {a: dict.fromkeys(keys, 0.01) for a in retention}
     criterion = ToleranceCriterion(0.1, 0.9, 0.9, 0.1)
-    with pytest.raises(ValueError, match=r"retention.*5.0.*\(9, 1\)"):
+    with pytest.raises(ValueError, match=r"ratio.*5.0.*\(9, 1\)"):
         knowledge_error_tolerance(retention, spurious, eligible=keys, criterion=criterion)
     result = knowledge_error_tolerance(retention, spurious, eligible=keys - {(9, 1)}, criterion=criterion)
     assert result.amplitude == 5 and result.eligible == 9 and result.excluded == 1
@@ -229,6 +231,67 @@ def test_criterion_refuses_invalid_limits(field, value):
     fields[field] = value
     with pytest.raises(ValueError, match=field):
         ToleranceCriterion(**fields)
+
+
+@pytest.mark.parametrize("reference_count,retained_count,spurious_count", [(50, 45, 0), (530, 530, 53)])
+def test_count_ratios_preserve_inclusive_tolerance_gates(reference_count, retained_count, spurious_count):
+    # Uniform 0.05-arcsec cells must cancel before testing the inclusive 0.9/0.1 limits.
+    layout = grid_positions((0, 0), spacing_arcsec=0.05, half_width_arcsec=0.6, annulus=None)
+    information = np.zeros((1, len(layout)))
+    information[0, :reference_count] = 4
+    reference = _result(layout, information)
+    fitted = np.zeros_like(information)
+    fitted[0, :retained_count] = 1
+    spurious = np.zeros_like(information)
+    spurious[0, :spurious_count] = 1
+    mismatch = _result(layout, np.full_like(information, 4), amplitude_hat=fitted,
+                       amplitude_spurious=spurious)
+    areas = knowledge_error_areas(reference, mismatch, q_threshold=4, min_reference_count=33)
+    assert areas.retention[0] == retained_count / reference_count
+    assert areas.detected_area_ratio[0] == retained_count / reference_count
+    assert areas.spurious_ratio[0] == spurious_count / reference_count
+    result = knowledge_error_tolerance(ratio={2.0: {1: areas.retention[0]}},
+                                      spurious={2.0: {1: areas.spurious_ratio[0]}}, eligible={1},
+                                      criterion=ToleranceCriterion(0.1, 0.9, 0.9, 0.1))
+    assert result.amplitude == 2.0 and result.passing == (2.0,) and result.first_failing is None
+
+
+_TABLE5 = json.loads((Path(__file__).parents[1] / "fixtures/analysis/table5_knowledge_error.json").read_text())
+
+
+def test_table5_fixture_covers_both_rung_classes_of_the_twelve_systems():
+    cases = _TABLE5["cases"]
+    systems = {case["system_id"] for case in cases}
+    assert len(systems) == 12 and len(cases) == 24
+    assert {(case["system_id"], case["rung_class"]) for case in cases} == {
+        (system, rung) for system in systems for rung in ("m10", "m50")}
+
+
+@pytest.mark.parametrize("case", _TABLE5["cases"],
+                         ids=lambda case: f"{case['system_id']}-{case['rung_class']}")
+def test_tolerance_reproduces_archived_table5_retained_locations(case):
+    # Real integer aperture-mask counts; the golden tolerances come from the original figure reducer.
+    # No artificial directions or copies of already-reduced quantiles are supplied.
+    reference_count = case["reference_count"]
+    directions = _TABLE5["direction_order"]
+    retention, total_area, spurious = {}, {}, {}
+    for amplitude, rows in case["directions_by_amplitude_nm"].items():
+        amplitude = float(amplitude)
+        retention[amplitude] = {direction: counts[0] / reference_count
+                                for direction, counts in zip(directions, rows, strict=True)}
+        total_area[amplitude] = {direction: counts[1] / reference_count
+                                 for direction, counts in zip(directions, rows, strict=True)}
+        spurious[amplitude] = {direction: counts[2] / reference_count
+                               for direction, counts in zip(directions, rows, strict=True)}
+    criterion = ToleranceCriterion(**_TABLE5["criterion"])
+    result = knowledge_error_tolerance(ratio=retention, spurious=spurious, eligible=directions,
+                                      criterion=criterion)
+    assert result.amplitude == case["expected_tolerance_K_nm"]
+    assert result.eligible == 8 and result.excluded == 0
+    # The same raw inputs also preserve the distinct pre-submission total-area statistic.
+    total = knowledge_error_tolerance(ratio=total_area, spurious=spurious, eligible=directions,
+                                     criterion=criterion)
+    assert total.amplitude == case["expected_tolerance_total_area_nm"]
 
 
 @pytest.mark.backend

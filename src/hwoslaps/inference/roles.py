@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 from .refine import refine as refine_maximum
-from .result import RoleFit
+from .result import RefineOutcome, RoleFit, RoleStatus
 from .sampler import SearchOutcome, run_search
-from .settings import RefineSettings, SamplerSettings
-from .starts import select_starts
+from .settings import PROCEDURE_VERSION, RefineSettings, SamplerSettings
+from .starts import InsufficientStartsError, select_starts
 
 if TYPE_CHECKING:
     from .api import PreparedCase
@@ -46,9 +46,25 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
         if refine is None:
             vector = np.asarray(outcome.result.samples.max_log_likelihood(as_instance=False), dtype=float)
         else:
-            starts = select_starts(case_dir / outcome.record.output_path / "files", model.parameter_names,
-                                   model.lower, model.upper, refine)
-            refinement = refine_maximum(starts, case.objective(role), refine)
+            try:
+                starts = select_starts(case_dir / outcome.record.output_path / "files", model.parameter_names,
+                                       model.lower, model.upper, refine)
+            except InsufficientStartsError as selection_error:
+                vector = selection_error.starts[0].physical
+                log_likelihood = case.log_likelihood(role, vector)
+                if not np.isfinite(log_likelihood):
+                    log_likelihood = None
+                refinement = RefineOutcome(
+                    acceptance_status=RoleStatus.UNRESOLVED, best_log_likelihood=log_likelihood,
+                    best_vector=vector, gates=dict.fromkeys(("support", "repeat", "finite_gradient", "scalar_residual",
+                                                           "direct_log_likelihood", "incumbent"), False),
+                    record={"start_selection_error": str(selection_error),
+                            "start_provenance": [start.to_mapping() for start in selection_error.starts],
+                            "sampler_incumbent_retained": log_likelihood is not None,
+                            "procedure": refine.to_mapping(), "procedure_version": PROCEDURE_VERSION},
+                    projected_gradient_linf=None, repeat_converged=None)
+            else:
+                refinement = refine_maximum(starts, case.objective(role), refine)
             log_likelihood = refinement.best_log_likelihood
             vector = refinement.best_vector
             if log_likelihood is None:

@@ -3,11 +3,11 @@
 This example forecasts subhalo detection for a Habitable Worlds Observatory imaging
 observation. It uses the telescope of exploratory analytic case EAC1 and the ultraviolet and
 visible (UVIS) channel of the High Resolution Imager (HRI), taken from the HWO
-Science-Engineering Interface (SEI) v0.1.9. The observing band, lens and source are those of
-the RASTI paper (Vassilakis et al., *Point spread function requirements for dark matter
-subhalo detection with the Habitable Worlds Observatory*, submitted to RAS Techniques and
-Instruments). SEI v0.1.9 describes pre-formulation concepts, so these are study inputs, not
-final instrument values.
+Science-Engineering Interface (SEI) v0.1.9. Its band and exposure follow the RASTI study,
+with an illustrative isothermal lens and exponential source. The default optical PSF
+has zero wavefront error; the paper's reference state used 35 nm RMS. The example is
+not the production COSMOS-source population or its sensitivity aperture. SEI v0.1.9
+describes pre-formulation concepts rather than final instrument values.
 
 ```{figure} ../_static/hwo-reference.png
 :alt: Left, the simulated HWO ring in ADU. Right, the forecast q map for a 10^8 solar-mass NFW subhalo.

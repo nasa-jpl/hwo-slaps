@@ -14,7 +14,7 @@ Engine configuration. Section-local rules run before these cross-section rules.
 | `forecast` | null or mapping, see `forecast` | `null` |  | Fisher forecast inputs |
 
 - every kernel file is sampled at scene.grid.pixel_scale_arcsec
-- optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale
+- optical truth and model nodes fit within the focal period and meet sub-pixel Nyquist
 - wavelength_samples requires a bandpass and component SEDs
 - AB source or sky inputs require a bandpass and a collecting area
 - nuisance names resolve; wavefront modes need a model basis and existing segments; an Einstein-radius ring needs exactly one radius
@@ -57,6 +57,7 @@ The lensing scene.
 | `perturbers` | mapping, see `scene.perturbers` | `{}` |  | fixed perturbing halos |
 
 - source.redshift > lens.redshift
+- lens mass includes a centred component
 - component names unique within a galaxy and not reserved
 - halo redshifts in (0, source.redshift); moline2017_eq7 only at the lens redshift and in its mass range
 - radius: einstein_radius needs exactly one lens mass component with an Einstein radius
@@ -177,7 +178,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -192,7 +193,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -205,7 +206,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `scene.lens.light.<name>.flux.reference_band.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -220,7 +221,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## scene.lens.light.<name>.flux.reference_band.factors[i] (kind: top_hat)
 
@@ -231,7 +232,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -368,7 +369,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -383,7 +384,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -396,7 +397,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `scene.source.light.<name>.flux.reference_band.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -411,7 +412,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## scene.source.light.<name>.flux.reference_band.factors[i] (kind: top_hat)
 
@@ -422,7 +423,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -1185,7 +1186,7 @@ the instrument
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `name` | null or non-empty text | `null` |  | instrument label, recorded only |
+| `name` | null or non-empty text | `null` |  | instrument label, included in configuration identity |
 | `detector` | mapping, see `instrument.detector` | required |  | detector noise parameters |
 | `bandpass` | null or mapping by `kind` (top_hat, table, product), see `instrument.bandpass` | `null` |  | system throughput including detector quantum efficiency |
 | `collecting_area_m2` | null or number > 0 | `null` | m^2 | photon-collecting area |
@@ -1211,7 +1212,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -1226,7 +1227,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -1239,7 +1240,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `instrument.bandpass.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -1254,7 +1255,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## instrument.bandpass.factors[i] (kind: top_hat)
 
@@ -1265,7 +1266,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -1310,7 +1311,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -1325,7 +1326,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -1338,7 +1339,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `observation.sky.reference_band.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -1353,7 +1354,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## observation.sky.reference_band.factors[i] (kind: top_hat)
 
@@ -1364,7 +1365,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -1820,7 +1821,7 @@ Engine configuration. Section-local rules run before these cross-section rules.
 | `forecast` | null or mapping, see `batch.config.forecast` | `null` |  | Fisher forecast inputs |
 
 - every kernel file is sampled at scene.grid.pixel_scale_arcsec
-- optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale
+- optical truth and model nodes fit within the focal period and meet sub-pixel Nyquist
 - wavelength_samples requires a bandpass and component SEDs
 - AB source or sky inputs require a bandpass and a collecting area
 - nuisance names resolve; wavefront modes need a model basis and existing segments; an Einstein-radius ring needs exactly one radius
@@ -1863,6 +1864,7 @@ The lensing scene.
 | `perturbers` | mapping, see `batch.config.scene.perturbers` | `{}` |  | fixed perturbing halos |
 
 - source.redshift > lens.redshift
+- lens mass includes a centred component
 - component names unique within a galaxy and not reserved
 - halo redshifts in (0, source.redshift); moline2017_eq7 only at the lens redshift and in its mass range
 - radius: einstein_radius needs exactly one lens mass component with an Einstein radius
@@ -1983,7 +1985,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -1998,7 +2000,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -2011,7 +2013,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `batch.config.scene.lens.light.<name>.flux.reference_band.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -2026,7 +2028,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## batch.config.scene.lens.light.<name>.flux.reference_band.factors[i] (kind: top_hat)
 
@@ -2037,7 +2039,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -2174,7 +2176,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -2189,7 +2191,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -2202,7 +2204,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `batch.config.scene.source.light.<name>.flux.reference_band.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -2217,7 +2219,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## batch.config.scene.source.light.<name>.flux.reference_band.factors[i] (kind: top_hat)
 
@@ -2228,7 +2230,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -2991,7 +2993,7 @@ the instrument
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `name` | null or non-empty text | `null` |  | instrument label, recorded only |
+| `name` | null or non-empty text | `null` |  | instrument label, included in configuration identity |
 | `detector` | mapping, see `batch.config.instrument.detector` | required |  | detector noise parameters |
 | `bandpass` | null or mapping by `kind` (top_hat, table, product), see `batch.config.instrument.bandpass` | `null` |  | system throughput including detector quantum efficiency |
 | `collecting_area_m2` | null or number > 0 | `null` | m^2 | photon-collecting area |
@@ -3017,7 +3019,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -3032,7 +3034,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -3045,7 +3047,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `batch.config.instrument.bandpass.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -3060,7 +3062,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## batch.config.instrument.bandpass.factors[i] (kind: top_hat)
 
@@ -3071,7 +3073,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -3116,7 +3118,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -3131,7 +3133,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 
 - support is ordered
@@ -3144,7 +3146,7 @@ Selected by `kind: product`.
 |---|---|---|---|---|
 | `support_nm` | pair, each number > 0 | required | nm | band support (low, high) |
 | `factors` | list of at least 1 items, each mapping selected by kind: table, top_hat, constant, see `batch.config.observation.sky.reference_band.factors[i]` | required |  | response factors |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - support is ordered and contained in each top-hat factor
 
@@ -3159,7 +3161,7 @@ Selected by `kind: table`.
 | `value_key` | non-empty text | required |  | value column or array |
 | `wavelength_unit` | one of: nm, angstrom, um, m | required |  | wavelength unit |
 | `power` | integer >= 1 | `1` |  | number of identical surfaces |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 ## batch.config.observation.sky.reference_band.factors[i] (kind: top_hat)
 
@@ -3170,7 +3172,7 @@ Selected by `kind: top_hat`.
 | `min_nm` | number > 0 | required | nm | lower wavelength |
 | `max_nm` | number > 0 | required | nm | upper wavelength |
 | `throughput` | number in (0, 1] | required |  | electrons per entrance-pupil photon |
-| `label` | null or non-empty text | `null` |  | bandpass label |
+| `label` | null or non-empty text | `null` |  | bandpass label; does not alter throughput, but participates in EngineConfig identity |
 
 - wavelengths are ordered
 
@@ -3675,7 +3677,10 @@ Selected by `kind: forecast_argmax`.
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
 | `masses_msun` | list of at least 1 items, each number > 0, no repeats | required |  | trial masses present in forecast |
-| `aperture_radius_arcsec` | null or number > 0 | `null` |  | closed selection disc |
+| `aperture_radius_arcsec` | null or number > 0 | `null` |  | closed disc in hypothesis-plane arcseconds |
+| `aperture_einstein_radius_multiple` | null or number > 0 | `null` |  | closed disc radius as a multiple of this member Einstein radius |
+| `support_margin_arcsec` | null or number >= 0 | `null` |  | margin from each fit image edge for the trial kernel |
+| `metric` | null or one of: q_asimov, q_mismatch | `null` |  | selection statistic; None uses the forecast detection metric |
 
 ## batch.nonlinear.<key>.retry
 
@@ -3707,6 +3712,7 @@ Selected by `kind: forecast_argmax`.
 | `preparation_cache_size` | integer >= 1 | `2` |  | bounded preparations retained per worker |
 | `memory_fraction` | number in (0, 1] | `0.75` |  | total preallocated fraction per device |
 | `training_workers` | integer >= 1 | `1` |  | backend emulator-training workers per batch worker |
+| `job_timeout_seconds` | null or number > 0 | `null` |  | maximum elapsed seconds for one dispatched job |
 
 ## fit
 

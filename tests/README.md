@@ -29,16 +29,25 @@ environment.
 
 ## Paper parity
 
-`tests/parity/` compares the forecast, optics and nonlinear likelihood with fixtures
-computed by the RASTI code. The fixtures and their inputs come from
-`tests/scripts/generate_paper_parity.py`. To regenerate only the inputs and compare them
-with the committed ones:
+`tests/parity/` compares five synthetic forecast scenes, optical kernels and fixed-vector
+nonlinear likelihoods with values computed by the tagged RASTI code. A separate CPU
+reference check uses the archived sys0043 production inputs: a COSMOS source, a 522 x 522
+image at 0.00716 arcsec/pixel, the 999 x 999 science35 kernel and HWO detector noise.
+The production oracle is a new evaluation of those inputs using the submitted code;
+historical per-node forecast arrays were not archived.
+
+`tests/scripts/generate_paper_parity.py` generates these tagged-code oracles. This command
+writes only the synthetic inputs; it does not compare them with committed fixtures:
 
 ```bash
 python tests/scripts/generate_paper_parity.py --inputs-only --out /path/to/new-inputs
 ```
 
-Regenerating the expected values requires a checkout of the tagged RASTI code and a GPU.
+Regenerating the original expected values requires a checkout of the tagged RASTI code
+and a GPU. The separate `--production-anchor` mode requires the original configuration
+and job receipt and runs on the CPU. Its oracle records input and submitted-source hashes.
+The `*_8fa6209` fixtures instead preserve continuity with an intermediate engine revision;
+they do not establish submitted-paper nonlinear refinement parity under the slam1 boxes.
 
 ## Writing tests
 

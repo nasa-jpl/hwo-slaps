@@ -68,6 +68,8 @@ def test_rejection_redraws_invalid_members_and_reports_original_error(minimal_ma
     invalid=next(i for i in range(100) if independent_e(3,i,0)>=.999)
     with pytest.raises(PopulationError,match=f"member {invalid}.*last error.*ell_comps"):
         list(iter_population_members(base,mapping,1,seed=3,start=invalid))
+    raw = sample_population(mapping, 1, seed=3, start=invalid)[0]
+    assert raw["e"] == independent_e(3, invalid, 0)  # raw draws do not apply config rejection
     mapping["max_attempts"]=50
     members=list(iter_population_members(base,mapping,100,seed=3))
     for member in members:

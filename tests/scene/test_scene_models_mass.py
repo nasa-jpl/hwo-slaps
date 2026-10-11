@@ -84,7 +84,13 @@ def test_cartesian_multipole_agrees_with_amplitude_angle_and_backend(m, slope, c
 def test_shear_deflections_and_registry_order(minimal_mapping):
     import autolens as al
 
-    spec = _scene(minimal_mapping, {"type": "ExternalShear", "gamma_1": 0.08, "gamma_2": -0.05})
+    # A valid scene requires a centred mass. Keep the shear first in declaration
+    # order and evaluate its profile alone, preserving the analytic shear oracle.
+    values = copy.deepcopy(minimal_mapping["scene"])
+    centred_mass = next(iter(values["lens"]["mass"].values()))
+    values["lens"]["mass"] = {"main": {"type": "ExternalShear", "gamma_1": 0.08, "gamma_2": -0.05},
+                              "anchor": centred_mass}
+    spec = parse_scene(values)
     actual = np.asarray(instantiate(spec.lens.mass[0])["main"].deflections_yx_2d_from(
         grid=al.Grid2DIrregular(values=POINTS)))
     y, x = POINTS.T

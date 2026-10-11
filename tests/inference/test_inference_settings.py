@@ -131,9 +131,8 @@ def test_box_rules_reproduce_paper_bounds():
         BoxRule(0.5, fractional=True).box(0.0, UNBOUNDED)
 
 
-def test_default_settings_equal_the_paper_procedure():
-    """Literals of 41621de fresh_profile.py:62-76 and autolens_model_builder.py:22-34; the lens light
-    rows (A6 3.1) and the orientation rows in degrees (SCI-16, SPEC 10.2 Q7) are new."""
+def test_default_refinement_and_narrow_box_settings_keep_the_engine_contract():
+    """The historical refinement gates and narrow default boxes, distinct from adopted paper priors."""
     assert RefineSettings().to_mapping() == {
         "original_start_count": 8, "start_separation_normalized_l2": 0.05, "start_separation_posterior_sigma": 1.0,
         "maxiter": 500, "ftol": 0.0, "gtol": 1.0e-10, "maxls": 50, "repeat_maxiter": 1000, "repeat_ftol": 0.0,
@@ -178,6 +177,21 @@ def test_settings_round_trip_and_rule_overrides_merge_field_by_field():
     assert sampler.to_mapping()["n_eff"] == 200.0 and isinstance(sampler.to_mapping()["n_eff"], float)
     refine = RefineSettings(original_start_count=2, maxiter=50, start_separation_posterior_sigma=2.0)
     assert RefineSettings.from_mapping(refine.to_mapping()) == refine
+
+
+def test_partial_python_prior_rules_merge_defaults_and_sort_like_mappings():
+    overrides = (("source.position", BoxRule(0.05)), ("lens.einstein_radius", BoxRule(0.25, fractional=True)))
+    widths = PriorWidths(rules=overrides)
+    mapped = PriorWidths.from_mapping({"rules": {name: rule.to_mapping() for name, rule in overrides}})
+    assert widths == mapped
+    assert widths.rule("lens", "position") == PriorWidths().rule("lens", "position")
+    assert widths.rule("lens", "einstein_radius").box(1.0, POSITIVE) == (0.75, 1.25)
+    assert [name for name, _ in widths.rules] == sorted(name for name, _ in DEFAULT_BOX_RULES)
+    assert PriorWidths(rules=()) == PriorWidths()
+    with pytest.raises(ConfigError, match="distinct"):
+        PriorWidths(rules=(overrides[0], overrides[0]))
+    with pytest.raises(ConfigError, match="unknown keys"):
+        PriorWidths(rules=(("lens.typo", BoxRule(0.05)),))
 
 
 @pytest.mark.parametrize("shape", [None, "forecast", (1, 1), (3, 5), (2, 4), (40, 40), (0, 3)])

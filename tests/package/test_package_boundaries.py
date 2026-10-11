@@ -215,11 +215,14 @@ def layer(name):
         return 5
     if relative in ("analysis", "population", "artifacts") or relative.startswith(("analysis.", "population.")):
         return 6
-    return 7
+    if name == "hwoslaps" or relative in ("config", "batch", "plotting", "cli", "__main__") or relative.startswith(("batch.", "plotting.")):
+        return 7
+    raise AssertionError(f"package layer must be declared explicitly: {name}")
 
 
 def test_package_imports_follow_layer_direction():
     for path, name in modules():
+        source_layer = layer(name)
         if path.name == "__init__.py":
             continue
         package = name.rpartition(".")[0]
@@ -227,7 +230,7 @@ def test_package_imports_follow_layer_direction():
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name.startswith("hwoslaps."):
-                        assert layer(alias.name) <= layer(name), (name, alias.name)
+                        assert layer(alias.name) <= source_layer, (name, alias.name)
                 continue
             if not isinstance(node, ast.ImportFrom):
                 continue
@@ -237,7 +240,7 @@ def test_package_imports_follow_layer_direction():
             else:
                 target = node.module or ""
             if target.startswith("hwoslaps.") and not target.endswith(".__init__"):
-                assert layer(target) <= layer(name), (name, target)
+                assert layer(target) <= source_layer, (name, target)
 
 
 def test_class_names_are_unique_across_the_package():

@@ -302,14 +302,14 @@ def test_changed_job_during_recovery_is_a_conflict(tiny_batch_spec, tmp_path, er
             mapping['forecast']['masses_msun'] = [1e7, 1e8]
         resumed = parse_batch(mapping, base_dir=spec.base_dir)
         if change_job:
-            with pytest.raises(BatchConflict, match=forecast_job.job_id):
+            with pytest.raises(BatchConflict, match='scientific specification'):
                 run_batch(resumed, root, select=forecast_job.job_id)
             events = [event for event in _events(root) if event['session'] == 2]
-            if not erase_records:
-                assert not any(event['type'] == 'started' for event in events)
-            else:
-                failed = next(event for event in events if event['type'] == 'failed')
-                assert failed['failure']['error_type'] == 'BatchConflict'
+            assert not any(event['type'] in ('started', 'worker_ready') for event in events)
+            assert not (root / 'sessions/2/workers.jsonl').exists()
+            _wait(lambda: (root / forecast_job.job_id / 'complete.json').exists())
+            from hwoslaps.batch import open_batch
+            assert open_batch(root).spec['forecast']['masses_msun'] == [1e8]
         else:
             report = run_batch(resumed, root, select=forecast_job.job_id)
             assert report.counts['duplicate'] == 1 and report.counts['failed'] == 0

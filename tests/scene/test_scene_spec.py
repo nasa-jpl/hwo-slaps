@@ -36,6 +36,8 @@ DOMAIN_ROWS = [
     ("missing-light-amplitude", {"source.light.disk.intensity": _DELETE}, "scene.source.light.disk"),
     ("unknown-component-key", {"lens.mass.main.slope": 2.1}, "scene.lens.mass.main.slope"),
     ("no-lens-mass", {"lens.mass": {}}, "scene.lens.mass"),
+    ("no-centred-lens-mass", {"lens.mass": {"shear": {"type": "ExternalShear", "gamma_1": 0.01,
+                                                        "gamma_2": 0.02}}}, "scene.lens.mass"),
     ("zero-over-sampling", {"grid.over_sample_size": 0}, "scene.grid.over_sample_size"),
     ("nfw-without-concentration", {"subhalo.concentration": _DELETE}, "scene.subhalo.concentration"),
     ("point-mass-with-concentration", {"subhalo.type": "PointMass"}, "scene.subhalo.concentration"),

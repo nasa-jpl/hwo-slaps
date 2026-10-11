@@ -1,4 +1,4 @@
-# SPEC_CORE B3: the RASTI science scene, static 35 nm draw and full paper-scale grid.
+# Performance fixture with a static 35 nm draw and a large grid; not a paper production scene.
 run_name: benchmark_paper_scale
 seed: 11
 cosmology: {name: Planck15}

@@ -215,3 +215,85 @@ def test_halo_profiles_are_the_autolens_classes_of_their_types(planck15):
         for name, value in halo.lensing().parameters.items():
             assert getattr(profile, name) == value
         assert halo.autolens_profile(centre=(0.0, 0.0)).centre == (0.0, 0.0)
+
+
+@pytest.mark.backend
+@pytest.mark.parametrize("model", [POINT_MASS, SIS, NFW], ids=["point-mass", "sis", "nfw"])
+def test_halo_reload_tolerates_only_small_recomputed_scale_drift(model, planck15):
+    halo = make_halo(model, 2.0e8, (0.4, -0.8), redshift=0.2, source_redshift=0.6, cosmology=planck15)
+    record = halo.to_mapping()
+    for fields in record["lensing"].values():
+        for name, value in fields.items():
+            fields[name] = value * (1.0 + 5.0e-13)
+    restored = Halo.from_mapping(record)
+    assert restored == halo
+    for key in ("model", "mass_msun", "mass_definition", "position_yx_arcsec", "redshift", "source_redshift", "cosmology"):
+        assert restored.to_mapping()[key] == record[key]
+    for group, fields in halo.to_mapping()["lensing"].items():
+        for name, value in fields.items():
+            excessive = halo.to_mapping()
+            excessive["lensing"][group][name] = value * (1.0 + 2.0e-12)
+            with pytest.raises(ValueError, match="lensing"):
+                Halo.from_mapping(excessive)
+
+
+@pytest.mark.backend
+@pytest.mark.parametrize("tamper", ["missing-field", "extra-field", "nonfinite", "boolean", "cosmology"])
+def test_halo_reload_keeps_strict_record_structure_and_cosmology(planck15, tamper):
+    record = make_halo(NFW, 2.0e8, (0.4, -0.8), redshift=0.2, source_redshift=0.6,
+                       cosmology=planck15).to_mapping()
+    if tamper == "missing-field":
+        del record["lensing"]["parameters"]["kappa_s"]
+    elif tamper == "extra-field":
+        record["lensing"]["parameters"]["extra"] = 1.0
+    elif tamper == "cosmology":
+        record["cosmology"]["parameters"]["H0"] += 1.0e-12
+    else:
+        record["lensing"]["parameters"]["kappa_s"] = math.nan if tamper == "nonfinite" else True
+    with pytest.raises(ValueError):
+        Halo.from_mapping(record)
+
+
+@pytest.mark.backend
+def test_halo_records_reload_under_alternate_numpy_dispatch(planck15, tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+    import subprocess
+    import sys
+
+    import hwoslaps
+    try:
+        from numpy._core._multiarray_umath import __cpu_features__
+    except ModuleNotFoundError:
+        from numpy.core._multiarray_umath import __cpu_features__
+
+    optional_features = ("AVX512F", "AVX512CD", "AVX512_SKX", "AVX512_CLX", "AVX512_CNL", "AVX512_ICL",
+                         "AVX512_SPR", "AVX2", "FMA3")
+    disabled = [name for name in optional_features if __cpu_features__.get(name, False)]
+    if not disabled:
+        pytest.skip("host exposes no optional x86 dispatch features for this portability probe")
+    records = [make_halo(model, mass, (0.4, -0.8), redshift=0.2, source_redshift=0.6,
+                         cosmology=planck15).to_mapping()
+               for model in (POINT_MASS, SIS, NFW) for mass in (1.0e6, 2.0e8, 1.0e10)]
+    input_path = tmp_path / "halos-native.json"
+    output_path = tmp_path / "halos-alternate.json"
+    input_path.write_text(json.dumps(records))
+    monkeypatch.setenv("PYTHONPATH", str(Path(hwoslaps.__file__).resolve().parent.parent))
+    env = dict(os.environ, NPY_DISABLE_CPU_FEATURES=",".join(disabled), CUDA_VISIBLE_DEVICES="")
+    program = """
+import json
+from pathlib import Path
+import sys
+from hwoslaps.scene.halos import Halo
+from hwoslaps.provenance import capture_provenance
+records = json.loads(Path(sys.argv[1]).read_text())
+restored = [Halo.from_mapping(record).to_mapping() for record in records]
+Path(sys.argv[2]).write_text(json.dumps({"halos": restored, "provenance": capture_provenance()}))
+"""
+    subprocess.run([sys.executable, "-c", program, str(input_path), str(output_path)], env=env,
+                   check=True, capture_output=True, text=True)
+    output = json.loads(output_path.read_text())
+    assert output["provenance"]["numpy_cpu_environment"]["NPY_DISABLE_CPU_FEATURES"] == ",".join(disabled)
+    for native, alternate in zip(records, output["halos"], strict=True):
+        for key in ("model", "mass_msun", "mass_definition", "position_yx_arcsec", "redshift", "source_redshift", "cosmology"):
+            assert alternate[key] == native[key]

@@ -1,67 +1,109 @@
 # Migrating from the RASTI code
 
-The code used for the RASTI paper is kept at the git tag `rasti-26-183-submitted`.
-This version reorganizes the package around one configuration file, one forecast
-interface and one set of result files. Parity tests check that forecasts of the paper's
-test scenes match the RASTI code exactly. The interfaces differ. Old result files cannot be read by
-this version, so keep the tagged code if you need to reproduce or reread old products.
+The submitted implementation is available at the git tag `rasti-26-183-submitted`
+(commit `41621de`). Its [code and provenance record](https://github.com/nasa-jpl/hwo-slaps/tree/rasti-26-183-submitted/reproducibility/rasti-26-183)
+remains in Git history. This package has a new configuration schema and result format;
+use the tagged implementation to read old products or run the original campaign scripts.
+
+## Entry points
+
+| Submitted RASTI code | This version |
+|---|---|
+| `python runner.py --config FILE`, calling `hwoslaps.pipeline.run_enhanced_pipeline` | `hwoslaps forecast CONFIG... --masses M... -o DIR` or `hwoslaps simulate CONFIG...` |
+| `Pipeline.run(config)` selecting simulation or detection from `modeling.enabled` | Explicit `prepare_forecast`, `forecast`, and `simulate` calls |
+| `hwoslaps.modeling.fisher_detector.FisherDetector` and its grid-map methods | `PreparedForecast` and `forecast`, returning a `ForecastResult` |
+| `scripts/run_ladder.py` and the campaign generation, launch, and harvest scripts | Configurable population and batch jobs, followed by explicit analysis |
+| Pipeline-driven plots | Plotting functions that return Matplotlib axes; callers choose what to plot and save |
+
+The old `campaign`, `lensing`, `modeling`, `psf`, and `pipeline` modules are removed.
+Their reusable calculations now live in `scene`, `optics`, `fisher`, `inference`,
+`analysis`, and `batch`. The old study scripts and frozen campaign files are not
+installed alongside the new engine.
 
 ## Configuration
 
-| RASTI code | This version |
+| Submitted RASTI configuration | This version |
 |---|---|
-| `config.loading.load_config` returning a dictionary | `load_config` returning a validated `EngineConfig` |
-| `global_seed` | `seed` for the scene; detector noise has its own seed |
-| `lensing.lens_galaxy`, `lensing.source_galaxy` | Named components under `scene.lens` and `scene.source` |
-| `telescope`, `imaging` | `psf.truth`, `instrument` and `observation` |
+| `global_seed` | `seed` for scene choices; detector noise and samplers have separate seeds |
+| `lensing.grid`, `lensing.lens_galaxy`, `lensing.source_galaxy` | `scene.grid`, named `scene.lens` components, and named `scene.source.light` components |
+| `lensing.subhalo` combines model and injection choices | `scene.subhalo` describes the hypothesis; optional `scene.injection` specifies an injected mass and position |
+| `psf.telescope`, high-resolution/kernel settings, and wavefront coefficients | `psf.truth`, with a pupil and optical settings or an external kernel |
 | `modeling.fit_psf` | `psf.model` |
-| PSF priors given as repository paths | Packaged prior names, or a path relative to the configuration file |
-| Fisher `mask_mode` and annulus settings | `forecast.mask` |
-| A list of free nuisance parameters | `forecast.nuisances.fixed`, listing the parameters to hold fixed |
-| Background and PSF nuisance switches | `forecast.nuisances.background_offset` and `forecast.nuisances.wavefront` |
-| Engine, workers and batch size in the configuration | `Execution`, or command-line options |
-| A detection threshold in the configuration | A `q_threshold` argument wherever detections are counted |
+| `observation.detector` and `observation.exposure_time` | `instrument.detector` and `observation.exposure_time_s` |
+| `modeling.fisher` mask, parameter, and position choices | `forecast.mask`, `forecast.nuisances`, and `forecast.positions` |
+| Detection thresholds in study configuration | Explicit `q_threshold` arguments in analysis |
 
-Paths inside a configuration are now relative to the file that contains them, and
-misspelled keys are errors.
+Paths are relative to the file that declares them. Unknown keys are errors. The new
+schema does not translate old YAML automatically; start with a current example and
+transfer the physical choices explicitly.
+
+The old observation layer applied `observation.throughput` to rendered source samples.
+Current literal profile rates are already detected rates. Alternatively, use AB
+photometry with a collecting area, a bandpass including detector quantum efficiency,
+and a source SED. Copying an old intensity without its throughput and pixel-sampling
+convention can change the detected brightness. Sky and dark-current rates are already
+detected and must not be multiplied by throughput again.
 
 ## Forecasts and analysis
 
-| RASTI code | This version |
-|---|---|
-| The injected mass used as the forecast mass | `forecast(prepared, masses_msun=[...])` |
-| `prepared.trial(...)`, `SubhaloTrial` | `prepared.hypothesis(mass, position)`, returning a `Halo` |
-| `forecast(..., masses=..., domain_positions=...)` | `forecast(..., masses_msun=..., positions=...)`; the position domain is set at preparation |
-| `summarize_forecast` with supplied areas | `summarize`, which takes areas from the grid |
-| Array-based `mass_reach` | `mass_reach(summary, quantity=..., target=..., interpolation=...)` |
-| A fixed two-feature selection helper | `RankingPolicy` and `rank_pool` with your own cuts and weights |
-| Plotting functions that save files | Plotting functions that return Matplotlib axes |
+`prepare_forecast` builds reusable scene, observation, PSF and nuisance state.
+`forecast(prepared, masses_msun=[...])` evaluates a chosen mass list. `summarize`
+reduces those maps at your threshold, and `mass_reach` finds crossings in the supplied
+mass sequence. These replace the detector and ladder interfaces, rather than aliasing
+them.
 
-Nuisance parameter names now follow the configuration, for example
-`lens.mass.main.einstein_radius` or `source.light.disk.centre_x`.
+The paper used refined rungs for its best-position mass reach, but coarse-lattice
+rungs for its 10% and 50% area estimands. Select those rung sets explicitly when
+reproducing the paper: `mass_reach` does not infer a ladder's coarse/refined history.
+Nonmonotone curves return `non_monotonic`; the paper's ladder instead used its first
+upward crossing. Bounds and sampled crossings also have explicit status values.
+
+For the submitted Table 5, the retained-sensitive-area statistic is
+`KnowledgeErrorAreas.retention` (K), the intersection with correct-PSF detections.
+`detected_area_ratio` is the different total-area ratio used by the pre-submission
+harvester. See [PSF knowledge error](guide/psfs.md#psf-knowledge-error).
 
 ## Simulations and fits
 
-| RASTI code | This version |
-|---|---|
-| `simulate(..., trial=..., seed=..., sample_noise=...)` | `simulate(..., subhalo=..., noise_seed=...)`, with `None` for no subhalo or no noise |
-| A fit's `dataset_kind` set separately from the data | Taken from the observation being fitted |
-| `NonlinearSearchSettings`, `FreshProfileSettings` | `SamplerSettings`, `RefineSettings`, with the sampler seed as a separate argument |
-| A single subhalo recovery | Separate sampler and refined estimates |
-| A fit mask taken from the forecast | All pixels except a PSF border by default; `mask="forecast_mask_minus_psf_border"` to match the forecast |
+Use `simulate(prepared, subhalo=..., noise_seed=...)`; `None` omits the halo or the
+noise draw. The returned observation records whether it is expected or noisy.
+`validate_nonlinear` takes explicit fit, sampler, and optional refinement settings.
+Failed, unresolved, and accepted nondetection outcomes remain distinct.
 
-The default nonlinear prior boxes and sampler settings are narrower than those used for
-the paper's adopted runs. [Nonlinear fits](guide/nonlinear.md#the-settings-used-in-the-rasti-paper)
-shows how to set the paper's values.
+Every supported scene parameter is free by default unless listed in
+`forecast.nuisances.fixed`. This includes an Image component's `rotation_deg`, which
+the paper held fixed. For a component named `galaxy`, include this entry alongside
+any other fixed parameters:
+
+```yaml
+forecast:
+  nuisances:
+    fixed: [source.light.galaxy.rotation_deg]
+```
+
+The nonlinear fit uses the forecast's free scene parameters. Its default prior boxes
+and sampler settings are not the adopted paper protocol. The [paper recipe](guide/nonlinear.md#the-settings-used-in-the-rasti-paper)
+gives `slam1`, its retry settings, batch size and fixed-rotation configuration. Both
+forecast-mask and explicit-mask fits remove the PSF border, so their fitted pixels
+may still differ from the forecast mask.
+
+Random placement, direction and sampler streams now use named identifiers. A seed
+value alone does not reproduce the old campaign's realization. Random injection
+scatter is specified in arcseconds rather than pixels, and polar placement is about
+the configured lens centre. Preserve explicit positions and archived seeds when an
+exact historical realization is required. Injected and control nonlinear families
+receive distinct noise seeds; sharing a Poisson seed would not establish paired noise.
 
 ## Command line
 
-The command line takes configuration files as positional arguments:
+Configuration files are positional and combine in order:
 
 ```bash
 hwoslaps forecast scene.yaml instrument.yaml forecast.yaml --masses 1e7 1e8 -o out/run
 hwoslaps simulate scene.yaml instrument.yaml --noise-seed 11 -o out/noisy
 ```
 
-`--smooth` simulates without a subhalo, and `--expected` without noise. Campaigns that
-used the RASTI orchestration scripts now use [batches](guide/batches.md).
+`--smooth` simulates without a subhalo; `--expected` omits the noise draw.
+[Populations and batches](guide/batches.md) describes the replacement campaign interface.
+The parity suite compares five synthetic scenes with the tagged implementation;
+it does not reproduce every paper campaign or its scientific selection rules.

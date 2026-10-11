@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -12,7 +13,7 @@ from ..fisher.data_space import psf_border_mask
 from ..identity import KernelIdentity, array_digest
 from ..scene.image_source import frozen_value
 from ..observation.observation import Observation
-from ..optics.kernels import DetectorPSF, make_convolver
+from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC, DetectorPSF, make_convolver
 from .settings import OBJECTIVE_VERSION
 
 __all__ = ["FitData", "build_fit_data", "support_half_widths"]
@@ -78,7 +79,8 @@ def build_fit_data(observation: Observation, model_kernel: DetectorPSF, *, mask_
         raise ValueError("over_sample_size must be an integer >= 1")
     if over_sample_size != observation.grid.over_sample_size:
         raise ValueError("fit sampling differs from the observation's generation sampling")
-    if model_kernel.pixel_scale_arcsec != observation.pixel_scale_arcsec:
+    if not math.isclose(model_kernel.pixel_scale_arcsec, observation.pixel_scale_arcsec,
+                        rel_tol=0.0, abs_tol=PIXEL_SCALE_ATOL_ARCSEC):
         raise ValueError("model kernel pixel scale differs from the observation")
     shape = tuple(observation.grid.shape)
     include = np.array(base_mask, dtype=bool, copy=True)

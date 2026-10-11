@@ -50,7 +50,8 @@ reference = load_forecast("out/kernel_psf/matched/forecast.npz")
 mismatched = load_forecast("out/kernel_psf/mismatched/forecast.npz")
 areas = knowledge_error_areas(reference, mismatched, q_threshold=10.0, min_reference_count=1)
 
-print(areas.detected_area_ratio)   # R: area detected with the wrong PSF / correct area
+print(areas.retention)             # K: originally detected area still detected / correct area
+print(areas.detected_area_ratio)   # total detected area with the wrong PSF / correct area
 print(areas.spurious_ratio)        # F: false-detection area / correct area
 ```
 

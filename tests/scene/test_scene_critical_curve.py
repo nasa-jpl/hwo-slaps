@@ -5,6 +5,7 @@ from copy import deepcopy
 
 import pytest
 
+from hwoslaps.config.checks import ConfigError
 from hwoslaps.scene.convert import ell_comps_from
 from hwoslaps.scene.critical_curve import effective_einstein_radius
 from hwoslaps.scene.spec import parse_scene
@@ -55,8 +56,9 @@ def test_a_lens_below_the_extraction_resolution_is_refused(scene_mapping, planck
         effective_einstein_radius(parse_scene(scene_mapping), planck15)
     shear_only = deepcopy(original)
     shear_only["lens"]["mass"] = {"shear": {"type": "ExternalShear", "gamma_1": 0.0, "gamma_2": 0.0}}
-    with pytest.raises(ValueError, match="no lens mass component has an Einstein radius"):
-        effective_einstein_radius(parse_scene(shear_only), planck15)
+    with pytest.raises(ConfigError, match="must have a centre") as error:
+        parse_scene(shear_only)
+    assert error.value.path == "scene.lens.mass"
     weak_main = deepcopy(original)
     weak_main["lens"]["mass"]["main"].update(einstein_radius=0.0001, ell_comps=[0.0, 0.0])
     weak_main["lens"]["mass"]["companion"] = {"type": "Isothermal", "centre": [0.0, 3.0],

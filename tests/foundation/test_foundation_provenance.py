@@ -72,17 +72,21 @@ def test_non_repository_is_null_and_failure_inside_tracked_repository_propagates
 
 def test_capture_records_the_imported_package_from_an_unrelated_working_directory(source_repo, monkeypatch):
     import hwoslaps
+    from hwoslaps._version import __version__
     root, _ = source_repo
     actual_package = Path(hwoslaps.__file__).resolve().parent
     # Pytest's source-path setting is not inherited by child interpreters.
     monkeypatch.setenv("PYTHONPATH", str(actual_package.parent))
-    expected = git(actual_package, "rev-parse", "HEAD").decode().strip()
+    expected = git_revision(actual_package)
     program = "from hwoslaps.provenance import capture_provenance; import json; print(json.dumps(capture_provenance(command=['validate'])))"
     output = subprocess.run([sys.executable, "-c", program], cwd=root, check=True, capture_output=True, text=True).stdout
     record = json.loads(output)
     assert Path(record["package_path"]) == actual_package
-    assert record["source"]["commit"] == expected
-    assert record["hwoslaps_version"] == "1.0.0"
+    if expected is None:
+        assert record["source"] is None
+    else:
+        assert record["source"]["commit"] == expected.commit
+    assert record["hwoslaps_version"] == __version__
     assert record["command"] == ["validate"]
     assert record["python"] == ".".join(map(str, sys.version_info[:3]))
     assert record["packages"]["numpy"]["version"] == importlib.metadata.version("numpy")
@@ -101,3 +105,24 @@ def test_capture_reports_live_blas_thread_counts():
         record = capture_provenance()
     pools = [pool for pool in record["thread_pools"] if pool["user_api"] == "blas"]
     assert pools and all(pool["num_threads"] == 2 for pool in pools)
+
+
+def test_capture_records_numpy_cpu_dispatch_and_blas_architecture(monkeypatch):
+    from hwoslaps import provenance
+    try:
+        from numpy._core._multiarray_umath import __cpu_features__
+    except ModuleNotFoundError:
+        from numpy.core._multiarray_umath import __cpu_features__
+
+    monkeypatch.setattr(provenance, "threadpool_info", lambda: [{"user_api": "blas", "internal_api": "openblas",
+                        "num_threads": 2, "version": "test", "architecture": "SkylakeX",
+                        "threading_layer": "pthreads", "prefix": "libopenblas", "filepath": "/test/libopenblas.so"}])
+    monkeypatch.setenv("NPY_DISABLE_CPU_FEATURES", "AVX2")
+    record = capture_provenance()
+    assert record["numpy_cpu_features"] == {name: bool(enabled) for name, enabled in __cpu_features__.items()}
+    assert record["numpy_cpu_environment"] == {"NPY_DISABLE_CPU_FEATURES": "AVX2"}
+    pool = record["thread_pools"][0]
+    assert pool["architecture"] == "SkylakeX"
+    assert pool["threading_layer"] == "pthreads"
+    assert pool["filepath"] == "/test/libopenblas.so"
+    json.dumps(record)

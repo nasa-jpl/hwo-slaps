@@ -3,8 +3,8 @@
 The realized tuple is passed to every scene build of a preparation, so perturbers never
 move between the baseline, nuisance renders and node renders. Its index is the component
 name ``perturber_<index>`` of the plane assembly rule (``scene.builder``). A halo's ``centre``
-is its angular position in its own plane; for a halo behind the lens that is not where it
-appears on the image.
+is its angular position in its own plane. Deflections by earlier planes can change
+where it appears in the image; foreground halos can also change lens-plane ray positions.
 """
 
 from __future__ import annotations

@@ -48,7 +48,8 @@ the [configuration reference](../configuration.md)).
 ## Trial positions
 
 `forecast.positions` sets where trial subhalos are placed. Positions are `(y, x)` in
-arcseconds.
+arcseconds in the hypothesis halo's own plane. The coordinate origin is aligned with
+the image-grid centre; numerical grid spacings and radii use this same plane.
 
 `grid`
 : A square lattice centred on the lens.
@@ -70,6 +71,11 @@ arcseconds.
   forecast:
     positions: {kind: ring, count: 36, radius: einstein_radius}
   ```
+
+  The named radii are image-plane features. They are supported at or in front of the
+  main lens, but rejected when `scene.subhalo.redshift` is behind it. For a background
+  hypothesis, supply a numeric radius or explicit own-plane coordinates obtained
+  from the appropriate lens equation.
 
 `explicit`
 : A list of positions.
@@ -158,8 +164,11 @@ forecast:
   noise_covariance: covariance.npy
 ```
 
-The matrix is square, with one row per pixel of the full image. Simulated noise and
-nonlinear fits still use independent pixels.
+The matrix is square, with one row per pixel of the full image in flattened row order,
+and has units of ADU². Its diagonal must match `prepared.sigma_adu**2` on the selected
+pixels within relative tolerance 10⁻⁶. Simulations draw independent pixel noise.
+Nonlinear validation uses a diagonal likelihood and rejects a preparation configured
+with `noise_covariance`.
 
 ## Engines and execution
 

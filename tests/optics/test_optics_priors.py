@@ -265,3 +265,20 @@ def test_prior_files_never_resolve_through_the_working_directory_or_the_reposito
     with pytest.raises(ConfigError, match="not resolved") as caught:
         parse_prior({"path": str(relative)}, "psf.model.draw.prior")
     assert caught.value.path == "psf.model.draw.prior.path"
+
+
+@pytest.mark.parametrize("duplicate", ["name: changed", "global_weights: {4: 2}", "metadata: {a: 1, a: 2}"])
+def test_prior_yaml_rejects_duplicate_keys(duplicate):
+    from hwoslaps.optics.mode_priors import parse_mode_weight_prior
+
+    document = "name: example\nsegment_variance_fraction: 0\nglobal_weights: {4: 1}\n"
+    with pytest.raises(ValueError, match="duplicate key"):
+        parse_mode_weight_prior((document + duplicate + "\n").encode())
+
+
+def test_prior_yaml_uses_engine_core_scalar_rules():
+    from hwoslaps.optics.mode_priors import parse_mode_weight_prior
+
+    prior = parse_mode_weight_prior(
+        "name: yes\nsegment_variance_fraction: 0\nglobal_weights: {010: 1e0}\n")
+    assert prior.name == "yes" and dict(prior.global_weights) == {10: 1.0}

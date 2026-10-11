@@ -21,6 +21,11 @@ step, and the limits of what a forecast or fit can tell you.
 ## Coordinates
 
 - Positions are `(y, x)` in arcseconds, with the origin at the centre of the image grid.
+- Component and halo positions are angular coordinates in their own redshift plane.
+  `forecast.positions`, `scene.injection.position` and `trials.aperture_radius_arcsec`
+  use the hypothesis halo's plane. A foreground perturber can deflect rays before they
+  reach the main lens, so lens-plane coordinates need not coincide with image-plane
+  positions either.
 - In detector images, row 0 has the largest *y*, and columns increase in *x*. Image-source
   assets are the exception: their row 0 is the bottom row.
 - In plots and trial-position grids, *y* increases upward and *x* to the right.
@@ -53,6 +58,12 @@ parameters to make a combination pass.
 The Moliné relation is applied at the lens redshift and only within its calibrated
 range of $10^6$ to $10^{12}$ M☉. A subhalo off the lens plane is placed in the angular
 coordinates of its own plane.
+
+The named placement radii `einstein_radius` and `critical_curve` describe image-plane
+features. HWO-SLAPS rejects these names for hypotheses behind the main lens. Use a
+numeric radius or explicit position in the halo's own plane there. Foreground
+hypotheses remain supported; the named radii do not account for ray deflections by
+other foreground perturbers.
 
 Line-of-sight halos, if configured, are drawn once from the configuration's `seed` and
 held fixed in both the smooth and subhalo models. HWO-SLAPS applies no subhalo mass
@@ -100,7 +111,8 @@ within detector pixels, for each light group. In the calibration tests, values b
 0.063 kept the error in the subhalo signal information below 1% compared with a finer
 reference. The value is reported, not enforced. Some of the paper's test scenes exceed it, and
 small values do not guarantee small errors for every subhalo position. For a new kind of
-scene, compare against finer pixels.
+scene, compare against finer pixels. At `over_sample_size: 1` this diagnostic is zero
+by construction and provides no constraint on unresolved within-pixel structure.
 
 ## Optics
 
@@ -108,6 +120,12 @@ Optical PSFs are propagated from the pupil and wavefront with HCIPy and integrat
 detector pixels. Kernels must have odd dimensions, and every wavelength must be sampled
 finely enough that the PSF is neither aliased nor under-sampled at the detector scale.
 Kernel files must be sampled at the detector pixel scale.
+
+HCIPy optical kernels retain the focal-array row order: row 0 has the most negative
+focal *y*. When consumed as a detector kernel, whose row 0 has the largest detector
+*y*, positive pupil/focal *y* maps to negative detector *y*. The *x* axes agree. This
+orientation is part of the optical-kernel convention; external kernel files use
+their supplied array orientation.
 
 Kernels are normalized to unit sum on their finite support. The fraction of the PSF's
 total power that lies inside the support is recorded as its captured fraction.
@@ -145,7 +163,9 @@ nuisance column is rescaled by the same factor, but it depends on the relative u
 individual columns. Each result records the nuisance rank and the condition number so
 you can see when this cutoff acts.
 
-Forecasts can use a dense noise covariance. Simulations draw independent pixel noise,
+Forecasts can use a dense noise covariance in ADU², with one row per full-image pixel
+in flattened row order. The diagonal on selected pixels must match the squared noise
+map within relative tolerance 10⁻⁶. Simulations draw independent pixel noise,
 and nonlinear fits use independent pixels, so `validate_nonlinear` does not accept a
 forecast prepared with a dense covariance.
 
@@ -210,17 +230,17 @@ projected gradient.
 ## Gradients at special points
 
 Refinement needs gradients of the likelihood. A few profiles have no well-defined
-gradient at exact special values, and HWO-SLAPS raises an error there instead of
-returning a wrong gradient:
+gradient at exact special values, and gradient evaluation raises an error there:
 
 - an `Isothermal` lens whose free ellipticity is exactly zero;
 - a circular `PowerLaw` lens with slope other than 2;
 - an `Exponential` or `Sersic` (index ≥ 1) light profile with a grid point exactly at its
   centre.
 
-Small non-zero ellipticities, fixed circular profiles and sampling without refinement
-all work. When a role fails for this reason, offset the centre slightly or fix the
-parameter.
+When a gradient is refused, refinement evaluates the likelihood without gradients
+and retains a finite incumbent if one is available. That start stops, and the role
+remains `unresolved_optimization` unless another start satisfies the refinement
+checks. Fixing a light-profile centre does not remove a cusp at a grid point.
 
 ## Nonlinear PSFs
 

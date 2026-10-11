@@ -31,14 +31,17 @@ from hwoslaps import load_forecast, mass_reach, summarize
 result = load_forecast("out/quickstart/forecast.npz")
 summary = summarize(result, q_threshold=10.0)
 reach = mass_reach(summary, quantity="q_max", target=10.0, interpolation="log")
-print(f"smallest detectable mass: {reach.mass_msun:.3g} solar masses")
+if reach.mass_msun is None:
+    print(f"mass reach status: {reach.status}")
+else:
+    print(f"smallest detectable mass: {reach.mass_msun:.3g} solar masses")
 ```
 
 ## Documentation
 
 The handbook in `docs/` covers installation, a quickstart, how the forecast works, a
 user guide for each task, worked examples including the HWO reference telescope, and the
-full API and configuration reference. To build it:
+full API and configuration reference. To build it in a separate documentation environment:
 
 ```bash
 python -m pip install -r docs/requirements.txt .
@@ -49,9 +52,11 @@ then open `docs/_build/html/index.html`.
 
 ## The RASTI paper
 
-The code used for the RASTI paper is kept at the git tag `rasti-26-183-submitted`. This
-version reproduces its forecasts for the paper's test scenes exactly; see
-`docs/migration.md` for the interface changes.
+The submitted implementation and its [code and provenance record](https://github.com/nasa-jpl/hwo-slaps/tree/rasti-26-183-submitted/reproducibility/rasti-26-183)
+are kept at the git tag `rasti-26-183-submitted`. The current parity suite compares
+five synthetic test scenes and one archived production scene against that code.
+See `docs/migration.md` for interface
+changes and the distinctions between those checks and full paper reproduction.
 
 ## Copyright
 

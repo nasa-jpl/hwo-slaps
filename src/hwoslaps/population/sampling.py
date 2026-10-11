@@ -57,7 +57,7 @@ class Copula:
             raise PopulationError(f"copulas.{self.name}.variables: sequence required")
         variables = tuple(self.variables)
         if len(variables) < 2 or len(set(variables)) != len(variables):
-            raise PopulationError(f"copulas.{self.name}.variables: at least2 distinct variables required")
+            raise PopulationError(f"copulas.{self.name}.variables: at least 2 distinct variables required")
         for variable in variables:
             _variable_name(variable, f"copulas.{self.name}.variables")
         try:
@@ -202,6 +202,13 @@ class PopulationSpec:
                 "catalog": None if self.catalog is None else self.catalog.to_mapping(),
                 "bind": {path: reference.name() for path, reference in self.bind.items()}, "max_attempts": self.max_attempts}
 
+    def identity_mapping(self):
+        """Scientific specification with catalog column bindings, independent of its path."""
+        mapping = self.to_mapping()
+        if mapping["catalog"] is not None:
+            mapping["catalog"].pop("path")
+        return mapping
+
     def captured_digest(self, *, catalog_sha256: str | None) -> str:
         """Identify the spec with the catalog bytes actually loaded by a consumer."""
         if self.catalog is None:
@@ -212,7 +219,7 @@ class PopulationSpec:
                 catalog_sha256 = Sha256()(catalog_sha256, "population.catalog_sha256")
             except ConfigError as error:
                 raise PopulationError(str(error)) from None
-        return mapping_digest({"spec": self.to_mapping(), "catalog_sha256": catalog_sha256})
+        return mapping_digest({"spec": self.identity_mapping(), "catalog_sha256": catalog_sha256})
 
     def digest(self):
         """Identify the spec with the catalog file's current bytes."""
@@ -291,6 +298,11 @@ def _draw(spec: PopulationSpec, seed: int, index: int, attempt: int, catalog: Ca
 
 
 def sample_population(spec: PopulationSpec | Mapping[str, Any], count: int, *, seed: int, start: int = 0) -> list[dict[str, Any]]:
+    """Draw raw values at attempt zero without validating effective configurations.
+
+    ``iter_population_members`` may reject these values and draw later attempts when
+    a binding violates the base configuration; use its member values for accepted draws.
+    """
     spec = _spec(spec)
     count, seed, start = (_integer(value, name) for value, name in ((count, "count"), (seed, "seed"), (start, "start")))
     catalog = None if spec.catalog is None else load_catalog(spec.catalog)
@@ -340,6 +352,12 @@ def _set_target(mapping, target, value):
 
 def iter_population_members(base: ConfigSource, spec: PopulationSpec | Mapping[str, Any], count: int, *, seed: int, start: int = 0,
                             name_prefix: str = "system", base_dir: Path | str | None = None) -> Iterator[PopulationMember]:
+    """Yield accepted draws after validating each bound effective configuration.
+
+    Base configuration and binding paths are checked before drawing. PopulationError and
+    effective-configuration ConfigError rejections consume attempts, including deterministic
+    errors introduced by bound values. Use the yielded member values for accepted realizations.
+    """
     spec = spec if isinstance(spec, PopulationSpec) else PopulationSpec.from_mapping(spec, base_dir = base_dir)
     count, seed, start = (_integer(value, name) for value, name in ((count, "count"), (seed, "seed"), (start, "start")))
     if not isinstance(name_prefix, str) or re.fullmatch(r"[A-Za-z0-9_]+", name_prefix) is None:
