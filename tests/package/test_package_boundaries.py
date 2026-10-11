@@ -215,7 +215,7 @@ def layer(name):
         return 5
     if relative in ("analysis", "population", "artifacts") or relative.startswith(("analysis.", "population.")):
         return 6
-    if name == "hwoslaps" or relative in ("config", "batch", "cli", "__main__") or relative.startswith("batch."):
+    if name == "hwoslaps" or relative in ("config", "batch", "plotting", "cli", "__main__") or relative.startswith(("batch.", "plotting.")):
         return 7
     raise AssertionError(f"package layer must be declared explicitly: {name}")
 

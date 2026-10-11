@@ -223,10 +223,15 @@ def test_supplied_session_is_borrowed_and_left_active(prepared_forecast, tmp_pat
         validate_nonlinear(prepared_forecast, trial, observation, fit=fit, sampler=sampler, sampler_seed=7,
                            session=session, output_dir=tmp_path / "outputs", case_id="first")
         assert session.active and {child.pid for child in multiprocessing.active_children()} == children
-        with pytest.raises(ValueError, match="separated samples.*refinement needs"):
-            validate_nonlinear(prepared_forecast, trial, observation, fit=fit, sampler=dataclasses.replace(sampler, n_live_smooth=20, n_eff=200, n_like_max=2000), sampler_seed=8,
-                               refine=RefineSettings(original_start_count=1000000),
-                               session=session, output_dir=tmp_path / "outputs", case_id="second")
+        unresolved = validate_nonlinear(
+            prepared_forecast, trial, observation, fit=fit,
+            sampler=dataclasses.replace(sampler, n_live_smooth=20, n_eff=200, n_like_max=2000), sampler_seed=8,
+            refine=RefineSettings(original_start_count=1000000),
+            session=session, output_dir=tmp_path / "outputs", case_id="second")
+        assert unresolved.smooth.acceptance_status is RoleStatus.UNRESOLVED
+        assert np.isfinite(unresolved.smooth.log_likelihood)
+        assert unresolved.smooth.refinement.best_vector is not None
+        assert "start_selection_error" in unresolved.smooth.refinement.record
         assert session.active and {child.pid for child in multiprocessing.active_children()} == children
 
 
@@ -319,14 +324,14 @@ def test_image_paper_recipe_fixes_rotation_in_forecast_and_both_fit_roles():
     with prepare_forecast(fixed) as prepared:
         assert len(prepared.nuisances.names) == 10 and name not in prepared.nuisances.names
         case = prepare_case(prepared, prepared.hypothesis(1e8, (0.4, -0.6)), prepared.observation,
-                            fit=FitSpec(mode="fixed_template"))
+                            fit=FitSpec(mode="fixed_template"), use_jax=False)
         for role in ("smooth", "subhalo"):
             assert len(case.model(role).parameter_names) == 9
             assert not any("rotation_deg" in parameter for parameter in case.model(role).parameter_names)
     with prepare_forecast(fixed.replace({"forecast": {"nuisances": {"fixed": []}}})) as prepared:
         assert len(prepared.nuisances.names) == 11 and name in prepared.nuisances.names
         case = prepare_case(prepared, prepared.hypothesis(1e8, (0.4, -0.6)), prepared.observation,
-                            fit=FitSpec(mode="fixed_template"))
+                            fit=FitSpec(mode="fixed_template"), use_jax=False)
         for role in ("smooth", "subhalo"):
             assert len(case.model(role).parameter_names) == 10
             assert any("rotation_deg" in parameter for parameter in case.model(role).parameter_names)

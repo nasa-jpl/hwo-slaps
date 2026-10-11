@@ -190,6 +190,60 @@ def test_unusable_member_followup_is_terminal_and_other_member_finishes(tiny_bat
 
 
 @pytest.mark.backend
+def test_real_worker_executes_configured_critical_curve_retry(tiny_batch_spec, tmp_path):
+    import math
+    from hwoslaps.batch import open_batch, run_batch
+    from hwoslaps.identity import mapping_digest
+    family = {'trials': {'kind': 'configured'}, 'inject': True, 'noise': False,
+              'fit': {'mode': 'fixed_template'},
+              'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 40,
+                          'n_shell': 1, 'f_live': .1, 'n_like_max': 50000,
+                          'discard_exploration': True, 'number_of_cores': 1},
+              # No refinement is requested, so neither role can attain this status.
+              'retry': {'acceptance': {'smooth': ['accepted_repeatable_profile'],
+                                      'subhalo': ['accepted_repeatable_profile']},
+                        'require_retained_state': False, 'stationarity_tolerance': None,
+                        'sampler': {'n_eff': 40, 'n_like_max': 50000}}}
+    initial = tiny_batch_spec(population=None, forecast=None, nonlinear={'critical': family},
+                              execution={'devices': 'cpu', 'workers_per_device': 1, 'job_timeout_seconds': 120.})
+    mapping = initial.to_mapping()
+    mapping['config']['scene']['lens']['mass']['mass']['einstein_radius'] = .25
+    mapping['config']['scene']['injection']['position'] = {
+        'kind': 'angle', 'radius': 'critical_curve', 'angle_deg': 45.}
+    spec = parse_batch(mapping, base_dir=initial.base_dir)
+    blueprint, = plan_batch(spec).jobs
+    assert blueprint.parameters['configured_trial'] and blueprint.parameters['position_yx'] is None
+    assert blueprint.parameters['resolved_trial'] is None and blueprint.seeds == {}
+    root = tmp_path / 'critical-curve-retry'
+    report = run_batch(spec, root)
+    assert report.counts['completed'] == 2 and report.counts['failed'] == 0
+    batch = open_batch(root)
+    records = sorted((job for job in batch.jobs if job.kind == 'nonlinear'), key=lambda job: job.attempt)
+    assert [job.attempt for job in records] == [0, 1]
+    assert all(job.status == 'complete' for job in records)
+    first_trial = records[0].marker['summary']['trial']
+    assert records[1].marker['summary']['trial'] == first_trial
+    assert first_trial['mass_msun'] == 1e8
+    y, x = first_trial['position_yx']
+    centre_y, centre_x = spec.base.scene.lens_centre
+    assert .1 < math.hypot(y - centre_y, x - centre_x) < .4
+    assert math.degrees(math.atan2(y - centre_y, x - centre_x)) == pytest.approx(45., abs=1e-10)
+    assert records[0].marker['seeds']['noise'] == records[1].marker['seeds']['noise'] is None
+    assert records[0].marker['seeds']['sampler'] != records[1].marker['seeds']['sampler']
+    assert records[0].marker['summary']['retry']['status'] != 'accepted'
+    _, first, retry = next(batch.case_pairs(family='critical'))
+    assert first.hypothesis == retry.hypothesis
+    assert first.observation == retry.observation
+    assert mapping_digest(first.data) == mapping_digest(retry.data)
+    assert first.fit == retry.fit and first.models == retry.models
+    for record, case in zip(records, (first, retry), strict=True):
+        assert case.sampler_seed == record.marker['seeds']['sampler']
+        assert case.hypothesis.position_yx_arcsec == tuple(first_trial['position_yx'])
+        assert all(case.role(role).status == 'success' and case.role(role).log_likelihood is not None
+                   for role in ('smooth', 'subhalo'))
+
+
+@pytest.mark.backend
 @pytest.mark.parametrize('tolerance,retry_needed', [(None, False), (1e-4, True)])
 def test_retry_followup_consumes_actual_typed_stationarity_verdict(tiny_batch_spec, tmp_path, tolerance, retry_needed):
     from hwoslaps.analysis.nonlinear import case_status

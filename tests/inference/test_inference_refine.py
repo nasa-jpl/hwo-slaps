@@ -160,20 +160,31 @@ def _repeat_moves_the_best(box_objective):
 
 
 def _repeat_raises(box_objective):
-    """The objective fails from the repeat's first evaluation on (counted from a first run)."""
+    """The repeat cannot evaluate a value or gradient; the prior best remains evaluable."""
     value, objective, starts = _slow_setup(box_objective)
     multistart = sum(run["evaluation_count"] for run in refine(starts, objective, REPEAT_SETTINGS).record["runs"])
     calls = itertools.count(1)
+    pending_value_refusal = [False]
 
     def fails_in_the_repeat(z):
         if next(calls) > multistart:
+            pending_value_refusal[0] = True
             raise FloatingPointError("the tighter repeat cannot evaluate")
         return objective.value_and_gradient(z)
 
-    outcome = refine(starts, dataclasses.replace(objective, value_and_gradient=fails_in_the_repeat), REPEAT_SETTINGS)
+    def residual(z):
+        if pending_value_refusal[0]:
+            pending_value_refusal[0] = False
+            raise FloatingPointError("the tighter repeat cannot evaluate its residual")
+        return objective.residual(z)
+
+    outcome = refine(starts, dataclasses.replace(objective, value_and_gradient=fails_in_the_repeat,
+                                                residual=residual), REPEAT_SETTINGS)
     assert outcome.repeat_converged is None
     assert outcome.record["tighter_repeat"]["message"] == "FloatingPointError: the tighter repeat cannot evaluate"
     assert outcome.best_vector == tuple(SLOW_POINTS[0])
+    assert outcome.record["tighter_repeat"]["observed_best_half_chi2"] is None
+    assert outcome.record["candidate_best_gradient_valid"] is True
     return outcome, {"repeat"}
 
 
@@ -231,7 +242,7 @@ GATE_FAILURES = {
 
 @pytest.mark.parametrize("case", list(GATE_FAILURES))
 def test_refinement_gates_reject_each_failure(case, box_objective):
-    """Each defect fails exactly its own gate and leaves the role unresolved."""
+    """Each scenario fails exactly its expected gates and leaves the role unresolved."""
     outcome, failed = GATE_FAILURES[case](box_objective)
     assert outcome.acceptance_status is RoleStatus.UNRESOLVED
     assert {name for name, passed in outcome.gates.items() if not passed} == failed
