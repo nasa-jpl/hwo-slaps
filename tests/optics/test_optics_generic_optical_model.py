@@ -136,3 +136,20 @@ def test_model_sampling_guards_its_own_optical_system(p1_truth, circular_pupil):
     provider = build_psf_provider(specs.truth, pixel_scale_arcsec=0.03)
     with pytest.raises(ValueError, match="under-resolved"):
         build_model_psf(specs.model, provider, pixel_scale_arcsec=0.03)
+
+
+@pytest.mark.parametrize("kind", ["table", "product"])
+def test_chromatic_sampling_guard_uses_non_tophat_support(p1_truth, paper_pupil, kind):
+    # Sampling nodes depend only on declared support, without opening any table.
+    band = {"kind": kind, "support_nm": [450.0, 550.0]}
+    if kind == "table":
+        band.update(path="not-read.csv", wavelength_unit="nm", value_column="throughput")
+    else:
+        band["factors"] = [{"kind": "constant", "value": 1.0}]
+    paper = {**_sampled(p1_truth, 21), "pupil": paper_pupil, "detector_oversampling": 3,
+             "kernel_shape": [999, 999], "wavefront": {}}
+    with pytest.raises(ConfigError, match="aliased kernel at 452.381") as caught:
+        _run_cross({"truth": paper}, band, scale=0.00716)
+    assert caught.value.path == "psf.truth"
+    paper["kernel_shape"] = [51, 51]
+    _run_cross({"truth": paper}, band, scale=0.00716)

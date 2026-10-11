@@ -130,9 +130,22 @@ def _tracker(objective: BoxObjective, state: dict[str, Any], *,
         state["evaluation_count"] += 1
         try:
             value, gradient = objective.value_and_gradient(np.asarray(z, dtype=float))
-        except Exception:
+        except Exception as error:
             if count_failures:
                 state["failed_evaluation_count"] += 1
+            # Some profiles have finite values at points where no gradient exists.
+            # Evaluate the value independently, while still stopping this solver run.
+            try:
+                residual = np.asarray(objective.residual(np.asarray(z, dtype=float)), dtype=float)
+                scalar = 0.5 * float(residual @ residual)
+                retained = _record_best_finite(state, z, scalar, None, objective.to_physical(z))
+                if retained:
+                    state["best_gradient_error"] = f"{type(error).__name__}: {error}"
+                if state["evaluation_count"] == 1 and retained:
+                    state["first_half_chi2"] = scalar
+            except Exception:
+                # Preserve the original failure if value-only evaluation also fails.
+                pass
             raise
         _record_best_finite(state, z, value, gradient, objective.to_physical(z))
         return value, gradient
@@ -181,6 +194,8 @@ def _run_start(start: RefineStart, objective: BoxObjective, settings: RefineSett
     run = _solve(_tracker(objective, state, count_failures=True), z0, maxiter=settings.maxiter, ftol=settings.ftol,
                  gtol=settings.gtol, maxls=settings.maxls)
     first, result, endpoint_z = run.first_value, run.result, run.endpoint_z
+    if first is None:
+        first = state.get("first_half_chi2")
     logger.info("refinement start %d: best half chi-square %r after %d evaluations", start.index,
                 state["best_half_chi2"], state["evaluation_count"])
     return {

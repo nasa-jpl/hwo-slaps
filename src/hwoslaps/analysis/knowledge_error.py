@@ -1,9 +1,9 @@
 """PSF knowledge-error areas, common-cohort tolerances and nominal separation.
 
-Retention measures the intersection with correct-PSF detections. The paper's R
-is instead the ratio of all mismatch detections to reference detections, and F
-uses spurious detections inside the same selection. Full-domain spurious area
-is reported separately. Thresholds, count floors and tolerance limits are the
+Retention measures the intersection with correct-PSF detections, called K in
+the submitted RASTI paper. The total detected-area ratio also counts new
+mismatch detections; spurious_ratio uses false detections inside the same selection.
+Full-domain spurious area is reported separately. Thresholds, count floors and tolerance limits are the
 caller's; eligible member/direction keys come from the reference experiment.
 """
 
@@ -80,8 +80,8 @@ def knowledge_error_areas(reference: ForecastResult, mismatched: ForecastResult,
 
     Both results must have identical mass/position bytes, uniform cell areas,
     comparison digest, mask digest, nuisance order and complete truth bindings.
-    An aperture selection gives the paper's R and F; spurious area also covers
-    every evaluated position. Mismatch detections require positive amplitudes.
+    An aperture selection gives retention K and spurious ratio F; spurious area
+    also covers every evaluated position. Mismatch detections require positive amplitudes.
     """
     _pair_identity(reference, mismatched)
     if isinstance(min_reference_count, (bool, np.bool_)) or not isinstance(min_reference_count, Integral) \
@@ -101,9 +101,10 @@ def knowledge_error_areas(reference: ForecastResult, mismatched: ForecastResult,
     areas = [count * reference.cell_areas_arcsec2[0] for count in counts]
     eligible = counts[0] >= min_reference_count
     ratios = []
-    for numerator in (areas[2], areas[1], areas[4]):
+    # Uniform cell area cancels; dividing counts preserves inclusive ratio gates.
+    for numerator in (counts[2], counts[1], counts[4]):
         ratio = np.full(reference.masses_msun.shape, np.nan)
-        np.divide(numerator, areas[0], out=ratio, where=eligible)
+        np.divide(numerator, counts[0], out=ratio, where=eligible)
         ratios.append(ratio)
     return KnowledgeErrorAreas(reference.masses_msun, float(q_threshold), int(min_reference_count),
                                counts[0], areas[0], counts[1], areas[1], counts[2], areas[2],
@@ -151,25 +152,26 @@ class ToleranceResult:
     excluded: int
 
 
-def knowledge_error_tolerance(retention: Mapping[float, Mapping[Hashable, float]],
+def knowledge_error_tolerance(ratio: Mapping[float, Mapping[Hashable, float]],
                               spurious: Mapping[float, Mapping[Hashable, float]], *,
                               eligible: Collection[Hashable], criterion: ToleranceCriterion) -> ToleranceResult:
     """Apply both gates to one fixed set of eligible keys, such as the directions of one lens.
 
-    ``retention`` maps each amplitude to the paper's R per key, which is
-    ``KnowledgeErrorAreas.detected_area_ratio``; ``spurious`` maps it to F, which is
-    ``spurious_ratio``.
+    ``ratio`` maps each amplitude to a caller-selected ratio per key. Pass
+    ``KnowledgeErrorAreas.retention`` for the submitted paper's retained-location
+    fraction K, or ``detected_area_ratio`` to gate on all mismatched detections.
+    ``spurious`` maps each amplitude to ``spurious_ratio`` per key.
 
     Every amplitude and both maps must contain the same keys, including the
     ineligible ones. An eligible non-finite value raises ValueError instead of changing
     the set. Leave out of the maps any amplitude that is not part of the test.
     """
-    amplitudes = _amplitudes(retention, "retention")
+    amplitudes = _amplitudes(ratio, "ratio")
     _amplitudes(spurious, "spurious")
-    if not amplitudes or set(retention) != set(spurious):
-        raise ValueError("retention and spurious must contain the same non-empty amplitude set")
-    keys = set(retention[amplitudes[0]])
-    for name, values in (("retention", retention), ("spurious", spurious)):
+    if not amplitudes or set(ratio) != set(spurious):
+        raise ValueError("ratio and spurious must contain the same non-empty amplitude set")
+    keys = set(ratio[amplitudes[0]])
+    for name, values in (("ratio", ratio), ("spurious", spurious)):
         for amplitude in amplitudes:
             actual = set(values[amplitude])
             if actual != keys:
@@ -183,7 +185,7 @@ def knowledge_error_tolerance(retention: Mapping[float, Mapping[Hashable, float]
     passing, failing = [], []
     for amplitude in amplitudes:
         samples = []
-        for name, values in (("retention", retention), ("spurious", spurious)):
+        for name, values in (("ratio", ratio), ("spurious", spurious)):
             sample = [_finite_number(values[amplitude][key], f"{name} at amplitude {amplitude}, key {key!r}")
                       for key in ordered]
             samples.append(sample)

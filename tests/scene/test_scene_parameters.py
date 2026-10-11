@@ -94,3 +94,13 @@ def test_match_parameters_expands_patterns_in_parameter_order(rich_scene):
         match_parameters(names, ["lens.mass.*", "source.light.Disk.*"], path="forecast.nuisances.fixed")
     assert error.value.path == "forecast.nuisances.fixed[1]"
     assert "source.light.disk.intensity" in error.value.message
+
+
+def test_unknown_parameter_reports_names_before_configured_flux_is_resolved(scene_mapping):
+    disk = scene_mapping["source"]["light"]["disk"]
+    del disk["intensity"]
+    disk["flux"] = {"rate_e_per_s": 3.0}
+    spec = parse_scene(scene_mapping)
+    with pytest.raises(KeyError, match="no scene parameter") as error:
+        with_parameter(spec, "source.light.disk.missing", 0.2)
+    assert "source.light.disk.intensity" in str(error.value)

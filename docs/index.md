@@ -53,16 +53,16 @@ Each example is a set of configuration files and a driver script in the reposito
 
 | Example | Shows |
 |---|---|
-| [HWO reference](examples/hwo.md) | The RASTI paper's HWO set-up: segmented telescope, AB photometry and saved products |
+| [HWO reference](examples/hwo.md) | HWO observing inputs with an illustrative smooth lens/source and saved products |
 | [Monolithic telescope](examples/monolithic.md) | A circular telescope with obscuration and spiders, lens light and a signal-to-noise mask |
 | [Chromatic PSF](examples/chromatic.md) | Broadband PSFs for sources of different colours, with a convergence check |
 | [Kernel PSFs](examples/kernel_psf.md) | PSF kernel files and PSF knowledge-error areas |
 | [Population batch](examples/population.md) | A population of lenses run as a resumable batch, with a nonlinear fit |
 
-The HWO reference reproduces the observing set-up of the RASTI paper (Vassilakis et al.,
-*Point spread function requirements for dark matter subhalo detection with the Habitable
-Worlds Observatory*, submitted to RAS Techniques and Instruments). The other examples use
-illustrative values chosen to exercise features of HWO-SLAPS.
+The HWO reference uses the study's telescope, detector, band and exposure inputs with
+an illustrative exponential source and a perfect default PSF. It is not a production
+paper scene; the paper used COSMOS sources and a 35 nm RMS reference PSF. The other
+examples also use illustrative values chosen to exercise package features.
 
 ```{toctree}
 :hidden:

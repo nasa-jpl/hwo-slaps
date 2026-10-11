@@ -10,6 +10,63 @@ import pytest
 pytestmark = pytest.mark.backend
 
 
+@pytest.mark.parametrize("radius", ["einstein_radius", "critical_curve"])
+def test_named_forecast_radii_reject_hypotheses_behind_the_lens_before_preparation(minimal_mapping, radius, monkeypatch):
+    from hwoslaps.config.checks import ConfigError
+    from hwoslaps.fisher import api
+
+    minimal_mapping["scene"]["subhalo"] = {"type": "PointMass", "redshift": 0.45}
+    minimal_mapping["forecast"]["positions"] = {"kind": "ring", "count": 4, "radius": radius}
+    def unexpected_preparation(*args, **kwargs):
+        pytest.fail("an invalid radius must be rejected before scene preparation")
+    monkeypatch.setattr(api, "_assets", unexpected_preparation)
+    with pytest.raises(ConfigError, match="own plane") as error:
+        api.prepare_forecast(minimal_mapping)
+    assert error.value.path == "forecast.positions.radius"
+
+
+@pytest.mark.parametrize("radius", ["einstein_radius", "critical_curve"])
+def test_named_forecast_radii_keep_foreground_hypotheses_valid(minimal_mapping, radius):
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+    from hwoslaps.scene.critical_curve import effective_einstein_radius
+
+    minimal_mapping["scene"]["subhalo"] = {"type": "PointMass", "redshift": 0.1}
+    minimal_mapping["forecast"]["positions"] = {"kind": "ring", "count": 4, "radius": radius}
+    with prepare_forecast(minimal_mapping) as prepared:
+        expected = (prepared.scene.einstein_radius() if radius == "einstein_radius" else
+                    effective_einstein_radius(prepared.scene.spec, prepared.scene.cosmology))
+        np.testing.assert_allclose(np.linalg.norm(prepared.positions.positions_yx, axis=1), expected)
+        result = forecast(prepared, masses_msun=[1.0e8])
+        assert np.all(np.isfinite(result.q_asimov))
+
+
+@pytest.mark.parametrize("redshift", [0.1, 0.45])
+@pytest.mark.parametrize("positions", [
+    {"kind": "explicit", "positions_yx": [[0.0, 0.2], [0.2, 0.0]]},
+    {"kind": "ring", "count": 4, "radius": 0.2},
+    {"kind": "grid", "spacing_arcsec": 0.2, "half_width_arcsec": 0.2},
+], ids=["explicit", "numeric-ring", "grid"])
+def test_off_plane_forecasts_use_supplied_own_plane_coordinates(minimal_mapping, redshift, positions):
+    from hwoslaps.fisher.api import forecast, prepare_forecast
+
+    minimal_mapping["scene"]["subhalo"] = {"type": "PointMass", "redshift": redshift}
+    minimal_mapping["forecast"]["positions"] = positions
+    with prepare_forecast(minimal_mapping) as prepared:
+        if positions["kind"] == "explicit":
+            np.testing.assert_array_equal(prepared.positions.positions_yx, positions["positions_yx"])
+        elif positions["kind"] == "ring":
+            np.testing.assert_allclose(np.linalg.norm(prepared.positions.positions_yx, axis=1), 0.2)
+        else:
+            np.testing.assert_array_equal(np.unique(prepared.positions.positions_yx[:, 0]), [-0.2, 0.0, 0.2])
+        for position in prepared.positions.positions_yx:
+            halo = prepared.hypothesis(1.0e8, tuple(position))
+            assert halo.redshift == redshift
+            assert halo.position_yx_arcsec == tuple(position)
+        result = forecast(prepared, masses_msun=[1.0e8])
+        np.testing.assert_array_equal(result.positions_yx, prepared.positions.positions_yx)
+        assert np.all(np.isfinite(result.q_asimov))
+
+
 @pytest.mark.parametrize("engine", ["reference", "jax"])
 def test_mass_rows_ignore_masses_evaluated_earlier(minimal_mapping, engine):
     from hwoslaps.fisher.api import Execution, forecast, prepare_forecast

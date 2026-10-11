@@ -496,10 +496,12 @@ def _check_truth_sampling(root: Mapping[str, Any], path: str) -> None:
             nodes = (spec.wavelength_m,)
         else:
             band = root.get("instrument", {}).get("bandpass")
-            if band is None or band["kind"] != "top_hat":
-                continue  # loaded table/product nodes are checked by the runtime constructor
+            if band is None:
+                continue  # the spectral-input rule reports the missing bandpass
             from ..spectra.bandpass import bandpass_nodes
-            nodes = bandpass_nodes((band["min_nm"] / 1e9, band["max_nm"] / 1e9), spec.wavelength_samples)
+            support_nm = ((band["min_nm"], band["max_nm"]) if band["kind"] == "top_hat"
+                          else band["support_nm"])
+            nodes = bandpass_nodes(tuple(value / 1e9 for value in support_nm), spec.wavelength_samples)
         try:
             for wavelength in nodes:
                 check_sampling(spec, pixel_scale_arcsec=root["scene"]["grid"]["pixel_scale_arcsec"],
@@ -523,7 +525,7 @@ def _check_spectral_inputs(root: Mapping[str, Any], path: str) -> None:
 
 CROSS_RULES: tuple[Rule, ...] = (
     Rule("every kernel file is sampled at scene.grid.pixel_scale_arcsec", _check_kernel_pixel_scales),
-    Rule("optical truth and model nodes are neither aliased nor under-resolved at the scene pixel scale",
+    Rule("optical truth and model nodes fit within the focal period and meet sub-pixel Nyquist",
          _check_truth_sampling),
     Rule("wavelength_samples requires a bandpass and component SEDs", _check_spectral_inputs),
 )

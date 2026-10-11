@@ -42,7 +42,9 @@ psf:
 
 `focal_length_m`, `wavelength_nm`
 : Together with the detector pixel scale, these set how finely the PSF is sampled.
-  HWO-SLAPS raises an error if the PSF would be under-sampled or aliased.
+  HWO-SLAPS checks focal sampling and requires the sampled focal period to exceed
+  the kernel extent. These checks do not guarantee freedom from aliasing; check
+  convergence as you increase the pupil resolution.
 
 `detector_oversampling`
 : Sub-samples per detector pixel used to integrate the PSF over each pixel.
@@ -51,8 +53,13 @@ psf:
 : The size of the kernel in detector pixels. Larger kernels capture more of the PSF
   wings and take longer to convolve.
 
-The kernel records the fraction of the PSF's power that falls inside it (its
-*captured fraction*). For the HWO reference at 500 nm this is 0.99995.
+The kernel records the fraction of the sampled periodic focal field's power that
+falls inside it (its *captured fraction*). This is not an infinite-plane
+encircled-energy fraction. Increase the pupil resolution and kernel extent to check
+convergence before interpreting it as the fraction of physical PSF power retained.
+
+Optical kernels retain HCIPy's array orientation: pupil and focal +y map to detector
+−y, while +x agrees with detector +x.
 
 ### Wavefront errors
 
@@ -141,7 +148,9 @@ from hwoslaps.analysis import aperture_selection, knowledge_error_areas
 reference = load_forecast("out/matched/forecast.npz")      # the matched forecast
 mismatched = load_forecast("out/ke_10nm_seed1/forecast.npz")
 
-aperture = aperture_selection(reference, centre_yx=(0.0, 0.0), radius_arcsec=1.5)
+# Set lens_centre_yx and theta_E_eff_arcsec from your lens geometry.
+aperture = aperture_selection(reference, centre_yx=lens_centre_yx,
+                               radius_arcsec=2 * theta_E_eff_arcsec)
 areas = knowledge_error_areas(reference, mismatched, q_threshold=10.0,
                               min_reference_count=33, selection=aperture)
 ```
@@ -150,14 +159,17 @@ The two forecasts must agree in everything except the model PSF: the same compar
 digest, positions, pixel mask and nuisance parameters. HWO-SLAPS checks this and raises an
 error otherwise.
 
+Choose the selection for your experiment. The RASTI paper used an aperture of radius
+$2\theta_{\rm E,eff}$ about each lens centre.
+
 For each mass, `areas` holds counts and areas of detections, and three ratios to the area
 detected by the matched forecast inside the selection:
 
 | Field | Ratio |
 |---|---|
-| `detected_area_ratio` | Area detected with the wrong model PSF, divided by the matched area. This is *R* in the RASTI paper. |
+| `detected_area_ratio` | Area detected with the wrong model PSF, divided by the matched area. This was the pre-submission declared total-area ratio; it includes newly detected positions. |
 | `spurious_ratio` | Area of false detections caused by the PSF error alone, divided by the matched area. This is *F* in the RASTI paper (not the information *F* of [How HWO-SLAPS works](../concepts.md)). |
-| `retention` | Area detected by both the matched and the mismatched forecast, divided by the matched area. Always at most 1. |
+| `retention` | Area detected by both the matched and the mismatched forecast, divided by the matched area. This is *K* in the submitted RASTI paper. Always at most 1. |
 
 The ratios are `NaN` at masses where the matched forecast detects fewer than
 `min_reference_count` positions, because a ratio of a few cells is too noisy to use.
@@ -166,16 +178,17 @@ The ratios are `NaN` at masses where the matched forecast detects fewer than
 ### Tolerances
 
 The **tolerance** is the largest error amplitude that still passes two gates across the
-directions: the 10th percentile of *R* stays at or above a minimum, and the 90th
-percentile of *F* stays at or below a maximum. The RASTI paper used *Q*₁₀[*R*] ≥ 0.9 and
+directions: the 10th percentile of the chosen ratio stays at or above a minimum, and the 90th
+percentile of *F* stays at or below a maximum. The submitted RASTI paper used *Q*₁₀[*K*] ≥ 0.9 and
 *Q*₉₀[*F*] ≤ 0.1, with a floor of 33 reference cells. It computed the tolerance for each
-lens and mass separately over that lens's eight directions, then reported the median
-across lenses.
+lens and test mass separately over that lens's eight directions, using the upper sampled
+mass bracketing each lens's M10 or M50 threshold. It reported medians across lenses
+separately for each rung class.
 
-`knowledge_error_tolerance` applies the gates to one set of directions. Pass *R*
-(`detected_area_ratio`) as its first argument. Despite their names, that argument and the
-`retention_*` fields of `ToleranceCriterion` take *R*, not the `retention` field of the
-areas:
+`knowledge_error_tolerance` applies the gates to one set of directions. Its first argument,
+`ratio`, can hold whichever ratio your experiment gates on. Pass *K* (`retention`) for
+the submitted paper's criterion. The `retention_*` fields of `ToleranceCriterion` set
+the quantile and minimum of the supplied ratio:
 
 ```python
 import numpy as np
@@ -197,14 +210,15 @@ def tolerance_nm(reference, mismatched, mass_index, aperture):
                                           min_reference_count=33, selection=aperture)
             if areas.reference_count[mass_index] < 33:
                 return None               # too few reference detections at this mass
-            ratio[amplitude][direction] = areas.detected_area_ratio[mass_index]
+            ratio[amplitude][direction] = areas.retention[mass_index]
             spurious[amplitude][direction] = areas.spurious_ratio[mass_index]
     directions = set(ratio[next(iter(ratio))])
     found = knowledge_error_tolerance(ratio, spurious, eligible=directions, criterion=criterion)
     return found.amplitude                # None if no amplitude passes
 
-# One value per lens and mass, then the median across lenses:
-# requirement_nm = np.median([value for value in values if value is not None])
+# Collect one value per lens separately for the M10 and M50 test masses.
+# Decide how to report any None tolerances before forming a numeric sample.
+# requirement_nm = np.quantile(values, 0.5, method="inverted_cdf")
 ```
 
 The tolerance is the largest passing amplitude, even if a smaller one failed.

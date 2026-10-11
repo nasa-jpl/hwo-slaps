@@ -199,6 +199,7 @@ LSSTDocstringGuide.txt
 .DS_Store
 scratch/
 outputs/
+out/
 .claude/
 # Generated documentation
 docs/api/

@@ -22,5 +22,7 @@ def test_observation_plots_draw_current_arrays_and_expected_source_snr(plt, obse
             assert ax.images[0].get_extent() == pytest.approx((-1.025, 1.025, -1.025, 1.025))
             if quantity == "snr":
                 assert ax.get_title() == "Expected source S/N"
+            elif quantity == "data":
+                assert ax.get_title() == ("Expected data (ADU)" if current.kind == "expected" else "Observed data (ADU)")
         with pytest.raises(ValueError, match="quantity"):
             plot_observation(current, "absent")

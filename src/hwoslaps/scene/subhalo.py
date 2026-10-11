@@ -9,6 +9,8 @@ mass component with one), like forecast layouts. The angle runs counter-clockwis
 toward +y. ``radius: einstein_radius`` is the Einstein-radius parameter of the single lens
 mass component that has one; ``radius: critical_curve`` is the effective Einstein radius
 of the tangential critical curve (``scene.critical_curve``); a number is in arcsec.
+Coordinates and numeric radii are in the hypothesis's own plane. The named radii are
+image-plane features and are rejected for hypotheses behind the main lens.
 
 A random placement draws, in this order, the angle uniform in [0, 360) deg and a radial
 offset uniform in [-scatter_arcsec, scatter_arcsec] from the named stream
@@ -21,7 +23,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from ..config.checks import Key, Pair, Real, Table, Text, Union, Variants
+from ..config.checks import ConfigError, Key, Pair, Real, Table, Text, Union, Variants
 from ..seeding import stream_rng
 from .convert import polar_offset
 from .cosmology import Cosmology
@@ -114,7 +116,22 @@ def injection_from_values(values: Mapping[str, Any]) -> InjectionSpec:
     return InjectionSpec(mass_msun=values["mass_msun"], position=placement)
 
 
+def validate_named_radius(radius: Radius, *, lens_redshift: float, subhalo_redshift: float | None,
+                          path: str) -> None:
+    """Reject image-plane radius names for a hypothesis behind the main lens.
+
+    Numeric radii and explicit coordinates are in the hypothesis's own plane.
+    Foreground hypotheses can use image-plane radius names because rays have not
+    yet crossed the main lens; fixed foreground perturbers may still deflect them.
+    """
+    if isinstance(radius, str) and subhalo_redshift is not None and subhalo_redshift > lens_redshift:
+        raise ConfigError(path, f"{radius} is an image-plane radius and cannot place a hypothesis behind "
+                          "the main lens; supply a numeric radius or explicit position in the halo's own plane")
+
+
 def _radius(radius: Radius, spec: SceneSpec, cosmology: Cosmology) -> float:
+    validate_named_radius(radius, lens_redshift=spec.lens.redshift, subhalo_redshift=spec.subhalo_redshift,
+                          path="scene.injection.position.radius")
     if radius == "einstein_radius":
         return spec.einstein_radius()
     if radius == "critical_curve":

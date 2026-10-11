@@ -25,6 +25,7 @@ from ..scene.halos import Halo, make_halo
 from ..scene.image_source import frozen_value, load_image_asset
 from ..scene.perturbers import realize_perturbers
 from ..scene.spec import SceneSpec, pixel_centres_yx
+from ..scene.subhalo import validate_named_radius
 from ..spectra.bandpass import build_bandpass
 from .data_space import (DataSpace, all_pixels_mask, annulus_mask, build_data_space,
                          grid_centre_yx, load_noise_covariance, psf_border_mask, source_snr_mask)
@@ -79,7 +80,7 @@ class PreparedForecast:
     """Reuse a prepared scene, detector response and nuisance projection.
 
     Created by ``prepare_forecast``. The smooth observation, model mean and
-    noise map are in ADU; positions use the scene's ``(y, x)`` arcsec frame.
+    noise map are in ADU; positions use ``(y, x)`` arcsec in the hypothesis's own plane.
     The record captures the configuration, input-file and kernel identities.
     Forecast and simulation entry points revalidate these captured inputs.
 
@@ -230,6 +231,9 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
         raise ConfigError("forecast", "a forecast section is required to prepare a forecast")
     if not isinstance(execution, Execution):
         raise TypeError("execution must be an Execution")
+    if resolved.forecast.positions.kind == "ring":
+        validate_named_radius(resolved.forecast.positions.radius, lens_redshift=resolved.scene.lens.redshift,
+                              subhalo_redshift=resolved.scene.subhalo_redshift, path="forecast.positions.radius")
     identity = resolved.capture_identity()
     config_digest = identity["config_digest"]
     comparison_digest = identity["comparison_digest"]

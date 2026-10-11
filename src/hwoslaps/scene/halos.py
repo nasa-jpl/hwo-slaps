@@ -13,10 +13,9 @@ RASTI-26-183 paper code:
 
 - ``halo_lensing`` (concrete masses: truth scenes, forecast engines, fixed-template fits,
   perturbers) is the scalar order, including the kpc round trip of the NFW scale
-  radius and the km/s round trip of the SIS velocity dispersion. PARITY P1-P4 and the
-  401-mass sweep fixture pin it.
+  radius and the km/s round trip of the SIS velocity dispersion.
 - ``halo_lensing_traced`` (freed fits, numpy or JAX arrays) is the order of the
-  array-namespace twins of those functions, without the round trips. PARITY N1 pins it.
+  array-namespace twins of those functions, without the round trips.
 
 The two agree to one or two ulp.
 """
@@ -465,7 +464,7 @@ class Halo:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> Halo:
-        """The halo of a ``to_mapping`` record; its recorded lensing scales must be this engine's."""
+        """Restore exact physical inputs; allow 1e-12 relative drift in recomputed lensing scales."""
         if sorted(mapping) != sorted(_HALO_RECORD_KEYS):
             raise ValueError(f"halo record keys must be {list(_HALO_RECORD_KEYS)}, got {sorted(map(str, mapping))}")
         halo = make_halo(halo_model_from_values(HALO_MODEL_TABLE.read(mapping["model"], "model")),
@@ -473,9 +472,23 @@ class Halo:
                          source_redshift=mapping["source_redshift"],
                          cosmology=Cosmology.from_mapping(mapping["cosmology"]))
         expected = halo.to_mapping()
-        for key in ("mass_definition", "lensing"):
+        for key in ("model", "mass_msun", "mass_definition", "position_yx_arcsec", "redshift", "source_redshift",
+                    "cosmology"):
             if mapping[key] != expected[key]:
                 raise ValueError(f"halo record {key} {mapping[key]!r} differs from this engine's {expected[key]!r}")
+        recorded = mapping["lensing"]
+        scales = expected["lensing"]
+        if not isinstance(recorded, Mapping) or recorded.keys() != scales.keys():
+            raise ValueError("halo record lensing fields differ from this engine's")
+        for group, fields in scales.items():
+            supplied = recorded[group]
+            if not isinstance(supplied, Mapping) or supplied.keys() != fields.keys():
+                raise ValueError(f"halo record lensing.{group} fields differ from this engine's")
+            for name, value in fields.items():
+                actual = supplied[name]
+                if (isinstance(actual, (bool, np.bool_)) or not isinstance(actual, RealNumber)
+                        or not math.isclose(actual, value, rel_tol=1.0e-12, abs_tol=0.0)):
+                    raise ValueError(f"halo record lensing.{group}.{name} {actual!r} differs from this engine's {value!r}")
         return halo
 
 

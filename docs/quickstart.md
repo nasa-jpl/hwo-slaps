@@ -42,8 +42,9 @@ hwoslaps forecast configs/minimal.yaml --masses 1e6 3e6 1e7 3e7 1e8 -o out/quick
 ```
 
 The first command prints the configuration's digest, a hash of its scientific content. The second prints the path of
-its output directory when it finishes. PyAutoLens may also print notices
-about its JAX settings while it loads; they need no action.
+its output directory when it finishes. Backend libraries may also print notices.
+Read any sampling or PSF warning in the context of the [scientific conventions](conventions.md);
+a completed example does not by itself establish convergence for a changed configuration.
 
 The output directory must not exist yet. HWO-SLAPS writes four files into it:
 

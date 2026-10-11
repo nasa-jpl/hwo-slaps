@@ -8,7 +8,7 @@ Installing HWO-SLAPS adds the `hwoslaps` command. `python -m hwoslaps` is equiva
 | `hwoslaps forecast CONFIG... --masses M... -o DIR` | Run a forecast and save it |
 | `hwoslaps simulate CONFIG... (--noise-seed N \| --expected) -o DIR` | Simulate an observation and save it |
 | `hwoslaps reference [SECTION]` | Print the configuration reference |
-| `hwoslaps batch plan SPEC` | Validate a batch file and print its jobs |
+| `hwoslaps batch plan SPEC` | Validate a batch file and print member/job counts |
 | `hwoslaps batch run SPEC -o DIR` | Run or resume a batch |
 | `hwoslaps batch status DIR` | Summarize a batch's completed and failed jobs |
 
@@ -27,7 +27,7 @@ Installing HWO-SLAPS adds the `hwoslaps` command. `python -m hwoslaps` is equiva
 
 `--log-level {DEBUG,INFO,WARNING}`
 : Placed before the command, for example `hwoslaps --log-level WARNING forecast ...`.
-  Sets what is printed; the full log is always written to `run.log`.
+  Sets what is printed. Forecasts and simulations also write `run.log`; batch jobs have their own logs.
 
 ## validate
 
@@ -94,7 +94,7 @@ hwoslaps batch status out/population
 | `--devices` | `cpu`, or comma-separated GPU indices |
 | `--workers-per-device N` | Workers sharing each device |
 | `--select GLOB` | Run only the jobs whose identifier matches |
-| `--fresh` | Start a new batch, and fail if the output directory already holds one |
+| `--fresh` | Start a new batch, and fail if the output directory is nonempty |
 | `--verify` | Recheck the hashes of completed artifacts |
 | `--require-single-revision` | Fail if completed jobs came from different source revisions |
 

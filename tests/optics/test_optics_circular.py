@@ -174,3 +174,37 @@ def test_captured_power_fraction_is_bracketed_by_airy_encircled_energy():
     fraction = captured_power_fraction(psf)
     assert _airy_encircled_energy(math.pi * half_width) <= fraction <= _airy_encircled_energy(
         math.pi * math.sqrt(2) * half_width)
+
+
+@pytest.mark.parametrize("noll,axis", [(2, "x"), (3, "y")])
+def test_positive_pupil_tilt_retains_hcipy_focal_and_detector_signs(noll, axis):
+    psf = _circular_psf(pixels=256, shape=(31, 31), wavefront={"zernikes": {noll: 50.0}})
+    field = psf.focal_field(samples_per_lambda_over_d=8, radius_lambda_over_d=4)
+    coordinates = field.x_arcsec if axis == "x" else field.y_arcsec
+    assert np.sum(coordinates * field.intensity) > 0.0
+    assert np.all(np.diff(field.y_arcsec[:, 0]) > 0.0)
+    kernel = psf.kernel().kernel
+    row, column = np.indices(kernel.shape)
+    # Detector coordinates: x increases with column, y decreases with row.
+    detector_x = (column - 15) * psf.pixel_scale_arcsec
+    detector_y = (15 - row) * psf.pixel_scale_arcsec
+    if axis == "x":
+        assert np.sum(detector_x * kernel) > 0.0
+        assert np.sum(detector_y * kernel) == pytest.approx(0.0, abs=1e-12)
+    else:
+        assert np.sum(detector_y * kernel) < 0.0
+        assert np.sum(detector_x * kernel) == pytest.approx(0.0, abs=1e-12)
+
+
+def test_captured_periodic_power_converges_toward_airy_bounds_with_pupil_sampling():
+    # This support fits inside the 64-sample period, but repeated wings still bias capture.
+    shape = (121, 121)
+    providers = [_circular_psf(pixels=pixels, shape=shape, oversampling=9) for pixels in (64, 256, 512)]
+    fractions = [captured_power_fraction(provider) for provider in providers]
+    half_width = shape[0] / 4.0  # pixels are lambda/(2D); radius in lambda/D
+    inner = _airy_encircled_energy(math.pi * half_width)
+    outer = _airy_encircled_energy(math.pi * math.sqrt(2) * half_width)
+    # Circle bounds are independent of the propagation, with room for pupil/pixel quadrature.
+    assert fractions[0] > outer + 1e-3
+    assert inner - 1e-4 <= fractions[-1] <= outer + 1e-4
+    assert abs(fractions[2] - fractions[1]) < abs(fractions[1] - fractions[0])

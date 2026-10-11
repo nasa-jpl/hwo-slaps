@@ -19,12 +19,10 @@ import threading
 import time
 
 from ..artifacts import write_json, write_yaml
-from ..config.checks import ConfigError
-from ..config.loading import read_yaml
-from ..config.schema import resolve_config
-from ..identity import canonical_json, mapping_digest
+from ..identity import canonical_json
 from ..provenance import capture_provenance
-from .jobs import follow_ups, plan_batch
+from .jobs import FollowupFailure, follow_ups
+from .frozen import persist_plan, restored_plan
 from .processes import (boot_id, group_members, require_process_support, signal_owned,
                         worker_record)
 from .spec import BatchExecution
@@ -61,6 +59,7 @@ class _Slot:
     busy: object = None
     run: str | None = None
     ownership: dict = field(default_factory=dict)
+    dispatched_at: float | None = None
 
 
 class _WorkerListener:
@@ -307,25 +306,7 @@ def _ready_slot(listener, slots, revision, events):
 
 
 def _persist_plan(output, plan):
-    for member in plan.members:
-        path = output / 'members' / member.run_name / 'member.json'
-        record = member.to_mapping()
-        if path.exists():
-            if mapping_digest(read_json(path)) != mapping_digest(record):
-                raise BatchConflict(f'persisted population member changed: {path}')
-        else:
-            write_json(path, record)
-    for arm in plan.arm_configs:
-        path = output / 'members' / arm.member.run_name / arm.name / 'effective_config.yaml'
-        if path.exists():
-            try:
-                stored = resolve_config(read_yaml(path))
-            except ConfigError as error:
-                raise BatchConflict(f'invalid persisted effective configuration: {path}: {error}') from error
-            if stored.digest() != arm.config_digest:
-                raise BatchConflict(f'persisted effective configuration changed: {path}')
-        else:
-            write_yaml(path, arm.config.to_mapping())
+    persist_plan(output, plan)
 
 
 def _choose_job(slot, pending, slots):
@@ -423,7 +404,7 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
             write_yaml(session_dir / 'batch_spec.yaml', effective.to_mapping())
             if resume:
                 _wait_for_earlier_workers(output, session, events)
-            plan = plan_batch(effective)
+            plan = restored_plan(output, effective)
             write_json(session_dir / 'session.json', {'session': session, 'started': start, 'provenance': provenance,
                 'source': provenance['source'], 'source_revision': revision, 'execution': execution.to_mapping(),
                 'spec_digest': plan.spec_digest, 'population_digest': plan.population_digest,
@@ -431,6 +412,24 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
             _persist_plan(output, plan)
             known, pending, reached = {}, OrderedDict(), set()
             def enqueue(job):
+                if isinstance(job, FollowupFailure):
+                    if job.job_id in known:
+                        return
+                    known[job.job_id] = job
+                    reached.add(job.job_id)
+                    failure_path = output / job.job_id / 'failure.json'
+                    if failure_path.exists():
+                        if read_json(failure_path) != job.to_mapping():
+                            raise BatchConflict(f'terminal follow-up record changed: {job.job_id}')
+                    else:
+                        write_json(failure_path, job.to_mapping())
+                    counts['failed'] += 1
+                    failures.append({'job_id': job.job_id, 'kind': job.kind, 'error_type': 'NoUsableTrial',
+                                     'message': job.reason, 'log': str(failure_path),
+                                     'source_job_id': job.source_job_id, 'family': job.family,
+                                     'member_index': job.member_index, 'arm': job.arm, 'mass_msun': job.mass_msun})
+                    events.append({'type': 'followup_failed', **job.to_mapping()})
+                    return
                 if job.job_id in known:
                     if known[job.job_id].digest() != job.digest():
                         raise BatchConflict(f'two planned jobs disagree: {job.job_id}')
@@ -471,12 +470,37 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                                     if job is not None:
                                         del pending[job.job_id]
                                         slot.busy, slot.run = job, None
+                                        slot.dispatched_at = time.monotonic()
                                         slot.connection.send({'type': 'job', 'payload': job.payload(output, session, execution).to_mapping()})
                         if not any(slot.busy is not None for slot in slots) and stop_error is not None:
                             break
                         active = [slot.connection for slot in slots if slot.connection is not None]
                         readable = wait(active, timeout=5.)
                         for slot in list(slots):
+                            if (slot.busy is not None and slot.dispatched_at is not None and execution.job_timeout_seconds is not None
+                                    and time.monotonic() - slot.dispatched_at >= execution.job_timeout_seconds):
+                                job = slot.busy
+                                _close_slots([slot], interrupt=True)
+                                marker = read_marker(output / job.job_id)
+                                if marker is not None:
+                                    if marker['job_digest'] != job.digest():
+                                        raise BatchConflict(f'timed-out job published another identity: {job.job_id}')
+                                    verify_marker(output / job.job_id, marker, digests=verify)
+                                    count_revision(marker)
+                                    counts['completed'] += 1
+                                    for following in follow_ups(plan, job, output):
+                                        enqueue(following)
+                                else:
+                                    run_dir = claim_run_dir(output / job.job_id) if slot.run is None else output / job.job_id / slot.run
+                                    failure = {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'session': session,
+                                               'error_type': 'JobTimeout', 'message': f'job exceeded {execution.job_timeout_seconds} seconds',
+                                               'traceback': '', 'worker': slot.worker}
+                                    write_failure(run_dir, failure)
+                                    counts['failed'] += 1
+                                    failures.append({'job_id': job.job_id, 'kind': job.kind, 'error_type': 'JobTimeout',
+                                                     'message': failure['message'], 'log': str(run_dir / 'job.log')})
+                                    events.append({'type': 'failed', 'job_id': job.job_id, 'failure': failure})
+                                slot.busy, slot.run, slot.dispatched_at, slot.connection = None, None, None, None
                             if slot.connection not in readable and slot.process.poll() is None:
                                 continue
                             message = None
@@ -516,7 +540,7 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                                         stop_error = BatchConflict(f'job conflict: {job.job_id}: {failure["message"]}')
                                 else:
                                     raise BatchError(f'unknown worker event {kind!r}')
-                                slot.busy, slot.run = None, None
+                                slot.busy, slot.run, slot.dispatched_at = None, None, None
                                 if kind != 'failed':
                                     continue
                             if slot.busy is not None:

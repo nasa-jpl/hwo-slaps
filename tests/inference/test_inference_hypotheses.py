@@ -143,6 +143,29 @@ def test_boxes_outside_a_joint_domain_are_refused(plane, prepared_forecast_facto
         _models(prepared, prepared.hypothesis(1.0e8, (0.4, -0.6)), FitSpec(mode="fixed_template"))
 
 
+def test_fractional_joint_box_diagnostic_gives_a_usable_fractional_width(prepared_forecast_factory):
+    import re
+    from hwoslaps.inference.settings import BoxRule, PriorWidths
+    from hwoslaps.scene.profiles import ELLIPTICITY_LIMIT
+
+    prepared = prepared_forecast_factory({"scene": {"source": {"light": {"light": {"ell_comps": [0.70, 0.70]}}}}})
+    trial = prepared.hypothesis(1e8, (0.4, -0.6))
+
+    def fit(width):
+        return FitSpec(mode="fixed_template", prior_widths=PriorWidths(rules=(
+            ("source.ellipticity", BoxRule(width, fractional=True, clip=(-0.9, 0.9))),)))
+
+    with pytest.raises(ConfigError, match="fractional ellipticity half width") as error:
+        _models(prepared, trial, fit(0.05))
+    match = re.search(r"half width is ([0-9.e+-]+)", str(error.value))
+    suggested = float(match[1])
+    oracle = (ELLIPTICITY_LIMIT / math.sqrt(2.0) - 0.7) / 0.7
+    assert suggested == pytest.approx(oracle, rel=1e-7)
+    _models(prepared, trial, fit(suggested * (1.0 - 1e-6)))
+    with pytest.raises(ConfigError, match="fractional ellipticity half width"):
+        _models(prepared, trial, fit(suggested * (1.0 + 1e-5)))
+
+
 def test_image_rotation_priors_follow_the_parameter_registry(prepared_forecast_factory, image_asset):
     prepared = prepared_forecast_factory({"scene": {"source": {"light": {"light": {
         "type": "Image", "asset_path": str(image_asset), "centre": [-0.03, 0.08],

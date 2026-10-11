@@ -45,9 +45,12 @@ def require_lane(engine):
     import jax
 
     devices = jax.devices()
-    if len(devices) != 1 or devices[0].platform != "gpu":
-        raise RuntimeError("this JAX example requires exactly one visible GPU; select its device before running")
-    return {"engine": engine, "lane": "gpu", "devices": [str(device) for device in devices]}
+    # Probe the default placement used by the engine, including jax.default_device.
+    executing_device, = jax.device_put(0).devices()
+    if executing_device.platform != "gpu":
+        raise RuntimeError("this JAX example requires a GPU backend; select a GPU before running")
+    return {"engine": engine, "lane": "gpu", "device": str(executing_device),
+            "devices": [str(device) for device in devices]}
 
 
 def new_output(path):
@@ -66,11 +69,11 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
     from hwoslaps.simulation import simulate
 
     started = time.perf_counter() if started_at is None else started_at
+    output = new_output(output)
     with prepare_forecast(config, execution=Execution(engine=engine, reference_workers=reference_workers)) as prepared:
         # Let the actual backend install its startup settings before querying JAX devices.
         lane = require_lane(engine)
         environment = capture_provenance(command=command)
-        output = new_output(output)
         result = forecast(prepared, masses_msun=masses)
         summary = summarize(result, q_threshold=q_threshold)
         save_forecast(result, output / "forecast.npz")
@@ -109,6 +112,4 @@ def run_product(config, output, *, masses, engine, q_threshold, budget_s, comman
     }
     write_json(output / "run.json", record)
     print(json.dumps(record, indent=2, allow_nan=False))
-    if elapsed > budget_s:
-        raise RuntimeError(f"example exceeds its {budget_s} s budget: {elapsed:.3f} s; see {output / 'run.json'}")
     return result, record

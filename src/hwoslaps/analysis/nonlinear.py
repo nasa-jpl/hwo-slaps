@@ -179,7 +179,7 @@ def classify_case(result: CaseResult, rule: ClassificationRule) -> CaseClassific
     if outcome.status == "accepted" and q is None:
         raise ValueError("an accepted case must have a finite q_signed")
     return CaseClassification(outcome.status, q, result.q_clipped, rule,
-                              None if q is None else abs(q - rule.q_threshold) < rule.marginal_half_width,
+                              None if outcome.status != "accepted" else abs(q - rule.q_threshold) < rule.marginal_half_width,
                               None if outcome.status != "accepted" else q >= rule.q_threshold,
                               outcome.role_statuses, outcome.reasons,
                               {role: None if result.role(role).log_likelihood is None

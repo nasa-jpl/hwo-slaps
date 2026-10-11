@@ -63,6 +63,7 @@ class BatchExecution:
     preparation_cache_size: int = 2
     memory_fraction: float = .75
     training_workers: int = 1
+    job_timeout_seconds: float | None = None
 
     def __post_init__(self):
         if not isinstance(self.forecast, Execution):
@@ -81,7 +82,7 @@ class BatchExecution:
                 'batch_size': self.forecast.batch_size, 'devices': self.devices,
                 'workers_per_device': self.workers_per_device, 'threads_per_worker': self.threads_per_worker,
                 'preparation_cache_size': self.preparation_cache_size, 'memory_fraction': self.memory_fraction,
-                'training_workers': self.training_workers}
+                'training_workers': self.training_workers, 'job_timeout_seconds': self.job_timeout_seconds}
 
 
 _EXECUTION_TABLE = Table((
@@ -95,6 +96,7 @@ _EXECUTION_TABLE = Table((
     Key('preparation_cache_size', _COUNT, 'bounded preparations retained per worker', 2),
     Key('memory_fraction', Real(min=0., min_open=True, max=1.), 'total preallocated fraction per device', .75),
     Key('training_workers', _COUNT, 'backend emulator-training workers per batch worker', 1),
+    Key('job_timeout_seconds', Nullable(_POSITIVE), 'maximum elapsed seconds for one dispatched job', None),
 ))
 
 
@@ -157,6 +159,9 @@ class TrialSelector:
     explicit: tuple[ExplicitTrial, ...] = ()
     masses_msun: tuple[float, ...] = ()
     aperture_radius_arcsec: float | None = None
+    aperture_einstein_radius_multiple: float | None = None
+    support_margin_arcsec: float | None = None
+    metric: str | None = None
 
     def to_mapping(self):
         if self.kind == 'explicit':
@@ -164,7 +169,10 @@ class TrialSelector:
         if self.kind == 'configured':
             return {'kind': self.kind}
         return {'kind': self.kind, 'masses_msun': self.masses_msun, **(
-            {'aperture_radius_arcsec': self.aperture_radius_arcsec} if self.kind == 'forecast_argmax' else {})}
+            {'aperture_radius_arcsec': self.aperture_radius_arcsec,
+             'aperture_einstein_radius_multiple': self.aperture_einstein_radius_multiple,
+             'support_margin_arcsec': self.support_margin_arcsec, 'metric': self.metric}
+            if self.kind == 'forecast_argmax' else {})}
 
 
 @dataclass(frozen=True)
@@ -262,7 +270,10 @@ class BatchSpec:
 
     def captured_digest(self, *, base_config_digest, population_digest):
         """Identity from the inputs captured by a plan, without reopening their paths."""
-        return mapping_digest({'spec': self.to_mapping(), 'config_digest': base_config_digest,
+        mapping = self.to_mapping()
+        if self.population is not None:
+            mapping['population'] = {**self.population.to_mapping(), **self.population.spec.identity_mapping()}
+        return mapping_digest({'spec': mapping, 'config_digest': base_config_digest,
                                'population_digest': population_digest})
 
 
@@ -288,7 +299,10 @@ _TRIALS_TABLE = Variants('kind', {
     'configured': Table(()),
     'forecast_positions': Table((Key('masses_msun', _MASSES, 'trial masses present in forecast'),)),
     'forecast_argmax': Table((Key('masses_msun', _MASSES, 'trial masses present in forecast'),
-                              Key('aperture_radius_arcsec', Nullable(_POSITIVE), 'closed selection disc', None))),
+                              Key('aperture_radius_arcsec', Nullable(_POSITIVE), 'closed disc in hypothesis-plane arcseconds', None),
+                              Key('aperture_einstein_radius_multiple', Nullable(_POSITIVE), 'closed disc radius as a multiple of this member Einstein radius', None),
+                              Key('support_margin_arcsec', Nullable(Real(min=0.)), 'margin from each fit image edge for the trial kernel', None),
+                              Key('metric', Nullable(Text(choices=('q_asimov', 'q_mismatch'))), 'selection statistic; None uses the forecast detection metric', None))),
 })
 _RETRY_TABLE = Table((
     Key('acceptance', Table(tuple(Key(role, ListOf(Text(choices=tuple(value.value for value in RoleStatus)),
@@ -389,7 +403,11 @@ def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
         explicit = tuple(ExplicitTrial('all' if trial['members'] == 'all' else (
             (trial['members'],) if isinstance(trial['members'], int) else tuple(trial['members'])),
             trial['mass_msun'], tuple(trial['position_yx'])) for trial in selector.get('explicit', ()))
-        trials = TrialSelector(selector['kind'], explicit, tuple(selector.get('masses_msun', ())), selector.get('aperture_radius_arcsec'))
+        if selector.get('aperture_radius_arcsec') is not None and selector.get('aperture_einstein_radius_multiple') is not None:
+            raise ConfigError(f'nonlinear.{name}.trials', 'choose an absolute aperture or an Einstein-radius multiple')
+        trials = TrialSelector(selector['kind'], explicit, tuple(selector.get('masses_msun', ())),
+                               selector.get('aperture_radius_arcsec'), selector.get('aperture_einstein_radius_multiple'),
+                               selector.get('support_margin_arcsec'), selector.get('metric'))
         fit = FitSpec.from_mapping(record['fit'], path=f'nonlinear.{name}.fit')
         sampler = SamplerSettings.from_mapping(record['sampler'], path=f'nonlinear.{name}.sampler')
         refine = None if record['refine'] is None else RefineSettings.from_mapping(record['refine'], path=f'nonlinear.{name}.refine')

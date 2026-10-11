@@ -73,8 +73,10 @@ python examples/chromatic/convergence.py --directory out/chromatic_convergence \
 ```
 
 `convergence.py` passes when, at each mass, the largest *q* changes by at most 1%
-between variants, for both the matched and the monochromatic model. In our runs
-the largest change was 0.13%. Each run takes two to three minutes on one GPU.
+between variants, for both the matched and the monochromatic model, and the change
+in the monochromatic model's largest spurious *q*, divided by the matched reference's
+largest *q*, is at most 1%. Runtime budgets are reported separately from these
+numerical gates.
 
 ## Fitting chromatic data
 

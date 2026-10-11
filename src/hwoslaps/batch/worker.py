@@ -102,6 +102,24 @@ def _preparation(prepared, hit, duration):
             'identity': json_ready(prepared.record)}
 
 
+def resolve_configured_trial(parameters, config, prepared):
+    """Resolve the first trial once; retries consume its recorded physical coordinates."""
+    from ..scene.subhalo import configured_injection
+    carried = parameters['resolved_trial']
+    if carried is None:
+        resolved = configured_injection(config.scene, prepared.scene.cosmology, seed=config.seed)
+        trial = {'mass_msun': resolved.mass_msun, 'position_yx': resolved.position_yx_arcsec,
+                 'trial_id': trial_id(resolved.mass_msun, resolved.position_yx_arcsec)}
+    else:
+        trial = dict(carried)
+        if (set(trial) != {'mass_msun', 'position_yx', 'trial_id'}
+                or trial['trial_id'] != trial_id(trial['mass_msun'], tuple(trial['position_yx']))):
+            raise BatchConflict('invalid carried configured trial')
+    if trial['mass_msun'] != parameters['mass_msun']:
+        raise BatchConflict('configured trial mass changed')
+    return trial
+
+
 def run_job(payload, cache, session, *, connection, worker, revision):
     from ..analysis.nonlinear import RoleAcceptance, case_status
     from ..artifacts import load_case_snapshot, save_case, save_forecast, save_observation
@@ -150,15 +168,8 @@ def run_job(payload, cache, session, *, connection, worker, revision):
                     artifacts = {'forecast': save_forecast(result, run_dir / 'forecast.npz')}
                 elif payload.kind == 'nonlinear':
                     if parameters.get('configured_trial'):
-                        resolved = configured_injection(config.scene, prepared.scene.cosmology, seed=config.seed)
-                        actual_trial = {'mass_msun': resolved.mass_msun, 'position_yx': resolved.position_yx_arcsec,
-                                        'trial_id': trial_id(resolved.mass_msun, resolved.position_yx_arcsec)}
-                        carried = parameters['resolved_trial']
-                        if carried is not None and json_ready(carried) != json_ready(actual_trial):
-                            raise BatchConflict(f'configured retry resolved to another physical trial: {payload.job_id}')
-                        if resolved.mass_msun != parameters['mass_msun']:
-                            raise BatchConflict(f'configured trial mass changed: {payload.job_id}')
-                        hypothesis = prepared.hypothesis(resolved.mass_msun, resolved.position_yx_arcsec)
+                        actual_trial = resolve_configured_trial(parameters, config, prepared)
+                        hypothesis = prepared.hypothesis(actual_trial['mass_msun'], tuple(actual_trial['position_yx']))
                         replicate, member = parameters['replicate'], parameters['member_index']
                         identifier = actual_trial['trial_id']
                         # The blueprint remains immutable; only actual run seeds are resolved here.

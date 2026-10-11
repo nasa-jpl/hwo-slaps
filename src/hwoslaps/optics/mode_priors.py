@@ -28,9 +28,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-import yaml
 
 from ..config.checks import ConfigError, FilePath, Integer, Key, Nullable, Pair, Real, Rule, Table, Text
+from ..config.loading import parse_yaml_value
 from ..identity import mapping_digest
 
 __all__ = [
@@ -177,8 +177,9 @@ _DOCUMENT_KEYS = ("name", "segment_variance_fraction", "global_weights", "segmen
 def parse_mode_weight_prior(document_bytes: bytes | str) -> ModeWeightPrior:
     """A prior from the bytes of its YAML table; a caller recording a digest hashes these bytes."""
     try:
-        document = yaml.safe_load(document_bytes)
-    except yaml.YAMLError as error:
+        text = document_bytes.decode("utf-8") if isinstance(document_bytes, bytes) else document_bytes
+        document = parse_yaml_value(text)
+    except (ConfigError, UnicodeError) as error:
         raise ValueError(f"invalid mode-weight prior YAML: {error}") from error
     if not isinstance(document, dict):
         raise ValueError("a mode-weight prior document must be a mapping")

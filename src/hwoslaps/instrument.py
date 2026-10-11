@@ -86,7 +86,7 @@ DETECTOR_TABLE = Table(
 
 INSTRUMENT_TABLE = Table(
     keys=(
-        Key("name", Nullable(Text()), "instrument label, recorded only", default=None),
+        Key("name", Nullable(Text()), "instrument label, included in configuration identity", default=None),
         Key("detector", DETECTOR_TABLE, "detector noise parameters"),
         Key("bandpass", Nullable(BANDPASS_TABLE), "system throughput including detector quantum efficiency", None),
         Key("collecting_area_m2", Nullable(Real(min=0.0, min_open=True)), "photon-collecting area", None, unit="m^2"),

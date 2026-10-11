@@ -26,6 +26,23 @@ def test_fit_data_units_and_background_follow_the_observation_kind(kind, prepare
     assert json_ready(data.record["truth_kernels"]) == observation.psfs.to_mapping()
 
 
+@pytest.mark.parametrize("offset, accepted", [(5e-13, True), (2e-12, False)])
+def test_fit_pixel_scale_uses_the_declared_sampling_tolerance(offset, accepted, prepared_forecast):
+    from hwoslaps.optics.kernels import DetectorPSF
+
+    original = prepared_forecast.psfs.model_kernels.single
+    kernel = DetectorPSF.from_array(original.kernel, prepared_forecast.observation.pixel_scale_arcsec + offset,
+                                    normalize=False)
+    arguments = dict(mask_name="all_pixels_minus_psf_border", base_mask=np.ones((40, 40), dtype=bool),
+                     over_sample_size=prepared_forecast.observation.grid.over_sample_size)
+    if accepted:
+        fitted = build_fit_data(prepared_forecast.observation, kernel, **arguments)
+        assert fitted.record["pixel_scale_arcsec"] == prepared_forecast.observation.pixel_scale_arcsec
+    else:
+        with pytest.raises(ValueError, match="pixel scale differs"):
+            build_fit_data(prepared_forecast.observation, kernel, **arguments)
+
+
 @pytest.mark.parametrize("base", ["all", "forecast", "custom"])
 def test_fitted_pixels_remove_the_kernel_border_from_each_base_mask(base, prepared_forecast):
     include = np.ones((40, 40), dtype=bool)

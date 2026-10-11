@@ -301,9 +301,35 @@ def test_coincident_light_cusp_is_recorded_by_refinement(prepared_forecast_facto
                    origin={"saved_log_likelihood": likelihood} if index == 0 else {}) for index in range(3))
     outcome = refine(starts, case.objective("smooth"), RefineSettings(original_start_count=2))
     assert outcome.acceptance_status is RoleStatus.UNRESOLVED
-    assert outcome.best_log_likelihood is None
+    assert outcome.best_log_likelihood == pytest.approx(likelihood, abs=1e-8)
+    assert outcome.best_vector == pytest.approx(model.truth)
+    assert outcome.gates["finite_gradient"] is False and outcome.gates["repeat"] is False
+    assert outcome.record["incumbent"]["evaluated"] is True
     assert all("Exponential gradient is undefined at an exactly zero-radius" in row["message"]
                for row in outcome.to_mapping()["record"]["runs"])
+
+
+def test_image_paper_recipe_fixes_rotation_in_forecast_and_both_fit_roles():
+    from hwoslaps.config.schema import load_config
+    from hwoslaps.fisher.api import prepare_forecast
+
+    path = Path(__file__).resolve().parents[1] / "fixtures/paper_parity/engine/p3_image_source_kernel.yaml"
+    fixed = load_config(path)
+    name = "source.light.light.rotation_deg"
+    with prepare_forecast(fixed) as prepared:
+        assert len(prepared.nuisances.names) == 10 and name not in prepared.nuisances.names
+        case = prepare_case(prepared, prepared.hypothesis(1e8, (0.4, -0.6)), prepared.observation,
+                            fit=FitSpec(mode="fixed_template"))
+        for role in ("smooth", "subhalo"):
+            assert len(case.model(role).parameter_names) == 9
+            assert not any("rotation_deg" in parameter for parameter in case.model(role).parameter_names)
+    with prepare_forecast(fixed.replace({"forecast": {"nuisances": {"fixed": []}}})) as prepared:
+        assert len(prepared.nuisances.names) == 11 and name in prepared.nuisances.names
+        case = prepare_case(prepared, prepared.hypothesis(1e8, (0.4, -0.6)), prepared.observation,
+                            fit=FitSpec(mode="fixed_template"))
+        for role in ("smooth", "subhalo"):
+            assert len(case.model(role).parameter_names) == 10
+            assert any("rotation_deg" in parameter for parameter in case.model(role).parameter_names)
 
 
 def test_custom_mask_case_records_round_trip(prepared_forecast, tmp_path):

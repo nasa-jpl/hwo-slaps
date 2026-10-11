@@ -1,4 +1,10 @@
-"""Explicit geometry conversions and caller-provided population function hooks."""
+"""Explicit geometry conversions and caller-provided population function hooks.
+
+Function-hook identity records ``module:function`` and inputs, not implementation bytes.
+Keep hook code and runtime state immutable for a population plan. When changing an
+implementation, use a new module/function name or explicit version input so its identity
+changes. Source binding is deferred because cached imported code can differ from disk bytes.
+"""
 
 from __future__ import annotations
 

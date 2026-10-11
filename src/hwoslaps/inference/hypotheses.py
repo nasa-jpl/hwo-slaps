@@ -47,6 +47,11 @@ def _joint_ellipticity(component: ComponentSpec, parameters: dict[str, Any], fre
         else:
             corner.append(abs(parameter.value))
     if math.hypot(*corner) >= ELLIPTICITY_LIMIT:
+        rule = fit.prior_widths.rule(component.plane, "ellipticity")
+        if rule.fractional:
+            _refuse_joint_box(component, parameters, free, fit, "ellipticity",
+                              lambda narrowed: _corner(component, definitions, free, fit, narrowed) < ELLIPTICITY_LIMIT,
+                              f"hypot(ellipticity) < {ELLIPTICITY_LIMIT}")
         count = sum(varied)
         linear = sum(abs(parameter.value) for parameter, varies in zip(definitions, varied, strict=True) if varies)
         constant = sum(parameter.value ** 2 for parameter in definitions) - ELLIPTICITY_LIMIT ** 2
@@ -62,12 +67,12 @@ def _bounds(component: ComponentSpec, parameter: Any, free: set[str], fit: FitSp
         return parameter.value, parameter.value
     rule = fit.prior_widths.rule(component.plane, parameter.definition.kind)
     if narrowed is not None and parameter.definition.kind == narrowed[0]:
-        # Joint mass kinds use absolute widths. At zero test the limiting, fixed-truth box.
+        # At zero test the limiting, fixed-truth box; retain the caller's width units.
         if narrowed[1] == 0.0:
             return parameter.value, parameter.value
         from .settings import BoxRule
 
-        rule = BoxRule(narrowed[1], clip=rule.clip)
+        rule = BoxRule(narrowed[1], fractional=rule.fractional, clip=rule.clip)
     return rule.box(parameter.value, parameter.definition.domain)
 
 
@@ -118,13 +123,15 @@ def _mass_box_domains(component: ComponentSpec, parameters: dict[str, Any], free
 
 def _refuse_joint_box(component, parameters, free, fit, kind, condition, description):
     path = f"scene.{component.plane}.{component.role}.{component.name}"
+    rule = fit.prior_widths.rule(component.plane, kind)
+    units = "fractional " if rule.fractional else ""
     if not condition((kind, 0.0)):
         others = sorted({p.definition.kind for p in parameters.values()
                          if p.definition.kind in {"ellipticity", "slope", "multipole", "shear"}
                          and p.definition.kind != kind})
-        raise ConfigError(path, f"fit box violates {description}; no symmetric {kind} half width fits "
+        raise ConfigError(path, f"fit box violates {description}; no symmetric {units}{kind} half width fits "
                           f"with the other kinds ({', '.join(others)}) unchanged")
-    lower, upper = 0.0, fit.prior_widths.rule(component.plane, kind).half_width
+    lower, upper = 0.0, rule.half_width
     for _ in range(80):
         middle = (lower + upper) / 2.0
         if condition((kind, middle)):
@@ -133,7 +140,7 @@ def _refuse_joint_box(component, parameters, free, fit, kind, condition, descrip
             upper = middle
         if upper - lower <= 1.0e-8 * max(upper, 1.0e-300):
             break
-    raise ConfigError(path, f"fit box violates {description}; largest symmetric {kind} half width "
+    raise ConfigError(path, f"fit box violates {description}; largest symmetric {units}{kind} half width "
                       f"is {lower:.8g} (strictly below), with the other boxes unchanged")
 
 

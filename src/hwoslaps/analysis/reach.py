@@ -5,7 +5,8 @@ target, always in log mass. ``interpolation`` sets how the value is
 interpolated: ``linear`` in the value or ``log`` in its logarithm. A power law
 ``q = A M**alpha`` is a straight line in (log M, log q), so ``log`` recovers its
 crossing exactly while ``linear`` places it low for ``alpha > 0``; ``log`` suits
-``q_max`` and areas, ``linear`` suits fractions. A curve that never reaches the
+smooth positive ``q_max`` curves. Sampled areas and fractions can have zeros
+and steps, so choose interpolation explicitly rather than assuming a power law. A curve that never reaches the
 target inside the measured range is a bound, never an extrapolation, and a
 non-monotonic curve has no unique reach. Every result records the target, the
 interpolation and the summary quantity it came from.

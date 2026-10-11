@@ -106,7 +106,8 @@ When files are combined:
 - changing a `kind` or `type` replaces that whole block, so keys from the old kind do
   not leak into the new one;
 - `null` removes an optional value. For example, `flux: null` removes an AB magnitude
-  so that a literal `intensity` can be used instead.
+  so that a literal `intensity` can be used instead. It does not delete a named lens
+  or source component; only keys declared nullable accept `null`.
 
 File paths inside a configuration, such as a PSF kernel or an image source, are
 relative to the file that contains them. A file can be reused from any working
@@ -135,7 +136,7 @@ checked when the configuration is built. A misspelled key fails with its full pa
 ConfigError: observation.exposure_tim_s: unknown key; allowed: exposure_count, exposure_time_s, sky
 ```
 
-`hwoslaps validate --print` prints the complete configuration with every default
+`hwoslaps validate CONFIG --print` prints the complete configuration with every default
 filled in. `config.to_mapping()` returns the same thing as a Python dictionary.
 
 ## YAML numbers
@@ -147,7 +148,9 @@ readers treat `1e8` as a string.) Duplicate keys are an error.
 
 Every configuration has a **digest**: a SHA-256 hash of its scientific content,
 including the bytes of every file it references. Two configurations with the same
-digest produce the same forecast. The digest ignores `run_name`.
+digest have the same captured configuration and file contents. Numerical equality
+across engines or hosts requires the corresponding numerical checks. The digest
+ignores `run_name`, but includes instrument names and bandpass labels.
 
 ```python
 print(config.digest())

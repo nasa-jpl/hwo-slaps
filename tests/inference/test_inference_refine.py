@@ -279,6 +279,40 @@ def test_bad_starts_fail_before_any_evaluation(defect, box_objective):
     assert evaluations == []
 
 
+def test_gradient_refusal_retains_finite_incumbent_and_best_value(box_objective):
+    value, _ = quadratic(TARGET)
+
+    def refused(x):
+        raise ValueError("gradient undefined at this finite light-profile value")
+
+    points = [TARGET, (0.2, 0.65), (0.3, 0.75)]
+    starts = starts_from(points, *UNIT, 0.0)
+    outcome = refine(starts, box_objective(*UNIT, value, refused), RefineSettings(original_start_count=2))
+    assert outcome.acceptance_status is RoleStatus.UNRESOLVED
+    assert outcome.best_log_likelihood == 0.0 and outcome.best_vector == TARGET
+    assert outcome.projected_gradient_linf is None and outcome.repeat_converged is None
+    assert {key for key, passed in outcome.gates.items() if not passed} == {"repeat", "finite_gradient"}
+    assert outcome.record["incumbent"]["passed"] is True
+    assert all("gradient undefined" in run["observed_best_gradient_error"] for run in outcome.record["runs"])
+
+
+def test_gradient_refusal_during_descent_retains_the_better_finite_value(box_objective):
+    value, gradient = quadratic(TARGET)
+
+    def refused_near_best(x):
+        if np.linalg.norm(np.asarray(x) - TARGET) < 1e-8:
+            raise ValueError("gradient undefined at the best value")
+        return gradient(x)
+
+    points = [(0.1, 0.2), (0.7, 0.8), (0.9, 0.1)]
+    outcome = refine(starts_from(points, *UNIT, -value(points[0])),
+                     box_objective(*UNIT, value, refused_near_best), RefineSettings(original_start_count=2))
+    assert outcome.acceptance_status is RoleStatus.UNRESOLVED
+    assert outcome.best_log_likelihood > -1e-12
+    assert outcome.best_vector == pytest.approx(TARGET, abs=1e-8)
+    assert outcome.gates["finite_gradient"] is False and outcome.gates["repeat"] is False
+
+
 @pytest.mark.parametrize("posterior", ["sharp", "broad", "unweighted", "too_few"])
 def test_start_selection_uses_prior_and_posterior_scales(posterior, tmp_path):
     names = ["a", "b"]

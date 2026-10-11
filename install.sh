@@ -8,11 +8,15 @@ TASK_PYTHON=3.11
 TASK_GPU=0
 TASK_EDITABLE=
 TASK_ENV_SELECTED=0
+TASK_REUSE=0
 usage() {
     cat <<'HELP'
 Usage: bash install.sh [--env-name NAME | --prefix DIR] [--python VERSION]
-                      [--cpu | --gpu] [--editable-backends DIR]
-Dependency pins are read from pyproject.toml. Patches are applied only to the
+                      [--cpu | --gpu] [--reuse] [--editable-backends DIR]
+The scientific stack supports Python 3.11 and 3.12. Existing environments are
+preserved unless --reuse explicitly authorizes dependency installation in them.
+Dependency pins are read from pyproject.toml and constraints/validated.txt.
+Patches are applied only to the
 selected environment and must match the packaged original/patched hashes.
 HELP
 }
@@ -27,28 +31,83 @@ while [ $# -gt 0 ]; do
         --python) TASK_PYTHON=${2:?--python requires VERSION}; shift 2;;
         --gpu) TASK_GPU=1; shift;;
         --cpu) TASK_GPU=0; shift;;
+        --reuse) TASK_REUSE=1; shift;;
         --editable-backends) TASK_EDITABLE=${2:?--editable-backends requires DIR}; shift 2;;
         --help|-h) usage; exit 0;;
         *) usage; exit 2;;
     esac
 done
-source "$(conda info --base)/etc/profile.d/conda.sh"
-if [ -n "$TASK_PREFIX" ]; then
-    if [ ! -d "$TASK_PREFIX/conda-meta" ]; then
-        conda create --prefix "$TASK_PREFIX" "python=$TASK_PYTHON" -y
-    fi
-    conda activate "$TASK_PREFIX"
+[[ "$TASK_PYTHON" =~ ^3\.(11|12)(\.[0-9]+)?$ ]] || {
+    printf '%s\n' 'The scientific stack requires Python 3.11 or 3.12.' >&2; exit 2;
+}
+command -v conda >/dev/null || { printf '%s\n' 'conda must be available on PATH.' >&2; exit 1; }
+TASK_CONDA_BASE=$(conda info --base)
+TASK_BASE_PYTHON="$TASK_CONDA_BASE/bin/python"
+[ -x "$TASK_BASE_PYTHON" ] || { printf '%s\n' 'The conda base interpreter is unavailable.' >&2; exit 1; }
+source "$TASK_CONDA_BASE/etc/profile.d/conda.sh"
+# Check command success separately from parsing. A failed lookup must never be
+# interpreted as an absent environment, even with no bare python on PATH.
+TASK_CONDA_INFO=$(conda info --json)
+TASK_CONDA_ENVS=$(conda env list --json)
+TASK_PREFIX=$("$TASK_BASE_PYTHON" - "$TASK_PREFIX" "$TASK_ENV" "$TASK_CONDA_INFO" "$TASK_CONDA_ENVS" <<'PY'
+import json
+from pathlib import Path
+import re
+import sys
+
+requested, name, info_text, envs_text = sys.argv[1:]
+info, listing = json.loads(info_text), json.loads(envs_text)
+envs, env_dirs = listing["envs"], info["envs_dirs"]
+if (not isinstance(envs, list) or not isinstance(env_dirs, list) or not env_dirs
+        or any(not isinstance(path, str) or not path for path in (*envs, *env_dirs))):
+    raise RuntimeError("conda returned an invalid environment inventory")
+if requested:
+    target = Path(requested).expanduser().absolute()
+else:
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", name) or name in {"base", "root"}:
+        raise ValueError("select a non-base environment name without path separators")
+    candidates = {Path(path).absolute() for path in envs if Path(path).name == name}
+    # A partially-created or unregistered prefix still must not be replaced.
+    candidates.update(Path(directory).absolute() / name for directory in env_dirs
+                      if (Path(directory) / name).exists() or (Path(directory) / name).is_symlink())
+    if len(candidates) > 1:
+        raise RuntimeError("environment name is ambiguous; select it with --prefix")
+    target = next(iter(candidates)) if candidates else Path(env_dirs[0]).absolute() / name
+if target.resolve() == Path(info["root_prefix"]).resolve():
+    raise ValueError("refusing to install the scientific stack in the conda base environment")
+print(target)
+PY
+)
+if [ -e "$TASK_PREFIX" ] || [ -L "$TASK_PREFIX" ]; then
+    [ "$TASK_REUSE" -eq 1 ] || {
+        printf 'Existing prefix preserved: %s. Use --reuse to install into this environment.\n' "$TASK_PREFIX" >&2
+        exit 1
+    }
+    [ -d "$TASK_PREFIX/conda-meta" ] && [ -x "$TASK_PREFIX/bin/python" ] || {
+        printf '%s\n' 'The existing prefix is not a usable conda environment.' >&2; exit 1;
+    }
 else
-    if ! conda env list --json | python -c 'import json,sys,pathlib; raise SystemExit(not any(pathlib.Path(p).name == sys.argv[1] for p in json.load(sys.stdin)["envs"]))' "$TASK_ENV"; then
-        conda create --name "$TASK_ENV" "python=$TASK_PYTHON" -y
-    fi
-    conda activate "$TASK_ENV"
+    [ "$TASK_REUSE" -eq 0 ] || { printf '%s\n' '--reuse requires an existing environment.' >&2; exit 1; }
+    conda create --prefix "$TASK_PREFIX" "python=$TASK_PYTHON" -y
 fi
+conda activate "$TASK_PREFIX"
+TASK_ENV_PYTHON="$CONDA_PREFIX/bin/python"
+"$TASK_ENV_PYTHON" - "$TASK_PREFIX" "$TASK_PYTHON" <<'PY'
+from pathlib import Path
+import sys
+
+prefix = Path(sys.argv[1]).resolve(strict=True)
+if Path(sys.prefix).resolve(strict=True) != prefix or not Path(sys.executable).resolve(strict=True).is_relative_to(prefix):
+    raise RuntimeError("the activated interpreter does not belong to the selected environment")
+requested = tuple(map(int, sys.argv[2].split(".")))
+if sys.version_info[:len(requested)] != requested:
+    raise RuntimeError("the existing environment Python differs from --python; select its version explicitly")
+PY
 TASK_EXTRAS=all
 if [ "$TASK_GPU" -eq 1 ]; then TASK_EXTRAS=all,cuda12; fi
-python -m pip install -e "$TASK_SOURCE[$TASK_EXTRAS]"
+"$TASK_ENV_PYTHON" -m pip install -c "$TASK_SOURCE/constraints/validated.txt" -e "$TASK_SOURCE[$TASK_EXTRAS]"
 if [ -n "$TASK_EDITABLE" ]; then
-    python - "$TASK_SOURCE/pyproject.toml" "$TASK_EDITABLE" <<'PY'
+    "$TASK_ENV_PYTHON" - "$TASK_SOURCE/pyproject.toml" "$TASK_EDITABLE" <<'PY'
 from pathlib import Path
 import re
 import subprocess
@@ -90,7 +149,7 @@ for extra, checkout in (("lensing", "PyAutoLens"), ("optics", "hcipy")):
     subprocess.run([sys.executable, "-m", "pip", "install", "--no-deps", "-e", str(directory)], check=True)
 PY
 fi
-python - "$TASK_SOURCE/tools/patches/autoarray-2026.5.14.2" "$CONDA_PREFIX" <<'PY'
+"$TASK_ENV_PYTHON" - "$TASK_SOURCE/tools/patches/autoarray-2026.5.14.2" "$CONDA_PREFIX" <<'PY'
 import hashlib
 import importlib.metadata
 import importlib.util
@@ -158,7 +217,7 @@ for filename, digests in expected.items():
     if actual != digests["patched"]:
         raise RuntimeError(f"{filename}: patched SHA-256 {actual} differs from the validated patch")
 PY
-python - "$TASK_GPU" <<'PY'
+"$TASK_ENV_PYTHON" - "$TASK_GPU" <<'PY'
 import sys
 import autolens
 import autofit

@@ -9,7 +9,6 @@ from typing import Any
 
 import numpy as np
 
-from ..analysis.reductions import aperture_selection
 from ..artifacts import load_forecast
 from ..config.checks import ConfigError
 from ..config.schema import EngineConfig
@@ -22,7 +21,24 @@ from ..scene.cosmology import Cosmology
 from ..scene.subhalo import configured_injection
 from ..seeding import derived_seed
 from .spec import BatchExecution, BatchSpec
-from .state import BatchConflict, BatchError, RetryVerdict, read_marker, verify_marker
+from .state import BatchConflict, BatchError, RetryVerdict, read_json, read_marker, verify_marker
+
+
+@dataclass(frozen=True)
+class FollowupFailure:
+    job_id: str
+    source_job_id: str
+    source_job_digest: str
+    member_index: int
+    arm: str
+    family: str
+    mass_msun: float
+    reason: str
+    input_digest: str
+    kind: str = 'followup'
+
+    def to_mapping(self):
+        return dict(self.__dict__)
 
 
 @dataclass(frozen=True)
@@ -226,6 +242,11 @@ def plan_batch(spec: BatchSpec) -> BatchPlan:
     relationships without starting backend workers. Forecast-selected trials and
     retries become follow-up jobs after their prerequisite artifacts are available.
     """
+    return build_plan(spec)
+
+
+def build_plan(spec: BatchSpec, *, frozen_members=None, frozen_arms=None) -> BatchPlan:
+    """Construct jobs from declared inputs or the checked frozen realization."""
     base_identity = spec.base.capture_identity()
     manifest = dict(base_identity['file_digests'])
     def config_identity(config):
@@ -236,7 +257,20 @@ def plan_batch(spec: BatchSpec) -> BatchPlan:
             manifest[path] = digest
         return record['config_digest']
     population_digest = None
-    if spec.population is None:
+    if frozen_members is not None:
+        members = tuple(frozen_members)
+        for member in members:
+            if config_identity(member.config) != member.config_digest:
+                raise BatchConflict(f'frozen member configuration identity changed: {member.run_name}')
+        captured = {member.population_digest for member in members}
+        if len(captured) != 1:
+            raise BatchConflict('frozen members do not share one population identity')
+        population_digest = captured.pop()
+        if spec.population is not None:
+            population_digest = spec.population.spec.captured_digest(catalog_sha256=members[0].catalog_sha256)
+        if spec.population is not None and spec.population.spec.catalog is not None:
+            manifest[str(spec.population.spec.catalog.path)] = members[0].catalog_sha256
+    elif spec.population is None:
         base = spec.base
         members = (MemberRecord(0, base.run_name, base.seed, 0, {}, base, base_identity['config_digest']),)
     else:
@@ -257,8 +291,8 @@ def plan_batch(spec: BatchSpec) -> BatchPlan:
             if path in manifest and manifest[path] != digest:
                 raise ConfigError('population.catalog', f'catalog snapshot conflicts with another planned input: {path}')
             manifest[path] = digest
-    configurations = []
-    for member in members:
+    configurations = [] if frozen_arms is None else list(frozen_arms)
+    for member in () if frozen_arms is not None else members:
         for arm in spec.arms:
             config = member.config.replace(arm.overrides, base_dir=spec.base_dir)
             if arm.directions is not None and not isinstance(config.psf.model, KnowledgeErrorModel):
@@ -292,6 +326,12 @@ def plan_batch(spec: BatchSpec) -> BatchPlan:
         for family in spec.nonlinear:
             if not _participates(family, arm):
                 continue
+            if family.trials.aperture_einstein_radius_multiple is not None:
+                try:
+                    arm.config.scene.einstein_radius()
+                except ValueError as error:
+                    raise ConfigError(f'nonlinear.{family.name}.trials.aperture_einstein_radius_multiple',
+                                      'requires exactly one configured Einstein radius') from error
             reference = _reference_arm(plan, family, arm)
             if family.trials.kind.startswith('forecast_'):
                 if not _participates(spec.forecast, reference) or not set(family.trials.masses_msun) <= set(spec.forecast.masses_msun):
@@ -325,7 +365,7 @@ def plan_batch(spec: BatchSpec) -> BatchPlan:
     return BatchPlan(spec, members, tuple(jobs), deferred, tuple(configurations), spec_digest, population_digest, manifest)
 
 
-def follow_ups(plan: BatchPlan, job: Job, output_dir: Path) -> tuple[Job, ...]:
+def follow_ups(plan: BatchPlan, job: Job, output_dir: Path) -> tuple[Job | FollowupFailure, ...]:
     job_dir = Path(output_dir) / job.job_id
     marker = read_marker(job_dir)
     if marker is None:
@@ -345,20 +385,55 @@ def follow_ups(plan: BatchPlan, job: Job, output_dir: Path) -> tuple[Job, ...]:
                 if _reference_arm(plan, family, arm).name != job.arm:
                     continue
                 selection = np.ones(len(result.positions_yx), dtype=bool)
-                if family.trials.aperture_radius_arcsec is not None:
-                    selection = aperture_selection(result, centre_yx=arm.config.scene.lens_centre,
-                                                   radius_arcsec=family.trials.aperture_radius_arcsec)
+                radius = family.trials.aperture_radius_arcsec
+                if family.trials.aperture_einstein_radius_multiple is not None:
+                    radius = family.trials.aperture_einstein_radius_multiple * arm.config.scene.einstein_radius()
+                if radius is not None:
+                    selection &= result.positions.within(arm.config.scene.lens_centre, radius)
+                domain = _domain(arm.config)
+                if domain is not None:
+                    selection &= np.hypot(*(result.positions_yx - arm.config.scene.lens_centre).T) <= domain + 1e-12
+                if family.trials.support_margin_arcsec is not None:
+                    half_width = np.asarray(arm.config.scene.grid.shape) * arm.config.scene.grid.pixel_scale_arcsec / 2
+                    selection &= np.all(np.abs(result.positions_yx) <= half_width - family.trials.support_margin_arcsec, axis=1)
                 for mass in family.trials.masses_msun:
                     row = list(result.masses_msun).index(mass)
+                    failure_id = f'members/{arm.member.run_name}/{arm.name}/followup/{family.name}/m{text_digest(float(mass).hex())[:16]}'
+                    inputs = mapping_digest({'source': job.digest(), 'forecast_artifact': marker['artifacts']['forecast']['sha256'],
+                                             'arm': arm.config_digest,
+                                             'family': family.to_mapping(), 'mass_msun': mass})
+                    failure_path = Path(output_dir) / failure_id / 'failure.json'
+                    if failure_path.exists():
+                        try:
+                            stored = FollowupFailure(**read_json(failure_path))
+                        except TypeError as error:
+                            raise BatchConflict(f'invalid terminal follow-up record: {failure_id}') from error
+                        expected = FollowupFailure(failure_id, job.job_id, job.digest(), job.member.index,
+                                                   arm.name, family.name, mass, stored.reason, inputs)
+                        if (mapping_digest(stored.to_mapping()) != mapping_digest(expected.to_mapping())
+                                or not isinstance(stored.reason, str) or not stored.reason):
+                            raise BatchConflict(f'terminal follow-up identity changed: {failure_id}')
+                        jobs.append(stored)
+                        continue
                     if family.trials.kind == 'forecast_positions':
+                        if not np.all(selection):
+                            jobs.append(FollowupFailure(failure_id, job.job_id, job.digest(), job.member.index,
+                                arm.name, family.name, mass, 'requested forecast positions exceed the fit domain', inputs))
+                            continue
                         indices = range(len(result.positions_yx))
                     else:
-                        metric = getattr(result, result.detection_metric)[row]
+                        metric_name = family.trials.metric or result.detection_metric
+                        values = getattr(result, metric_name)
+                        metric = np.full(len(result.positions_yx), np.nan) if values is None else values[row]
                         eligible = selection & np.isfinite(metric)
-                        if result.detection_metric == 'q_mismatch':
-                            eligible &= result.amplitude_hat[row] > 0
+                        if metric_name == 'q_mismatch':
+                            eligible &= False if result.amplitude_hat is None else result.amplitude_hat[row] > 0
                         if not np.any(eligible):
-                            raise BatchError(f'no eligible forecast_argmax node for {job.job_id}, mass {mass}')
+                            reason = (f'requested metric {metric_name} is unavailable for this forecast' if values is None
+                                      else 'no finite eligible node inside the aperture, fit domain and support margin')
+                            jobs.append(FollowupFailure(failure_id, job.job_id, job.digest(), job.member.index,
+                                arm.name, family.name, mass, reason, inputs))
+                            continue
                         indices = (int(np.argmax(np.where(eligible, metric, -np.inf))),)
                     for index in indices:
                         position = tuple(float(value) for value in result.positions_yx[index])

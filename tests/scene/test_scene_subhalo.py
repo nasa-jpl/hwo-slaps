@@ -98,3 +98,40 @@ def test_placement_on_the_critical_curve_uses_the_effective_einstein_radius(scen
     y, x = configured_injection(spec, planck15, seed=3).position_yx_arcsec
     assert math.hypot(y - LENS_CENTRE[0], x - LENS_CENTRE[1]) == pytest.approx(
         effective_einstein_radius(spec, planck15), rel=1.0e-14)
+
+
+@pytest.mark.parametrize("radius", ["einstein_radius", "critical_curve"])
+@pytest.mark.parametrize("kind", ["angle", "random"])
+def test_named_injection_radii_reject_hypotheses_behind_the_lens(scene_mapping, radius, kind):
+    scene_mapping["subhalo"] = {"type": "PointMass", "redshift": 0.45}
+    position = {"kind": kind, "radius": radius,
+                **({"angle_deg": 0.0} if kind == "angle" else {"scatter_arcsec": 0.05})}
+    with pytest.raises(ConfigError, match="own plane") as error:
+        _inject(scene_mapping, position)
+    assert error.value.path == "scene.injection.position.radius"
+
+
+@pytest.mark.backend
+@pytest.mark.parametrize("radius", ["einstein_radius", "critical_curve"])
+def test_named_injection_radii_keep_foreground_hypotheses_valid(scene_mapping, planck15, radius):
+    from hwoslaps.scene.critical_curve import effective_einstein_radius
+
+    scene_mapping["subhalo"] = {"type": "PointMass", "redshift": 0.1}
+    spec = _inject(scene_mapping, {"kind": "angle", "angle_deg": 0.0, "radius": radius})
+    halo = configured_injection(spec, planck15, seed=3)
+    expected_radius = spec.einstein_radius() if radius == "einstein_radius" else effective_einstein_radius(spec, planck15)
+    assert halo.redshift == 0.1
+    assert halo.position_yx_arcsec == pytest.approx((LENS_CENTRE[0], LENS_CENTRE[1] + expected_radius))
+
+
+@pytest.mark.parametrize("redshift", [0.1, 0.45])
+@pytest.mark.parametrize("position, expected", [
+    ({"kind": "direct", "centre": [0.2, -0.4]}, (0.2, -0.4)),
+    ({"kind": "angle", "angle_deg": 0.0, "radius": 0.2}, (0.3, 0.0)),
+])
+def test_off_plane_injection_coordinates_are_in_the_halos_own_plane(scene_mapping, planck15, redshift,
+                                                                  position, expected):
+    scene_mapping["subhalo"] = {"type": "PointMass", "redshift": redshift}
+    halo = configured_injection(_inject(scene_mapping, position), planck15, seed=3)
+    assert halo.redshift == redshift
+    assert halo.position_yx_arcsec == pytest.approx(expected)

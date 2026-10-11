@@ -118,9 +118,19 @@ def _invalid_constant(value):
     raise ValueError(f"nonfinite JSON constant {value}")
 
 
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f'duplicate JSON key {key!r}')
+        result[key] = value
+    return result
+
+
 def read_json(path: Path) -> Mapping[str, Any]:
     try:
-        value = json.loads(path.read_text(encoding='utf-8'), parse_constant=_invalid_constant)
+        value = json.loads(path.read_text(encoding='utf-8'), parse_constant=_invalid_constant,
+                           object_pairs_hook=_unique_object)
     except (json.JSONDecodeError, ValueError) as error:
         raise BatchConflict(f"invalid JSON in {path}: {error}") from error
     if not isinstance(value, dict):
@@ -184,6 +194,8 @@ def job_state(job_dir: Path) -> str:
         return 'complete'
     if not job_dir.is_dir():
         return 'absent'
+    if (job_dir / 'failure.json').is_file():
+        return 'failed'
     runs = sorted((path for path in job_dir.iterdir() if path.is_dir()
                    and re.fullmatch(r'run_[0-9]{3,}', path.name)), key=lambda path: int(path.name[4:]))
     if not runs:

@@ -131,7 +131,7 @@ def test_case_status_follows_the_paper_rules(event, expected, reason, case_facto
     (12.0, False, False, True, 12.0), (10.5, False, True, True, 10.5),
     (9.5, False, True, False, 9.5), (10.0, False, True, True, 10.0),
     (11.0, False, False, True, 11.0), (9.0, False, False, False, 9.0),
-    (-2.0, False, False, False, 0.0), (10.5, True, True, None, 10.5),
+    (-2.0, False, False, False, 0.0), (10.5, True, None, None, 10.5),
 ])
 def test_classification_reports_marginal_and_detection(q, unresolved, marginal, detected, clipped, case_factory):
     case = case_factory(q)

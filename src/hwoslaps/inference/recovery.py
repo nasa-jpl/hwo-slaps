@@ -1,7 +1,8 @@
 """Freed-subhalo recovery: the sampler and refined estimates and the posterior quantiles.
 
 Raw values only. The margins to the ends of the mass support are reported in dex; a boundary
-flag or a band fraction is a threshold the caller applies. The sampler estimate is the
+flag is a threshold the caller applies. Posterior band fractions require the raw sampler
+draws and weights, not just these quantiles. The sampler estimate is the
 sampler's maximum-likelihood instance (the values the paper reported); the refined estimate
 is decoded from the refined best vector, the solution whose likelihood enters ``q_signed``.
 """

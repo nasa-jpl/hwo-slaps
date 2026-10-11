@@ -2,13 +2,18 @@
 
 A kernel is the box integral of the propagated intensity over each detector pixel (an
 ``N x N`` midpoint rule with ``N = detector_oversampling``), normalized to unit sum on its
-support; the power beyond the support is discarded and its complement is recorded in the
-kernel's source as ``captured_power_fraction``. The detector grid is built in focal-plane
-metres, so every wavelength lands on the same pixels.
+support. ``captured_power_fraction`` records the integrated power on that support divided by
+sampled pupil power. The sampled pupil makes the focal field periodic, so this fraction can
+include power from repeated wings and is not an infinite-plane encircled-energy estimate.
+The detector grid is built in focal-plane metres, so every wavelength lands on the same pixels.
 
-``check_sampling`` refuses aliased kernels (the sampled pupil makes the focal plane periodic)
-and kernels whose pixels are too coarse for the oversampling to resolve the intensity before
-binning.
+``check_sampling`` requires the support to fit inside one focal period and the sub-pixel step
+to meet intensity Nyquist. These basic checks do not guarantee negligible periodic-wing bias;
+convergence with pupil sampling must be checked for the chosen support.
+
+Arrays retain HCIPy's focal coordinates: row zero has the most negative focal y. When used
+as detector kernels (row zero has the largest detector y), focal and pupil +y map to detector
+-y; x has the same direction in both coordinate systems.
 """
 
 from __future__ import annotations
@@ -55,10 +60,12 @@ class OpticalSpec:
 
 
 def check_sampling(spec: OpticalSpec, *, pixel_scale_arcsec: float, wavelength_m: float) -> None:
-    """Raise ValueError for an aliased or under-resolved kernel at ``wavelength_m``.
+    """Raise ValueError when support spans a focal period or sub-pixels exceed intensity Nyquist.
 
     Aliasing: a pupil of ``pixels`` samples over ``diameter_m`` makes the focal plane periodic
     with period ``pixels * wavelength / diameter_m``, which must exceed the kernel extent.
+    This necessary check does not bound contamination from periodic wings; increase pupil
+    sampling to check convergence of the kernel and captured fraction.
     Sub-pixel Nyquist: the oversampled pixel ``pixel_scale_arcsec / detector_oversampling``
     must not exceed ``wavelength / (2 diameter_m)``, the Nyquist step of the intensity.
     """
@@ -82,7 +89,10 @@ def check_sampling(spec: OpticalSpec, *, pixel_scale_arcsec: float, wavelength_m
 
 @dataclass(frozen=True)
 class FocalField:
-    """Focal-plane intensity as a fraction of the pupil power per sample, about the optical axis."""
+    """Sampled periodic focal intensity in pupil-power units, about the optical axis.
+
+    ``y_arcsec`` increases with row index, opposite to the detector-image y convention.
+    """
 
     intensity: np.ndarray
     x_arcsec: np.ndarray
@@ -265,7 +275,8 @@ class OpticalPSF:
 
         ``coefficients`` replaces the provider's wavefront for this evaluation. The source
         records the wavelength, the provider and coefficients digests and the captured power
-        fraction of this propagation.
+        fraction of this sampled periodic propagation. It can include repeated wings;
+        increase pupil sampling to check convergence before treating it as physical capture.
         """
         wavelength = self._wavelength(wavelength_m)
         wavefront = self._coefficients_or_own(coefficients)
@@ -305,7 +316,11 @@ class OpticalPSF:
 
     def focal_field(self, wavelength_m: float | None = None, *, coefficients: WavefrontCoefficients | None = None,
                     samples_per_lambda_over_d: int, radius_lambda_over_d: float) -> FocalField:
-        """Point-sampled focal-plane intensity on a grid in units of ``wavelength / diameter_m``."""
+        """Periodic focal intensity on a grid in units of ``wavelength / diameter_m``.
+
+        Coordinates are HCIPy's focal coordinates: +y runs toward larger row indices,
+        mapping to detector -y when the same array is used as an image kernel.
+        """
         import hcipy
 
         wavelength = self._wavelength(wavelength_m)

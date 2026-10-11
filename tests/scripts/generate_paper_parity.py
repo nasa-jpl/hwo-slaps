@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Generate paper-parity anchors from the submitted RASTI-26-183 code.
 
-Every expected value under ``tests/fixtures/paper_parity`` comes from the
-paper commit 41621de (tag ``rasti-26-183-submitted``). This script never
-imports the engine under test: each lane runs in a child process whose
-``hwoslaps`` must resolve inside an extracted ``git archive 41621de`` tree.
+This script generates submitted-code scene anchors from paper commit
+41621de (tag ``rasti-26-183-submitted``). The separate fixture
+``inference/fit_engine_8fa6209.json`` is a later engine continuity anchor.
+This script never imports the engine under test: each lane's ``hwoslaps``
+must resolve inside an extracted ``git archive 41621de`` tree.
 
 Run on xtx only, from the root of an engine checkout synced there, then
 copy ``tests/fixtures/paper_parity`` back to the checkout::
@@ -22,6 +23,14 @@ copy ``tests/fixtures/paper_parity`` back to the checkout::
 ``--kernel-anchor`` instead writes only ``k1_paper_kernel.json`` (the K1 anchor: the paper's HWO
 reference truth kernels at 999x999 and 51x51, from ``configs/psf_states/science_hwo35.yaml``),
 in one reference-lane child, and touches no other file.
+
+``--production-anchor`` writes a separate reference-only oracle for archived
+``ladder_selected_sys0043`` inputs: the full 522x522 detector image, 999x999
+science35 PSF and actual COSMOS asset, at one mass and three grid positions.
+It requires the original staged configuration and matched-job receipt plus the
+committed submitted-code hash manifest. This is a new 41621de oracle evaluation
+of archived production inputs, not a replay of historical per-node results.
+Run this mode with the reference environment above; no GPU argument is needed.
 
 The parent process writes the scene inputs (engine YAML, synthetic source
 asset and detector kernel) into ``--out`` and then runs one child per lane
@@ -302,9 +311,9 @@ def _elliptical_gaussians(shape, scale, components):
     return image
 
 
-def _engine_input_text(name):
+def _engine_input_text(name, *, science=None):
     """Final-schema inputs from the same fixed scientific scene used by the paper lane."""
-    science = SCENES[name]["science"]
+    science = SCENES[name]["science"] if science is None else science
     lensing = science["lensing"]
     light = lensing["source_galaxy"]["light"]
     subhalo = lensing["subhalo"]
@@ -919,6 +928,142 @@ def _diff_paths(a, b, prefix=""):
     return [] if a == b else [prefix.rstrip(".")]
 
 
+PRODUCTION_NAME = "production_sys0043"
+PRODUCTION_ASSET = "configs/source_assets/cosmos_48849_hlr011.npz"
+PRODUCTION_POSITIONS = ((-0.8, 0.0), (0.0, 0.8), (0.8, 0.0))
+PRODUCTION_MASS = 1.0e8
+PRODUCTION_HASHES = {
+    "staged_config": "508093ee43e09a56f4aa9eb4ae958c83b1a44d41cd1613b25f3d43c65e139541",
+    "archive_receipt": "209d15de532ad47638ad5857c6bde0d33b892d107e54a073f9b8a52eb131669f",
+    "source_asset": "c67570fdc56068fc900e3428f6b6ff2d5ffce8f459858c302c6de1461d24ed21",
+    "truth_kernel": "429a3702e050178c68b44d4de49e6a61acb595e4e5649120ba31c56470aae88c",
+    "submitted_code_manifest": "1f7014245cd5e0db68436e2395ee3eb4a95af355b28d96d2db839c8cf5d273aa",
+}
+PAPER_GIT_TREE = "2f185e14053017b85b084f0387906b813b99ec1d"
+
+
+def _verify_submitted_python(paper_tree, manifest):
+    """Bind every importable submitted Python file, rather than trusting a directory name."""
+    if (paper_tree / ".git").exists() or _file_sha256(manifest) != PRODUCTION_HASHES["submitted_code_manifest"]:
+        raise ValueError("production oracle requires the pinned extracted submitted-code tree")
+    expected = {}
+    for line in manifest.read_text().splitlines():
+        digest, name = line.split("  ", 1)
+        expected[name] = digest
+    actual = {str(path.relative_to(paper_tree)) for directory in ("src/hwoslaps", "scripts")
+              for path in (paper_tree / directory).rglob("*.py")}
+    if actual != set(expected):
+        raise ValueError("submitted-code tree has missing or extra Python files")
+    for name, digest in expected.items():
+        if _file_sha256(paper_tree / name) != digest:
+            raise ValueError(f"submitted-code bytes differ: {name}")
+    return {"paper_commit": PAPER_COMMIT, "paper_tag": PAPER_TAG, "git_tree": PAPER_GIT_TREE,
+            "python_files_verified": len(expected), "python_manifest_sha256": _file_sha256(manifest)}
+
+
+def production_anchor(args):
+    """One submitted-code reference evaluation of genuine production inputs, without a campaign."""
+    paper_tree = args.paper_tree.resolve()
+    staged_path = args.production_config.resolve()
+    receipt_path = args.production_receipt.resolve()
+    manifest_path = args.production_source_manifest.resolve()
+    out = args.out.resolve()
+    work = args.work.resolve()
+    _check_lane_environment("reference", 0)
+    identity = _verify_submitted_python(paper_tree, manifest_path)
+    for path, key in ((staged_path, "staged_config"), (receipt_path, "archive_receipt"),
+                      (paper_tree / PRODUCTION_ASSET, "source_asset")):
+        if _file_sha256(path) != PRODUCTION_HASHES[key]:
+            raise ValueError(f"production input bytes differ: {key}")
+    archive_receipt = json.loads(receipt_path.read_text())
+    if archive_receipt["system_id"] != "ladder_selected_sys0043" or archive_receipt["delta_nm"] != 0:
+        raise ValueError("the historical receipt is not the matched production case")
+    if archive_receipt["truth_kernel_sha256"] != PRODUCTION_HASHES["truth_kernel"]:
+        raise ValueError("historical truth kernel differs from the production anchor")
+    if out.exists() or work.exists():
+        raise FileExistsError("production output and work paths must both be fresh")
+    work.mkdir(parents=True)
+    out.mkdir(parents=True)
+    (out / "engine").mkdir()
+    asset = out / Path(PRODUCTION_ASSET).name
+    asset.write_bytes((paper_tree / PRODUCTION_ASSET).read_bytes())
+    (out / "submitted_code_41621de.sha256").write_bytes(manifest_path.read_bytes())
+    _enter_backend_harness()
+    _import_paper(paper_tree)
+    import run_ladder
+    from hwoslaps.lensing.sampling import configured_sub_size
+
+    staged = yaml.safe_load(staged_path.read_text())
+    config = run_ladder._rung_config(staged, staged["ladder"], staged["ladder"]["aperture"])
+    config["lensing"]["source_galaxy"]["light"]["asset_path"] = str(asset)
+    config["modeling"]["fisher"]["map"]["engine"] = "reference"
+    config["modeling"]["fisher"]["map"]["num_workers"] = 1
+    config["plotting"]["enabled"] = False
+    config["plotting"]["output_dir"] = str(work)
+    _validate_paper_config(config)
+    grid = config["lensing"]["grid"]
+    if grid["shape"] != [522, 522] or grid["pixel_scale"] != .00716 or configured_sub_size(grid) != 4:
+        raise ValueError("production detector geometry differs from the archived case")
+    start = time.perf_counter()
+    psf = _paper_truth_psf(config)
+    if _kernel_sha256(psf.kernel) != PRODUCTION_HASHES["truth_kernel"]:
+        raise ValueError("submitted-code rendering does not reproduce the archived science35 kernel")
+    detector = run_ladder._build_detector(config, psf)
+    build_seconds = time.perf_counter() - start
+    run_ladder._point_detector_at_rung(detector, 8.0)
+    banks = detector._evaluate_grid_positions(PRODUCTION_POSITIONS)
+    bank_names = {"q_asimov": "q_asimov_local", "fisher_raw": "fisher_raw",
+                  "fisher_profiled": "fisher_profiled", "sigma_amplitude": "sigma_amplitude_profiled",
+                  "degradation": "degradation"}
+    arrays = {"positions_yx": np.asarray(PRODUCTION_POSITIONS), "masses_msun": np.asarray([PRODUCTION_MASS])}
+    for name, field in bank_names.items():
+        arrays["reference__" + name] = np.concatenate([np.atleast_1d(getattr(bank, field)) for bank in banks])[None, :]
+    np.savez_compressed(out / "forecast.npz", **arrays)
+    science = copy.deepcopy(config)
+    science["lensing"]["grid"]["over_sample_size"] = configured_sub_size(grid)
+    science["lensing"]["source_galaxy"]["light"]["asset_path"] = asset.name
+    engine_path = out / "engine" / f"{PRODUCTION_NAME}.yaml"
+    engine_path.write_text(_engine_input_text(PRODUCTION_NAME, science=science))
+    record = {
+        "schema": 1, "name": PRODUCTION_NAME,
+        "description": "New submitted-code oracle evaluation of genuine archived sys0043 production inputs; historical per-node results were not archived and are not claimed as replayed.",
+        "generator": "tests/scripts/generate_paper_parity.py --production-anchor",
+        "generator_sha256": _file_sha256(Path(__file__)), "submitted_code": identity,
+        "archive_provenance": {"campaign": "psf_knowledge_fisher_v1", "system_id": archive_receipt["system_id"],
+                               "production_commit": archive_receipt["code_git_hash"],
+                               "staged_config_sha256": PRODUCTION_HASHES["staged_config"],
+                               "matched_job_receipt_sha256": PRODUCTION_HASHES["archive_receipt"],
+                               "historical_per_node_replay": False},
+        "engine_config": str(engine_path.relative_to(out)), "engine_config_sha256": _file_sha256(engine_path),
+        "fixture": "forecast.npz", "fixture_sha256": _file_sha256(out / "forecast.npz"),
+        "source_asset": {"file": asset.name, "sha256": _file_sha256(asset)},
+        "geometry": {"detector_shape": grid["shape"], "pixel_scale_arcsec": grid["pixel_scale"],
+                     "over_sample_size": configured_sub_size(grid), "kernel_shape": [999, 999],
+                     "map_half_width_arcsec": config["modeling"]["fisher"]["map"]["grid"]["half_width_arcsec"]},
+        "observation": config["observation"], "noise_seed": config["global_seed"],
+        "masses_msun": [PRODUCTION_MASS], "positions_yx": [list(position) for position in PRODUCTION_POSITIONS],
+        "truth_kernel_sha256": _kernel_sha256(psf.kernel),
+        "fit_kernel_sha256": _kernel_sha256(detector.model_psf_data.kernel),
+        "profiled_nuisance_names": list(detector.nuisance_names),
+        "nuisance_prior_precision": [float(value) for value in detector.prior_precision_diagonal],
+        "pixels_unmasked": int(detector.pixels_unmasked),
+        "diagnostic_digests": {
+            "mu0_adu": _array_digest(detector.mu0_adu_2d), "mu0_model_adu": _array_digest(detector.mu0_model_adu_2d),
+            "sigma_adu": _array_digest(detector.sigma_adu_2d), "fisher_mask": _array_digest(detector.mask_2d.astype(float)),
+            "noisy_baseline_adu": _array_digest(detector.observation_baseline.imaging.data.native),
+            "nuisance_images": {name: _array_digest(image) for name, image in zip(detector.nuisance_names, detector.nuisance_images)},
+        },
+        "seconds": {"detector_build": build_seconds, "total": time.perf_counter() - start},
+        "versions": _versions(), "environment": {name: os.environ.get(name) for name in _lane_environment("reference", 0)},
+    }
+    # Detect accidental mutation of the source tree during execution as well as before imports.
+    if _verify_submitted_python(paper_tree, manifest_path) != identity:
+        raise ValueError("submitted-code identity changed during generation")
+    (out / "oracle.json").write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({"name": PRODUCTION_NAME, "oracle_sha256": _file_sha256(out / "oracle.json"),
+                      "seconds": record["seconds"], "submitted_code": identity}, indent=2), flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--paper-tree", type=Path)
@@ -929,8 +1074,21 @@ def main():
     parser.add_argument("--lane", choices=LANES, help="internal: run one lane in this process")
     parser.add_argument("--kernel-anchor", action="store_true",
                         help=f"write only {K1_FIXTURE} (the K1 anchor), in the reference lane")
+    parser.add_argument("--production-anchor", action="store_true",
+                        help="write only the reference sys0043 production-input oracle")
+    parser.add_argument("--production-config", type=Path, help="original archived sys0043 staged configuration")
+    parser.add_argument("--production-receipt", type=Path, help="original archived sys0043 matched-job receipt")
+    parser.add_argument("--production-source-manifest", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "fixtures/paper_parity/production/submitted_code_41621de.sha256")
     parser.add_argument("--inputs-only", action="store_true", help="write only synthetic assets and final-schema engine YAML")
     args = parser.parse_args()
+    if args.production_anchor:
+        if args.lane is not None or args.kernel_anchor or args.inputs_only or args.gpu is not None:
+            parser.error("--production-anchor is reference-only and cannot be combined with other modes or --gpu")
+        if any(value is None for value in (args.paper_tree, args.work, args.production_config, args.production_receipt)):
+            parser.error("--production-anchor requires --paper-tree, --work, --production-config and --production-receipt")
+        production_anchor(args)
+        return 0
     if args.inputs_only:
         if args.lane is not None or args.kernel_anchor:
             parser.error("--inputs-only cannot be combined with --lane or --kernel-anchor")

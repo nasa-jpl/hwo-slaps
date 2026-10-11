@@ -22,7 +22,7 @@ __all__ = ["BANDPASS_TABLE", "Bandpass", "BandpassSpec", "ConstantFactor", "Prod
            "TopHatBand", "bandpass_nodes", "bandpass_spec_mapping", "bin_integrals", "build_bandpass", "integrate_dlnlambda", "parse_bandpass"]
 
 _POSITIVE = Real(min=0.0, min_open=True)
-_LABEL = Key("label", Nullable(Text()), "bandpass label", None)
+_LABEL = Key("label", Nullable(Text()), "bandpass label; does not alter throughput, but participates in EngineConfig identity", None)
 _SUPPORT = Key("support_nm", Pair(_POSITIVE), "band support (low, high)", unit="nm")
 
 

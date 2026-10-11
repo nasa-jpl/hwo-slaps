@@ -22,6 +22,12 @@ The core runner checks that no scientific library was imported, which keeps
 configuration handling and result loading usable on machines without them. The backend
 runner sets up the AutoArray configuration the tests expect. Batch tests need Linux.
 
+CI runs the core tests on Python 3.11 and 3.12 with both the validated dependency
+constraints and the latest compatible releases. The full scientific environment
+uses `constraints/validated.txt`; CPU backend and GPU jobs run on manual dispatch.
+The GPU job needs an existing self-hosted Linux GPU runner and a prepared scientific
+environment.
+
 Tests are grouped by package under `tests/`. Expected values come from independent
 calculations (closed-form lensing and photometry, analytic PSFs), from fixtures of the
 RASTI code, or from comparisons between the reference and JAX engines.
@@ -33,11 +39,24 @@ computed with the RASTI code for five test scenes. The reference engine must rep
 the RASTI reference-engine values bit for bit, and the JAX engine on a GPU must reproduce
 the RASTI GPU values bit for bit. The JAX engine on a CPU must agree to a few parts per
 million. The fixtures were made by `tests/scripts/generate_paper_parity.py`,
-which runs the tagged RASTI code. To check that the committed inputs still match:
+which runs the tagged RASTI code. To regenerate the synthetic inputs without
+executing the tagged code:
 
 ```bash
 python tests/scripts/generate_paper_parity.py --inputs-only --out /path/to/new-inputs
 ```
+
+This command writes inputs; it does not compare them with the committed fixtures.
+
+A separate CPU reference check uses the archived sys0043 production inputs, including
+the COSMOS source, 522 x 522 image, 999 x 999 science35 kernel and HWO noise. Its expected
+values were newly evaluated with the submitted code; historical per-node arrays were
+not archived. The generator's `--production-anchor` mode requires the original
+configuration and job receipt and records their hashes and the submitted-source hashes.
+
+The `*_8fa6209` fixtures preserve intermediate-engine behaviour. In particular, the
+nonlinear fit fixture is a continuity check, not submitted-paper refinement parity
+under the slam1 boxes.
 
 ## Writing tests
 
@@ -63,7 +82,7 @@ The configuration reference is generated from the code. When a configuration tab
 changes, regenerate `docs/CONFIG.md`; the build fails if it is out of date:
 
 ```bash
-python -m hwoslaps reference > docs/CONFIG.md
+PYTHONPATH=src python -m hwoslaps reference > docs/CONFIG.md
 ```
 
 The figure on the quickstart page is made by `docs/_scripts/quickstart_figure.py`, run
@@ -71,4 +90,4 @@ from the repository root in the scientific environment.
 
 `.readthedocs.yaml` configures a Read the Docs build with the same settings, and
 `.github/workflows/docs.yml` builds the HTML on pushes and pull requests that touch the
-documentation or source.
+documentation, source, examples or configurations.

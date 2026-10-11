@@ -9,11 +9,27 @@ import pytest
 
 from hwoslaps.artifacts import save_forecast
 from hwoslaps.batch import BatchConflict, BatchError, parse_batch, plan_batch
-from hwoslaps.batch.jobs import follow_ups
+from hwoslaps.batch.jobs import FollowupFailure, follow_ups
 from hwoslaps.batch.state import claim_run_dir, publish_marker
 from hwoslaps.fisher.positions import explicit_positions
 from hwoslaps.fisher.result import ForecastResult
 from hwoslaps.identity import file_digest
+
+
+def test_configured_retry_uses_carried_trial_without_resolving_geometry(tiny_batch_spec, monkeypatch):
+    from hwoslaps.batch.jobs import trial_id
+    from hwoslaps.batch.worker import resolve_configured_trial
+    spec = tiny_batch_spec()
+    position = (.2718281828459045, -.3141592653589793)
+    carried = {'mass_msun': 1e8, 'position_yx': list(position), 'trial_id': trial_id(1e8, position)}
+    def forbidden(*args, **kwargs):
+        raise AssertionError('retry attempted to resolve a critical curve on this host')
+    monkeypatch.setattr('hwoslaps.scene.subhalo.configured_injection', forbidden)
+    parameters = {'mass_msun': 1e8, 'resolved_trial': carried}
+    assert resolve_configured_trial(parameters, spec.base, None) == carried
+    parameters['resolved_trial'] = {**carried, 'trial_id': 'another'}
+    with pytest.raises(BatchConflict, match='carried configured trial'):
+        resolve_configured_trial(parameters, spec.base, None)
 
 
 @pytest.mark.parametrize('kind,radius,amplitudes,expected', [
@@ -22,6 +38,7 @@ from hwoslaps.identity import file_digest
     ('forecast_argmax', .2, [-2., 3., 2.], [(0., .2)]),
     ('forecast_argmax', None, [-2., 0., -1.], None),
     ('forecast_argmax', .15, [-2., 3., 2.], None),
+    ('forecast_argmax', .05, [-2., 3., 2.], None),
     ('forecast_argmax', None, [np.nan, np.nan, np.nan], None),
 ])
 def test_follow_ups_from_completed_forecasts(tiny_batch_spec, tmp_path, kind, radius, amplitudes, expected):
@@ -44,12 +61,132 @@ def test_follow_ups_from_completed_forecasts(tiny_batch_spec, tmp_path, kind, ra
         'run': run.name, 'artifacts': {'forecast': {'path': str(path.relative_to(job_dir)),
         'bytes': path.stat().st_size, 'sha256': file_digest(path)}}})
     if expected is None:
-        with pytest.raises(BatchError, match=job.job_id):
+        failures = follow_ups(plan, job, root)
+        assert len(failures) == 1 and isinstance(failures[0], FollowupFailure)
+        assert failures[0].source_job_id == job.job_id
+        assert failures[0].family == 'n' and failures[0].mass_msun == 1e8
+        terminal = root / failures[0].job_id / 'failure.json'
+        from hwoslaps.artifacts import write_json
+        write_json(terminal, failures[0].to_mapping())
+        assert follow_ups(plan, job, root) == failures
+        record = json.loads(terminal.read_text())
+        record['source_job_id'] = 'another/member/forecast'
+        terminal.write_text(json.dumps(record))
+        with pytest.raises(BatchConflict, match='terminal follow-up identity changed'):
             follow_ups(plan, job, root)
     else:
         following = follow_ups(plan, job, root)
         assert [tuple(item.parameters['position_yx']) for item in following] == expected
         assert all(item.parameters['mass_msun'] == 1e8 and item.parameters['attempt'] == 0 for item in following)
+
+
+def test_argmax_filters_the_fit_domain_before_ranking(tiny_batch_spec, tmp_path):
+    family = {'arms': ['fit'], 'forecast_arm': 'wide', 'trials': {'kind': 'forecast_argmax', 'masses_msun': [1e8]},
+              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'}}
+    spec = tiny_batch_spec(population={'count': 1}, arms=[{'name': 'wide'}, {'name': 'fit',
+        'overrides': {'forecast': {'positions': {'kind': 'explicit', 'positions_yx': [[0., .2]]}}}}], nonlinear={'n': family})
+    plan = plan_batch(spec)
+    job = next(job for job in plan.jobs if job.kind == 'forecast' and job.arm == 'wide')
+    positions = explicit_positions([[0., .1], [0., .3]], (0., 0.))
+    result = ForecastResult(np.array([1e8]), positions, np.array([[4., 100.]]), np.array([[4., 100.]]),
+                            np.ones((1, 2)), np.ones((1, 2)), 'knowledge_error', job.config.to_mapping(), {})
+    job_dir = tmp_path / 'domain' / job.job_id
+    run = claim_run_dir(job_dir)
+    path = save_forecast(result, run / 'forecast.npz')
+    publish_marker(job_dir, {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'kind': 'forecast',
+        'run': run.name, 'artifacts': {'forecast': {'path': str(path.relative_to(job_dir)),
+        'bytes': path.stat().st_size, 'sha256': file_digest(path)}}})
+    selected = follow_ups(plan, job, tmp_path / 'domain')
+    assert len(selected) == 1 and selected[0].parameters['position_yx'] == (0., .1)
+
+
+def test_missing_requested_mismatch_metric_is_a_terminal_followup(tiny_batch_spec, tmp_path):
+    family = {'trials': {'kind': 'forecast_argmax', 'masses_msun': [1e8], 'metric': 'q_mismatch'},
+              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'}}
+    plan = plan_batch(tiny_batch_spec(population={'count': 1}, nonlinear={'n': family}))
+    job = next(job for job in plan.jobs if job.kind == 'forecast')
+    positions = explicit_positions([[0., .1]], (0., 0.))
+    result = ForecastResult(np.array([1e8]), positions, np.ones((1, 1)), np.ones((1, 1)),
+                            None, None, 'matched', job.config.to_mapping(), {})
+    root = tmp_path / 'missing-metric'
+    job_dir = root / job.job_id
+    run = claim_run_dir(job_dir)
+    path = save_forecast(result, run / 'forecast.npz')
+    publish_marker(job_dir, {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'kind': 'forecast',
+        'run': run.name, 'artifacts': {'forecast': {'path': str(path.relative_to(job_dir)),
+        'bytes': path.stat().st_size, 'sha256': file_digest(path)}}})
+    failures = follow_ups(plan, job, root)
+    assert len(failures) == 1 and isinstance(failures[0], FollowupFailure)
+
+
+@pytest.mark.parametrize('metric,support,expected_index', [('q_asimov', False, 1), ('q_mismatch', False, 0), ('q_asimov', True, 0)])
+def test_argmax_metric_member_radius_and_image_support_are_independent(tiny_batch_spec, tmp_path, metric, support, expected_index):
+    family = {'trials': {'kind': 'forecast_argmax', 'masses_msun': [1e8], 'metric': metric,
+                        'aperture_einstein_radius_multiple': .5}, 'inject': True, 'noise': False,
+              'fit': {'mode': 'fixed_template'}}
+    spec = tiny_batch_spec(population={'count': 1}, nonlinear={'n': family})
+    plan = plan_batch(spec)
+    radius = plan.arm_configs[0].config.scene.einstein_radius()
+    if support:
+        grid = plan.arm_configs[0].config.scene.grid
+        margin = grid.shape[1] * grid.pixel_scale_arcsec / 2 - .2 * radius
+        trials = replace(spec.nonlinear[0].trials, support_margin_arcsec=margin)
+        spec = replace(spec, nonlinear=(replace(spec.nonlinear[0], trials=trials),))
+        plan = plan_batch(spec)
+    job = next(job for job in plan.jobs if job.kind == 'forecast')
+    points = [(0., scale * radius) for scale in (.1, .3, .7)]
+    positions = explicit_positions(points, (0., 0.))
+    result = ForecastResult(np.array([1e8]), positions, np.array([[1., 4., 9.]]), np.array([[1., 4., 9.]]),
+                            np.array([[10., 1., 1.]]), np.ones((1, 3)), 'knowledge_error', job.config.to_mapping(), {})
+    root = tmp_path / 'geometry'
+    job_dir = root / job.job_id
+    run = claim_run_dir(job_dir)
+    path = save_forecast(result, run / 'forecast.npz')
+    publish_marker(job_dir, {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'kind': 'forecast',
+        'run': run.name, 'artifacts': {'forecast': {'path': str(path.relative_to(job_dir)),
+        'bytes': path.stat().st_size, 'sha256': file_digest(path)}}})
+    chosen = follow_ups(plan, job, root)
+    assert len(chosen) == 1 and chosen[0].parameters['position_yx'] == points[expected_index]
+
+
+@pytest.mark.backend
+def test_unusable_member_followup_is_terminal_and_other_member_finishes(tiny_batch_spec, tmp_path, monkeypatch):
+    from hwoslaps.batch import BatchIncomplete, open_batch, run_batch
+    from hwoslaps.batch.frozen import persist_plan
+    from hwoslaps.batch.state import source_revision
+    from hwoslaps.provenance import capture_provenance
+    family = {'trials': {'kind': 'forecast_argmax', 'masses_msun': [1e8]}, 'inject': True, 'noise': False,
+              'fit': {'mode': 'fixed_template'}, 'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50,
+              'n_eff': 200, 'n_shell': 1, 'f_live': .01, 'discard_exploration': True, 'number_of_cores': 1}}
+    spec = tiny_batch_spec(nonlinear={'n': family}, execution={'workers_per_device': 1})
+    plan = plan_batch(spec)
+    root = tmp_path / 'terminal'
+    persist_plan(root, plan)
+    for job in plan.jobs:
+        positions = explicit_positions([[0., .1]], (0., 0.))
+        amplitude = -1. if job.member.index == 0 else 1.
+        result = ForecastResult(np.array([1e8]), positions, np.ones((1, 1)), np.ones((1, 1)),
+                                np.array([[amplitude]]), np.ones((1, 1)), 'knowledge_error', job.config.to_mapping(), {})
+        job_dir = root / job.job_id
+        run = claim_run_dir(job_dir)
+        path = save_forecast(result, run / 'forecast.npz')
+        publish_marker(job_dir, {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'kind': 'forecast',
+            'run': run.name, 'source_revision': source_revision(capture_provenance()), 'artifacts': {'forecast': {
+                'path': str(path.relative_to(job_dir)), 'bytes': path.stat().st_size, 'sha256': file_digest(path)}}})
+    with pytest.raises(BatchIncomplete) as failure:
+        run_batch(spec, root)
+    assert failure.value.report.counts['failed'] == 1 and failure.value.report.counts['completed'] == 1
+    failed = next(job for job in open_batch(root).jobs if job.kind == 'followup')
+    assert failed.status == 'failed' and failed.family == 'n' and failed.source_job_id.endswith('/forecast')
+    original = (failed.path / 'failure.json').read_bytes()
+    def forbidden(*args, **kwargs):
+        raise AssertionError('terminal resume attempted to redraw the population')
+    monkeypatch.setattr('hwoslaps.batch.jobs.iter_population_members', forbidden)
+    with pytest.raises(BatchIncomplete) as resumed:
+        run_batch(spec, root)
+    assert resumed.value.report.counts['failed'] == 1 and resumed.value.report.counts['skipped'] == 3
+    assert (failed.path / 'failure.json').read_bytes() == original
+    assert not (root / 'sessions/2/workers.jsonl').exists()
 
 
 @pytest.mark.backend

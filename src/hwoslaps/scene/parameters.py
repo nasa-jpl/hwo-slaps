@@ -66,7 +66,7 @@ def with_parameter(spec: SceneSpec, name: str, value: float) -> SceneSpec:
         for definition in PROFILE_TYPES[component.type].parameters(component.values):
             if _name(component, definition) == name:
                 return _replaced(spec, galaxy, component, definition, value)
-    raise KeyError(f"no scene parameter {name!r}; parameters: {', '.join(p.name for p in scene_parameters(spec))}")
+    raise KeyError(f"no scene parameter {name!r}; parameters: {', '.join(scene_parameter_names(spec))}")
 
 
 def _replaced(spec: SceneSpec, galaxy: GalaxySpec, component: ComponentSpec, definition: ParameterDef,

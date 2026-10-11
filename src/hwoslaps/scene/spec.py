@@ -12,8 +12,9 @@ from the profile registry, halo keys from ``scene.halos``, the injection from
 - a placement with ``radius: einstein_radius`` has exactly one lens mass component with an
   Einstein radius.
 
-Angles and positions are arcsec in (y, x) order on the image plane with the origin at the
-grid centre; placements are about the lens centre.
+Positions are angular arcsec in (y, x) order in each component's own plane, with the
+origin at the grid centre; placements are about the lens centre. Named placement
+radii are image-plane features and cannot place a hypothesis behind the main lens.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from .halos import HaloModel, MOLINE2017_MASS_RANGE_MSUN, halo_model_from_values
 from .image_source import frozen_value
 from .perturbers import PERTURBERS_TABLE, PerturberSpec, check_population_context, perturbers_from_values
 from .profiles import PROFILE_TYPES
-from .subhalo import INJECTION_TABLE, InjectionSpec, injection_from_values
+from .subhalo import INJECTION_TABLE, InjectionSpec, injection_from_values, validate_named_radius
 
 __all__ = [
     "ComponentSpec", "GalaxySpec", "GridSpec", "LIGHT_COMPONENT_TABLE", "LightGroup", "MASS_COMPONENT_TABLE",
@@ -288,12 +289,24 @@ def _check_halos(values: Mapping[str, Any], path: str) -> None:
 
 def _check_radius_reference(values: Mapping[str, Any], path: str) -> None:
     injection = values["injection"]
-    if injection is None or injection["position"].get("radius") != "einstein_radius":
+    if injection is None:
+        return
+    radius = injection["position"].get("radius")
+    if radius is not None:
+        validate_named_radius(radius, lens_redshift=values["lens"]["redshift"],
+                              subhalo_redshift=values["subhalo"]["redshift"],
+                              path=f"{path}.injection.position.radius")
+    if radius != "einstein_radius":
         return
     count = len(_einstein_radii((component["type"], component) for component in values["lens"]["mass"].values()))
     if count != 1:
         raise ConfigError(f"{path}.injection.position.radius",
                           f"einstein_radius needs exactly one lens mass component with an Einstein radius, found {count}")
+
+
+def _check_lens_centre(values: Mapping[str, Any], path: str) -> None:
+    if not any("centre" in component for component in values["lens"]["mass"].values()):
+        raise ConfigError(f"{path}.lens.mass", "at least one lens mass component must have a centre for placements and layouts")
 
 
 SCENE_TABLE = Table(
@@ -308,6 +321,7 @@ SCENE_TABLE = Table(
     ),
     rules=(
         Rule("source.redshift > lens.redshift", _check_redshift_order),
+        Rule("lens mass includes a centred component", _check_lens_centre),
         Rule("component names unique within a galaxy and not reserved", _check_component_names),
         Rule("halo redshifts in (0, source.redshift); moline2017_eq7 only at the lens redshift and in its mass range",
              _check_halos),

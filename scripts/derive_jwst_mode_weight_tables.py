@@ -721,7 +721,8 @@ def _build_parser():
     parser.add_argument('--max-maps', type=int)
     parser.add_argument('--global-max-noll', type=int, default=55)
     parser.add_argument('--segment-max-noll', type=int, default=10)
-    parser.add_argument('--output-dir', default='src/hwoslaps/optics/priors')
+    parser.add_argument('--output-dir', default='out/jwst_mode_weight_tables',
+                        help='derived tables directory (packaged priors are replaced only if selected explicitly)')
     parser.add_argument('--opd-cache-dir')
     return parser
 
