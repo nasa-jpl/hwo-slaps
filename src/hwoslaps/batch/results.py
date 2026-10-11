@@ -98,7 +98,8 @@ class BatchResults:
 def open_batch(output_dir) -> BatchResults:
     root = Path(output_dir).expanduser().resolve()
     sessions = root / 'sessions'
-    numbers = sorted(int(path.name) for path in sessions.iterdir() if path.is_dir() and path.name.isdecimal())
+    numbers = sorted(int(path.name) for path in sessions.iterdir()
+                     if path.is_dir() and path.name.isdecimal() and (path / 'batch_spec.yaml').is_file())
     if not numbers:
         raise BatchError(f'no recorded batch session in {root}')
     spec = read_yaml(sessions / str(numbers[-1]) / 'batch_spec.yaml')

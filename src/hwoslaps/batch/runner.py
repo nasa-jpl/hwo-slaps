@@ -401,10 +401,10 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
             provenance = capture_provenance(command=sys.argv)
             revision = source_revision(provenance)
             start = time.time()
-            write_yaml(session_dir / 'batch_spec.yaml', effective.to_mapping())
             if resume:
                 _wait_for_earlier_workers(output, session, events)
             plan = restored_plan(output, effective)
+            write_yaml(session_dir / 'batch_spec.yaml', effective.to_mapping())
             write_json(session_dir / 'session.json', {'session': session, 'started': start, 'provenance': provenance,
                 'source': provenance['source'], 'source_revision': revision, 'execution': execution.to_mapping(),
                 'spec_digest': plan.spec_digest, 'population_digest': plan.population_digest,

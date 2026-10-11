@@ -1,6 +1,8 @@
 """Persist the realized plan so resume never redraws a population or its trials."""
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
+import re
 
 from ..artifacts import write_json, write_yaml
 from ..config.loading import read_yaml
@@ -9,6 +11,53 @@ from ..identity import file_digest, mapping_digest, native_ready
 from ..seeding import member_seed
 from .jobs import BatchPlan, Job, MemberRecord, PlannedArm, build_plan, plan_batch
 from .state import BatchConflict, read_json
+
+
+def plan_history(output):
+    """Read immutable revisions; every append retains the full previous realization."""
+    root = output / 'frozen_plan.yaml'
+    seal = output / 'frozen_plan.json'
+    revisions = {}
+    for path in output.glob('frozen_plan_r*'):
+        match = re.fullmatch(r'frozen_plan_r([0-9]{6})\.(yaml|json)', path.name)
+        if match is None:
+            raise BatchConflict(f'unknown frozen-plan revision file: {path}')
+        revisions.setdefault(int(match[1]), set()).add(match[2])
+    if root.exists() != seal.exists() or revisions and not root.exists():
+        raise BatchConflict('persisted frozen plan and its byte-identity seal must both be present')
+    if not root.exists():
+        return []
+    if set(revisions) != set(range(1, len(revisions) + 1)) or any(kinds != {'yaml', 'json'} for kinds in revisions.values()):
+        raise BatchConflict('frozen-plan revisions must be contiguous and paired with their seals')
+    history = []
+    for path in [root, *(output / f'frozen_plan_r{number:06d}.yaml' for number in sorted(revisions))]:
+        sha = file_digest(path)
+        expected = {'schema': 1, 'sha256': sha}
+        if history:
+            expected['previous_sha256'] = history[-1][2]
+        if read_json(path.with_suffix('.json')) != expected:
+            raise BatchConflict(f'persisted frozen plan bytes or revision link changed: {path}')
+        record = read_yaml(path)
+        if history:
+            prior = history[-1][1]
+            if len(record['members']) <= len(prior['members']):
+                raise BatchConflict('frozen-plan revision must append population members')
+            for key in ('members', 'arms', 'jobs'):
+                if mapping_digest({'items': record[key][:len(prior[key])]}) != mapping_digest({'items': prior[key]}):
+                    raise BatchConflict(f'frozen-plan revision changed previous {key}')
+            for key in ('schema', 'base_config_digest', 'population_digest', 'deferred'):
+                if record[key] != prior[key]:
+                    raise BatchConflict(f'frozen-plan revision changed previous {key}')
+        history.append((path, record, sha))
+    return history
+
+
+def count_spec(spec, count):
+    if spec.population is None:
+        if count != 1:
+            raise BatchConflict('a single-config batch cannot append population members')
+        return spec
+    return replace(spec, population=replace(spec.population, count=count))
 
 
 def science_spec(spec):
@@ -71,6 +120,13 @@ def persisted_members(output, spec):
 
 
 def persist_plan(output, plan):
+    history = plan_history(output)
+    identity = mapping_digest(science_spec(plan.spec))
+    if history:
+        prior = history[-1][1]
+        if (len(plan.members) < len(prior['members'])
+                or prior['spec_identity'] != mapping_digest(science_spec(count_spec(plan.spec, len(prior['members']))))):
+            raise BatchConflict('only an increased population count can append to the frozen plan')
     entries = []
     for member in plan.members:
         root = output / 'members' / member.run_name
@@ -94,7 +150,7 @@ def persist_plan(output, plan):
             write_yaml(path, arm.config.to_mapping())
         arms.append({'member_index': arm.member.index, 'name': arm.name, 'base_name': arm.base_name,
                      'direction': arm.direction, 'config_digest': arm.config_digest, 'sha256': file_digest(path)})
-    record = {'schema': 1, 'spec_identity': mapping_digest(science_spec(plan.spec)),
+    record = {'schema': 1, 'spec_identity': identity,
               'base_config_digest': plan.spec.base.digest(), 'spec_digest': plan.spec_digest,
               'population_digest': plan.population_digest, 'file_digests': dict(plan.file_digests),
               'catalog_path': None if plan.spec.population is None or plan.spec.population.spec.catalog is None
@@ -104,20 +160,30 @@ def persist_plan(output, plan):
                         'arm': job.arm, 'config_digest': job.config_digest, 'preparation_key': job.preparation_key,
                         'parameters': {key: value for key, value in job.parameters.items()
                                        if key != 'forecast_config_mapping'}, 'seeds': job.seeds} for job in plan.jobs]}
-    path = output / 'frozen_plan.yaml'
-    if path.exists():
-        return
+    if history:
+        prior = history[-1][1]
+        if record['spec_identity'] == prior['spec_identity']:
+            return
+        for key in ('members', 'arms', 'jobs'):
+            if mapping_digest({'items': record[key][:len(prior[key])]}) != mapping_digest({'items': prior[key]}):
+                raise BatchConflict(f'append changed previous frozen {key}')
+        if (len(record['members']) <= len(prior['members']) or record['spec_identity'] != mapping_digest(science_spec(plan.spec))
+                or prior['spec_identity'] != mapping_digest(science_spec(count_spec(plan.spec, len(prior['members']))))):
+            raise BatchConflict('only an increased population count can append to the frozen plan')
+        path = output / f'frozen_plan_r{len(history):06d}.yaml'
+    else:
+        path = output / 'frozen_plan.yaml'
     write_yaml(path, native_ready(record))
-    write_json(output / 'frozen_plan.json', {'schema': 1, 'sha256': file_digest(path)})
+    seal = {'schema': 1, 'sha256': file_digest(path)}
+    if history:
+        seal['previous_sha256'] = history[-1][2]
+    write_json(path.with_suffix('.json'), seal)
 
 
 def restored_plan(output, spec):
     """Return the checked frozen realization, or plan the first session."""
-    path = output / 'frozen_plan.yaml'
-    seal = output / 'frozen_plan.json'
-    if path.exists() != seal.exists():
-        raise BatchConflict('persisted frozen plan and its byte-identity seal must both be present')
-    if not path.exists():
+    history = plan_history(output)
+    if not history:
         if not any((output / 'members').glob('*/member.json')):
             return plan_batch(spec)
         # Upgrade existing completed cohorts without redrawing accepted values.
@@ -149,13 +215,18 @@ def restored_plan(output, spec):
                     config = parse_config(read_yaml(output / 'members' / member.run_name / name / 'effective_config.yaml'))
                     configurations.append(PlannedArm(member, name, arm.name, direction, config, config.digest()))
         return build_plan(spec, frozen_members=members, frozen_arms=tuple(configurations))
-    authority = read_json(seal)
-    if authority != {'schema': 1, 'sha256': file_digest(path)}:
-        raise BatchConflict('persisted frozen plan bytes changed')
-    record = read_yaml(path)
-    if (record['schema'] != 1 or record['spec_identity'] != mapping_digest(science_spec(spec))
-            or record['base_config_digest'] != spec.base.digest()):
+    record = history[-1][1]
+    requested = spec
+    old_count = len(record['members'])
+    requested_count = 1 if spec.population is None else spec.population.count
+    if requested_count < old_count:
+        raise BatchConflict('requested population count cannot shrink the frozen cohort')
+    spec = count_spec(spec, old_count)
+    if (any(item['schema'] != 1 or item['spec_identity'] != mapping_digest(science_spec(count_spec(spec, len(item['members']))))
+            for _, item, _ in history) or record['base_config_digest'] != spec.base.digest()):
         raise BatchConflict('requested scientific specification or consumed inputs differ from the frozen plan')
+    if any((output / 'members' / name).exists() for _, name, _ in member_names(requested)[old_count:]):
+        raise BatchConflict('unsealed added-member directories conflict with population extension')
     for filename, digest in record['file_digests'].items():
         if filename != record['catalog_path'] and file_digest(filename) != digest:
             raise BatchConflict(f'consumed input bytes differ from the frozen plan: {filename}')
@@ -191,7 +262,30 @@ def restored_plan(output, spec):
         jobs.append(Job(item['job_id'], item['kind'], arm.member, arm.name, arm.config, arm.config_digest,
                         item['preparation_key'], parameters, item['seeds'],
                         None if item['kind'] == 'simulate' else spec.execution.forecast.engine))
-    return BatchPlan(spec, members, tuple(jobs), record['deferred'], tuple(configurations),
+    current = BatchPlan(spec, members, tuple(jobs), record['deferred'], tuple(configurations),
                      spec.captured_digest(base_config_digest=record['base_config_digest'],
                                           population_digest=record['population_digest']),
                      record['population_digest'], record['file_digests'])
+    if requested_count == old_count:
+        return current
+    from ..population.sampling import iter_population_members
+    population = requested.population
+    additions = tuple(MemberRecord(item.index, item.run_name, item.seed, item.attempt, item.values, item.config,
+                                   item.config.digest(), item.catalog_sha256,
+                                   population.spec.captured_digest(catalog_sha256=item.catalog_sha256))
+                      for item in iter_population_members(requested.base, population.spec, requested_count - old_count,
+                          seed=population.seed, start=population.start + old_count, name_prefix=population.name_prefix,
+                          base_dir=requested.base_dir))
+    extra = build_plan(requested, frozen_members=additions,
+                       member_indices={index for index, _, _ in member_names(requested)})
+    if extra.population_digest != current.population_digest:
+        raise BatchConflict('added members differ from the frozen population identity')
+    files = {path: sha for path, sha in current.file_digests.items() if path != record['catalog_path']}
+    for path, sha in extra.file_digests.items():
+        if path in files and files[path] != sha:
+            raise BatchConflict(f'consumed input changed while extending the population: {path}')
+        files[path] = sha
+    return BatchPlan(requested, (*members, *additions), (*jobs, *extra.jobs), current.deferred,
+                     (*configurations, *extra.arm_configs),
+                     requested.captured_digest(base_config_digest=record['base_config_digest'], population_digest=current.population_digest),
+                     current.population_digest, files)

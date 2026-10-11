@@ -245,7 +245,7 @@ def plan_batch(spec: BatchSpec) -> BatchPlan:
     return build_plan(spec)
 
 
-def build_plan(spec: BatchSpec, *, frozen_members=None, frozen_arms=None) -> BatchPlan:
+def build_plan(spec: BatchSpec, *, frozen_members=None, frozen_arms=None, member_indices=None) -> BatchPlan:
     """Construct jobs from declared inputs or the checked frozen realization."""
     base_identity = spec.base.capture_identity()
     manifest = dict(base_identity['file_digests'])
@@ -306,7 +306,7 @@ def build_plan(spec: BatchSpec, *, frozen_members=None, frozen_arms=None) -> Bat
                 configurations.append(PlannedArm(member, name, arm.name, direction, effective, config_identity(effective)))
     spec_digest = spec.captured_digest(base_config_digest=base_identity['config_digest'], population_digest=population_digest)
     plan = BatchPlan(spec, members, (), {}, tuple(configurations), spec_digest, population_digest, manifest)
-    member_indices = {member.index for member in members}
+    member_indices = {member.index for member in members} if member_indices is None else member_indices
     for family in spec.nonlinear:
         for index, trial in enumerate(family.trials.explicit):
             if trial.members != 'all' and not set(trial.members) <= member_indices:

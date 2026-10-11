@@ -170,6 +170,9 @@ stops with a conflict instead of mixing results.
 The realized members and effective configurations are frozen at the first run. Resume
 loads those values instead of drawing them again on the current host, and checks their
 stored bytes, the scientific specification, catalogue identity and referenced input files.
+Increasing only the population count appends new absolute member indices. Earlier
+members and artifacts stay unchanged, with linked immutable plan revisions recording
+the extension. Shrinking the cohort or changing other scientific inputs is a conflict.
 Referenced PSF and scene assets must remain available at their recorded paths.
 
 Set `execution.job_timeout_seconds` to bound one dispatched job. Its default is `null`.
