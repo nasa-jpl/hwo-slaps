@@ -1,0 +1,3 @@
+# Illustrative convergence overlay: twice the wavelength-bin count, all geometry unchanged.
+psf:
+  truth: {wavelength_samples: 22}

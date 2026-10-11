@@ -1,0 +1,14 @@
+# Illustrative overlay: SEI coating/QE product with an assumed flat 0.832 filter.
+# A 999-pixel kernel aliases at the short band edge; 901 pixels cover 6.45 arcsec.
+psf:
+  truth: {wavelength_nm: null, wavelength_samples: 11, kernel_shape: [901, 901]}
+instrument:
+  bandpass:
+    kind: product
+    support_nm: [450.0, 550.0]
+    factors:
+      - {kind: table, path: ../hwo_reference/sei_v0.1.9/XeLiF_refl.yaml, wavelength_key: wavelength,
+         value_key: reflectivity, wavelength_unit: nm, power: 13, label: coatings}
+      - {kind: table, path: ../hwo_reference/sei_v0.1.9/Teledyne_COSMOS_CMOS_QE.yaml,
+         wavelength_key: wavelength, value_key: QE, wavelength_unit: nm, label: detector_qe}
+      - {kind: constant, value: 0.832}

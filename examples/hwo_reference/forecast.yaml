@@ -1,0 +1,5 @@
+# Illustrative all-pixel forecast on a fixed 61 x 61 lattice; not the paper population aperture.
+forecast:
+  positions: {kind: grid, spacing_arcsec: 0.05, half_width_arcsec: 1.5}
+  mask: {kind: all_pixels}
+  nuisances: {}
