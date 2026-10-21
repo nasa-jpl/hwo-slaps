@@ -67,6 +67,13 @@ Its `--inputs-only` mode writes inputs without comparing committed fixtures. Its
 those arrays were not historical per-node campaign outputs. Regenerating expected arrays
 with the current implementation would not supply an independent oracle.
 
+`tests/fixtures/analysis/table5_knowledge_error.json` holds the archived aperture-mask
+counts behind RASTI Table 5, with the per-system tolerances and the Retained and Pass
+columns. `tests/scripts/psf_retention_table.py` is the reducer behind the submitted table,
+and `tests/scripts/extract_table5_knowledge.py` rebuilds the fixture from the archived
+`psf_knowledge_fisher_v1` masks, checking every value against the reducer output. Both
+read the campaign archive, which is not part of the repository.
+
 ## Writing tests
 
 - Test one behaviour in one place. Extend an existing test or parameter table before

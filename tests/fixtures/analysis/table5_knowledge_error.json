@@ -1,26 +1,31 @@
 {
   "schema": 1,
   "provenance": {
-    "description": "Real integer aperture-mask counts for the 24 Fisher tolerances underlying submitted RASTI Table 5, with expected K values from the original figure reducer JSON.",
+    "description": "Real integer aperture-mask counts for the 24 Fisher tolerances underlying submitted RASTI Table 5, with expected K values and Table 5 columns from the original figure reducer output.",
     "source_archive": "psf_knowledge_fisher_v1",
     "source_reducer": {
-      "path": "figure_builds/results_20260922/psf_retention_table.py",
-      "sha256": "9de4eef1729d669ec389a563eae70b2355982a6fb0159757cf6dbd68c0750f19"
+      "path": "tests/scripts/psf_retention_table.py",
+      "sha256": "41f95a7ec4fe35896806202775712a66753ef513a93ae0c3a911f48b82125e1a"
     },
     "source_table": {
-      "path": "figure_builds/results_20260922/psf_retention_table.json",
+      "path": "psf_retention_table.json, written by the reducer from the archive",
       "sha256": "6134857968389595e378398b8feba52882676cd6156d2077f16e207622b09e6b"
     },
+    "source_extractor": {
+      "path": "tests/scripts/extract_table5_knowledge.py",
+      "sha256": "9554bdcaf47fad9e45ccfe34f509c71c8b0b41e686ad12ebbf3fd3d411ec606c"
+    },
     "source_manuscript": {
-      "path": "rasti_manuscript/main.tex",
+      "path": "main.tex of the submitted RASTI manuscript",
       "sha256": "8a3338798687255822aebf2583815018331fc89c081ae02c5ed0f04027330768",
       "definition": "K = retained correct-PSF sensitive positions / correct-PSF sensitive positions; Q10(K)>=0.9 and Q90(F)<=0.1, inside radius 2 theta_E_eff."
     },
     "mask_archive_file_count": 984,
     "mask_archive_manifest_sha256": "955c80c0d3e9b72651f8d37d8dafd575b2ea19d12db1db6a25649759514f53c9",
     "mask_archive_manifest_format": "SHA256, two spaces, campaign-relative filename, newline; sorted by filename.",
-    "extraction": "NumPy unpackbits (MSB first) of actual aperture-restricted masks; all per-amplitude K, R and F quantiles and gates checked against the original figure reducer JSON.",
+    "extraction": "NumPy unpackbits (MSB first) of actual aperture-restricted masks; all per-amplitude K, R and F quantiles, gates and Table 5 medians checked against the original figure reducer output.",
     "expected_tolerance_rule": "The original reducer uses the largest contiguous passing amplitude. All 24 archived passing sets are monotone, so the goldens also test the generic largest-passing reducer.",
+    "table5_rule": "Retained is the median over the 12 systems (inverse empirical CDF) of Q10(K) over the eight directions (linear interpolation); Pass counts systems with Q10(K)>=0.9 and Q90(F)<=0.1.",
     "excluded_amplitude_nm": 35
   },
   "criterion": {
@@ -405,5 +410,43 @@
       "expected_tolerance_K_nm": 2,
       "expected_tolerance_total_area_nm": 2
     }
-  ]
+  ],
+  "table5": {
+    "m10": {
+      "2": {
+        "retained_median_q10_K": 0.9722938144329897,
+        "pass_K": 12
+      },
+      "5": {
+        "retained_median_q10_K": 0.9246684350132626,
+        "pass_K": 11
+      },
+      "10": {
+        "retained_median_q10_K": 0.8156390977443608,
+        "pass_K": 4
+      },
+      "20": {
+        "retained_median_q10_K": 0.6721804511278195,
+        "pass_K": 0
+      }
+    },
+    "m50": {
+      "2": {
+        "retained_median_q10_K": 0.9749197288619337,
+        "pass_K": 12
+      },
+      "5": {
+        "retained_median_q10_K": 0.9247464503042596,
+        "pass_K": 10
+      },
+      "10": {
+        "retained_median_q10_K": 0.8401622718052738,
+        "pass_K": 2
+      },
+      "20": {
+        "retained_median_q10_K": 0.6641990724224046,
+        "pass_K": 0
+      }
+    }
+  }
 }

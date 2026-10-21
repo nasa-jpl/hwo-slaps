@@ -1,7 +1,8 @@
-"""Hand-counted areas, archived Table 5 tolerances and fixed keyed-cohort rules."""
+"""Hand-counted areas, archived Table 5 tolerances and columns, and fixed keyed-cohort rules."""
 
 from copy import deepcopy
 from dataclasses import replace
+import hashlib
 import json
 from pathlib import Path
 
@@ -271,22 +272,30 @@ def test_table5_fixture_covers_both_rung_classes_of_the_twelve_systems():
         (system, rung) for system in systems for rung in ("m10", "m50")}
 
 
+def _table5_ratios(case):
+    """K, total-area and spurious ratios per amplitude and direction, from the archived counts."""
+    ratios = ({}, {}, {})
+    for amplitude, rows in case["directions_by_amplitude_nm"].items():
+        for column, ratio in enumerate(ratios):
+            ratio[float(amplitude)] = {direction: counts[column] / case["reference_count"]
+                                       for direction, counts in zip(_TABLE5["direction_order"], rows, strict=True)}
+    return ratios
+
+
+def test_table5_fixture_names_its_committed_generators():
+    provenance = _TABLE5["provenance"]
+    for key in ("source_reducer", "source_extractor"):
+        path = Path(__file__).parents[2] / provenance[key]["path"]
+        assert hashlib.sha256(path.read_bytes()).hexdigest() == provenance[key]["sha256"], key
+
+
 @pytest.mark.parametrize("case", _TABLE5["cases"],
                          ids=lambda case: f"{case['system_id']}-{case['rung_class']}")
 def test_tolerance_reproduces_archived_table5_retained_locations(case):
     # Real integer aperture-mask counts; the golden tolerances come from the original figure reducer.
     # No artificial directions or copies of already-reduced quantiles are supplied.
-    reference_count = case["reference_count"]
+    retention, total_area, spurious = _table5_ratios(case)
     directions = _TABLE5["direction_order"]
-    retention, total_area, spurious = {}, {}, {}
-    for amplitude, rows in case["directions_by_amplitude_nm"].items():
-        amplitude = float(amplitude)
-        retention[amplitude] = {direction: counts[0] / reference_count
-                                for direction, counts in zip(directions, rows, strict=True)}
-        total_area[amplitude] = {direction: counts[1] / reference_count
-                                 for direction, counts in zip(directions, rows, strict=True)}
-        spurious[amplitude] = {direction: counts[2] / reference_count
-                               for direction, counts in zip(directions, rows, strict=True)}
     criterion = ToleranceCriterion(**_TABLE5["criterion"])
     result = knowledge_error_tolerance(ratio=retention, spurious=spurious, eligible=directions,
                                       criterion=criterion)
@@ -296,6 +305,33 @@ def test_tolerance_reproduces_archived_table5_retained_locations(case):
     total = knowledge_error_tolerance(ratio=total_area, spurious=spurious, eligible=directions,
                                      criterion=criterion)
     assert total.amplitude == case["expected_tolerance_total_area_nm"]
+
+
+# Retained and Pass columns of submitted RASTI Table 5, by rung class and error in nm.
+_PAPER_TABLE5 = {"m10": {2: (0.97, 12), 5: (0.92, 11), 10: (0.82, 4), 20: (0.67, 0)},
+                 "m50": {2: (0.97, 12), 5: (0.92, 10), 10: (0.84, 2), 20: (0.66, 0)}}
+
+
+@pytest.mark.parametrize("rung_class", ["m10", "m50"])
+def test_counts_reproduce_table5_retained_and_pass_columns(rung_class):
+    # Retained is the median over systems (inverse empirical CDF) of each system's Q10(K).
+    criterion = ToleranceCriterion(**_TABLE5["criterion"])
+    results, q10 = [], {}
+    for case in _TABLE5["cases"]:
+        if case["rung_class"] != rung_class:
+            continue
+        retention, _, spurious = _table5_ratios(case)
+        results.append(knowledge_error_tolerance(ratio=retention, spurious=spurious,
+                                                 eligible=_TABLE5["direction_order"], criterion=criterion))
+        for amplitude, values in retention.items():
+            q10.setdefault(amplitude, []).append(
+                np.quantile(list(values.values()), criterion.retention_quantile, method="linear"))
+    assert len(results) == 12
+    for amplitude, (retained, passed) in _PAPER_TABLE5[rung_class].items():
+        reducer = _TABLE5["table5"][rung_class][str(amplitude)]
+        median = float(np.quantile(q10[amplitude], 0.5, method="inverted_cdf"))
+        assert median == reducer["retained_median_q10_K"] and round(median, 2) == retained
+        assert sum(amplitude in result.passing for result in results) == reducer["pass_K"] == passed
 
 
 @pytest.mark.backend
