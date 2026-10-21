@@ -30,6 +30,9 @@ job: run the GPU commands above on a machine with the cards. A new push to a pul
 request cancels that pull request's running checks; a push to `main` or `rasti` never
 cancels a running check.
 
+`tools/benchmark_forecast.py` times the preparation and forecasts of any configuration;
+run it with `--help` for its options.
+
 Tests are grouped by package under `tests/`. Expected values come from independent
 calculations (closed-form lensing and photometry, analytic PSFs), from fixtures of the
 RASTI code, or from comparisons between the reference and JAX engines.
