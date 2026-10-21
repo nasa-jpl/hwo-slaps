@@ -13,7 +13,7 @@ from ..config.checks import FilePath, Key, Table, Text
 from ..config.loading import parse_yaml_value
 from ..identity import read_file_snapshot
 
-__all__ = ["TABLE_TABLE", "SpectralTable", "TableSpec", "parse_table", "read_table"]
+__all__ = ["TABLE_TABLE", "SpectralTable", "TableSpec", "read_table"]
 
 WavelengthUnit = Literal["nm", "angstrom", "um", "m"]
 TABLE_TABLE = Table((
@@ -38,10 +38,6 @@ class TableSpec:
     @classmethod
     def from_values(cls, values: Mapping[str, Any]) -> TableSpec:
         return cls(Path(values["path"]), values["wavelength_key"], values["value_key"], values["wavelength_unit"])
-
-
-def parse_table(mapping: Mapping[str, Any], path: str) -> TableSpec:
-    return TableSpec.from_values(TABLE_TABLE.read(mapping, path))
 
 
 @dataclass(frozen=True, eq=False)

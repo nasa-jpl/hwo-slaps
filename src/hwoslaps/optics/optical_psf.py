@@ -298,12 +298,6 @@ class OpticalPSF:
         wavelengths = self._wavelengths_m if wavelengths_m is None else checked_wavelengths(wavelengths_m)
         return tuple(self.kernel(wavelength, coefficients=coefficients) for wavelength in wavelengths)
 
-    def detector_power(self, wavelength_m: float | None = None, *,
-                       coefficients: WavefrontCoefficients | None = None) -> np.ndarray:
-        """Unnormalized power per detector pixel, in units of the pupil power, shape ``(ny, nx)``."""
-        power = self._binned_power(self._wavelength(wavelength_m), self._coefficients_or_own(coefficients))
-        return np.array(power.shaped, dtype=float)
-
     def pupil_wavefront(self, wavelength_m: float | None = None, *,
                         coefficients: WavefrontCoefficients | None = None) -> Any:
         """The aberrated pupil-plane HCIPy wavefront."""
@@ -348,8 +342,8 @@ class OpticalPSF:
         """The provider record: optics, sampling, wavefront and the draw that set it.
 
         The pupil enters through its specification and the Zernike disc; the sampled pupil's
-        own record (``Pupil.to_mapping``: area, power, active and dark segments) follows from
-        the specification and stays out of the provider identity.
+        derived values (area, power, active and dark segments) follow from the specification
+        and stay out of the provider identity.
         """
         pupil = self._pupil.spec
         return {

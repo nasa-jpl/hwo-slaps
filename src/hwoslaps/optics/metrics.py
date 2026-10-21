@@ -14,7 +14,7 @@ from numpy.typing import ArrayLike
 from .optical_psf import FocalField, OpticalPSF
 from .wavefront import WavefrontCoefficients
 
-__all__ = ["captured_power_fraction", "encircled_energy", "fwhm_arcsec", "strehl_ratio"]
+__all__ = ["encircled_energy", "fwhm_arcsec", "strehl_ratio"]
 
 
 def strehl_ratio(psf: OpticalPSF, wavelength_m: float | None = None, *,
@@ -90,14 +90,3 @@ def fwhm_arcsec(field: FocalField) -> float:
     inner = outer - 1
     fraction = (mean_value[inner] - half) / (mean_value[inner] - mean_value[outer])
     return float(2.0 * (mean_radius[inner] + fraction * (mean_radius[outer] - mean_radius[inner])))
-
-
-def captured_power_fraction(psf: OpticalPSF, wavelength_m: float | None = None, *,
-                            coefficients: WavefrontCoefficients | None = None) -> float:
-    """Integrated sampled periodic power inside the kernel support, before normalization.
-
-    Divided by sampled pupil power; repeated wings can bias this relative to physical
-    infinite-plane capture. Check convergence with pupil sampling for the chosen support.
-    """
-    power = psf.detector_power(wavelength_m, coefficients=coefficients)
-    return float(np.sum(power.ravel())) / psf.pupil.total_power

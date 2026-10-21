@@ -11,7 +11,6 @@ _PUBLIC_API = {
     "fnu_jy_to_ab": ("photometry", "fnu_jy_to_ab"),
     "rate_from_ab": ("photometry", "rate_from_ab"),
     "sky_rate_e_per_s_per_pixel": ("photometry", "sky_rate_e_per_s_per_pixel"),
-    "synthetic_ab_mag": ("photometry", "synthetic_ab_mag"),
     "effective_wavelength_m": ("photometry", "effective_wavelength_m"),
     "band_mean_throughput": ("photometry", "band_mean_throughput"),
 }

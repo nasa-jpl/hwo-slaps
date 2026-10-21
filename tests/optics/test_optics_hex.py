@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.config.checks import ConfigError
-from hwoslaps.optics.metrics import captured_power_fraction, fwhm_arcsec, strehl_ratio
+from hwoslaps.optics.metrics import fwhm_arcsec, strehl_ratio
 from hwoslaps.optics.providers import build_psf_provider, parse_psf
 from hwoslaps.optics.pupils import Pupil, build_pupil, parse_pupil
 from hwoslaps.optics.wavefront import WavefrontMode
@@ -72,15 +72,14 @@ def test_strehl_follows_marechal(paper_pupil, defocus_nm):
     assert strehl_ratio(psf) == pytest.approx(marechal, rel=1e-3, abs=5e-4)
 
 
-def test_recorded_captured_power_equals_the_metric(p1_truth):
+def test_recorded_captured_power_follows_the_evaluated_coefficients(p1_truth):
     psf = build_psf_provider(parse_psf({"truth": p1_truth}).truth, pixel_scale_arcsec=0.03)
     recorded = psf.kernel().source["captured_power_fraction"]
-    assert recorded == captured_power_fraction(psf, 5e-7)
     assert 0.0 < recorded < 1.0
     mode = WavefrontMode("segment_hexikes", 1, 0)
     shifted = psf.coefficients.replace(mode, 1.0)
     derivative_side = psf.kernel(coefficients=shifted).source["captured_power_fraction"]
-    assert derivative_side == captured_power_fraction(psf, coefficients=shifted)
+    assert derivative_side == psf.with_coefficients(shifted).kernel().source["captured_power_fraction"]
     assert derivative_side != recorded
 
 

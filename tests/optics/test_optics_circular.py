@@ -7,7 +7,7 @@ import pytest
 from scipy import integrate, optimize, special
 
 from hwoslaps.constants import ARCSEC_PER_RAD
-from hwoslaps.optics.metrics import captured_power_fraction, encircled_energy, fwhm_arcsec, strehl_ratio
+from hwoslaps.optics.metrics import encircled_energy, fwhm_arcsec, strehl_ratio
 from hwoslaps.optics.optical_psf import FocalField
 from hwoslaps.optics.providers import build_psf_provider, parse_psf
 from hwoslaps.optics.pupils import build_pupil, parse_pupil
@@ -171,7 +171,7 @@ def test_rectangular_kernel_keeps_row_column_order():
 def test_captured_power_fraction_is_bracketed_by_airy_encircled_energy():
     psf = _circular_psf(diameter_m=2.0, pixels=256)
     half_width = 5.5 / 2
-    fraction = captured_power_fraction(psf)
+    fraction = psf.kernel().source["captured_power_fraction"]
     assert _airy_encircled_energy(math.pi * half_width) <= fraction <= _airy_encircled_energy(
         math.pi * math.sqrt(2) * half_width)
 
@@ -200,7 +200,7 @@ def test_captured_periodic_power_converges_toward_airy_bounds_with_pupil_samplin
     # This support fits inside the 64-sample period, but repeated wings still bias capture.
     shape = (121, 121)
     providers = [_circular_psf(pixels=pixels, shape=shape, oversampling=9) for pixels in (64, 256, 512)]
-    fractions = [captured_power_fraction(provider) for provider in providers]
+    fractions = [provider.kernel().source["captured_power_fraction"] for provider in providers]
     half_width = shape[0] / 4.0  # pixels are lambda/(2D); radius in lambda/D
     inner = _airy_encircled_energy(math.pi * half_width)
     outer = _airy_encircled_energy(math.pi * math.sqrt(2) * half_width)

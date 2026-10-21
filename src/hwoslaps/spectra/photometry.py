@@ -11,8 +11,8 @@ from ..constants import AB_ZERO_POINT_JY, JANSKY_SI, PLANCK_J_S
 from .bandpass import Bandpass, integrate_dlnlambda
 from .sed import SED
 
-__all__ = ["ab_scale_jy", "ab_to_fnu_jy", "band_mean_throughput", "detected_flux_per_m2",
-           "effective_wavelength_m", "fnu_jy_to_ab", "rate_from_ab", "sky_rate_e_per_s_per_pixel", "synthetic_ab_mag"]
+__all__ = ["ab_to_fnu_jy", "band_mean_throughput", "effective_wavelength_m", "fnu_jy_to_ab", "rate_from_ab",
+           "sky_rate_e_per_s_per_pixel"]
 
 
 def _number(value: float, name: str, *, positive: bool = False) -> float:
@@ -84,26 +84,6 @@ def _positive_from_log(value: float, name: str) -> float:
     if not math.isfinite(result) or result <= 0.0:
         raise ValueError(f"{name} has no positive finite representable value")
     return result
-
-
-def detected_flux_per_m2(sed: SED, scale_jy: float, bandpass: Bandpass) -> float:
-    scale = _number(scale_jy, "scale_jy", positive=True)
-    integral = _log_integral(sed, bandpass)
-    if integral == -math.inf:
-        return 0.0
-    return _positive_from_log(math.log(scale) + math.log(JANSKY_SI) - math.log(PLANCK_J_S) + integral,
-                              "detected flux per square metre")
-
-
-def ab_scale_jy(sed: SED, magnitude: float, band: Bandpass) -> float:
-    scale = math.log(ab_to_fnu_jy(magnitude)) + _positive_log_integral(None, band) - _positive_log_integral(sed, band)
-    return _positive_from_log(scale, "SED scale_jy")
-
-
-def synthetic_ab_mag(sed: SED, scale_jy: float, band: Bandpass) -> float:
-    scale = _number(scale_jy, "scale_jy", positive=True)
-    log_mean = math.log(scale) + _positive_log_integral(sed, band) - _positive_log_integral(None, band)
-    return -2.5 / math.log(10.0) * (log_mean - math.log(AB_ZERO_POINT_JY))
 
 
 def rate_from_ab(magnitude: float, bandpass: Bandpass, area_m2: float, *,

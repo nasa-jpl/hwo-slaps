@@ -365,10 +365,6 @@ class WavefrontBasis:
             opd = opd + np.asarray(self._zernike_phase(coefficients, wavelength)) * to_opd
         return opd
 
-    def opd_nm(self, coefficients: WavefrontCoefficients) -> np.ndarray:
-        """The OPD in nm on the pupil grid, shape ``(pixels, pixels)``."""
-        return (self._opd_m(coefficients) * 1e9).reshape(self._pupil.grid.shape)
-
     def aperture_rms_nm(self, coefficients: WavefrontCoefficients) -> float:
         """Piston-removed OPD RMS over the illuminated pupil, in nm."""
         values = self._opd_m(coefficients)[self._pupil.illuminated_mask]

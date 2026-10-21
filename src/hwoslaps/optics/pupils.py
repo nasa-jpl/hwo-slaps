@@ -14,7 +14,6 @@ carry segment modes in draws and nuisances, and segment indices never change.
 
 from __future__ import annotations
 
-import dataclasses
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -23,7 +22,6 @@ from typing import Any, ClassVar
 import numpy as np
 
 from ..config.checks import Boolean, ConfigError, Integer, Key, Nullable, Real, Rule, Table, Variants
-from ..identity import json_ready
 
 __all__ = [
     "PUPIL_TABLE", "CircularPupilSpec", "HexSegmentedPupilSpec", "Pupil", "PupilSpec", "SpiderSpec",
@@ -239,18 +237,6 @@ class Pupil:
     @property
     def dark_segments(self) -> tuple[int, ...]:
         return tuple(s for s in range(self.segment_count) if s not in self.active_segments)
-
-    def to_mapping(self) -> dict[str, Any]:
-        return json_ready({
-            "kind": self.spec.kind,
-            "spec": dataclasses.asdict(self.spec),
-            "segment_count": self.segment_count,
-            "active_segments": list(self.active_segments),
-            "dark_segments": list(self.dark_segments),
-            "zernike_diameter_m": self.zernike_diameter_m,
-            "collecting_area_m2": self.collecting_area_m2,
-            "total_power": self.total_power,
-        })
 
 
 def _with_modifiers(aperture: Any, spec: PupilSpec) -> Any:

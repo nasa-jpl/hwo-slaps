@@ -124,7 +124,7 @@ def test_draw_identity_changes_with_each_input(p1_truth, tmp_path):
 
 def _independent_rms_nm(psf, coefficients):
     wavelength = psf.wavelengths_m[0]
-    assert np.max(np.abs(psf.basis.opd_nm(coefficients))) * 1e-9 < 0.4 * wavelength
+    assert np.max(np.abs(psf.basis._opd_m(coefficients))) < 0.4 * wavelength
     field = np.asarray(psf.pupil_wavefront(coefficients=coefficients).electric_field)
     phase = np.angle(field[psf.pupil.illuminated_mask])
     opd = phase * wavelength / (2 * math.pi) * 1e9

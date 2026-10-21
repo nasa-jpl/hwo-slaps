@@ -6,7 +6,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from hwoslaps.spectra.tables import parse_table, read_table
+from hwoslaps.spectra.tables import TABLE_TABLE, TableSpec, read_table
+
+
+def parse_table(mapping, path):
+    return TableSpec.from_values(TABLE_TABLE.read(mapping, path))
 
 
 @pytest.mark.parametrize("suffix", ["yaml", "yml", "csv", "npz"])

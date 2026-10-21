@@ -24,7 +24,6 @@ _PUBLIC_API = {
     "strehl_ratio": ("metrics", "strehl_ratio"),
     "encircled_energy": ("metrics", "encircled_energy"),
     "fwhm_arcsec": ("metrics", "fwhm_arcsec"),
-    "captured_power_fraction": ("metrics", "captured_power_fraction"),
 }
 __all__ = list(_PUBLIC_API)
 

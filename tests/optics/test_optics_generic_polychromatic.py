@@ -7,7 +7,7 @@ import pytest
 from scipy.special import j1
 
 from hwoslaps.constants import ARCSEC_PER_RAD
-from hwoslaps.optics.metrics import captured_power_fraction, fwhm_arcsec
+from hwoslaps.optics.metrics import fwhm_arcsec
 from hwoslaps.optics.optical_psf import FocalField
 from hwoslaps.optics.providers import build_psf_provider, parse_psf
 from hwoslaps.optics.wavefront import WavefrontCoefficients
@@ -54,8 +54,8 @@ def test_wavelength_stack_shares_pixels_and_follows_integrated_airy(circular_pup
     for wavelength, kernel in zip(psf.wavelengths_m, stack):
         assert kernel.pixel_scale_arcsec == pixel and kernel.shape == (31, 31)
         assert kernel.source["wavelength_m"] == wavelength
-        assert kernel.source["captured_power_fraction"] == captured_power_fraction(psf, wavelength)
         direct = psf.kernel(wavelength)
+        assert dict(kernel.source) == dict(direct.source)
         (one,) = psf.kernels([wavelength])
         np.testing.assert_array_equal(one.kernel, direct.kernel)
         assert dict(one.source) == dict(direct.source)
@@ -112,7 +112,8 @@ def test_coefficient_variant_retains_stack_and_each_node_identity(circular_pupil
     for wavelength, kernel in zip(variant.wavelengths_m, variant.kernels()):
         assert kernel.source["wavelength_m"] == wavelength
         assert kernel.source["coefficients_digest"] == coefficients.digest()
-        assert kernel.source["captured_power_fraction"] == captured_power_fraction(variant, wavelength)
+        expected = psf.kernel(wavelength, coefficients=coefficients).source["captured_power_fraction"]
+        assert kernel.source["captured_power_fraction"] == expected
 
 
 def test_drawn_stack_exposes_actual_prior_bytes_without_moving_the_mono_limit(circular_pupil, tmp_path):

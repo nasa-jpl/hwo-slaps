@@ -7,9 +7,13 @@ import pytest
 
 from hwoslaps.optics.chromatic import effective_kernel, sed_weights
 from hwoslaps.optics.kernels import DetectorPSF
-from hwoslaps.spectra.bandpass import build_bandpass, parse_bandpass
-from hwoslaps.spectra.photometry import detected_flux_per_m2
+from hwoslaps.spectra.bandpass import build_bandpass, integrate_dlnlambda, parse_bandpass
 from hwoslaps.spectra.sed import build_sed, parse_sed
+
+
+def photon_integral(sed,band):
+    wavelengths,throughput=band.integration_grid(sed)
+    return integrate_dlnlambda(throughput*sed.fnu(wavelengths),wavelengths)
 
 
 def top_hat(throughput=.21):
@@ -31,7 +35,7 @@ def test_sed_bin_weights_follow_independent_photon_equations(kind,nodes_nm):
     np.testing.assert_allclose(weights.bin_edges_m,edges,rtol=1.e-15,atol=0.)
     # Mathematical photon measure includes the single recorded common factor.
     measured=weights.rates.sum()*math.exp(weights.log_rate_scale)
-    expected_integral=detected_flux_per_m2(sed,1.,band)*6.62607015e-34/1.e-26
+    expected_integral=photon_integral(sed,band)
     assert measured==pytest.approx(expected_integral,rel=1.e-12,abs=0.)
     with pytest.raises(ValueError):weights.rates[0]=0.
 
@@ -47,7 +51,7 @@ def test_narrow_table_line_is_assigned_to_exactly_one_provider_bin(frame,redshif
     weights=sed_weights(band,sed,np.array([455.,475.,500.,525.,545.])/1.e9)
     np.testing.assert_array_equal(weights.normalized,[0.,0.,1.,0.,0.])
     assert weights.rates.sum()*math.exp(weights.log_rate_scale)==pytest.approx(
-        detected_flux_per_m2(sed,1.,band)*6.62607015e-34/1.e-26,rel=1.e-12,abs=0.)
+        photon_integral(sed,band),rel=1.e-12,abs=0.)
 
 
 @pytest.mark.parametrize("quantity",["fnu","flambda"])

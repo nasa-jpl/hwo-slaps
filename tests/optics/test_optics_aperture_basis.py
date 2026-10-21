@@ -10,6 +10,11 @@ from hwoslaps.optics.pupils import build_pupil, parse_pupil
 from hwoslaps.optics.wavefront import WavefrontBasis
 
 
+def _opd_nm(basis, coefficients):
+    """The OPD in nm on the flattened pupil grid."""
+    return basis._opd_m(coefficients) * 1e9
+
+
 def test_positive_diagonal_qr():
     values = np.random.default_rng(2).normal(size=(40, 6))
     q_matrix, r_matrix = positive_diagonal_qr(values)
@@ -39,7 +44,7 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
     for index in range(len(global_nolls)):
         unit = {noll: float(j == index) for j, noll in enumerate(global_nolls)}
         raw = transform.to_raw(global_=unit)
-        opd = basis.opd_nm(raw).ravel()[mask]
+        opd = _opd_nm(basis, raw)[mask]
         assert np.mean(opd ** 2) == pytest.approx(1.0, rel=1e-10)
         if index == 0:
             assert [value != 0.0 for _, value in raw.zernikes()] == [True] + [False] * (len(global_nolls) - 1)
@@ -47,7 +52,7 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
         unit = {noll: float(j == index) for j, noll in enumerate(segment_nolls)}
         raw = transform.to_raw(segment={3: unit})
         assert {segment for segment, _, _ in raw.segment_hexikes()} == {3}
-        opd = basis.opd_nm(raw).ravel()[segment_mask]
+        opd = _opd_nm(basis, raw)[segment_mask]
         assert np.mean(opd ** 2) == pytest.approx(1.0, rel=1e-10)
         if index == 0:
             assert [value != 0.0 for _, _, value in raw.segment_hexikes()] == [True] + [False] * (len(segment_nolls) - 1)
@@ -62,7 +67,7 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
         draw = draw_global_orthonormal(np.random.default_rng(20260806), prior, 1.0)
         expected = np.array([draw[noll] for noll in global_nolls])
         raw = transform.to_raw(global_=draw)
-        realized = basis.opd_nm(raw).ravel()[mask]
+        realized = _opd_nm(basis, raw)[mask]
         np.testing.assert_allclose(realized, orthonormal @ expected, rtol=1e-10, atol=1e-11)
         recovered = np.linalg.lstsq(orthonormal, realized, rcond=None)[0]
         np.testing.assert_allclose(recovered, expected, rtol=1e-10, atol=1e-11)
@@ -72,7 +77,7 @@ def test_transform_realizes_orthonormal_coefficients(p1_pupil, mode_source):
         direction = np.array([runtime.orthonormal_global[noll] for noll in global_nolls])
         expected_opd = orthonormal @ direction
         expected_scale = 1.0 / np.std(expected_opd)
-        physical = basis.opd_nm(runtime.coefficients).ravel()[mask]
+        physical = _opd_nm(basis, runtime.coefficients)[mask]
         np.testing.assert_allclose(physical, expected_opd * expected_scale, rtol=1e-10, atol=1e-11)
         projected = np.linalg.lstsq(orthonormal, physical, rcond=None)[0]
         np.testing.assert_allclose(projected, direction * expected_scale, rtol=1e-10, atol=1e-11)
