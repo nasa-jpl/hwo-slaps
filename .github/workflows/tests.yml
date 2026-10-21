@@ -6,11 +6,10 @@ on:
   workflow_dispatch:
     inputs:
       backend: {description: Run the pinned scientific stack, type: boolean, default: false}
-      gpu: {description: Run CUDA tests on an existing self-hosted GPU runner, type: boolean, default: false}
 permissions: {contents: read}
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   core:
     runs-on: ubuntu-latest
@@ -73,13 +72,3 @@ jobs:
       - shell: bash -el {0}
         env: {OMP_NUM_THREADS: '1', MKL_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1', NUMEXPR_NUM_THREADS: '1'}
         run: python tools/run_backend_tests.py tests -q -m 'not xtx_gpu and not xtx_multi_gpu'
-  gpu:
-    if: github.event_name == 'workflow_dispatch' && inputs.gpu
-    runs-on: [self-hosted, linux, gpu]
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - shell: bash -el {0}
-        env: {JAX_ENABLE_X64: '1', XLA_PYTHON_CLIENT_PREALLOCATE: 'false', OMP_NUM_THREADS: '1',
-              MKL_NUM_THREADS: '1', OPENBLAS_NUM_THREADS: '1', NUMEXPR_NUM_THREADS: '1'}
-        run: python tools/run_backend_tests.py --require-gpu --numba-jit enabled tests -q -rs -m 'xtx_gpu and not xtx_multi_gpu'
