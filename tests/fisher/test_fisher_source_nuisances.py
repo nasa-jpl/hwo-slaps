@@ -17,7 +17,9 @@ def test_sersic_index_column_matches_analytic_derivative(minimal_mapping):
     source.update(type="Sersic",sersic_index=2.5,ell_comps=[.08,.13])
     with prepare_forecast(minimal_mapping) as prepared:
         scene=prepared.scene;profile=scene.light_profiles["source"][0]
-        traced=scene.tracer.traced_grid_2d_list_from(grid=al.Grid2DIrregular(values=np.asarray(scene.grid.over_sampled)))[-1]
+        geometry=prepared.renderer.geometry
+        grid=geometry.grid()
+        traced=scene.tracer.traced_grid_2d_list_from(grid=al.Grid2DIrregular(values=np.asarray(grid.over_sampled)))[-1]
         y,x=(np.asarray(traced)-profile.centre).T
         e=np.hypot(*profile.ell_comps);q=(1-e)/(1+e);phi=.5*np.arctan2(*profile.ell_comps)
         xr=x*np.cos(phi)+y*np.sin(phi);yr=-x*np.sin(phi)+y*np.cos(phi)
@@ -26,10 +28,10 @@ def test_sersic_index_column_matches_analytic_derivative(minimal_mapping):
         db=2-4/(405*n*n)-92/(25515*n**3)-393/(1148175*n**4)+4*2194697/(30690717750*n**5)
         intensity=profile.intensity*np.exp(-b*(u**(1/n)-1))
         derivative=intensity*(-db*(u**(1/n)-1)+b*u**(1/n)*np.log(u)/n**2)
-        native=scene.grid.over_sampler.binned_array_2d_from(array=derivative).native
+        native=grid.over_sampler.binned_array_2d_from(array=derivative).native
         from scipy.signal import convolve2d
         kernel=prepared.psfs.model_kernels.for_group("source").kernel
-        expected=convolve2d(np.asarray(native),kernel,mode="same")
+        expected=geometry.crop(convolve2d(np.asarray(native),kernel,mode="same"))
         exposure=prepared.observation.exposure
         expected*=exposure.exposure_time_s/exposure.detector.gain_e_per_adu
         index=prepared.nuisances.names.index("source.light.light.sersic_index")
