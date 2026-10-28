@@ -81,6 +81,7 @@ class JobPayload:
     seeds: Mapping[str, int | None]
     session: int
     execution: Mapping[str, Any]
+    run: str | None = None
 
     def to_mapping(self):
         return deepcopy(self.__dict__)

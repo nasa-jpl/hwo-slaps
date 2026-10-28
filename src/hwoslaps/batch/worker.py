@@ -8,6 +8,7 @@ import logging
 from multiprocessing.connection import Client
 import os
 from pathlib import Path
+import re
 import sys
 import time
 import traceback
@@ -132,7 +133,14 @@ def run_job(payload, cache, session, *, connection, worker, revision):
     from ..simulation import simulate
 
     job_dir = Path(payload.job_dir)
-    run_dir = claim_run_dir(job_dir)
+    if payload.run is None:
+        run_dir = claim_run_dir(job_dir)
+    else:
+        if re.fullmatch(r'run_[0-9]{3,}', payload.run) is None:
+            raise BatchConflict('invalid controller-assigned run directory')
+        run_dir = job_dir / payload.run
+        if not run_dir.is_dir() or run_dir.is_symlink() or any(run_dir.iterdir()):
+            raise BatchConflict('controller-assigned run directory is missing or already used')
     try:
         connection.send({'type': 'started', 'job_id': payload.job_id, 'run': run_dir.name, **worker})
     except (BrokenPipeError, ConnectionResetError, EOFError):
@@ -245,7 +253,7 @@ def run_job(payload, cache, session, *, connection, worker, revision):
             marker = {'schema': 1, 'job_id': payload.job_id, 'job_digest': payload.job_digest, 'kind': payload.kind,
                       'run': run_dir.name, 'artifacts': records, 'seeds': seeds, 'session': payload.session,
                       'worker': worker, 'source_revision': revision, 'timing': {'run_s': time.perf_counter() - start},
-                      'summary': summary}
+                      'summary': summary, 'prepared': cache.prepared_count - before}
             if preparation is not None:
                 marker['preparation'] = preparation
             if reference_preparation is not None:
@@ -260,14 +268,15 @@ def run_job(payload, cache, session, *, connection, worker, revision):
                     raise BatchConflict(f'duplicate publication has a different winning job digest: {payload.job_id}')
                 verify_marker(job_dir, winner, digests=False)
                 return {'type': 'duplicate', 'job_id': payload.job_id, 'marker': winner,
-                        'prepared': cache.prepared_count - before, 'cache_keys': cache.keys}
+                        'run': run_dir.name, 'prepared': cache.prepared_count - before, 'cache_keys': cache.keys}
             return {'type': 'complete', 'job_id': payload.job_id, 'marker': marker,
-                    'prepared': cache.prepared_count - before, 'cache_keys': cache.keys}
+                    'run': run_dir.name, 'prepared': cache.prepared_count - before, 'cache_keys': cache.keys}
         except Exception as error:
             logging.getLogger(__name__).exception('job failed: %s', payload.job_id)
             failure = {'schema': 1, 'job_id': payload.job_id, 'job_digest': payload.job_digest,
                        'session': payload.session, 'error_type': type(error).__name__, 'message': str(error),
-                       'traceback': traceback.format_exc(), 'worker': worker, 'exit_code': None}
+                       'traceback': traceback.format_exc(), 'worker': worker, 'exit_code': None,
+                       'prepared': cache.prepared_count - before}
             write_failure(run_dir, failure)
             return {'type': 'failed', 'job_id': payload.job_id, 'failure': failure,
                     'run': run_dir.name, 'prepared': cache.prepared_count - before}

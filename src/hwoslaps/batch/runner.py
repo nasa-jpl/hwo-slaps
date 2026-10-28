@@ -324,6 +324,69 @@ def _choose_job(slot, pending, slots):
     return groups[chosen][0]
 
 
+def _terminal_outcome(job, output, *, run, session, worker, synthetic=None):
+    """Reconcile published authority identically for IPC, EOF, death and timeout.
+
+    Transport callers drain the owned generation before using ``synthetic``.
+    The assigned run identifies this attempt even if no started event arrived.
+    """
+    job_dir = output / job.job_id
+    def completion():
+        marker = read_marker(job_dir)
+        if marker is None:
+            return None
+        if (marker.get('job_id') != job.job_id or marker.get('job_digest') != job.digest()
+                or marker.get('kind') != job.kind or not isinstance(marker.get('source_revision'), str)):
+            raise BatchConflict(f'winning completion differs: {job.job_id}')
+        verify_marker(job_dir, marker, digests=True)
+        if marker['run'] == run and (marker.get('session') != session or marker.get('worker') != worker):
+            raise BatchConflict(f'completion differs from its active attempt: {job.job_id}')
+        return marker
+    marker = completion()
+    if marker is not None:
+        return 'complete', marker
+    if run is None:
+        raise BatchConflict(f'active attempt has no assigned run: {job.job_id}')
+    run_dir = job_dir / run
+    if not run_dir.is_dir() or run_dir.is_symlink() or not run_dir.resolve().is_relative_to(job_dir.resolve()):
+        raise BatchConflict(f'active attempt directory changed: {run_dir}')
+    path = run_dir / 'failure.json'
+    def failure_record():
+        try:
+            failure = read_json(path)
+        except FileNotFoundError:
+            return None
+        if (run_dir.is_symlink() or path.is_symlink() or failure.get('schema') != 1
+                or failure.get('job_id') != job.job_id or failure.get('job_digest') != job.digest()
+                or type(failure.get('session')) is not int or failure['session'] != session
+                or failure.get('worker') != worker
+                or any(not isinstance(failure.get(key), str) for key in ('error_type', 'message', 'traceback'))
+                or not failure['error_type']
+                or failure.get('exit_code') is not None and type(failure['exit_code']) is not int):
+            raise BatchConflict(f'invalid active-attempt failure: {path}')
+        return failure
+    failure = failure_record()
+    if failure is not None:
+        return 'failed', failure
+    if synthetic is None:
+        raise BatchConflict(f'worker terminal event has no published outcome: {job.job_id}')
+    failure = {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'session': session,
+               'traceback': '', 'worker': worker, **synthetic}
+    try:
+        write_failure(run_dir, failure)
+    except FileExistsError:
+        # Another atomic publisher won: validate its actual record, never merely
+        # suppress the collision or consume an older attempt's failure.
+        return _terminal_outcome(job, output, run=run, session=session, worker=worker)
+    marker = completion()
+    if marker is not None:
+        if failure_record() != failure:
+            raise BatchConflict(f'synthetic failure changed during completion race: {path}')
+        path.unlink()
+        return 'complete', marker
+    return 'failed', failure
+
+
 def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, verify=False, require_single_revision=False):
     """Execute selected missing jobs with owned workers and completion markers.
 
@@ -462,6 +525,38 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                     for _ in slots:
                         _ready_slot(listener, slots, revision, events)
                     stop_error = None
+                    finalized = {}
+                    def finalize(slot, message=None, synthetic=None):
+                        nonlocal stop_error
+                        job, run = slot.busy, slot.run
+                        outcome, record = _terminal_outcome(job, output, run=run, session=session,
+                                                            worker=slot.worker, synthetic=synthetic)
+                        if message is not None and message['type'] == 'failed' and outcome == 'failed' and record != message.get('failure'):
+                            raise BatchConflict(f'failed event differs from its published attempt: {job.job_id}')
+                        prepared = message.get('prepared', 0) if message is not None else (
+                            record.get('prepared', 0) if record.get('worker') == slot.worker and record.get('session') == session else 0)
+                        if type(prepared) is not int or prepared < 0:
+                            raise BatchConflict(f'invalid preparation count: {job.job_id}')
+                        counts['prepared'] += prepared
+                        if outcome == 'complete':
+                            count_revision(record)
+                            counts['duplicate' if record['run'] != run else 'completed'] += 1
+                            if message is not None:
+                                slot.keys = tuple(message.get('cache_keys', ()))
+                            if stop_error is None:
+                                for following in follow_ups(plan, job, output):
+                                    enqueue(following)
+                        else:
+                            counts['failed'] += 1
+                            failures.append({'job_id': job.job_id, 'kind': job.kind, 'error_type': record['error_type'],
+                                'message': record['message'].splitlines()[0] if record['message'] else '',
+                                'log': str(output / job.job_id / run / 'job.log')})
+                            if record['error_type'] == 'BatchConflict':
+                                stop_error = BatchConflict(f'job conflict: {job.job_id}: {record["message"]}')
+                        events.append({'type': 'reconciled', 'job_id': job.job_id, 'outcome': outcome,
+                                       'run': run, 'record': record})
+                        finalized[job.job_id] = (slot.process.pid, run)
+                        slot.busy, slot.run, slot.dispatched_at = None, None, None
                     while pending or any(slot.busy is not None for slot in slots):
                         if stop_error is None:
                             for slot in slots:
@@ -469,96 +564,67 @@ def run_batch(spec, output_dir, *, resume=True, execution=None, select=None, ver
                                     job = _choose_job(slot, pending, slots)
                                     if job is not None:
                                         del pending[job.job_id]
-                                        slot.busy, slot.run = job, None
+                                        slot.busy = job
+                                        slot.run = claim_run_dir(output / job.job_id).name
                                         slot.dispatched_at = time.monotonic()
-                                        slot.connection.send({'type': 'job', 'payload': job.payload(output, session, execution).to_mapping()})
+                                        payload = replace(job.payload(output, session, execution), run=slot.run)
+                                        try:
+                                            slot.connection.send({'type': 'job', 'payload': payload.to_mapping()})
+                                        except (BrokenPipeError, EOFError, ConnectionResetError):
+                                            # Reconcile this assigned attempt after owned cleanup below.
+                                            pass
                         if not any(slot.busy is not None for slot in slots) and stop_error is not None:
                             break
                         active = [slot.connection for slot in slots if slot.connection is not None]
-                        readable = wait(active, timeout=5.)
+                        wait(active, timeout=5.)
                         for slot in list(slots):
-                            if (slot.busy is not None and slot.dispatched_at is not None and execution.job_timeout_seconds is not None
-                                    and time.monotonic() - slot.dispatched_at >= execution.job_timeout_seconds):
-                                job = slot.busy
-                                _close_slots([slot], interrupt=True)
-                                marker = read_marker(output / job.job_id)
-                                if marker is not None:
-                                    if marker['job_digest'] != job.digest():
-                                        raise BatchConflict(f'timed-out job published another identity: {job.job_id}')
-                                    verify_marker(output / job.job_id, marker, digests=verify)
-                                    count_revision(marker)
-                                    counts['completed'] += 1
-                                    for following in follow_ups(plan, job, output):
-                                        enqueue(following)
-                                else:
-                                    run_dir = claim_run_dir(output / job.job_id) if slot.run is None else output / job.job_id / slot.run
-                                    failure = {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'session': session,
-                                               'error_type': 'JobTimeout', 'message': f'job exceeded {execution.job_timeout_seconds} seconds',
-                                               'traceback': '', 'worker': slot.worker}
-                                    write_failure(run_dir, failure)
-                                    counts['failed'] += 1
-                                    failures.append({'job_id': job.job_id, 'kind': job.kind, 'error_type': 'JobTimeout',
-                                                     'message': failure['message'], 'log': str(run_dir / 'job.log')})
-                                    events.append({'type': 'failed', 'job_id': job.job_id, 'failure': failure})
-                                slot.busy, slot.run, slot.dispatched_at, slot.connection = None, None, None, None
-                            if slot.connection not in readable and slot.process.poll() is None:
-                                continue
-                            message = None
-                            if slot.connection in readable:
+                            exited = False
+                            # Drain queued notifications before evaluating the deadline. A
+                            # terminal notification can arrive alongside EOF or timeout.
+                            while slot.connection is not None and slot.connection.poll():
                                 try:
                                     message = slot.connection.recv()
                                 except (EOFError, ConnectionResetError):
-                                    pass
-                            if message is not None:
-                                kind = message['type']
+                                    exited = True
+                                    break
+                                if not isinstance(message, Mapping) or message.get('type') not in ('started', 'complete', 'duplicate', 'failed'):
+                                    raise BatchError('worker sent an invalid job event')
+                                identifier = message.get('job_id')
+                                if identifier in finalized:
+                                    if finalized[identifier] != (slot.process.pid, message.get('run')):
+                                        raise BatchConflict('late worker event differs from its finalized attempt')
+                                    events.append({'type': 'duplicate_event', 'job_id': identifier, 'slot': slot.number})
+                                    continue
                                 job = slot.busy
-                                if job is None or message['job_id'] != job.job_id:
-                                    raise BatchError(f'worker {slot.number} reported a job it does not own')
+                                if job is None or identifier != job.job_id or message.get('run') != slot.run:
+                                    raise BatchError(f'worker {slot.number} reported an attempt it does not own')
                                 events.append({**message, 'slot': slot.number})
-                                if kind == 'started':
-                                    slot.run = message['run']
+                                if message['type'] == 'started':
+                                    if any(message.get(key) != value for key, value in slot.worker.items()):
+                                        raise BatchConflict('started event differs from owned worker generation')
                                     continue
-                                counts['prepared'] += message.get('prepared', 0)
-                                if kind in ('complete', 'duplicate'):
-                                    marker = read_marker(output / job.job_id)
-                                    if marker is None or marker['job_digest'] != job.digest():
-                                        raise BatchConflict(f'winning completion differs: {job.job_id}')
-                                    verify_marker(output / job.job_id, marker, digests=verify)
-                                    count_revision(marker)
-                                    counts['completed' if kind == 'complete' else 'duplicate'] += 1
-                                    slot.keys = tuple(message['cache_keys'])
-                                    if stop_error is None:
-                                        for following in follow_ups(plan, job, output):
-                                            enqueue(following)
-                                elif kind == 'failed':
-                                    failure = message['failure']
-                                    counts['failed'] += 1
-                                    failures.append({'job_id': job.job_id, 'kind': job.kind, 'error_type': failure['error_type'],
-                                        'message': failure['message'].splitlines()[0] if failure['message'] else '',
-                                        'log': str(output / job.job_id / message['run'] / 'job.log')})
-                                    if failure['error_type'] == 'BatchConflict':
-                                        stop_error = BatchConflict(f'job conflict: {job.job_id}: {failure["message"]}')
-                                else:
-                                    raise BatchError(f'unknown worker event {kind!r}')
-                                slot.busy, slot.run, slot.dispatched_at = None, None, None
-                                if kind != 'failed':
-                                    continue
-                            if slot.busy is not None:
-                                job = slot.busy
-                                run_dir = claim_run_dir(output / job.job_id) if slot.run is None else output / job.job_id / slot.run
-                                code = slot.process.wait()
-                                failure = {'schema': 1, 'job_id': job.job_id, 'job_digest': job.digest(), 'session': session,
-                                    'error_type': 'WorkerExited', 'message': f'worker exited with code {code}',
-                                    'traceback': '', 'worker': slot.worker, 'exit_code': code}
-                                write_failure(run_dir, failure)
-                                counts['failed'] += 1
-                                failures.append({'job_id': job.job_id, 'kind': job.kind, 'error_type': 'WorkerExited',
-                                    'message': failure['message'], 'log': str(run_dir / 'job.log')})
-                                events.append({'type': 'failed', 'job_id': job.job_id, 'failure': failure})
-                                slot.busy = None
-                            events.append({'type': 'worker_exit', 'slot': slot.number, 'pid': slot.process.pid})
+                                finalize(slot, message=message)
+                                if message['type'] == 'failed':
+                                    exited = True
+                                    break
+                            timed_out = (slot.busy is not None and slot.dispatched_at is not None
+                                and execution.job_timeout_seconds is not None
+                                and time.monotonic() - slot.dispatched_at >= execution.job_timeout_seconds)
+                            if not exited and not timed_out and slot.process.poll() is None:
+                                continue
+                            # No live owned publisher may remain before absence is used
+                            # to synthesize a transport failure. Preserve pinned cleanup.
+                            _close_slots([slot], interrupt=True)
                             slots.remove(slot)
-                            _close_slots([slot], interrupt=False)
+                            if slot.busy is not None:
+                                code = slot.process.returncode
+                                transport = {'error_type': 'JobTimeout' if timed_out else 'WorkerExited',
+                                    'message': f'job exceeded {execution.job_timeout_seconds} seconds' if timed_out
+                                               else f'worker exited with code {code}', 'exit_code': code}
+                                events.append({'type': 'transport_failure', 'job_id': slot.busy.job_id,
+                                               'slot': slot.number, **transport})
+                                finalize(slot, synthetic=transport)
+                            events.append({'type': 'worker_exit', 'slot': slot.number, 'pid': slot.process.pid})
                             if stop_error is None and (pending or any(worker.busy is not None for worker in slots)):
                                 replacement = _start_slot(slot.number, slot.device, session_dir, session, execution, listener, records)
                                 slots.append(replacement)
