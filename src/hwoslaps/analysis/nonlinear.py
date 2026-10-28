@@ -20,7 +20,8 @@ from ..inference.sampler import REQUIRED_SEARCH_INTERNAL_FILES
 
 __all__ = ["CLASSIFICATION_TABLE", "AgreementTable", "AttemptSelection", "CaseClassification", "CaseStatus",
            "ClassificationRule",
-           "RoleAcceptance", "StatusResult", "case_status", "classify_case", "detection_agreement", "select_attempt"]
+           "RoleAcceptance", "ScientificOutputs", "StatusResult", "case_status", "classify_case",
+           "detection_agreement", "scientific_outputs", "select_attempt"]
 
 CaseStatus = Literal["accepted", "unresolved", "failed", "incomplete"]
 _ROLES = ("smooth", "subhalo")
@@ -133,6 +134,36 @@ class AgreementTable:
     configuration_mismatches: int
 
 
+@dataclass(frozen=True)
+class ScientificOutputs:
+    """Values eligible for posterior/evidence aggregation, with explicit exclusions."""
+
+    evidence_differences: tuple[tuple[str, float], ...]
+    recoveries: tuple[tuple[str, Any], ...]
+    excluded: Mapping[str, int]
+
+
+def scientific_outputs(cases: Iterable[CaseResult], *, include_provisional: bool = False) -> ScientificOutputs:
+    """Select complete posterior/evidence outputs by default, independently of q acceptance.
+
+    ``include_provisional=True`` explicitly opts into retained incomplete or legacy
+    unknown-quality values. The role likelihood acceptance policy is separate.
+    """
+    evidence, recoveries, excluded = [], [], Counter()
+    for case in cases:
+        if case.delta_log_evidence is not None and (case.evidence_quality == "complete" or include_provisional):
+            evidence.append((case.case_id, case.delta_log_evidence))
+        else:
+            excluded[f"evidence_{case.evidence_quality}"] += 1
+        recovery = case.recovery
+        if recovery is not None and recovery.log10_mass_quantiles is not None and (
+                recovery.posterior_quality == "complete" or include_provisional):
+            recoveries.append((case.case_id, recovery))
+        else:
+            excluded[f"posterior_{'unavailable' if recovery is None else recovery.posterior_quality}"] += 1
+    return ScientificOutputs(tuple(evidence), tuple(recoveries), dict(excluded))
+
+
 def case_status(result: CaseResult, *, acceptance: RoleAcceptance, require_retained_state: bool,
                 stationarity_tolerance: float | None) -> StatusResult:
     """Failure, retention, role acceptance and optional stationarity, independent of q."""
@@ -156,7 +187,12 @@ def case_status(result: CaseResult, *, acceptance: RoleAcceptance, require_retai
                 missing.append(f"missing_retained_state: {role}: {detail}")
     if missing:
         return StatusResult("incomplete", statuses, tuple(missing))
-    reasons = [f"{role}: {status.value}" for role, status in statuses.items() if status not in getattr(acceptance, role)]
+    # Exact and bounded scalar maxima satisfy the standard accepted-maximum policy
+    # through their own recorded checks; they do not pretend to pass optimizer gates.
+    reasons = [f"{role}: {status.value}" for role, status in statuses.items()
+               if status not in getattr(acceptance, role)
+               and not (status in (RoleStatus.EXACT, RoleStatus.SCALAR)
+                        and RoleStatus.ACCEPTED in getattr(acceptance, role))]
     if tolerance is not None:
         for role, status in statuses.items():
             if status is RoleStatus.ACCEPTED:

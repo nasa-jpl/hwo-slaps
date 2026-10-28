@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CaseResult", "ForecastReference", "ObservationRecord", "RefineOutcome", "RetentionInventory", "RoleFit",
-    "RoleStatus", "SamplerRecord", "check_record_keys", "finite_json",
+    "RoleStatus", "SamplerDiagnostics", "SamplerRecord", "check_record_keys", "finite_json",
 ]
 
 
@@ -64,6 +64,8 @@ class RoleStatus(StrEnum):
     SAMPLER_ONLY = "sampler_only"
     ZERO_RESIDUAL_ANCHOR = "verified_zero_residual_anchor"
     FAILED = "failed"
+    EXACT = "exact_evaluation"
+    SCALAR = "accepted_bounded_scalar"
 
 
 @dataclass(frozen=True)
@@ -98,6 +100,32 @@ class RetentionInventory:
 
 
 @dataclass(frozen=True)
+class SamplerDiagnostics:
+    """Live stopping state, independent of likelihood optimization acceptance.
+
+    ``criteria_satisfied`` means the sampler's requested stopping contract was met;
+    it does not establish that all modes were found. ``pdf_usable`` is only the
+    backend's sample-weight heuristic, historically named ``pdf_converged``.
+    Unknown diagnostics never qualify a posterior or evidence as complete.
+    """
+
+    requested: Mapping[str, Any]
+    achieved: Mapping[str, Any]
+    exploration_complete: bool | None
+    criteria_satisfied: bool | None
+    stop_reason: str
+    pdf_usable: bool | None
+
+    def to_mapping(self) -> dict[str, Any]:
+        return finite_json(dataclasses.asdict(self))
+
+    @classmethod
+    def from_mapping(cls, mapping: Mapping[str, Any]) -> SamplerDiagnostics:
+        check_record_keys(mapping, cls)
+        return cls(**dict(mapping))
+
+
+@dataclass(frozen=True)
 class SamplerRecord:
     """One role search: where it ran, its identity, settings as requested and as constructed, outputs.
 
@@ -118,6 +146,7 @@ class SamplerRecord:
     likelihood_calls: int | None
     retention: RetentionInventory | None
     runtime_s: float
+    diagnostics: SamplerDiagnostics | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "requested", finite_json(self.requested))
@@ -126,10 +155,12 @@ class SamplerRecord:
     def to_mapping(self) -> dict[str, Any]:
         record = {item.name: getattr(self, item.name) for item in dataclasses.fields(self)}
         record["retention"] = None if self.retention is None else self.retention.to_mapping()
+        record["diagnostics"] = None if self.diagnostics is None else self.diagnostics.to_mapping()
         return finite_json(record)
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> SamplerRecord:
+        mapping = {"diagnostics": None, **mapping}
         check_record_keys(mapping, cls)
         retention = mapping["retention"]
         calls = mapping["likelihood_calls"]
@@ -141,7 +172,9 @@ class SamplerRecord:
                    log_evidence=_optional_float(mapping["log_evidence"]),
                    likelihood_calls=None if calls is None else int(calls),
                    retention=None if retention is None else RetentionInventory.from_mapping(retention),
-                   runtime_s=float(mapping["runtime_s"]))
+                   runtime_s=float(mapping["runtime_s"]),
+                   diagnostics=None if mapping["diagnostics"] is None else
+                   SamplerDiagnostics.from_mapping(mapping["diagnostics"]))
 
 
 @dataclass(frozen=True)
@@ -204,7 +237,7 @@ class RoleFit:
     """
 
     role: Literal["smooth", "subhalo"]
-    strategy: Literal["search", "truth_anchor"]
+    strategy: Literal["search", "truth_anchor", "exact", "scalar"]
     status: Literal["success", "failed"]
     log_likelihood: float | None
     truth_log_likelihood: float
@@ -216,12 +249,13 @@ class RoleFit:
     anchor_chi2: float | None
     error: str | None
     runtime_s: float
+    strategy_record: Mapping[str, Any] | None = None
 
     def __post_init__(self) -> None:
         if self.role not in ("smooth", "subhalo"):
             raise ValueError(f"role must be smooth or subhalo, got {self.role!r}")
-        if self.strategy not in ("search", "truth_anchor"):
-            raise ValueError(f"strategy must be search or truth_anchor, got {self.strategy!r}")
+        if self.strategy not in ("search", "truth_anchor", "exact", "scalar"):
+            raise ValueError(f"invalid role strategy {self.strategy!r}")
         if self.status not in ("success", "failed"):
             raise ValueError(f"status must be success or failed, got {self.status!r}")
         object.__setattr__(self, "parameter_names", tuple(self.parameter_names))
@@ -232,9 +266,56 @@ class RoleFit:
             return RoleStatus.FAILED
         if self.strategy == "truth_anchor":
             return RoleStatus.ZERO_RESIDUAL_ANCHOR
+        if self.strategy in ("exact", "scalar"):
+            if not self.strategy_record or not self.strategy_record.get("optimization_accepted", False):
+                return RoleStatus.UNRESOLVED
+            return RoleStatus.EXACT if self.strategy == "exact" else RoleStatus.SCALAR
         if self.refinement is None:
             return RoleStatus.SAMPLER_ONLY
         return self.refinement.acceptance_status
+
+    @property
+    def sampling_status(self) -> str:
+        """Requested sampling completion, never inferred from optimizer gates."""
+        if self.strategy != "search":
+            return "not_applicable"
+        if self.status == "failed":
+            return "failed"
+        diagnostics = None if self.sampler is None else self.sampler.diagnostics
+        if diagnostics is None or diagnostics.criteria_satisfied is None:
+            return "unknown"
+        return "complete" if diagnostics.criteria_satisfied else "incomplete"
+
+    @property
+    def pdf_usable(self) -> bool | None:
+        if self.strategy == "scalar":
+            return bool(self.strategy_record and self.strategy_record.get("posterior_quantiles"))
+        diagnostics = None if self.sampler is None else self.sampler.diagnostics
+        return None if diagnostics is None else diagnostics.pdf_usable
+
+    @property
+    def log_evidence(self) -> float | None:
+        if self.strategy_record is not None:
+            return _optional_float(self.strategy_record.get("log_evidence"))
+        return None if self.sampler is None else self.sampler.log_evidence
+
+    @property
+    def evidence_quality(self) -> str:
+        if self.log_evidence is None or not math.isfinite(self.log_evidence):
+            return "unavailable"
+        if self.strategy in ("exact", "scalar"):
+            return "complete" if self.strategy_record.get("integration_complete", False) else "provisional"
+        return "complete" if self.sampling_status == "complete" else "provisional"
+
+    @property
+    def posterior_quality(self) -> str:
+        if self.strategy in ("exact", "truth_anchor"):
+            return "not_applicable"
+        if not self.pdf_usable:
+            return "unavailable"
+        if self.strategy == "scalar":
+            return "complete" if self.strategy_record.get("integration_complete", False) else "provisional"
+        return "complete" if self.sampling_status == "complete" else "provisional"
 
     def to_mapping(self) -> dict[str, Any]:
         record = {item.name: getattr(self, item.name) for item in dataclasses.fields(self)}
@@ -244,6 +325,7 @@ class RoleFit:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> RoleFit:
+        mapping = {"strategy_record": None, **mapping}
         check_record_keys(mapping, cls)
         sampler, refinement, margins = mapping["sampler"], mapping["refinement"], mapping["box_edge_margins"]
         return cls(role=mapping["role"], strategy=mapping["strategy"], status=mapping["status"],
@@ -255,7 +337,7 @@ class RoleFit:
                    refinement=None if refinement is None else RefineOutcome.from_mapping(refinement),
                    box_edge_margins=None if margins is None else {name: float(v) for name, v in margins.items()},
                    anchor_chi2=_optional_float(mapping["anchor_chi2"]), error=mapping["error"],
-                   runtime_s=float(mapping["runtime_s"]))
+                   runtime_s=float(mapping["runtime_s"]), strategy_record=mapping["strategy_record"])
 
 
 def _finite_reference_number(value: Any, name: str) -> float:
@@ -428,6 +510,14 @@ class CaseResult:
         if name == "subhalo":
             return self.subhalo
         raise ValueError(f"role must be smooth or subhalo, got {name!r}")
+
+    @property
+    def evidence_quality(self) -> str:
+        """Quality of the retained raw evidence difference."""
+        if self.delta_log_evidence is None:
+            return "unavailable"
+        return "complete" if all(self.role(role).evidence_quality == "complete"
+                                 for role in ("smooth", "subhalo")) else "provisional"
 
     def to_mapping(self) -> dict[str, Any]:
         return finite_json({

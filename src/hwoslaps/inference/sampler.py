@@ -19,9 +19,11 @@ from numbers import Integral
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
+import numpy as np
+
 from ..identity import file_digest, mapping_digest
 from .fit_model import FitModel
-from .result import RetentionInventory, SamplerRecord
+from .result import RetentionInventory, SamplerDiagnostics, SamplerRecord
 from .settings import OBJECTIVE_VERSION, SamplerSettings
 
 if TYPE_CHECKING:
@@ -80,7 +82,7 @@ def make_search(*, model: FitModel, role: Literal["smooth", "subhalo"], n_live: 
 
 def _named_search(identity: str, *, role: str, n_live: int, settings: SamplerSettings, seed: int,
                   case_dir: Path) -> Any:
-    import autofit as af
+    from .backend import RecordedNautilus
 
     if role not in ("smooth", "subhalo"):
         raise ValueError(f"role must be smooth or subhalo, got {role!r}")
@@ -88,8 +90,35 @@ def _named_search(identity: str, *, role: str, n_live: int, settings: SamplerSet
         raise ValueError(f"n_live must be at least 1, got {n_live!r}")
     if isinstance(seed, bool) or not isinstance(seed, Integral) or seed < 0:
         raise ValueError(f"seed must be an integer >= 0, got {seed!r}")
-    return af.Nautilus(path_prefix=str(case_dir), name=f"{role}_{identity[:16]}",
+    return RecordedNautilus(path_prefix=str(case_dir), name=f"{role}_{identity[:16]}",
                        **_search_keywords(settings, n_live=n_live, seed=seed))
+
+
+def stopping_diagnostics(state: Any, effective: Mapping[str, Any]) -> SamplerDiagnostics:
+    """Snapshot Nautilus's stopping contract from its live sampler, not PDF weights.
+
+    Exploration uses ``f_live`` internally; after it completes Nautilus reports
+    that fraction as None. Its final success contract is explored AND all shell
+    counts >= n_shell AND n_eff >= target. The call budget is a separate stop.
+    """
+    explored = bool(state.explored)
+    shell_n = np.asarray(state.shell_n, dtype=int)
+    n_eff = float(state.n_eff)
+    n_like = int(state.n_like)
+    shell_passed = bool(shell_n.size and np.all(shell_n >= effective["n_shell"]))
+    ess_passed = bool(np.isfinite(n_eff) and n_eff >= effective["n_eff"])
+    complete = explored and shell_passed and ess_passed
+    budget = effective["n_like_max"]
+    exhausted = budget is not None and n_like >= budget
+    requested = {name: effective[name] for name in ("n_eff", "n_shell", "f_live", "n_like_max", "discard_exploration")}
+    return SamplerDiagnostics(requested=requested,
+        achieved={"n_eff": n_eff if np.isfinite(n_eff) else None, "n_like": n_like,
+                  "f_live": None if state.f_live is None else float(state.f_live),
+                  "shell_n": shell_n.tolist(), "shell_criterion_satisfied": shell_passed,
+                  "effective_sample_criterion_satisfied": ess_passed},
+        exploration_complete=explored, criteria_satisfied=complete,
+        stop_reason="criteria_satisfied" if complete else "budget_exhausted" if exhausted else "backend_stopped",
+        pdf_usable=None)
 
 
 def effective_settings(search: Any) -> dict[str, Any]:
@@ -186,14 +215,22 @@ def run_search(*, fit_model: FitModel, model: Any, analysis: Any, role: Literal[
         retention = inspect_retention(output_path, result_path=None if result is None
                                       else Path(result.paths.output_path))
     log_likelihood_max = log_evidence = likelihood_calls = None
+    diagnostics = getattr(search, "_hwoslaps_diagnostics", None)
     if result is not None:
         log_likelihood_max = float(result.max_log_likelihood_fit.figure_of_merit)
         evidence = result.samples.log_evidence
         log_evidence = None if evidence is None else float(evidence)
         likelihood_calls = int(result.samples.total_samples)
+        if diagnostics is not None:
+            from dataclasses import replace
+            diagnostics = replace(diagnostics, pdf_usable=bool(result.samples.pdf_converged))
+    if error is not None and diagnostics is not None:
+        from dataclasses import replace
+        diagnostics = replace(diagnostics, stop_reason="failed", criteria_satisfied=False)
     record = SamplerRecord(name=search.paths.name, output_path=output_path.relative_to(root).as_posix(),
                            identity=identity, n_live=n_live, requested=settings.to_mapping(),
                            effective=effective, seed=seed, training_workers=training_workers,
                            log_likelihood_max=log_likelihood_max, log_evidence=log_evidence,
-                           likelihood_calls=likelihood_calls, retention=retention, runtime_s=runtime_s)
+                           likelihood_calls=likelihood_calls, retention=retention, runtime_s=runtime_s,
+                           diagnostics=diagnostics)
     return SearchOutcome(record=record, result=result, error=error)

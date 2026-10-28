@@ -20,7 +20,7 @@ from .settings import MassSupport
 
 if TYPE_CHECKING:
     from .fit_model import FitModel
-    from .result import RefineOutcome
+    from .result import RefineOutcome, SamplerDiagnostics
     from .subhalo_classes import SubhaloMassMapping
 
 __all__ = ["SubhaloEstimate", "SubhaloRecovery", "extract_recovery", "weighted_quantiles"]
@@ -57,8 +57,11 @@ def _quantiles(value: Any) -> tuple[float, float, float] | None:
 
 @dataclass(frozen=True)
 class SubhaloRecovery:
-    """Freed-subhalo summary of the H1 search. Quantiles are (p16, p50, p84) of the sampler
-    samples, None when the sampler reports an unconverged posterior."""
+    """Freed-H1 values, with provisional quantiles retained and explicitly labelled.
+
+    ``pdf_converged`` is the historical backend weight-usability heuristic only.
+    Use ``posterior_quality`` for default scientific aggregation.
+    """
 
     sampler: SubhaloEstimate
     refined: SubhaloEstimate | None
@@ -68,6 +71,11 @@ class SubhaloRecovery:
     support: MassSupport
     pdf_converged: bool
     sample_count: int
+    posterior_quality: str = "unknown"
+
+    @property
+    def pdf_usable(self) -> bool:
+        return self.pdf_converged
 
     def to_mapping(self) -> dict[str, Any]:
         return {"sampler": self.sampler.to_mapping(),
@@ -76,10 +84,11 @@ class SubhaloRecovery:
                 "centre_y_quantiles": _list(self.centre_y_quantiles),
                 "centre_x_quantiles": _list(self.centre_x_quantiles),
                 "support": self.support.to_mapping(), "pdf_converged": self.pdf_converged,
-                "sample_count": self.sample_count}
+                "sample_count": self.sample_count, "posterior_quality": self.posterior_quality}
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> SubhaloRecovery:
+        mapping = {"posterior_quality": "unknown", **mapping}
         check_record_keys(mapping, cls)
         refined = mapping["refined"]
         return cls(sampler=SubhaloEstimate.from_mapping(mapping["sampler"]),
@@ -88,7 +97,8 @@ class SubhaloRecovery:
                    centre_y_quantiles=_quantiles(mapping["centre_y_quantiles"]),
                    centre_x_quantiles=_quantiles(mapping["centre_x_quantiles"]),
                    support=MassSupport.from_mapping(mapping["support"], path="support"),
-                   pdf_converged=bool(mapping["pdf_converged"]), sample_count=int(mapping["sample_count"]))
+                   pdf_converged=bool(mapping["pdf_converged"]), sample_count=int(mapping["sample_count"]),
+                   posterior_quality=mapping["posterior_quality"])
 
 
 def _list(values: tuple[float, ...] | None) -> list[float] | None:
@@ -130,7 +140,7 @@ def _estimate(log10_mass: float, centre_yx: tuple[float, float], mapping: Subhal
 
 
 def extract_recovery(result: Any, mapping: SubhaloMassMapping, model: FitModel,
-                     refinement: RefineOutcome | None) -> SubhaloRecovery:
+                     refinement: RefineOutcome | None, diagnostics: SamplerDiagnostics | None = None) -> SubhaloRecovery:
     """Recovery from a finished freed H1 search and, when it ran, its refinement.
 
     ``result`` is the AutoFit result of the search of ``model``; the subhalo is read at
@@ -159,10 +169,13 @@ def extract_recovery(result: Any, mapping: SubhaloMassMapping, model: FitModel,
     centre_y_values = np.asarray(samples.values_for_path(path + ("centre", "centre_0")), dtype=float)
     centre_x_values = np.asarray(samples.values_for_path(path + ("centre", "centre_1")), dtype=float)
     weights = np.asarray(samples.weight_list, dtype=float)
-    converged = pdf_converged and mass.size > 0
+    usable = pdf_converged and mass.size > 0
+    quality = ("unavailable" if not usable else "complete" if diagnostics is not None
+               and diagnostics.criteria_satisfied is True else "provisional")
     return SubhaloRecovery(
         sampler=sampler, refined=refined,
-        log10_mass_quantiles=weighted_quantiles(mass, weights) if converged else None,
-        centre_y_quantiles=weighted_quantiles(centre_y_values, weights) if converged else None,
-        centre_x_quantiles=weighted_quantiles(centre_x_values, weights) if converged else None,
-        support=mapping.support, pdf_converged=pdf_converged, sample_count=int(mass.size))
+        log10_mass_quantiles=weighted_quantiles(mass, weights) if usable else None,
+        centre_y_quantiles=weighted_quantiles(centre_y_values, weights) if usable else None,
+        centre_x_quantiles=weighted_quantiles(centre_x_values, weights) if usable else None,
+        support=mapping.support, pdf_converged=pdf_converged, sample_count=int(mass.size),
+        posterior_quality=quality)

@@ -27,6 +27,8 @@ _PUBLIC_API = {
     "classify_case": ("nonlinear", "classify_case"),
     "select_attempt": ("nonlinear", "select_attempt"),
     "detection_agreement": ("nonlinear", "detection_agreement"),
+    "scientific_outputs": ("nonlinear", "scientific_outputs"),
+    "ScientificOutputs": ("nonlinear", "ScientificOutputs"),
     "CaseClassification": ("nonlinear", "CaseClassification"),
     "AttemptSelection": ("nonlinear", "AttemptSelection"),
     "AgreementTable": ("nonlinear", "AgreementTable"),

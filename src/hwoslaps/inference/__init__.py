@@ -22,6 +22,7 @@ _PUBLIC_API = {
     "SubhaloRecovery": ("recovery", "SubhaloRecovery"),
     "SubhaloEstimate": ("recovery", "SubhaloEstimate"),
     "ForecastReference": ("result", "ForecastReference"),
+    "SamplerDiagnostics": ("result", "SamplerDiagnostics"),
     "ObservationRecord": ("result", "ObservationRecord"),
     "OBJECTIVE_VERSION": ("settings", "OBJECTIVE_VERSION"),
     "PROCEDURE_VERSION": ("settings", "PROCEDURE_VERSION"),

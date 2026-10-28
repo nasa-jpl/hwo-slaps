@@ -271,12 +271,12 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
     recovery = None
     if fit.mode == "freed" and subhalo_outcome is not None and subhalo_outcome.result is not None:
         recovery = extract_recovery(subhalo_outcome.result, case.models.mass_mapping, case.model("subhalo"),
-                                    subhalo.refinement)
+                                    subhalo.refinement, subhalo.sampler.diagnostics)
     q_signed = q_clipped = evidence_difference = None
     if smooth.log_likelihood is not None and subhalo.log_likelihood is not None:
         q_signed, q_clipped = likelihood_ratio(smooth.log_likelihood, subhalo.log_likelihood)
-    if subhalo_outcome is not None and smooth.status == subhalo.status == "success":
-        evidence0, evidence1 = smooth_outcome.record.log_evidence, subhalo_outcome.record.log_evidence
+    if smooth.status == subhalo.status == "success":
+        evidence0, evidence1 = smooth.log_evidence, subhalo.log_evidence
         if evidence0 is not None and evidence1 is not None and math.isfinite(evidence0) and math.isfinite(evidence1):
             evidence_difference = evidence1 - evidence0
     from ..provenance import capture_provenance

@@ -18,10 +18,27 @@ from contextlib import ExitStack, contextmanager
 from typing import Any
 
 import autolens as al
+import autofit as af
 from autolens.imaging.fit_imaging import FitImaging
 
 __all__ = ["ANALYSIS_CLASS", "BackendSession", "CompatAnalysisImaging", "ensure_jax_x64", "make_analysis",
            "require_jax_fitness_api"]
+
+
+class RecordedNautilus(af.Nautilus):
+    """Nautilus adapter capturing stopping diagnostics before state disposal.
+
+    A module-level class also preserves AutoFit's pickled search metadata.
+    Sampling, seeds, pools, and the backend stopping algorithm are unchanged.
+    """
+
+    def call_search(self, search_internal: Any, *args: Any, **kwargs: Any) -> Any:
+        from .sampler import effective_settings, stopping_diagnostics
+
+        try:
+            return super().call_search(search_internal, *args, **kwargs)
+        finally:
+            self._hwoslaps_diagnostics = stopping_diagnostics(search_internal, effective_settings(self))
 
 _VISUALIZATION_VARIABLE = "PYAUTO_SKIP_VISUALIZATION"
 _SCOPE_LOCK = threading.Lock()
