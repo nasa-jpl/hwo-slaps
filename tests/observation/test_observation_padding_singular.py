@@ -43,6 +43,12 @@ def test_singular_padding_common_crop_and_public_fit_share_pixel_integrals(kind,
     with prepare_forecast(minimal_mapping, execution=Execution(engine="jax")) as requested_jax:
         actual = forecast(requested_jax, masses_msun=[1e8])
         np.testing.assert_array_equal(actual.q_asimov, expected.q_asimov)
+        response = actual.provenance["comparison_inputs"]["response"]
+        assert response == case.data.record["comparison_inputs"]["response"]
+        assert response["operator"] == "native_binned_psf_padded_v1"
+        assert response["light_integration"]["source"]["policy"] == "native-brightness-adaptive-v1"
+        assert response["light_integration"]["source"]["max_cells"] == 1024
+        assert response["light_integration"]["lens"]["policy"] == "uniform_subpixel_mean"
         route = requested_jax.engine.describe()
         assert route["kind"] == "reference" and route["requested_kind"] == "jax"
         assert route["jax_accelerated"] is False and route["device"] == "cpu"

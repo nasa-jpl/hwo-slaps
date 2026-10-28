@@ -11,9 +11,26 @@ import numpy as np
 from .spec import GridSpec
 
 __all__ = ["NATIVE_RENDER_VERSION", "RenderGeometry", "render_scene_light",
-           "rendering_geometry"]
+           "rendering_geometry", "response_identity"]
 
 NATIVE_RENDER_VERSION = "native_binned_psf_padded_v1"
+
+
+def response_identity(scene, rendering):
+    """Describe the physical light response independently of execution backend."""
+    halos = tuple(getattr(scene, "perturbers", ()))
+    if getattr(scene, "subhalo", None) is not None:
+        halos += (scene.subhalo,)
+    singular = getattr(getattr(scene.spec, "subhalo", None), "type", None) in {"PointMass", "SIS"}
+    singular |= any(halo.model.type in {"PointMass", "SIS"} for halo in halos)
+    source = {"policy": "uniform_subpixel_mean"}
+    if singular:
+        from .singular_integration import ATOL, MAX_CELLS, MAX_DEPTH, ORDERS, POLICY, RTOL
+        source = {"policy": POLICY, "rtol": RTOL, "atol": ATOL, "orders": list(ORDERS),
+                  "max_cells": MAX_CELLS, "max_depth": MAX_DEPTH}
+    return dict(rendering) | {"over_sample_size": scene.spec.grid.over_sample_size,
+                              "light_integration": {"lens": {"policy": "uniform_subpixel_mean"},
+                                                    "source": source}}
 
 
 @dataclass(frozen=True)

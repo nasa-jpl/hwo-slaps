@@ -121,6 +121,10 @@ def test_padded_jax_forecast_and_nonlinear_model_share_reference_response(gpu, m
         trial = reference.hypothesis(1e8, (0.411, -0.613))
         case = prepare_case(reference, trial, reference.observation, fit=FitSpec(mode="fixed_template"), use_jax=True)
         independent = prepare_case(reference, trial, reference.observation, fit=FitSpec(mode="fixed_template"), use_jax=False)
+        response = left.provenance["comparison_inputs"]["response"]
+        assert response == case.data.record["comparison_inputs"]["response"]
+        assert response["operator"] == "native_binned_psf_padded_v1"
+        assert response["light_integration"]["source"]["policy"] == "uniform_subpixel_mean"
         model = case.model("smooth")
         instance = case.autofit_models["smooth"].instance_from_vector(vector=model.truth.tolist())
         fitted = case.analysis.fit_from(instance)

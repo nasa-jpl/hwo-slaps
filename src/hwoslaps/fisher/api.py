@@ -24,6 +24,7 @@ from ..scene.critical_curve import effective_einstein_radius
 from ..scene.halos import Halo, make_halo
 from ..scene.image_source import frozen_value, load_image_asset
 from ..scene.perturbers import realize_perturbers
+from ..scene.rendering import response_identity
 from ..scene.spec import SceneSpec, pixel_centres_yx
 from ..scene.subhalo import validate_named_radius
 from ..spectra.bandpass import build_bandpass
@@ -321,7 +322,7 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
                       {"sha256": prepared.record["model_convolver_digests"][0]}
                       if len(prepared.psfs.model_kernels.kernels) == 1 else None,
         "detector_geometry": {"shape": list(spec.grid.shape), "pixel_scale_arcsec": spec.grid.pixel_scale_arcsec},
-        "response": {"operator": "native_detector_convolution_v1", "over_sample_size": spec.grid.over_sample_size},
+        "response": response_identity(prepared.scene, prepared.record["rendering"]),
         "noise": {"units": "e_per_s", "digest": array_digest(np.asarray(prepared.sigma_adu) *
                   float(exposure.detector.gain_e_per_adu) / float(exposure.exposure_time_s)),
                   "covariance": None if covariance is None else prepared.record["file_digests"][str(covariance)],

@@ -18,6 +18,7 @@ from ..observation.observation import Observation
 from ..scene.halos import Halo
 from ..scene.image_source import frozen_value
 from ..scene.parameters import scene_parameters
+from ..scene.rendering import response_identity
 from .comparison import compare_forecast
 from .data import FitData, build_fit_data, support_half_widths
 from .fit_model import FitModel, autofit_model
@@ -185,7 +186,7 @@ def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observati
         "truth_psf": data.record["truth_kernels"],
         "fitted_psf": data.record["fitted_kernel"],
         "detector_geometry": {"shape": list(observation.grid.shape), "pixel_scale_arcsec": observation.pixel_scale_arcsec},
-        "response": {"operator": "native_detector_convolution_v1", "over_sample_size": spec.grid.over_sample_size},
+        "response": response_identity(prepared.scene, data.record["rendering"]),
         "noise": {"units": "e_per_s", "digest": data.record["noise_digest"], "covariance": None,
                   "fiducial": "smooth_scene" if observation.subhalo is None else "injected_observation"},
         "nuisance_constraints": constraints,
