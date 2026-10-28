@@ -25,7 +25,9 @@ def test_smooth_and_subhalo_models_hold_realized_populations_fixed(minimal_mappi
                   "mass_function": {"kind": "power_law", "slope": -1.9, "mass_min_msun": 5e6,
                                     "mass_max_msun": 5e8, "count": 2},
                   "spatial": {"kind": "uniform_disk", "radius_arcsec": 0.8}}
-    off_plane = {"type": "PointMass", "redshift": 0.4,
+    off_plane = {"type": "TNFW", "redshift": 0.4,
+                 "concentration": {"kind": "fixed", "value": 12.},
+                 "truncation": {"kind": "tau", "tau": 10.},
                  "mass_function": {"kind": "power_law", "slope": -1.0, "mass_min_msun": 1e7,
                                    "mass_max_msun": 1e8, "count": 1},
                  "spatial": {"kind": "uniform_annulus", "inner_arcsec": 0.2, "outer_arcsec": 0.7}}
@@ -52,3 +54,18 @@ def test_smooth_and_subhalo_models_hold_realized_populations_fixed(minimal_mappi
             tracer = al.Tracer(galaxies=list(instance.galaxies), cosmology=prepared.scene.cosmology.autogalaxy())
             np.testing.assert_allclose(tracer.image_2d_from(grid=truth.grid).native,
                                        truth.tracer.image_2d_from(grid=truth.grid).native, rtol=1e-12, atol=1e-14)
+
+
+@pytest.mark.parametrize("kind", ["PointMass", "SIS"])
+def test_realized_off_plane_singular_population_reports_capability_boundary(minimal_mapping, kind):
+    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.scene.singular_integration import SingularIntegrationCapabilityError
+
+    minimal_mapping["scene"]["perturbers"] = {"populations": [{
+        "type": kind, "redshift": 0.4,
+        "mass_function": {"kind": "power_law", "slope": -1., "mass_min_msun": 1.e7,
+                          "mass_max_msun": 1.e8, "count": 1},
+        "spatial": {"kind": "uniform_annulus", "inner_arcsec": 0.2, "outer_arcsec": 0.7}}]}
+    with pytest.raises(SingularIntegrationCapabilityError, match="two-plane scene and a lens-plane halo"):
+        with prepare_forecast(minimal_mapping):
+            pass
