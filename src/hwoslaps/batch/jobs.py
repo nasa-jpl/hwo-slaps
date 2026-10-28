@@ -205,7 +205,7 @@ def _nonlinear_jobs(plan, arm, family, mass, position, *, attempt=0, resolved_tr
                   'refine': None if refine is None else refine.to_mapping(),
                   'retry': None if family.retry is None else family.retry.to_mapping(),
                   'forecast_arm': reference.name, 'forecast_config_digest': reference.config_digest,
-                  'forecast_config_mapping': reference.config.to_mapping()}
+                  'forecast_config_mapping': reference.config.to_mapping(), 'comparison_policy': family.comparison_policy}
     if position is None:
         parameters.update(configured_trial=True, batch_seed=plan.spec.seed, member_index=arm.member.index,
                           sampler_arm=arm.name, resolved_trial=resolved_trial)

@@ -65,12 +65,14 @@ def test_effective_settings_are_read_back_and_recorded(light_model, raw_imaging,
     assert {name: defaults[name] for name in ("n_eff", "n_shell", "f_live", "discard_exploration", "n_like_max")} \
         == {"n_eff": 500, "n_shell": 1, "f_live": 0.01, "discard_exploration": False, "n_like_max": float("inf")}
 
-    class DroppingNautilus(af.Nautilus):
+    import hwoslaps.inference.backend as backend
+
+    class DroppingNautilus(backend.RecordedNautilus):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
             self.f_live = 0.01
 
-    monkeypatch.setattr(af, "Nautilus", DroppingNautilus)
+    monkeypatch.setattr(backend, "RecordedNautilus", DroppingNautilus)
     analysis = make_analysis(raw_imaging, cosmology=ag.cosmo.Planck15(), use_jax=False)
     with BackendSession() as session, pytest.raises(RuntimeError, match="f_live: requested 0.02, constructed 0.01"):
         run_search(fit_model=light_model, model=None, analysis=analysis, role="smooth", n_live=20,
@@ -170,6 +172,9 @@ def test_successful_search_records_its_outputs_and_retained_state(light_model, r
         rows = list(csv.DictReader(stream, skipinitialspace=True))
     assert record.log_likelihood_max == pytest.approx(max(float(row["log_likelihood"]) for row in rows), rel=1e-12)
     assert record.likelihood_calls >= 400 and np.isfinite(record.log_evidence)
+    assert record.diagnostics.stop_reason == "budget_exhausted"
+    assert record.diagnostics.criteria_satisfied is False
+    assert record.diagnostics.achieved["n_like"] >= 400
     assert record.retention.retained and record.retention.route == "directory"
     starts = select_starts(files, light_model.parameter_names, light_model.lower, light_model.upper,
                            RefineSettings(original_start_count=2))

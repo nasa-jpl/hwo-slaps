@@ -7,7 +7,7 @@ import os
 import types
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +17,8 @@ from ..identity import array_digest, mapping_digest
 from ..observation.observation import Observation
 from ..scene.halos import Halo
 from ..scene.image_source import frozen_value
+from ..scene.parameters import scene_parameters
+from .comparison import compare_forecast
 from .data import FitData, build_fit_data, support_half_widths
 from .fit_model import FitModel, autofit_model
 from .hypotheses import RoleModels, build_role_models
@@ -169,6 +171,33 @@ def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observati
                           over_sample_size=prepared.scene.spec.grid.over_sample_size)
     free = tuple(parameter.name for parameter in prepared.nuisances.parameters if parameter.kind == "scene")
     models = build_role_models(prepared.scene, trial, free, fit, use_jax=use_jax)
+    spec = prepared.scene.spec
+    constraints = {}
+    for parameter in scene_parameters(spec):
+        if parameter.name in free:
+            bounds = fit.prior_widths.rule(parameter.name.split(".")[0], parameter.definition.kind).box(
+                parameter.value, parameter.definition.domain)
+            constraints[parameter.name] = {"kind": "uniform_box", "lower": bounds[0], "upper": bounds[1]}
+    comparison_inputs = {
+        "trial_model": {"model": prepared.config.to_mapping()["scene"]["subhalo"],
+                        "redshift": trial.redshift, "source_redshift": trial.source_redshift,
+                        "cosmology": trial.cosmology.to_mapping()},
+        "truth_psf": data.record["truth_kernels"],
+        "fitted_psf": data.record["fitted_kernel"],
+        "detector_geometry": {"shape": list(observation.grid.shape), "pixel_scale_arcsec": observation.pixel_scale_arcsec},
+        "response": {"operator": "native_detector_convolution_v1", "over_sample_size": spec.grid.over_sample_size},
+        "noise": {"units": "e_per_s", "digest": data.record["noise_digest"], "covariance": None,
+                  "fiducial": "smooth_scene" if observation.subhalo is None else "injected_observation"},
+        "nuisance_constraints": constraints,
+        "statistic": {"name": "nonlinear_role_log_likelihood_ratio", "amplitude": fit.mode,
+                      "nuisances": "nonlinear_uniform_box", "q": "max(0,2*(logL1-logL0))",
+                      "h1": fit.h1, "objective_version": data.record["objective_version"],
+                      "parameter_bounds": {role: {"names": getattr(models, role).parameter_names,
+                                                 "lower": list(getattr(models, role).lower),
+                                                 "upper": list(getattr(models, role).upper)}
+                                           for role in ("smooth", "subhalo")}},
+    }
+    data = replace(data, record=dict(data.record) | {"comparison_inputs": comparison_inputs})
     converted = {role: autofit_model(getattr(models, role)) for role in ("smooth", "subhalo")}
     singular = trial.model.type in ("PointMass", "SIS") or any(
         halo.model.type in ("PointMass", "SIS") for halo in prepared.scene.perturbers)
@@ -188,7 +217,8 @@ def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observati
 def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Observation, *, fit: FitSpec,
                        sampler: SamplerSettings, sampler_seed: int, output_dir: str | os.PathLike[str],
                        refine: RefineSettings | None = None, session: BackendSession | None = None,
-                       forecast_reference: ForecastReference | None = None, case_id: str | None = None) -> CaseResult:
+                       forecast_reference: ForecastReference | None = None, case_id: str | None = None,
+                       comparison_policy: str = "strict") -> CaseResult:
     """Compare smooth and subhalo roles through the configured nonlinear searches.
 
     Parameters
@@ -213,6 +243,9 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
         Active caller-owned session, or None to create and close one for this call.
     forecast_reference : ForecastReference or None
         Optional forecast record at the same trial mass and position.
+    comparison_policy : {'strict', 'diagnostic'}
+        Strict rejects incompatible or unassessed forecast references before any
+        search. Diagnostic retains intentional cross-arm inputs and their report.
     case_id : str or None
         Nonempty directory basename, or None for a deterministic generated name.
         Its directory under output_dir must be absent or empty.
@@ -230,6 +263,8 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
     """
     if refine is not None and not sampler.use_jax:
         raise ValueError("refinement requires sampler.use_jax")
+    if comparison_policy not in ("strict", "diagnostic"):
+        raise ValueError("comparison_policy must be strict or diagnostic")
     if isinstance(sampler_seed, bool) or not isinstance(sampler_seed, (int, np.integer)) or sampler_seed < 0:
         raise ValueError("sampler_seed must be a nonnegative integer")
     if session is not None and not session.active:
@@ -239,6 +274,17 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
         raise ValueError(f"forecast reference node {(forecast_reference.mass_msun, forecast_reference.position_yx_arcsec)} "
                          f"differs from trial node {(trial.mass_msun, trial.position_yx_arcsec)}")
     case = prepare_case(prepared, trial, observation, fit=fit, use_jax=sampler.use_jax)
+    if forecast_reference is not None:
+        comparison = compare_forecast(forecast_reference, hypothesis=trial, data=case.data.record,
+                                      fitted_parameters=case.record["fitted_parameters"],
+                                      comparison_digest=case.record["comparison_digest"])
+        if comparison_policy == "strict" and not comparison.compatible:
+            raise ValueError("incompatible forecast reference: differences=" + ", ".join(comparison.differences)
+                             + "; not assessed=" + ", ".join(comparison.unassessed)
+                             + ". Use comparison_policy='diagnostic' for an intentional comparison.")
+        data = replace(case.data, record=dict(case.data.record) | {
+            "forecast_comparison": comparison.to_mapping() | {"policy": comparison_policy}})
+        case = replace(case, data=data, record=frozen_value(dict(case.record) | {"data": data.record}))
     for role in ("smooth", "subhalo"):
         if not math.isfinite(case.log_likelihood(role, case.truth_vector(role))):
             raise ValueError(f"{role} truth likelihood is non-finite before any search")

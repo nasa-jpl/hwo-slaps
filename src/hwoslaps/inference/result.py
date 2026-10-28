@@ -250,6 +250,7 @@ class RoleFit:
     error: str | None
     runtime_s: float
     strategy_record: Mapping[str, Any] | None = None
+    quality: Mapping[str, Any] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         if self.role not in ("smooth", "subhalo"):
@@ -259,6 +260,10 @@ class RoleFit:
         if self.status not in ("success", "failed"):
             raise ValueError(f"status must be success or failed, got {self.status!r}")
         object.__setattr__(self, "parameter_names", tuple(self.parameter_names))
+        object.__setattr__(self, "quality", {"sampling_status": self.sampling_status,
+                                             "pdf_usable": self.pdf_usable,
+                                             "posterior": self.posterior_quality,
+                                             "evidence": self.evidence_quality})
 
     @property
     def acceptance_status(self) -> RoleStatus:
@@ -301,7 +306,7 @@ class RoleFit:
 
     @property
     def evidence_quality(self) -> str:
-        if self.log_evidence is None or not math.isfinite(self.log_evidence):
+        if self.status == "failed" or self.log_evidence is None or not math.isfinite(self.log_evidence):
             return "unavailable"
         if self.strategy in ("exact", "scalar"):
             return "complete" if self.strategy_record.get("integration_complete", False) else "provisional"
@@ -309,6 +314,8 @@ class RoleFit:
 
     @property
     def posterior_quality(self) -> str:
+        if self.status == "failed":
+            return "unavailable"
         if self.strategy in ("exact", "truth_anchor"):
             return "not_applicable"
         if not self.pdf_usable:
@@ -325,10 +332,10 @@ class RoleFit:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> RoleFit:
-        mapping = {"strategy_record": None, **mapping}
+        mapping = {"strategy_record": None, "quality": None, **mapping}
         check_record_keys(mapping, cls)
         sampler, refinement, margins = mapping["sampler"], mapping["refinement"], mapping["box_edge_margins"]
-        return cls(role=mapping["role"], strategy=mapping["strategy"], status=mapping["status"],
+        restored = cls(role=mapping["role"], strategy=mapping["strategy"], status=mapping["status"],
                    log_likelihood=_optional_float(mapping["log_likelihood"]),
                    truth_log_likelihood=float(mapping["truth_log_likelihood"]),
                    parameter_names=tuple(mapping["parameter_names"]),
@@ -338,6 +345,9 @@ class RoleFit:
                    box_edge_margins=None if margins is None else {name: float(v) for name, v in margins.items()},
                    anchor_chi2=_optional_float(mapping["anchor_chi2"]), error=mapping["error"],
                    runtime_s=float(mapping["runtime_s"]), strategy_record=mapping["strategy_record"])
+        if mapping["quality"] is not None and mapping["quality"] != restored.quality:
+            raise ValueError("role quality differs from its recorded stopping/integration diagnostics")
+        return restored
 
 
 def _finite_reference_number(value: Any, name: str) -> float:
@@ -371,8 +381,16 @@ class ForecastReference:
     amplitude: float | None
     comparison_digest: str
     noise_model: str
+    scientific_inputs: Mapping[str, Any] | None = None
+    template_status: Literal["valid", "zero_information", "failed_numeric"] = "valid"
 
     def __post_init__(self) -> None:
+        if self.template_status not in ("valid", "zero_information", "failed_numeric"):
+            raise ValueError(f"invalid forecast reference template_status {self.template_status!r}")
+        if self.template_status == "failed_numeric":
+            raise ValueError("failed_numeric forecast template cannot define a scientific reference")
+        if self.template_status == "zero_information" and self.metric == "q_mismatch":
+            raise ValueError("zero_information forecast reference has an unidentified fitted amplitude")
         if self.metric not in ("q_asimov", "q_mismatch"):
             raise ValueError(f"metric must be q_asimov or q_mismatch, got {self.metric!r}")
         object.__setattr__(self, "q", _finite_reference_number(self.q, "q"))
@@ -395,6 +413,13 @@ class ForecastReference:
         if len(kernels) != 1:
             raise ValueError("a nonlinear forecast reference requires one distinct model kernel")
         metric = result.detection_metric
+        statuses = getattr(result, "template_status", None)
+        status = (str(statuses[mass_index, position_index]) if statuses is not None else
+                  "zero_information" if result.fisher_profiled[mass_index, position_index] == 0. else "valid")
+        if status == "failed_numeric":
+            raise ValueError("failed_numeric forecast template cannot define a scientific reference")
+        if status == "zero_information" and metric == "q_mismatch":
+            raise ValueError("zero_information forecast reference has an unidentified fitted amplitude")
         q = _finite_reference_number(getattr(result, metric)[mass_index, position_index],
                                      f"{metric} at node ({mass_index}, {position_index})")
         amplitude = None if metric == "q_asimov" else _finite_reference_number(
@@ -408,7 +433,8 @@ class ForecastReference:
                    model_kernel=KernelIdentity.from_mapping(kernels[0]["identity"]),
                    amplitude=amplitude,
                    comparison_digest=provenance["comparison_digest"],
-                   noise_model="diagonal" if covariance is None else f"covariance:{covariance}")
+                   noise_model="diagonal" if covariance is None else f"covariance:{covariance}",
+                   scientific_inputs=provenance.get("comparison_inputs"), template_status=status)
 
     def detected(self, *, q_threshold: float) -> bool:
         """``q >= q_threshold`` with a positive amplitude where one is recorded (the forecast rule)."""
@@ -421,6 +447,7 @@ class ForecastReference:
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> ForecastReference:
+        mapping = {"scientific_inputs": None, "template_status": "valid", **mapping}
         check_record_keys(mapping, cls)
         return cls(q=mapping["q"], metric=mapping["metric"], mass_msun=float(mapping["mass_msun"]),
                    position_yx_arcsec=tuple(mapping["position_yx_arcsec"]),
@@ -428,7 +455,8 @@ class ForecastReference:
                    nuisance_names=tuple(mapping["nuisance_names"]),
                    model_kernel=KernelIdentity.from_mapping(mapping["model_kernel"]),
                    amplitude=mapping["amplitude"],
-                   comparison_digest=mapping["comparison_digest"], noise_model=mapping["noise_model"])
+                   comparison_digest=mapping["comparison_digest"], noise_model=mapping["noise_model"],
+                   scientific_inputs=mapping["scientific_inputs"], template_status=mapping["template_status"])
 
 
 def _halo_from_mapping(mapping: Mapping[str, Any] | None) -> Halo | None:

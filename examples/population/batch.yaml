@@ -25,6 +25,8 @@ forecast:
   masses_msun: [1.0e8, 1.0e9]
 nonlinear:
   injected:
+    # Compare the smooth-variance linear forecast with a noisy uniform-box fit.
+    comparison_policy: diagnostic
     trials: {kind: explicit, explicit: [{members: 0, mass_msun: 1.0e9, position_yx: [1.0, 0.0]}]}
     inject: true
     noise: true

@@ -211,7 +211,7 @@ def test_batch_nonlinear_job_equals_direct_api(tiny_batch_spec, tmp_path):
     from hwoslaps.batch.jobs import case_id
     family = {'trials': {'kind': 'explicit', 'explicit': [{'members': 0, 'mass_msun': 1e8,
                                                         'position_yx': [.1, .2]}]},
-              'inject': True, 'noise': True, 'fit': {'mode': 'fixed_template'},
+              'inject': True, 'noise': True, 'fit': {'mode': 'fixed_template'}, 'comparison_policy': 'diagnostic',
               'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 200,
                           'n_shell': 1, 'f_live': .01, 'discard_exploration': True, 'number_of_cores': 1}}
     spec = tiny_batch_spec(population={'count': 1}, nonlinear={'n': family}, execution={'workers_per_device': 1})
@@ -231,7 +231,10 @@ def test_batch_nonlinear_job_equals_direct_api(tiny_batch_spec, tmp_path):
         assert actual.forecast_reference.to_mapping() == reference.to_mapping()
         expected = validate_nonlinear(prepared, trial, observed, fit=FitSpec.from_mapping(family['fit']),
             sampler=SamplerSettings.from_mapping(family['sampler']), sampler_seed=record.marker['seeds']['sampler'],
-            output_dir=tmp_path / 'direct-fit', forecast_reference=reference, case_id=case_id(planned.job_id))
+            output_dir=tmp_path / 'direct-fit', forecast_reference=reference, case_id=case_id(planned.job_id),
+            comparison_policy='diagnostic')
+    assert actual.data['forecast_comparison']['policy'] == 'diagnostic'
+    assert 'noise' in actual.data['forecast_comparison']['differences']
     assert actual.case_id == expected.case_id == case_id(planned.job_id)
     assert '/' not in actual.case_id
     for role in ('smooth', 'subhalo'):
@@ -323,7 +326,7 @@ def test_actual_worker_refuses_unplanned_scientific_capture(tiny_batch_spec, tmp
     import hwoslaps.simulation as simulation
     import hwoslaps.inference.api as inference_api
     family = {'trials': {'kind': 'explicit', 'explicit': [{'mass_msun': 1e8, 'position_yx': [.1, .2]}]},
-              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'},
+              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'}, 'comparison_policy': 'diagnostic',
               'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 200, 'n_shell': 1,
                           'f_live': .01, 'discard_exploration': True, 'number_of_cores': 1}}
     sections = {'simulate': {'inject': True, 'noise': False}} if kind == 'simulate' else {'nonlinear': {'n': family}}

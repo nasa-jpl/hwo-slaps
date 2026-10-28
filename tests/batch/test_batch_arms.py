@@ -58,7 +58,8 @@ def test_nonlinear_reference_uses_the_actual_999_forecast_arm(optical_batch_spec
     narrow = {**optical, 'kernel_shape': [51, 51]}
     family = {'arms': ['fit'], 'forecast_arm': 'fore', 'trials': {'kind': 'explicit', 'explicit': [
         {'mass_msun': 1e8, 'position_yx': [.1, .2]}]}, 'inject': True, 'noise': False,
-        'fit': {'mode': 'fixed_template'}, 'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50,
+        'fit': {'mode': 'fixed_template'}, 'comparison_policy': 'diagnostic',
+        'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50,
         'n_eff': 200, 'n_shell': 1, 'f_live': .01, 'discard_exploration': True}}
     mapping = base.to_mapping()
     mapping['config']['psf']['truth'] = deepcopy(optical)
@@ -80,5 +81,7 @@ def test_nonlinear_reference_uses_the_actual_999_forecast_arm(optical_batch_spec
                                                  mass_index=0, position_index=0)
     assert case.forecast_reference.to_mapping() == expected.to_mapping()
     assert case.forecast_reference.config_digest != case.observation.config_digest
+    assert 'model_psf' in case.data['forecast_comparison']['differences']
+    assert case.data['forecast_comparison']['policy'] == 'diagnostic'
     assert record.marker['preparation']['key'] == case.observation.config_digest
     assert record.marker['forecast_reference_preparation']['key'] == expected.config_digest

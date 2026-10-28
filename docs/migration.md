@@ -70,6 +70,23 @@ noise draw. The returned observation records whether it is expected or noisy.
 `validate_nonlinear` takes explicit fit, sampler, and optional refinement settings.
 Failed, unresolved, and accepted nondetection outcomes remain distinct.
 
+An attached forecast reference now uses `comparison_policy="strict"` by default.
+The fit rejects differing or unassessed scientific inputs before starting a search.
+For an intentional comparison across PSF arms, noise choices, or nuisance constraints,
+pass `comparison_policy="diagnostic"` and inspect `result.data["forecast_comparison"]`.
+`detection_agreement` also defaults to strict inclusion and reports each excluded
+comparison's differences. Its diagnostic mode must be requested separately.
+The truth-preserving `comparison_digest` keeps its existing meaning.
+
+Sampler records now capture requested and achieved stopping criteria, exploration
+completion, and the stop reason. Role `quality` records distinguish sampling status,
+posterior quality, and evidence quality from likelihood optimization acceptance.
+The backend's historical `pdf_converged` field is only a sample-weight usability
+heuristic; recovery also exposes it as `pdf_usable`. Incomplete runs retain finite
+evidence and usable quantiles as `provisional`. `scientific_outputs` excludes these
+values by default; `include_provisional=True` makes their inclusion explicit.
+Meeting sampler criteria does not establish that every posterior mode was found.
+
 Every supported scene parameter is free by default unless listed in
 `forecast.nuisances.fixed`. This includes an Image component's `rotation_deg`, which
 the paper held fixed. For a component named `galaxy`, include this entry alongside

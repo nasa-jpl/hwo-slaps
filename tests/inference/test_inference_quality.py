@@ -38,6 +38,7 @@ def test_quality_roundtrip_and_legacy_records_do_not_infer_completion():
     legacy = role.to_mapping()
     del legacy["sampler"]["diagnostics"]
     del legacy["strategy_record"]
+    del legacy["quality"]
     restored = RoleFit.from_mapping(legacy)
     assert restored.sampling_status == "unknown" and restored.evidence_quality == "provisional"
 
@@ -76,3 +77,39 @@ def test_independent_gaussian_sampler_completion_and_evidence(capped):
         variances = np.sum((samples - means) ** 2 * weights[:, None], axis=0)
         assert np.max(np.abs(means)) < .15
         assert np.max(np.abs(variances - 1.)) < .2
+
+
+@pytest.mark.backend
+def test_public_capped_fit_retains_provisional_values_and_roundtrips(prepared_forecast_factory, tmp_path):
+    from hwoslaps.analysis.nonlinear import scientific_outputs
+    from hwoslaps.artifacts import save_case, load_case
+    from hwoslaps.inference.api import validate_nonlinear
+    from hwoslaps.inference.settings import BoxRule, FitSpec, MassSupport, PriorWidths, SamplerSettings
+    from hwoslaps.scene.parameters import scene_parameters
+    from hwoslaps.simulation import simulate
+
+    initial = prepared_forecast_factory()
+    free = {"source.light.light.intensity", "source.light.light.effective_radius"}
+    fixed = [parameter.name for parameter in scene_parameters(initial.scene.spec) if parameter.name not in free]
+    prepared = prepared_forecast_factory({"forecast": {"nuisances": {"fixed": fixed, "background_offset": False}}})
+    trial = prepared.hypothesis(1.e8, (.4, -.6))
+    fit = FitSpec(mode="freed", mass_support=MassSupport(7.999, 8.001), prior_widths=PriorWidths(
+        rules=(("source.amplitude", BoxRule(.0001)), ("source.size", BoxRule(.00001))),
+        subhalo_freed_window_arcsec=.0001))
+    result = validate_nonlinear(prepared, trial, simulate(prepared, subhalo=trial, noise_seed=None), fit=fit,
+        sampler=SamplerSettings(n_live_smooth=10, n_live_subhalo_search=10, n_eff=500, n_like_max=100),
+        sampler_seed=7, output_dir=tmp_path / "fit")
+    assert result.recovery.pdf_usable is True
+    assert result.recovery.log10_mass_quantiles is not None
+    assert result.recovery.posterior_quality == result.evidence_quality == "provisional"
+    for role in (result.smooth, result.subhalo):
+        assert role.status == "success" and role.sampling_status == "incomplete"
+        assert role.sampler.diagnostics.stop_reason == "budget_exhausted"
+        assert role.sampler.diagnostics.exploration_complete is False
+    path = save_case(result, tmp_path / "case.json")
+    restored = load_case(path)
+    assert restored.to_mapping() == result.to_mapping()
+    assert scientific_outputs([restored]).evidence_differences == ()
+    assert scientific_outputs([restored]).recoveries == ()
+    explicit = scientific_outputs([restored], include_provisional=True)
+    assert len(explicit.evidence_differences) == len(explicit.recoveries) == 1

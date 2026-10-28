@@ -42,7 +42,8 @@ def test_nonlinear_q_matches_the_forecast_for_a_weak_subhalo(relation, prepared_
                                     fit=FitSpec(mode="fixed_template", mask="forecast_mask_minus_psf_border",
                                                 h1="truth_anchor" if relation == "matched" else "search"),
                                     sampler=sampler, sampler_seed=20261005, refine=RefineSettings(),
-                                    output_dir=tmp_path / "fits", case_id=f"{relation}_{index}", forecast_reference=reference)
+                                    output_dir=tmp_path / "fits", case_id=f"{relation}_{index}", forecast_reference=reference,
+                                    comparison_policy="diagnostic")
         assert result.data["mask"]["digest"] == reference.mask_digest
         assert tuple(reference.nuisance_names) == result.fitted_parameters
         assert reference.model_kernel == prepared.psfs.model_kernels.single.kernel_identity()

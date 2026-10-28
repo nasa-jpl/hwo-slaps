@@ -156,6 +156,7 @@ def test_unusable_member_followup_is_terminal_and_other_member_finishes(tiny_bat
     from hwoslaps.batch.state import source_revision
     from hwoslaps.provenance import capture_provenance
     family = {'trials': {'kind': 'forecast_argmax', 'masses_msun': [1e8]}, 'inject': True, 'noise': False,
+              'comparison_policy': 'diagnostic',
               'fit': {'mode': 'fixed_template'}, 'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50,
               'n_eff': 200, 'n_shell': 1, 'f_live': .01, 'discard_exploration': True, 'number_of_cores': 1}}
     spec = tiny_batch_spec(nonlinear={'n': family}, execution={'workers_per_device': 1})
@@ -194,7 +195,7 @@ def test_real_worker_executes_configured_critical_curve_retry(tiny_batch_spec, t
     import math
     from hwoslaps.batch import open_batch, run_batch
     from hwoslaps.identity import mapping_digest
-    family = {'trials': {'kind': 'configured'}, 'inject': True, 'noise': False,
+    family = {'trials': {'kind': 'configured'}, 'inject': True, 'noise': False, 'comparison_policy': 'diagnostic',
               'fit': {'mode': 'fixed_template'},
               'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 40,
                           'n_shell': 1, 'f_live': .1, 'n_like_max': 50000,
@@ -311,7 +312,7 @@ def test_actual_worker_passes_stationarity_policy_to_real_case_classifier(tiny_b
     tolerance = 1e-4
     statuses = ['sampler_only', 'verified_zero_residual_anchor', 'accepted_repeatable_profile']
     family = {'trials': {'kind': 'explicit', 'explicit': [{'mass_msun': 1e8, 'position_yx': [.1, .2]}]},
-              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'},
+              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'}, 'comparison_policy': 'diagnostic',
               'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 200, 'n_shell': 1,
                           'f_live': .01, 'discard_exploration': True, 'number_of_cores': 1},
               'retry': {'acceptance': {'smooth': statuses, 'subhalo': statuses},

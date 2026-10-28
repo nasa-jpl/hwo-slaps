@@ -201,9 +201,11 @@ class NonlinearFamily:
     retry: RetryPolicy | None
     arms: tuple[str, ...] | None = None
     forecast_arm: str | None = None
+    comparison_policy: Literal['strict', 'diagnostic'] = 'strict'
 
     def to_mapping(self):
-        return {'arms': self.arms, 'forecast_arm': self.forecast_arm, 'trials': self.trials.to_mapping(),
+        return {'arms': self.arms, 'forecast_arm': self.forecast_arm, 'comparison_policy': self.comparison_policy,
+                'trials': self.trials.to_mapping(),
                 'inject': self.inject, 'noise': self.noise, 'replicates': self.replicates,
                 'fit': self.fit.to_mapping(), 'sampler': self.sampler.to_mapping(),
                 'refine': None if self.refine is None else self.refine.to_mapping(),
@@ -316,6 +318,8 @@ _RETRY_TABLE = Table((
 _NONLINEAR_TABLE = Table((
     Key('arms', _ARMS, 'participating arm names', None),
     Key('forecast_arm', Nullable(_NAME), 'arm supplying trials and signed forecast references', None),
+    Key('comparison_policy', Text(choices=('strict', 'diagnostic')),
+        'strict input compatibility or explicit diagnostic cross-arm comparison', 'strict'),
     Key('trials', _TRIALS_TABLE, 'trial selection'), Key('inject', Boolean(), 'inject the trial'),
     Key('noise', Boolean(), 'draw detector noise'), Key('replicates', _COUNT, 'noise replicates', 1),
     Key('fit', _Settings(FitSpec), 'nonlinear fit'), Key('sampler', _Settings(SamplerSettings), 'sampler settings', {}),
@@ -426,7 +430,8 @@ def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
         if refine is not None and not sampler.use_jax:
             raise ConfigError(f'nonlinear.{name}.refine', 'requires sampler.use_jax')
         families.append(NonlinearFamily(name, trials, record['inject'], record['noise'], record['replicates'],
-                                        fit, sampler, refine, retry, _arms(record['arms']), record['forecast_arm']))
+                                        fit, sampler, refine, retry, _arms(record['arms']), record['forecast_arm'],
+                                        record['comparison_policy']))
     if simulate is None and forecast is None and not families:
         raise ConfigError('', 'at least one of simulate, forecast or nonlinear is required')
     for path, family in [('simulate', simulate), ('forecast', forecast)] + [(f'nonlinear.{family.name}', family) for family in families]:

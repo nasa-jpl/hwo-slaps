@@ -206,7 +206,7 @@ of searching, for checks on noise-free data.
 |---|---|
 | `q_signed` | $2(\ln L_\mathrm{subhalo} - \ln L_\mathrm{smooth})$, which can be negative |
 | `q_clipped` | `max(q_signed, 0)`, for display |
-| `delta_log_evidence` | The difference in log evidence, when both searches finished |
+| `delta_log_evidence` | The retained difference in finite log evidence; inspect `evidence_quality` before use |
 | `smooth`, `subhalo` | Each role's `acceptance_status`, likelihood, sampler record and refinement record |
 | `recovery` | For `freed` fits, the recovered subhalo mass and position |
 | `fit`, `sampler`, `refine`, `sampler_seed` | The settings used |
@@ -214,6 +214,14 @@ of searching, for checks on noise-free data.
 | `forecast_reference` | The forecast at the same mass and position, if supplied |
 
 Save it with `save_case` and read it back with `load_case`.
+
+Each role's `quality` records sampling completion, PDF usability, posterior quality,
+and evidence quality separately from its optimization acceptance. A capped search
+can retain a useful likelihood maximum while its posterior and evidence remain
+`provisional`. `scientific_outputs(cases)` selects complete posterior and evidence
+outputs; provisional values require `include_provisional=True`. The backend's
+historical `pdf_converged` heuristic only tests weight usability. The sampler record
+now stores live exploration, ESS, shell counts, requested criteria, and stop reason.
 
 A subhalo role with a fixed halo does not contain the smooth model as a special case,
 and a freed halo with a minimum mass does not either. `q_signed` is therefore a
@@ -280,6 +288,16 @@ fair comparison:
 The forecast also profiles a background offset that the fit does not include; set
 `forecast.nuisances.background_offset: false` to remove it from the forecast. The comparison
 reports this and any other difference between the two set-ups.
+
+Both operations default to `comparison_policy="strict"`. Fits reject incompatible
+or unassessed references before searching, and agreement tables exclude them with
+reasons. The report compares physical trial inputs, truth and model kernels, detector
+response and mask, normalized noise and its fiducial choice, and nuisance constraints.
+Uniform nonlinear boxes differ from flat or Gaussian-penalized forecast directions;
+an injected observation can also have a different variance from the smooth forecast.
+For a deliberate comparison under those assumptions, request
+`comparison_policy="diagnostic"` in both operations and inspect the differences.
+Linearization and fixed/profiled amplitude conventions remain stated approximations.
 
 To estimate false detections, fit smooth controls with noise:
 `simulate(prepared, subhalo=None, noise_seed=seed)` for many seeds. A noise-free smooth

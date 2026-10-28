@@ -15,13 +15,14 @@ from typing import Any, Literal
 
 from ..config.checks import Boolean, ConfigError, Key, ListOf, Nullable, Real, Table, Text
 from ..identity import mapping_digest
+from ..inference.comparison import ComparisonReport, compare_forecast
 from ..inference.result import CaseResult, RoleStatus
 from ..inference.sampler import REQUIRED_SEARCH_INTERNAL_FILES
 
 __all__ = ["CLASSIFICATION_TABLE", "AgreementTable", "AttemptSelection", "CaseClassification", "CaseStatus",
            "ClassificationRule",
            "RoleAcceptance", "ScientificOutputs", "StatusResult", "case_status", "classify_case",
-           "detection_agreement", "scientific_outputs", "select_attempt"]
+           "ComparisonReport", "compare_forecast", "detection_agreement", "scientific_outputs", "select_attempt"]
 
 CaseStatus = Literal["accepted", "unresolved", "failed", "incomplete"]
 _ROLES = ("smooth", "subhalo")
@@ -132,6 +133,9 @@ class AgreementTable:
     unfitted_forecast_nuisances: Mapping[str, int]
     mask_mismatches: int
     configuration_mismatches: int
+    comparison_policy: str
+    comparison_differences: Mapping[str, int]
+    comparison_reports: tuple[Mapping[str, Any], ...]
 
 
 @dataclass(frozen=True)
@@ -249,12 +253,20 @@ def select_attempt(first: CaseResult, retry: CaseResult | None, rule: Classifica
     return AttemptSelection("retry", repeated, label, changed)
 
 
-def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]]) -> AgreementTable:
-    """The 2x2 detection table, exclusions and forecast-input diagnostics under one rule."""
+def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]], *,
+                        comparison_policy: str = "strict") -> AgreementTable:
+    """Detection agreement with strict compatible inputs by default.
+
+    Diagnostic mode includes intentional cross-arm comparisons with differences
+    visible. It does not make their differing objectives like-for-like.
+    """
+    if comparison_policy not in ("strict", "diagnostic"):
+        raise ValueError("comparison_policy must be strict or diagnostic")
     rule = None
     counts = Counter()
     excluded = Counter()
     unfitted = Counter()
+    differences, reports = Counter(), []
     mask_mismatches = configuration_mismatches = 0
     for result, classification in cases:
         if rule is None:
@@ -267,6 +279,7 @@ def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]]) 
         if classification != classify_case(result, classification.rule):
             raise ValueError("classification does not match the supplied CaseResult under its rule")
         reference = result.forecast_reference
+        comparison = None
         if reference is not None:
             if reference.mass_msun != result.hypothesis.mass_msun or reference.position_yx_arcsec != result.hypothesis.position_yx_arcsec:
                 raise ValueError("forecast reference node differs from the case hypothesis")
@@ -275,6 +288,12 @@ def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]]) 
                              or name.startswith("psf.")})
             mask_mismatches += reference.mask_digest != result.data["mask"]["digest"]
             configuration_mismatches += reference.comparison_digest != result.comparison_digest
+            comparison = compare_forecast(reference, hypothesis=result.hypothesis, data=result.data,
+                                          fitted_parameters=result.fitted_parameters,
+                                          comparison_digest=result.comparison_digest)
+            differences.update(comparison.differences)
+            differences.update(f"not_assessed:{name}" for name in comparison.unassessed)
+            reports.append({"case_id": result.case_id, **comparison.to_mapping()})
         if classification.status != "accepted":
             excluded[classification.status] += 1
         elif reference is None:
@@ -283,6 +302,8 @@ def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]]) 
             excluded["control_observation"] += 1
         elif result.observation.subhalo != result.hypothesis:
             excluded["observation_injection_mismatch"] += 1
+        elif comparison_policy == "strict" and not comparison.compatible:
+            excluded["incompatible_forecast" if comparison.differences else "unassessed_forecast"] += 1
         else:
             forecast = reference.detected(q_threshold=rule.q_threshold)
             key = "both" if forecast and classification.detected else "forecast_only" if forecast else (
@@ -291,4 +312,5 @@ def detection_agreement(cases: Iterable[tuple[CaseResult, CaseClassification]]) 
     if rule is None:
         raise ValueError("detection agreement needs at least one case to define its ClassificationRule")
     return AgreementTable(rule, counts["both"], counts["forecast_only"], counts["nonlinear_only"], counts["neither"],
-                          dict(excluded), dict(unfitted), mask_mismatches, configuration_mismatches)
+                          dict(excluded), dict(unfitted), mask_mismatches, configuration_mismatches,
+                          comparison_policy, dict(differences), tuple(reports))

@@ -17,6 +17,21 @@ POWER_LAW = {"kind": "power_law", "c0": 20.0, "mass_pivot_msun": 1.0e8,
              "mass_slope": -0.1, "redshift_slope": -1.0}
 
 
+def test_strict_reference_preflight_reports_model_psf_before_search(prepared_forecast, tmp_path):
+    from hwoslaps.fisher.api import forecast
+    from hwoslaps.identity import KernelIdentity
+
+    trial = prepared_forecast.hypothesis(1.e8, (.4, -.6))
+    reference = ForecastReference.from_result(forecast(prepared_forecast, masses_msun=[1.e8],
+        positions=[trial.position_yx_arcsec]), mass_index=0, position_index=0)
+    reference = dataclasses.replace(reference, model_kernel=KernelIdentity("11" * 32, (7, 7), .05))
+    with pytest.raises(ValueError, match="incompatible forecast reference:.*model_psf"):
+        validate_nonlinear(prepared_forecast, trial, prepared_forecast.observation,
+            fit=FitSpec(mode="fixed_template"), sampler=SamplerSettings(n_like_max=100),
+            sampler_seed=7, output_dir=tmp_path / "must_not_exist", forecast_reference=reference)
+    assert not (tmp_path / "must_not_exist").exists()
+
+
 @pytest.mark.parametrize("defect", ["config", "truth_kernel", "injection", "redshift", "support", "noisy_anchor",
                                   "identity_kernel", "covariance", "model_sis", "model_concentration", "refine_cpu"])
 def test_prepare_case_refuses_incoherent_inputs_before_any_backend_object(defect, prepared_forecast_factory,
@@ -125,7 +140,7 @@ def test_case_output_and_reference_node_are_checked(defect, prepared_forecast, t
     with pytest.raises(ValueError, match=message):
         validate_nonlinear(prepared_forecast, trial, prepared_forecast.observation, fit=FitSpec(mode="fixed_template"),
                            sampler=SamplerSettings(), sampler_seed=7, output_dir=tmp_path / "outputs",
-                           case_id="case", forecast_reference=reference)
+                           case_id="case", forecast_reference=reference, comparison_policy="diagnostic")
     if defect == "directory":
         assert (directory / "keep.txt").read_text() == "keep"
     else:

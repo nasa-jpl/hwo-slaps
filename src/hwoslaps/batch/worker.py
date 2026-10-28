@@ -221,7 +221,8 @@ def run_job(payload, cache, session, *, connection, worker, revision):
                         fit=FitSpec.from_mapping(parameters['fit']), sampler=SamplerSettings.from_mapping(parameters['sampler']),
                         sampler_seed=seeds['sampler'], output_dir=run_dir / 'fit',
                         refine=None if refine is None else RefineSettings.from_mapping(refine), session=session,
-                        forecast_reference=forecast_reference, case_id=case_id(payload.job_id))
+                        forecast_reference=forecast_reference, case_id=case_id(payload.job_id),
+                        comparison_policy=parameters.get('comparison_policy', 'strict'))
                     if (result.observation.config_digest != payload.config_digest
                             or result.forecast_reference.config_digest != parameters['forecast_config_digest']):
                         raise BatchConflict(f'actual case input identities differ from their plans: {payload.job_id}')

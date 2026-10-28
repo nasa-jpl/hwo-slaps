@@ -29,6 +29,8 @@ _PUBLIC_API = {
     "detection_agreement": ("nonlinear", "detection_agreement"),
     "scientific_outputs": ("nonlinear", "scientific_outputs"),
     "ScientificOutputs": ("nonlinear", "ScientificOutputs"),
+    "ComparisonReport": ("nonlinear", "ComparisonReport"),
+    "compare_forecast": ("nonlinear", "compare_forecast"),
     "CaseClassification": ("nonlinear", "CaseClassification"),
     "AttemptSelection": ("nonlinear", "AttemptSelection"),
     "AgreementTable": ("nonlinear", "AgreementTable"),

@@ -311,6 +311,27 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
     covariance = prepared._config.forecast.noise_covariance
     draw = prepared.psfs.model.knowledge_error
     condition = prepared.workspace.condition_number
+    exposure = prepared.observation.exposure
+    comparison_inputs = {
+        "trial_model": {"model": prepared._config.to_mapping()["scene"]["subhalo"],
+                        "redshift": spec.lens.redshift if spec.subhalo_redshift is None else spec.subhalo_redshift,
+                        "source_redshift": spec.source.redshift, "cosmology": prepared.scene.cosmology.to_mapping()},
+        "truth_psf": prepared.psfs.truth_kernels.to_mapping(),
+        "fitted_psf": prepared.psfs.model_kernels.single.kernel_identity().to_mapping() |
+                      {"sha256": prepared.record["model_convolver_digests"][0]}
+                      if len(prepared.psfs.model_kernels.kernels) == 1 else None,
+        "detector_geometry": {"shape": list(spec.grid.shape), "pixel_scale_arcsec": spec.grid.pixel_scale_arcsec},
+        "response": {"operator": "native_detector_convolution_v1", "over_sample_size": spec.grid.over_sample_size},
+        "noise": {"units": "e_per_s", "digest": array_digest(np.asarray(prepared.sigma_adu) *
+                  float(exposure.detector.gain_e_per_adu) / float(exposure.exposure_time_s)),
+                  "covariance": None if covariance is None else prepared.record["file_digests"][str(covariance)],
+                  "fiducial": "smooth_scene"},
+        "nuisance_constraints": {parameter.name: {"kind": "flat"} if parameter.prior_sigma is None else
+                                 {"kind": "gaussian_penalty", "sigma": parameter.prior_sigma}
+                                 for parameter in prepared.nuisances.parameters},
+        "statistic": {"name": "profiled_linear_gaussian_q", "amplitude": "signed_profiled_linear",
+                      "nuisances": "first_order", "q": "one_sided_positive_amplitude"},
+    }
     return {key: json_ready(prepared.record[key]) for key in ("config_digest", "comparison_digest", "file_digests", "sampling")} | {
         "truth_kernels": prepared.psfs.truth_kernels.to_mapping(), "model_kernels": prepared.psfs.model_kernels.to_mapping(),
         "psf_relation": prepared.psfs.relation, "knowledge_error": None if draw is None else draw.to_mapping(),
@@ -337,7 +358,7 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
                  "digest": prepared.record["mask_digest"]},
         "noise_covariance": None if covariance is None else prepared.record["file_digests"][str(covariance)],
         "positions": {"kind": positions.kind, "count": len(positions), "domain_radius_arcsec": positions.domain_radius_arcsec},
-        "hwoslaps_version": __version__,
+        "hwoslaps_version": __version__, "comparison_inputs": comparison_inputs,
     }
 
 

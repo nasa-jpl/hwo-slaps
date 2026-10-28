@@ -258,7 +258,7 @@ def test_rule_round_trips_with_the_same_stationarity_domain(tolerance):
 ])
 def test_detection_agreement_preserves_hand_and_old_threshold_confusion(pairs, expected, case_factory):
     cases = [case_factory(q, forecast_q=forecast) for q, forecast in pairs]
-    result = detection_agreement((case, classify_case(case, _rule())) for case in cases)
+    result = detection_agreement(((case, classify_case(case, _rule())) for case in cases), comparison_policy="diagnostic")
     assert (result.both, result.forecast_only, result.nonlinear_only, result.neither) == expected
     assert result.rule == _rule() and result.excluded == {}
 
@@ -282,7 +282,7 @@ def test_detection_agreement_counts_and_exclusions(event, expected_counts, exclu
     elif event == "foreign_injection":
         case = dataclasses.replace(case, observation=dataclasses.replace(case.observation,
                                   subhalo=dataclasses.replace(case.hypothesis, mass_msun=2e7)))
-    table = detection_agreement([(case, classify_case(case, _rule()))])
+    table = detection_agreement([(case, classify_case(case, _rule()))], comparison_policy="diagnostic")
     assert (table.both, table.forecast_only, table.nonlinear_only, table.neither) == expected_counts
     assert table.excluded == exclusions
 
@@ -301,11 +301,70 @@ def test_agreement_reports_input_differences_and_scene_namespace(comparison, con
     fitted = (SCENE_PARAMETER, "observation.background_offset_adu", "psf.zernikes[4]") if claimed_unsupported else (SCENE_PARAMETER,)
     case = dataclasses.replace(case, forecast_reference=reference, fitted_parameters=fitted)
     unresolved = dataclasses.replace(case, subhalo=_role("subhalo", -94., RoleStatus.UNRESOLVED))
-    table = detection_agreement([(value, classify_case(value, _rule())) for value in (case, unresolved)])
+    table = detection_agreement([(value, classify_case(value, _rule())) for value in (case, unresolved)],
+                                comparison_policy="diagnostic")
     assert (table.both, table.excluded) == (1, {"unresolved": 1})
     assert table.mask_mismatches == 2 and table.configuration_mismatches == expected_mismatches
     assert table.unfitted_forecast_nuisances == {"source.light.light.intensity": 2,
                                               "observation.background_offset_adu": 2, "psf.zernikes[4]": 2}
+
+
+def _comparable(case):
+    inputs = {"trial_model": {"model": "PointMass", "redshift": .2}, "truth_psf": {"sha256": "truth"},
+              "fitted_psf": KERNEL.to_mapping(),
+              "detector_geometry": {"shape": [4, 4], "pixel_scale_arcsec": .05},
+              "response": {"operator": "native_detector_convolution_v1", "over_sample_size": 1},
+              "noise": {"units": "e_per_s", "digest": "noise", "covariance": None, "fiducial": "smooth_scene"},
+              "nuisance_constraints": {SCENE_PARAMETER: {"kind": "flat"}},
+              "statistic": {"name": "linear"}}
+    reference = dataclasses.replace(case.forecast_reference, scientific_inputs=inputs)
+    data = {**case.data, "model_kernel": KERNEL.to_mapping(), "comparison_inputs": inputs}
+    return dataclasses.replace(case, forecast_reference=reference, data=data)
+
+
+@pytest.mark.parametrize("difference", [None, "model_psf", "mask", "truth_configuration", "trial_model", "truth_psf", "fitted_psf",
+                                        "detector_geometry", "response", "noise", "nuisance_constraints"])
+def test_comparison_policies_name_differences_and_exclude_strictly(difference, case_factory):
+    case = _comparable(case_factory(12., forecast_q=12.))
+    if difference == "model_psf":
+        case = dataclasses.replace(case, data={**case.data, "model_kernel": KernelIdentity("11" * 32, (9, 7), .1).to_mapping()})
+    elif difference == "mask":
+        case = dataclasses.replace(case, data={**case.data, "mask": {"digest": "different"}})
+    elif difference == "truth_configuration":
+        case = dataclasses.replace(case, comparison_digest="different")
+    elif difference is not None:
+        inputs = {**case.data["comparison_inputs"], difference: {"different": True}}
+        case = dataclasses.replace(case, data={**case.data, "comparison_inputs": inputs})
+    pairs = [(case, classify_case(case, _rule()))]
+    strict = detection_agreement(pairs)
+    diagnostic = detection_agreement(pairs, comparison_policy="diagnostic")
+    assert diagnostic.both == 1 and diagnostic.excluded == {}
+    assert strict.both == (1 if difference is None else 0)
+    assert strict.excluded == ({} if difference is None else {"incompatible_forecast": 1})
+    assert strict.comparison_reports[0]["compatible"] == (difference is None)
+    if difference is not None:
+        assert strict.comparison_differences[difference] == 1
+    if difference == "model_psf":
+        assert strict.configuration_mismatches == 0
+        assert case.forecast_reference.comparison_digest == case.comparison_digest
+
+
+def test_legacy_reference_is_unassessed_and_quality_defaults_exclude_provisional(case_factory):
+    from hwoslaps.analysis.nonlinear import scientific_outputs
+    from hwoslaps.inference.result import SamplerDiagnostics
+
+    case = case_factory(12., forecast_q=12.)
+    table = detection_agreement([(case, classify_case(case, _rule()))])
+    assert table.both == 0 and table.comparison_reports[0]["not_assessed"]
+    # A raw finite Bayes factor survives, but unknown sampling quality excludes it.
+    case = dataclasses.replace(case, delta_log_evidence=3.)
+    assert scientific_outputs([case]).evidence_differences == ()
+    assert scientific_outputs([case], include_provisional=True).evidence_differences == ((case.case_id, 3.),)
+    diagnostics = SamplerDiagnostics({}, {}, True, True, "criteria_satisfied", True)
+    complete = dataclasses.replace(case, **{role: dataclasses.replace(case.role(role), sampler=dataclasses.replace(
+        case.role(role).sampler, log_evidence=1., diagnostics=diagnostics)) for role in ("smooth", "subhalo")})
+    assert scientific_outputs([complete]).evidence_differences == ((case.case_id, 3.),)
+    assert classify_case(complete, _rule()).status == classify_case(case, _rule()).status == "accepted"
 
 
 @pytest.mark.parametrize("invalid", ["empty", "mixed_rules", "foreign_node", "accepted_missing_statistic", "stale_classification"])

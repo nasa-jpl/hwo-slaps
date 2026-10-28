@@ -5,6 +5,11 @@ draw a population of lenses, apply several configuration variants to each, and s
 the jobs over CPUs or GPUs. Every finished job writes a completion marker, so an
 interrupted batch resumes where it stopped.
 
+Nonlinear families use `comparison_policy: strict` by default. Each attached forecast
+must pass the same scientific-input checks as a direct `validate_nonlinear` call.
+Declare `comparison_policy: diagnostic` explicitly for an intended comparison across
+PSF arms, noise choices, or forecast and fit constraints, and inspect the saved report.
+
 ## A batch file
 
 This example draws eight lenses from distributions, forecasts each at two masses, and

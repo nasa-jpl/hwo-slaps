@@ -154,10 +154,22 @@ def test_zero_information_mismatch_refuses_reference_and_matched_zero_round_trip
                   "model_kernels": {"kernels": [{"identity": KERNEL.to_mapping()}]}, "noise_covariance": None}
     mismatch = ForecastResult([1e8], positions, bank.fisher_raw[None], bank.fisher_profiled[None],
                               bank.amplitude_hat[None], bank.amplitude_spurious[None], "mismatched", {}, provenance)
-    with pytest.raises(ValueError, match="q_mismatch at node.*finite"):
+    with pytest.raises(ValueError, match="zero_information.*unidentified fitted amplitude"):
         ForecastReference.from_result(mismatch, mass_index=0, position_index=0)
     matched = ForecastResult([1e8], positions, bank.fisher_raw[None], bank.fisher_profiled[None],
                              None, None, "matched", {}, provenance)
     reference = ForecastReference.from_result(matched, mass_index=0, position_index=0)
     assert reference.q == 0.0 and reference.amplitude is None
+    assert reference.template_status == "zero_information"
     assert ForecastReference.from_mapping(json.loads(json.dumps(reference.to_mapping(), allow_nan=False))) == reference
+
+
+def test_reference_refuses_failed_template_even_with_finite_provisional_q():
+    from types import SimpleNamespace
+    import numpy as np
+
+    result = SimpleNamespace(masses_msun=[1.e8], positions_yx=[(.4, -.6)],
+        provenance={"model_kernels": {"kernels": [{"identity": KERNEL.to_mapping()}]}},
+        detection_metric="q_asimov", template_status=np.array([["failed_numeric"]]), q_asimov=np.array([[5.]]))
+    with pytest.raises(ValueError, match="failed_numeric forecast template"):
+        ForecastReference.from_result(result, mass_index=0, position_index=0)

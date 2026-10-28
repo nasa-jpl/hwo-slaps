@@ -13,7 +13,7 @@ def test_multi_device_run_equals_single_worker_run(tiny_batch_spec, tmp_path):
     tokens = [token.strip() for token in os.environ['CUDA_VISIBLE_DEVICES'].split(',')]
     assert len(tokens) >= 2 and len(set(tokens[:2])) == 2, 'this owner requires two actually assigned devices'
     family = {'trials': {'kind': 'forecast_argmax', 'masses_msun': [1e8]},
-              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'},
+              'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'}, 'comparison_policy': 'diagnostic',
               'sampler': {'n_live_smooth': 50, 'n_live_subhalo_fixed': 50, 'n_eff': 200,
                           'n_shell': 1, 'f_live': .01, 'discard_exploration': True,
                           'use_jax': True, 'number_of_cores': 1}}

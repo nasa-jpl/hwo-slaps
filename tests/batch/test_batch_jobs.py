@@ -15,6 +15,18 @@ _FAMILY = {'trials': {'kind': 'explicit', 'explicit': [{'members': 'all', 'mass_
            'inject': True, 'noise': True, 'replicates': 2, 'fit': {'mode': 'fixed_template'}}
 
 
+@pytest.mark.parametrize('policy', ['strict', 'diagnostic'])
+def test_nonlinear_comparison_policy_survives_spec_and_job_transport(tiny_batch_spec, tmp_path, policy):
+    spec = tiny_batch_spec(nonlinear={'n': {**deepcopy(_FAMILY), 'comparison_policy': policy}})
+    assert spec.nonlinear[0].comparison_policy == policy
+    assert spec.to_mapping()['nonlinear']['n']['comparison_policy'] == policy
+    restored = parse_batch(spec.to_mapping(), base_dir=spec.base_dir)
+    assert restored.nonlinear[0].comparison_policy == policy
+    jobs = [job for job in plan_batch(restored).jobs if job.kind == 'nonlinear']
+    assert jobs and all(job.parameters['comparison_policy'] == policy for job in jobs)
+    assert all(job.payload(tmp_path, 1, spec.execution).parameters['comparison_policy'] == policy for job in jobs)
+
+
 def _seed(entropy, name, *indices):
     words = np.frombuffer(hashlib.sha256(name.encode()).digest(), dtype='<u4')
     return int(np.random.SeedSequence(entropy, spawn_key=(*indices, *(int(word) for word in words)))
