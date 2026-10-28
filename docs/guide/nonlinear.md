@@ -297,7 +297,8 @@ Uniform nonlinear boxes differ from flat or Gaussian-penalized forecast directio
 an injected observation can also have a different variance from the smooth forecast.
 For a deliberate comparison under those assumptions, request
 `comparison_policy="diagnostic"` in both operations and inspect the differences.
-Linearization and fixed/profiled amplitude conventions remain stated approximations.
+Linearization remains an approximation. Different amplitude targets or a position/mass
+search require diagnostic mode because they change the statistic being compared.
 
 To estimate false detections, fit smooth controls with noise:
 `simulate(prepared, subhalo=None, noise_seed=seed)` for many seeds. A noise-free smooth

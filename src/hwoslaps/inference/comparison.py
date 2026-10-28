@@ -1,9 +1,9 @@
 """Readable scientific compatibility of a forecast reference and nonlinear fit.
 
 The truth-preserving comparison digest remains useful across model-PSF arms.
-This report checks fitted assumptions separately. Linearization and q definitions
-are reported as approximations; differing physical inputs, constraints or noise
-exclude strict validation. Legacy records without the inputs are not assessed.
+This report checks fitted assumptions separately. It states the linearization
+approximation and excludes differing statistic targets, physical inputs,
+constraints or noise from strict validation. Legacy inputs remain unassessed.
 """
 
 from dataclasses import dataclass
