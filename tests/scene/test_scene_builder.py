@@ -137,7 +137,7 @@ def test_native_sampling_variation_is_the_relative_within_pixel_rms(scene_mappin
 
 
 def test_extended_image_source_is_magnified_once(planck15, tmp_path):
-    """A small source behind a circular isothermal lens follows mu = 2 theta_E / beta (SIS, beta < theta_E)."""
+    """Without an injected halo, an isothermal lens gives mu = 2 theta_E / beta."""
     scale = 0.01
     axis = (np.arange(31) - 15) * scale
     yy, xx = np.meshgrid(axis, axis, indexing="ij")
@@ -156,7 +156,7 @@ def test_extended_image_source_is_magnified_once(planck15, tmp_path):
                                                                "einstein_radius": theta_e, "ell_comps": [0.0, 0.0]}}},
                    "source": {"redshift": 0.6, "light": {"blob": {"type": "Image", "asset_path": str(path),
                                                                    "centre": [0.0, 1.0], "total_flux": total_flux}}},
-                   "subhalo": {"type": "PointMass"}}
+                   "subhalo": {"type": "NFW", "concentration": {"kind": "fixed", "value": 20.0}}}
         return build_scene(parse_scene(mapping), planck15, subhalo=None).light_images["source"]
 
     image = scene(intrinsic)
