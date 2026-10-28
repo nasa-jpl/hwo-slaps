@@ -108,8 +108,12 @@ def test_area_inputs_must_share_geometry_and_relations(change, match):
         mismatch = replace(mismatch, positions=replace(layout, positions_yx=points, grid=grid))
     elif change == "area":
         layout = mismatch.positions
-        mismatch = replace(mismatch, positions=replace(layout, cell_areas_arcsec2=np.full(16, 1),
-                                                       grid=replace(layout.grid, spacing_arcsec=1.0)))
+        # The same sampled positions on a finer sparse lattice represent smaller cells.
+        grid = GridIndex(np.linspace(layout.grid.y_coords[0], layout.grid.y_coords[-1], 7),
+                         np.linspace(layout.grid.x_coords[0], layout.grid.x_coords[-1], 7),
+                         layout.grid.indices * 2, layout.grid.spacing_arcsec / 2)
+        mismatch = replace(mismatch, positions=replace(layout, cell_areas_arcsec2=np.full(16, grid.spacing_arcsec**2),
+                                                       boundary=np.ones(16, dtype=bool), grid=grid))
     elif change == "no_area":
         mismatch = replace(mismatch, positions=explicit_positions(mismatch.positions_yx, (0, 0)))
     elif change == "reference_relation":

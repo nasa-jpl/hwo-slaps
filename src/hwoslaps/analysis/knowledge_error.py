@@ -18,7 +18,7 @@ import numpy as np
 
 from ..fisher.result import ForecastResult
 from .binomial import BinomialCount, clopper_pearson
-from .reductions import InvalidPolicy, TemplateValidity, _invalid_policy, _read_only, _report_mapping, _reported
+from .reductions import InvalidPolicy, TemplateValidity, validate_invalid_policy, read_only, report_mapping, reported_values
 
 __all__ = ["KnowledgeErrorAreas", "KnownDetectionCounts", "ToleranceCriterion", "ToleranceResult", "SeparationResult",
            "knowledge_error_areas", "knowledge_error_tolerance", "first_separating_amplitude"]
@@ -71,7 +71,7 @@ class KnowledgeErrorAreas:
 
     def to_mapping(self) -> dict[str, Any]:
         """JSON-ready report with null incomplete quantities and validity/cohort records."""
-        return _report_mapping(self) | {
+        return report_mapping(self) | {
             "reference_validity": self.reference_validity.to_mapping(),
             "mismatch_validity": self.mismatch_validity.to_mapping(),
             "domain_validity": self.domain_validity.to_mapping(),
@@ -82,12 +82,12 @@ class KnowledgeErrorAreas:
     @property
     def selection_complete(self) -> np.ndarray:
         """Whether both selected forecasts are usable at each mass."""
-        return _read_only(self.reference_validity.complete & self.mismatch_validity.complete)
+        return read_only(self.reference_validity.complete & self.mismatch_validity.complete)
 
     @property
     def complete(self) -> np.ndarray:
         """Whether every reported selected and full-domain quantity is complete."""
-        return _read_only(self.selection_complete & self.domain_validity.complete)
+        return read_only(self.selection_complete & self.domain_validity.complete)
 
 
 def _same_array(first: np.ndarray, second: np.ndarray, name: str) -> None:
@@ -134,7 +134,7 @@ def knowledge_error_areas(reference: ForecastResult, mismatched: ForecastResult,
     denominator. A common caller-declared selection fixes the same spatial
     estimand across error amplitudes.
     """
-    _invalid_policy(invalid_policy)
+    validate_invalid_policy(invalid_policy)
     _pair_identity(reference, mismatched)
     if isinstance(min_reference_count, (bool, np.bool_)) or not isinstance(min_reference_count, Integral) \
             or min_reference_count < 1:
@@ -161,7 +161,7 @@ def knowledge_error_areas(reference: ForecastResult, mismatched: ForecastResult,
     selection_complete = reference_validity.complete & mismatch_validity.complete
     completeness = (reference_validity.complete, mismatch_validity.complete, selection_complete,
                     domain_validity.complete, mismatch_validity.complete)
-    counts = [_reported(count, complete) for count, complete in zip(known, completeness, strict=True)]
+    counts = [reported_values(count, complete) for count, complete in zip(known, completeness, strict=True)]
     # PositionSet guarantees uniform spacing**2. The reference denominator is
     # independent of mismatch validity, including across different amplitudes.
     areas = [count * reference.cell_areas_arcsec2[0] for count in counts]
@@ -174,8 +174,8 @@ def knowledge_error_areas(reference: ForecastResult, mismatched: ForecastResult,
     return KnowledgeErrorAreas(reference.masses_msun, float(q_threshold), int(min_reference_count),
                                counts[0], areas[0], counts[1], areas[1], counts[2], areas[2],
                                counts[3], areas[3], counts[4], areas[4], *ratios,
-                               _read_only(cohort), reference_validity, mismatch_validity, domain_validity,
-                               KnownDetectionCounts(*(_read_only(count) for count in known)), invalid_policy)
+                               read_only(cohort), reference_validity, mismatch_validity, domain_validity,
+                               KnownDetectionCounts(*(read_only(count) for count in known)), invalid_policy)
 
 
 def _finite_number(value: float, name: str) -> float:

@@ -3357,7 +3357,7 @@ No keys.
 | `seed` | integer >= 0 | required |  | population stream seed |
 | `count` | integer >= 1 | required |  | member count |
 | `start` | integer >= 0 | `0` |  | first absolute population index |
-| `name_prefix` | text matching [A-Za-z0-9_.-]+ | `system` |  | population member name prefix |
+| `name_prefix` | name of letters, digits, '.', '_', '-' | `system` |  | population member name prefix |
 
 ## batch.population.variables.<key> (kind: constant)
 
@@ -3631,6 +3631,7 @@ Selected by `kind: function`.
 |---|---|---|---|---|
 | `arms` | null or list of at least 1 items, each text matching [A-Za-z0-9_.-]+, no repeats | `null` |  | participating arm names |
 | `forecast_arm` | null or text matching [A-Za-z0-9_.-]+ | `null` |  | arm supplying trials and signed forecast references |
+| `comparison_policy` | one of: strict, diagnostic | `strict` |  | strict input compatibility or explicit diagnostic cross-arm comparison |
 | `trials` | mapping by `kind` (explicit, configured, forecast_positions, forecast_argmax), see `batch.nonlinear.<key>.trials` | required |  | trial selection |
 | `inject` | true or false | required |  | inject the trial |
 | `noise` | true or false | required |  | draw detector noise |
@@ -3696,8 +3697,8 @@ Selected by `kind: forecast_argmax`.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `smooth` | list of at least 1 items, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, no repeats | required |  | accepted role outcomes |
-| `subhalo` | list of at least 1 items, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, no repeats | required |  | accepted role outcomes |
+| `smooth` | list of at least 1 items, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, exact_evaluation, accepted_bounded_scalar, no repeats | required |  | accepted role outcomes |
+| `subhalo` | list of at least 1 items, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, exact_evaluation, accepted_bounded_scalar, no repeats | required |  | accepted role outcomes |
 
 ## batch.execution
 
@@ -3978,6 +3979,6 @@ Selected by `kind: forecast_argmax`.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
-| `smooth` | list, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, no repeats | required |  | accepted smooth role statuses |
-| `subhalo` | list, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, no repeats | required |  | accepted subhalo role statuses |
+| `smooth` | list, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, exact_evaluation, accepted_bounded_scalar, no repeats | required |  | accepted smooth role statuses |
+| `subhalo` | list, each one of: accepted_repeatable_profile, unresolved_optimization, sampler_only, verified_zero_residual_anchor, failed, exact_evaluation, accepted_bounded_scalar, no repeats | required |  | accepted subhalo role statuses |
 
