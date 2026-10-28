@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 from .refine import refine as refine_maximum
+from .low_dimension import exact_likelihood, scalar_likelihood
 from .result import RefineOutcome, RoleFit, RoleStatus
 from .sampler import SearchOutcome, run_search
 from .settings import PROCEDURE_VERSION, RefineSettings, SamplerSettings
@@ -31,10 +32,13 @@ def _edge_margins(case: PreparedCase, role: str, vector: np.ndarray | None) -> d
 
 def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, sampler: SamplerSettings,
                     sampler_seed: int, refine: RefineSettings | None, session: BackendSession,
-                    case_dir: Path, case_id: str) -> tuple[RoleFit, SearchOutcome]:
+                    case_dir: Path, case_id: str) -> tuple[RoleFit, SearchOutcome | None]:
     start = time.perf_counter()
     model = case.model(role)
     truth_log_likelihood = case.log_likelihood(role, case.truth_vector(role))
+    dimension = len(model.parameter_names)
+    if dimension <= 1:
+        return _deterministic_role(case, role, truth_log_likelihood=truth_log_likelihood, start=start), None
     outcome = run_search(fit_model=model, model=case.autofit_models[role], analysis=case.analysis, role=role,
                          n_live=sampler.n_live(role, case.fit.mode), settings=sampler, seed=sampler_seed,
                          case_dir=case_dir, case_id=case_id, data_identity=case.data.record, session=session)
@@ -76,6 +80,26 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
                      box_edge_margins=_edge_margins(case, role, vector), anchor_chi2=None, error=error,
                      runtime_s=time.perf_counter() - start)
     return result, outcome
+
+
+def _deterministic_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *,
+                        truth_log_likelihood: float, start: float) -> RoleFit:
+    model = case.model(role)
+    dimension = len(model.parameter_names)
+    strategy = "exact" if dimension == 0 else "scalar"
+    vector, likelihood, record, error = None, None, None, None
+    try:
+        outcome = (exact_likelihood(truth_log_likelihood) if dimension == 0 else
+                   scalar_likelihood(lambda values: case.log_likelihood(role, values),
+                                     model.lower[0], model.upper[0], parameter_name=model.parameter_names[0]))
+        vector, likelihood, record = outcome.best_vector, outcome.best_log_likelihood, outcome.record
+    except Exception as exception:
+        error = f"{type(exception).__name__}: {exception}"
+    return RoleFit(role=role, strategy=strategy, status="success" if error is None else "failed",
+                   log_likelihood=likelihood, truth_log_likelihood=truth_log_likelihood,
+                   parameter_names=model.parameter_names, n_free_parameters=dimension,
+                   sampler=None, refinement=None, box_edge_margins=_edge_margins(case, role, vector),
+                   anchor_chi2=None, error=error, runtime_s=time.perf_counter() - start, strategy_record=record)
 
 
 def anchor_role(case: PreparedCase) -> RoleFit:
