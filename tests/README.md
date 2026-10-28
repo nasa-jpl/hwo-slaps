@@ -22,6 +22,18 @@ marker expression. The backend runner supplies the pinned AutoArray configuratio
 temporary directory. GPU runs fail if the requested CUDA runtime is missing. Batch tests
 need Linux.
 
+The `test` extra supplies the backend-free test runner. The `scientific-test` extra also
+declares the independent interpolation and high-precision numerical oracles; `all`
+includes it. Install the scientific stack with `install.sh` so the checked AutoArray
+patches are applied in the selected environment.
+
+Pull requests run a compact pinned CPU scientific job covering nuisance projection,
+halo values, singular integration, padded rendering, Image gradients, low-dimensional
+inference, posterior-quality reporting, and public geometry/spectral/kernel contracts.
+The complete scientific and hardware suites remain explicit integration and release
+checks. Independent analytic and high-precision oracles validate deliberate changes
+from the historical numerical policy.
+
 Markers and packaging metadata are defined in `pyproject.toml`. The installed-package
 tests build a wheel without build isolation, unpack it into a temporary directory and run
 the command from outside the source tree; they never install into the current
