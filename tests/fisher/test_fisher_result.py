@@ -170,3 +170,30 @@ def test_nonfinite_primary_information_is_retained_as_failed_and_never_a_nondete
         restored = load_forecast(save_forecast(forecast, tmp_path / "failed.npz"))
     np.testing.assert_array_equal(restored.template_status, forecast.template_status)
     np.testing.assert_array_equal(restored.fisher_profiled, forecast.fisher_profiled)
+
+
+def test_projection_precision_bound_roundtrips_with_failed_status(tmp_path):
+    from dataclasses import replace
+    from hwoslaps.artifacts import load_forecast, save_forecast
+    forecast = replace(result([[np.nan, 4.0]], fisher_raw=[[100.0, 5.0]]),
+                       projection_error_bound=np.array([[2.0, 1e-12]]))
+    restored = load_forecast(save_forecast(forecast, tmp_path / "precision.npz"))
+    np.testing.assert_array_equal(restored.template_status, [["failed_numeric", "valid"]])
+    np.testing.assert_array_equal(restored.projection_error_bound, forecast.projection_error_bound)
+    assert not restored.projection_error_bound.flags.writeable
+    with pytest.raises(ValueError, match="failed_numeric"):
+        restored.detections(q_threshold=25.0)
+
+
+def test_precision_bound_cannot_be_loaded_or_replaced_as_an_ordinary_detection(tmp_path):
+    from dataclasses import replace
+    from hwoslaps.artifacts import load_forecast, save_forecast
+    initial = result([[100.0]])
+    with pytest.raises(ValueError, match="template_status is inconsistent"):
+        replace(initial, projection_error_bound=np.array([[1.0]]))
+    unresolved = replace(initial, template_status=None, projection_error_bound=np.array([[1.0]]))
+    assert unresolved.template_status[0, 0] == "failed_numeric"
+    restored = load_forecast(save_forecast(unresolved, tmp_path / "unresolved.npz"))
+    assert restored.q_asimov[0, 0] == 100.0  # Explicitly provisional, never ordinary evidence.
+    with pytest.raises(ValueError, match="failed_numeric"):
+        restored.detections(q_threshold=25.0)

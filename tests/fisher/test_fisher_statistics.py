@@ -34,6 +34,8 @@ def reductions_of(signals, space, data=None, bias=None):
         profiled=np.einsum("ij,ij->i", sr, sr) + np.einsum("ij,ij->i", sp, sp),
         finite=np.all(np.isfinite(signals), axis=1),
         signal_data_residual_inner=None if data is None else np.einsum("ij,ij->i", sr, dr) + np.einsum("ij,ij->i", sp, dp),
+        data_raw=None if data is None else np.einsum("ij,ij->i", data, data),
+        data_profiled=None if data is None else np.einsum("ij,ij->i", dr, dr) + np.einsum("ij,ij->i", dp, dp),
         data_finite=None if data is None else np.all(np.isfinite(data), axis=1),
         signal_bias_residual_inner=None if bias is None else sr @ br + sp @ bp)
 
@@ -391,3 +393,77 @@ def test_true_degeneracy_zero_columns_and_rank_tolerance_refinement():
     refined = ProfileLikelihoodWorkspace(design, [0.0, 0.0], ["a", "b"], rcond=1e-13)
     assert coarse.rank_tolerance_sensitive
     assert coarse.nuisance_rank == 1 and coarse.rank_at_refined_tolerance == refined.nuisance_rank == 2
+
+
+@pytest.mark.parametrize("precision,signal", [([0.0], [1e16, 10.0]), ([1e-30], [1e16, 0.0])],
+                         ids=["untouched_data_residual", "weak_gaussian_prior_residual"])
+def test_resolved_information_is_not_clipped_by_raw_signal_scale(precision, signal):
+    space = workspace([[1.0], [0.0]], precision)
+    bank = space.evaluate_bank([signal], data_whitened=[signal], bias_whitened=signal)
+    np.testing.assert_allclose(bank.q_asimov, [100.0], rtol=2e-15)
+    np.testing.assert_array_equal(bank.template_status, "valid")
+    np.testing.assert_allclose(bank.amplitude_hat, [1.0], rtol=2e-15)
+    np.testing.assert_allclose(bank.amplitude_spurious, [1.0], rtol=2e-15)
+    assert bank.projection_error_bound[0] < 1e-12
+
+
+def test_near_dependent_false_detection_refines_original_float_inputs_exactly():
+    # Independent 100-digit exact-float oracle supplied by the adversarial review.
+    a = np.array([1., 2., 3., 4., 5.])
+    v = np.array([2., -1., 3., -2., 1.])
+    u = np.array([3., 2., -1., 4., -2.])
+    design = np.column_stack((a, a + 1e-11 * v))
+    signal = 1e6 * (v + 1e-8*u)
+    expected = 0.002663131800320136
+    for scales in (np.ones(2), np.array([2.**-32, 2.**32])):
+        space = workspace(design / scales)
+        bank = space.evaluate_bank(signal[None, :], data_whitened=(0.7 * signal)[None, :], bias_whitened=-0.2 * signal)
+        assert space.nuisance_rank == 2
+        assert bank.q_asimov[0] == pytest.approx(expected, rel=2e-15)
+        assert bank.template_status[0] == "valid"
+        assert bank.q_asimov[0] < 25.0
+        # Data/bias are their original rounded float inputs: the exact amplitude
+        # oracle is not simply 0.7/-0.2 in such a cancellation-sensitive example.
+        assert np.isfinite(bank.amplitude_hat[0]) and np.isfinite(bank.amplitude_spurious[0])
+        assert bank.projection_error_bound[0] < expected * 1e-12
+
+
+def test_unresolved_large_problem_reports_failed_precision_without_a_false_nondetection():
+    a = np.linspace(1.0, 5.0, 10000)
+    v = np.sin(np.arange(10000.0))
+    design = np.column_stack((a, a + 1e-11*v))
+    signal = 1e6 * (v + 1e-8*np.cos(np.arange(10000.0)))
+    space = workspace(design)
+    assert not space.exact_refinement_available
+    bank = space.evaluate_bank(signal[None, :])
+    assert bank.template_status[0] == "failed_numeric"
+    assert np.isnan(bank.q_asimov[0])
+    assert np.isfinite(bank.projection_error_bound[0]) and bank.projection_error_bound[0] > 0.0
+
+
+def test_unresolved_streamed_reductions_cannot_publish_the_near_span_false_detection():
+    a = np.array([1., 2., 3., 4., 5.])
+    v = np.array([2., -1., 3., -2., 1.])
+    u = np.array([3., 2., -1., 4., -2.])
+    space = workspace(np.column_stack((a, a + 1e-11*v)))
+    signal = (1e6*(v + 1e-8*u))[None, :]
+    reduced = reductions_of(signal, space)
+    assert reduced.profiled[0] > 25.0  # Uncertified floating basis gives a false detection.
+    bank = space.evaluate_reductions(reduced)
+    assert bank.template_status[0] == "failed_numeric"
+    assert np.isnan(bank.q_asimov[0])
+    assert bank.projection_error_bound[0] > reduced.profiled[0]
+
+
+def test_nonzero_signal_norm_underflow_is_an_explicit_failure():
+    space = workspace(np.empty((2, 0)))
+    with pytest.raises(ValueError, match="signal information underflow"):
+        space.evaluate_bank([[1e-200, 0.0]])
+
+
+def test_positive_unrepresentable_refined_information_does_not_become_zero_information():
+    space = workspace([[1.0], [0.0]], [1e-320])
+    bank = space.evaluate_bank([[1e-100, 0.0]])
+    assert bank.template_status[0] == "failed_numeric"
+    assert np.isnan(bank.q_asimov[0])
+    assert bank.projection_error_bound[0] > 0.0

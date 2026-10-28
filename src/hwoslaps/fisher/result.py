@@ -82,6 +82,7 @@ class ForecastResult:
     config: Mapping[str, Any]
     provenance: Mapping[str, Any]
     template_status: np.ndarray | None = None
+    projection_error_bound: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         masses = np.asarray(self.masses_msun, dtype=float)
@@ -120,6 +121,12 @@ class ForecastResult:
                 with np.errstate(over="ignore", invalid="ignore"):
                     fitted_q = (values * np.sqrt(self.fisher_profiled))**2
                 failed |= (~zero & (~np.isfinite(values) | ~np.isfinite(fitted_q))) | (zero & ~np.isnan(values))
+        if self.projection_error_bound is not None:
+            bound = np.asarray(self.projection_error_bound, dtype=float)
+            if bound.shape != shape or np.any(~np.isfinite(bound)) or np.any(bound < 0.0):
+                raise ValueError("projection_error_bound must be finite, non-negative and have the statistic shape")
+            object.__setattr__(self, "projection_error_bound", _read_only(bound))
+            failed |= bound > bank.RELATIVE_PRECISION_TARGET * self.fisher_profiled
         inferred = np.where(failed, "failed_numeric", np.where(zero, "zero_information", "valid"))
         status = inferred if self.template_status is None else np.asarray(self.template_status)
         if status.shape != shape or status.dtype.kind != "U" or not np.all(np.isin(

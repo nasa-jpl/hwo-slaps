@@ -32,7 +32,8 @@ def test_forecast_plots_draw_the_result_values(plt, forecast_product):
     # Sparse rows must retain an unevaluated hole, not paint it as a nondetection.
     keep = np.array([True, True, True, True, False, True, True, True, True])
     sparse = replace(result, positions=result.positions.select(keep), fisher_raw=result.fisher_raw[:, keep],
-                     fisher_profiled=result.fisher_profiled[:, keep], template_status=result.template_status[:, keep])
+                     fisher_profiled=result.fisher_profiled[:, keep], template_status=result.template_status[:, keep],
+                     projection_error_bound=result.projection_error_bound[:, keep])
     sparse_ax = plot_statistic_map(sparse, "q_asimov", mass_index=1)
     expected = result.q_asimov[1].reshape(3, 3).copy()
     expected[1, 1] = np.nan

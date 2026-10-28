@@ -166,7 +166,7 @@ def write_yaml(path, mapping: Mapping[str, Any]) -> Path:
 
 
 def save_forecast(result: ForecastResult, path) -> Path:
-    """Publish a version-2 forecast NPZ archive without overwriting a file.
+    """Publish a version-3 forecast NPZ archive without overwriting a file.
 
     Parameters
     ----------
@@ -201,6 +201,8 @@ def save_forecast(result: ForecastResult, path) -> Path:
                "provenance_json": np.asarray(canonical_json(result.provenance)),
                "psf_relation": np.asarray(result.psf_relation)}
     members.update({name: getattr(result, name) for name in _STATISTICS})
+    if result.projection_error_bound is not None:
+        members["projection_error_bound"] = result.projection_error_bound
     for amplitude, group in _AMPLITUDES.items():
         if getattr(result, amplitude) is not None:
             members.update({name: getattr(result, name) for name in group})
@@ -235,7 +237,7 @@ def load_forecast(path) -> ForecastResult:
     from .fisher.positions import GridIndex, PositionSet
     from .fisher.result import ForecastResult
     members = _read_npz(path)
-    optional = {"cell_areas_arcsec2", "boundary", *_GRID_ARRAYS,
+    optional = {"cell_areas_arcsec2", "boundary", "projection_error_bound", *_GRID_ARRAYS,
                 *(name for group in _AMPLITUDES.values() for name in group)}
     if not _FORECAST_REQUIRED <= members.keys() or members.keys() - _FORECAST_REQUIRED - optional:
         raise ValueError("invalid forecast artifact member set")
@@ -267,7 +269,8 @@ def load_forecast(path) -> ForecastResult:
                             _float_array(members, "fisher_raw"), _float_array(members, "fisher_profiled"),
                             amplitudes["amplitude_hat"], amplitudes["amplitude_spurious"],
                             _scalar(members, "psf_relation", "U"), _json_member(members, "config_json"),
-                            _json_member(members, "provenance_json"), members["template_status"])
+                            _json_member(members, "provenance_json"), members["template_status"],
+                            _float_array(members, "projection_error_bound") if "projection_error_bound" in members else None)
     for name in (*_STATISTICS, *(key for group in _AMPLITUDES.values() for key in group)):
         if name in members:
             stored = _float_array(members, name)

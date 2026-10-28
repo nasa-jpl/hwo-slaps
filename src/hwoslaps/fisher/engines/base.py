@@ -95,6 +95,12 @@ class BankAccumulator:
         if self._pending >= HOST_FLUSH_POSITIONS:
             self._flush_reductions()
 
+    def add_result(self, result: SignalBankResult) -> None:
+        """Append a finished bounded batch after any earlier pending rows."""
+        self._flush_signals()
+        self._flush_reductions()
+        self._results.append(result)
+
     def _flush_signals(self) -> None:
         if not self._signals:
             return

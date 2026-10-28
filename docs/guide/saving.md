@@ -49,7 +49,8 @@ A `nuisance_rank` smaller than the number of nuisance names means some nuisance
 directions fell below the normalized singular-value cutoff. The projection
 record also reports whether a tenfold smaller tolerance would change the rank.
 
-Forecast schema 3 stores `template_status` beside the primary arrays. A
+Forecast schema 3 stores `template_status` beside the primary arrays and preserves
+`projection_error_bound` when numerical precision was assessed. A
 `zero_information` template has $q=0$ and an unidentified fitted amplitude.
 `failed_numeric` retains an invalid or provisional row explicitly; detection
 queries raise on these rows unless the caller chooses exclusion and reports the

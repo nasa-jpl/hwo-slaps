@@ -142,12 +142,16 @@ class JaxTemplateEngine:
             model_whitened = signal[0] / self._sigma_masked
             data_whitened = signal[1] / self._sigma_masked
         sr, sp = residual_blocks(model_whitened, self._basis_data, self._basis_prior)
-        reductions = {"raw": jnp.sum(model_whitened * model_whitened),
+        raw = jnp.sum(model_whitened * model_whitened)
+        raw = jnp.where((raw == 0.0) & jnp.any(model_whitened != 0.0), jnp.nan, raw)
+        reductions = {"raw": raw,
                       "profiled": jnp.sum(sr * sr) + jnp.sum(sp * sp),
                       "finite": jnp.all(jnp.isfinite(model_whitened))}
         if data_whitened is not None:
             dr, dp = residual_blocks(data_whitened, self._basis_data, self._basis_prior)
             reductions["signal_data_residual_inner"] = jnp.sum(sr * dr) + jnp.sum(sp * dp)
+            reductions["data_raw"] = jnp.sum(data_whitened * data_whitened)
+            reductions["data_profiled"] = jnp.sum(dr * dr) + jnp.sum(dp * dp)
             reductions["data_finite"] = jnp.all(jnp.isfinite(data_whitened))
         if self._bias_whitened is not None:
             br, bp = residual_blocks(self._bias_whitened, self._basis_data, self._basis_prior)
@@ -190,14 +194,14 @@ class JaxTemplateEngine:
                     for batch in batches:
                         current = self._reductions(batch, table)
                         if pending is not None:
-                            bank.add_reductions(self._materialize(pending))
+                            self._consume_reductions(bank, pending[0], pending[1], table)
                             if progress is not None:
-                                progress.update(pending["raw"].shape[0])
-                        pending = current
+                                progress.update(pending[0]["raw"].shape[0])
+                        pending = (current, batch)
                     if pending is not None:
-                        bank.add_reductions(self._materialize(pending))
+                        self._consume_reductions(bank, pending[0], pending[1], table)
                         if progress is not None:
-                            progress.update(pending["raw"].shape[0])
+                            progress.update(pending[0]["raw"].shape[0])
                 else:
                     for batch in batches:
                         for signal in np.asarray(self._signals(batch, table)):
@@ -209,6 +213,22 @@ class JaxTemplateEngine:
             if progress is not None:
                 progress.close()
         return results
+
+    def _consume_reductions(self, bank, reductions, batch, table):
+        materialized = self._materialize(reductions)
+        workspace = self.context.workspace
+        uncertain, _ = workspace.refinement_mask(materialized, bias_whitened=self.context.bias_whitened)
+        if workspace.exact_refinement_available and np.any(uncertain):
+            # Only numerically difficult batches cross the device/host image
+            # boundary. Batch size remains bounded; ordinary banks stream scalars.
+            vectors = np.asarray(self._signals(batch, table))
+            sigma = self.context.data_space.whitener.sigma
+            signal = vectors[:, 0, :] / sigma if self.context.mismatched else vectors / sigma
+            data = vectors[:, 1, :] / sigma if self.context.mismatched else None
+            bank.add_result(workspace.evaluate_bank(signal, data_whitened=data,
+                                                    bias_whitened=self.context.bias_whitened))
+        else:
+            bank.add_reductions(materialized)
 
     @staticmethod
     def _materialize(reductions):

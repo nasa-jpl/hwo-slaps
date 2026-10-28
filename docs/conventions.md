@@ -178,12 +178,23 @@ including the prior rows; fitted amplitudes use residual inner products.
 Each result records the normalized singular values, retained rank, condition
 number and rank at a tenfold smaller tolerance. The condition number refers to
 the retained normalized augmented design. The rank-sensitivity flag identifies
-fits whose retained span changes under this tolerance refinement. Residual
-norms no larger than $8\epsilon\max(1,\sqrt{r})$ times the signal norm are
-classified as zero information, where $r$ is the retained rank. This floor
-removes roundoff-scale residuals without treating all small positive information
-as zero; ill-conditioned spans can retain small floating point residuals above
-that floor.
+fits whose retained span changes under this tolerance refinement. Each template
+also records `projection_error_bound`, an absolute information-error bound from
+SVD reconstruction, column-scaling perturbations, basis orthogonality and
+residual arithmetic. The relative information-precision target is $10^{-6}$;
+residual inner products use the same target in standardized units near zero.
+
+Difficult small problems are refined using exact rational arithmetic on the
+original binary floating-point design, prior precision and signal/data vectors.
+The refinement computes residual vectors and prior penalties, preserving tiny
+physical information even beside a very large absorbed signal. It is available
+when $n_\mathrm{data}\max(1,p)^2\le32768$ and $p\le16$, and the exact augmented
+rank agrees with the declared SVD rank. Larger or rank-inconsistent unresolved
+problems receive `failed_numeric` status and unavailable statistics. The bound
+and refinement policy are recorded in the provenance. There is no signal-scale
+zero clipping: zero information requires an exactly zero resolved residual.
+JAX normally streams scalar reductions; a refinable difficult batch alone sends
+its bounded image vectors to the host for exact evaluation.
 
 `template_status` distinguishes `valid`, `zero_information` and `failed_numeric`
 trials. Zero information gives $q=0$ and an unidentified (`NaN`) fitted amplitude.

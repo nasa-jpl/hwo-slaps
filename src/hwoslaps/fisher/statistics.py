@@ -12,7 +12,11 @@ fitted and spurious numerators are residual inner products. A second projection
 pass removes floating point leakage along the retained basis. No information
 or numerator is obtained by subtracting two large scalar reductions.
 
-Zero-information templates have q=0 and unidentified (NaN) fitted amplitudes.
+Zero-information templates have q=0 and unidentified (NaN) fitted amplitudes;
+no raw-signal-relative floor erases positive residuals. Floating information and
+inner products are checked against an explicit precision target. Difficult small
+problems refine the original float inputs with exact rational residual algebra;
+unresolved larger/rank-inconsistent problems carry failed_numeric/NaN instead.
 Non-finite inputs or reductions raise explicitly. Dense host algebra uses one
 BLAS thread and accelerators return only residual-space scalar reductions.
 """
@@ -28,10 +32,15 @@ import numpy as np
 from numpy.typing import ArrayLike
 from threadpoolctl import threadpool_limits
 
+from .precision import ExactProfileRefinement
+
 __all__ = [
     "BankReductions", "ProfileLikelihoodWorkspace", "SignalBankResult", "Whitener",
     "amplitude_significance", "degradation", "residual_blocks", "sigma_amplitude", "z_asimov",
 ]
+
+
+RELATIVE_PRECISION_TARGET = 1.0e-6
 
 
 def sigma_amplitude(fisher_profiled: np.ndarray) -> np.ndarray:
@@ -183,6 +192,8 @@ class BankReductions:
     profiled: np.ndarray
     finite: np.ndarray
     signal_data_residual_inner: np.ndarray | None = None
+    data_raw: np.ndarray | None = None
+    data_profiled: np.ndarray | None = None
     data_finite: np.ndarray | None = None
     signal_bias_residual_inner: np.ndarray | None = None
 
@@ -191,9 +202,10 @@ class BankReductions:
         size = raw.shape[0]
         values = {"raw": raw, "profiled": self._row(self.profiled, "profiled", size),
                   "finite": self._verdict(self.finite, "finite", size)}
-        if (self.signal_data_residual_inner is None) != (self.data_finite is None):
-            raise ValueError("signal_data_residual_inner and data_finite are given together or not at all")
-        for name in ("signal_data_residual_inner", "signal_bias_residual_inner"):
+        data = (self.signal_data_residual_inner, self.data_raw, self.data_profiled, self.data_finite)
+        if any(value is None for value in data) and not all(value is None for value in data):
+            raise ValueError("data residual inner product, raw/profiled norms and finite verdict are given together or not at all")
+        for name in ("signal_data_residual_inner", "data_raw", "data_profiled", "signal_bias_residual_inner"):
             if getattr(self, name) is not None:
                 values[name] = self._row(getattr(self, name), name, size)
         if self.data_finite is not None:
@@ -245,6 +257,7 @@ class SignalBankResult:
     amplitude_spurious: np.ndarray | None = None
     q_spurious: np.ndarray | None = None
     z_spurious: np.ndarray | None = None
+    projection_error_bound: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         size = None
@@ -274,7 +287,8 @@ class SignalBankResult:
     @property
     def template_status(self) -> np.ndarray:
         """Identifiability per signal; failed numerical evaluations raise earlier."""
-        return _read_only(np.where(self.fisher_profiled == 0.0, "zero_information", "valid"))
+        return _read_only(np.where(~np.isfinite(self.fisher_profiled), "failed_numeric",
+                                   np.where(self.fisher_profiled == 0.0, "zero_information", "valid")))
 
     @property
     def size(self) -> int:
@@ -346,7 +360,7 @@ class ProfileLikelihoodWorkspace:
             norms = np.sqrt(np.sum(scaled * scaled, axis=0))
             scaled[:, nonzero] /= norms[nonzero]
             try:
-                basis, singular, _ = np.linalg.svd(scaled, full_matrices=False)
+                basis, singular, right = np.linalg.svd(scaled, full_matrices=False)
             except np.linalg.LinAlgError as error:
                 raise ValueError("normalized augmented nuisance SVD failed") from error
         _require_finite(singular, "normalized nuisance singular values")
@@ -361,9 +375,33 @@ class ProfileLikelihoodWorkspace:
         self.normalized_singular_values = _read_only(singular)
         self.basis_data = _read_only(basis[:self.n_data, keep])
         self.basis_prior = _read_only(basis[self.n_data:, keep])
-        # A norm at the roundoff floor is unidentified. This squared threshold
-        # does not erase genuinely small residuals at sqrt(eps)*signal scale.
-        self.zero_information_relative_norm = 8.0 * np.finfo(float).eps * max(1.0, np.sqrt(self.nuisance_rank))
+        self.relative_precision_target = RELATIVE_PRECISION_TARGET
+        self.exact_refinement_available = ExactProfileRefinement.affordable(self.n_data, self.n_nuisance)
+        self._exact_refinement = None
+        # A posteriori reconstruction plus floating arithmetic bounds. Scaling
+        # perturbations concern the exact original float inputs, not only the
+        # already-rounded normalized matrix. Norm bounds use Frobenius norms.
+        eps = np.finfo(float).eps
+        def gamma(size):
+            return size * eps / (1.0 - size * eps)
+        self.norm_reduction_relative_error = gamma(self.n_data + n_nuisance)
+        if self.nuisance_rank:
+            with threadpool_limits(limits=1):
+                reconstruction = (basis * singular) @ right
+                matrix_error = (np.linalg.norm(scaled - reconstruction) +
+                    gamma(max(1, n_nuisance)) * np.linalg.norm(np.abs(basis * singular) @ np.abs(right)) +
+                    4.0 * eps * np.linalg.norm(scaled))
+                retained = basis[:, keep]
+                orthogonality = (np.linalg.norm(retained.T @ retained - np.eye(self.nuisance_rank)) +
+                    gamma(self.n_data + n_nuisance) * np.linalg.norm(np.abs(retained).T @ np.abs(retained)))
+            last = self.nuisance_rank - 1
+            discarded = singular[last + 1] if last + 1 < len(singular) else 0.0
+            gap = singular[last] - discarded
+            subspace = np.inf if gap <= matrix_error else 4.0 * matrix_error / (gap - matrix_error)
+            arithmetic = 8.0 * (gamma(self.n_data + n_nuisance) + gamma(n_nuisance)) * np.sqrt(self.nuisance_rank)
+            self.residual_relative_error_bound = min(2.0, subspace + 4.0 * orthogonality + arithmetic)
+        else:
+            self.residual_relative_error_bound = 0.0
 
     def __setstate__(self, state: dict[str, object]) -> None:
         """Restore read-only arrays after unpickling."""
@@ -388,7 +426,10 @@ class ProfileLikelihoodWorkspace:
         with threadpool_limits(limits=1):
             sr, sp = residual_blocks(signals, self.basis_data, self.basis_prior)
             raw = np.einsum("ij,ij->i", signals, signals)
-            profiled = np.einsum("ij,ij->i", sr, sr) + np.einsum("ij,ij->i", sp, sp)
+            if np.any((raw == 0.0) & np.any(signals != 0.0, axis=1)):
+                raise ValueError("signal information underflow: a nonzero template has an unrepresentable squared norm")
+            profiled = (raw.copy() if self.nuisance_rank == 0 else
+                        np.einsum("ij,ij->i", sr, sr) + np.einsum("ij,ij->i", sp, sp))
             data_inner = bias_inner = None
             if data is not None:
                 dr, dp = residual_blocks(data, self.basis_data, self.basis_prior)
@@ -396,18 +437,55 @@ class ProfileLikelihoodWorkspace:
             if bias is not None:
                 br, bp = residual_blocks(bias, self.basis_data, self.basis_prior)
                 bias_inner = sr @ br + sp @ bp
-            return self.evaluate_reductions(BankReductions(raw, profiled, np.ones(len(signals), dtype=bool),
-                data_inner, None if data is None else np.ones(len(signals), dtype=bool), bias_inner),
-                bias_whitened=bias)
+            reductions = BankReductions(raw=raw, profiled=profiled, finite=np.ones(len(signals), dtype=bool),
+                signal_data_residual_inner=data_inner,
+                data_raw=None if data is None else np.einsum("ij,ij->i", data, data),
+                data_profiled=None if data is None else np.einsum("ij,ij->i", dr, dr) + np.einsum("ij,ij->i", dp, dp),
+                data_finite=None if data is None else np.ones(len(signals), dtype=bool),
+                signal_bias_residual_inner=bias_inner)
+            return self.evaluate_reductions(reductions, bias_whitened=bias,
+                                             _vectors=(signals, data, bias))
+
+    def _information_bound(self, raw, profiled):
+        error = self.residual_relative_error_bound * np.sqrt(raw)
+        with np.errstate(over="ignore", invalid="ignore"):
+            bound = 2.0 * np.sqrt(profiled) * error + error**2 + self.norm_reduction_relative_error * profiled
+        return np.minimum(raw, np.maximum(bound, np.where(profiled > 0.0, np.spacing(profiled), 0.0)))
+
+    def refinement_mask(self, reductions: BankReductions, *, bias_whitened=None):
+        """Rows whose floating residual statistics exceed the precision target."""
+        raw, profiled = reductions.raw, reductions.profiled
+        bound = self._information_bound(raw, profiled)
+        uncertain = bound > self.relative_precision_target * profiled
+        error_s = self.residual_relative_error_bound * np.sqrt(raw)
+        for inner, other_raw, other_profiled in (
+            (reductions.signal_data_residual_inner, reductions.data_raw, reductions.data_profiled),
+            (reductions.signal_bias_residual_inner, None, None),
+        ):
+            if inner is None:
+                continue
+            if other_raw is None:
+                bias = self._bias(bias_whitened)
+                with threadpool_limits(limits=1):
+                    br, bp = residual_blocks(bias, self.basis_data, self.basis_prior)
+                    other_raw = np.dot(bias, bias)
+                    other_profiled = np.dot(br, br) + np.dot(bp, bp)
+            error_other = self.residual_relative_error_bound * np.sqrt(other_raw)
+            inner_bound = (np.sqrt(profiled) * error_other + np.sqrt(other_profiled) * error_s +
+                           error_s * error_other + self.norm_reduction_relative_error * np.abs(inner))
+            # Absolute standardized precision near zero; relative precision for
+            # a large signed significance. This also protects the sign gate.
+            uncertain |= inner_bound > self.relative_precision_target * np.maximum(np.abs(inner), np.sqrt(profiled))
+        return uncertain, bound
 
     def evaluate_reductions(self, reductions: BankReductions, *,
-                            bias_whitened: ArrayLike | None = None) -> SignalBankResult:
+                            bias_whitened: ArrayLike | None = None, _vectors=None) -> SignalBankResult:
         """Finish residual-space reductions without transferring image banks."""
         if not np.all(reductions.finite):
             raise ValueError("signals_whitened contains non-finite values")
         if reductions.data_finite is not None and not np.all(reductions.data_finite):
             raise ValueError("data_whitened contains non-finite values")
-        for name in ("raw", "profiled", "signal_data_residual_inner", "signal_bias_residual_inner"):
+        for name in ("raw", "profiled", "signal_data_residual_inner", "data_raw", "data_profiled", "signal_bias_residual_inner"):
             value = getattr(reductions, name)
             if value is not None:
                 _require_finite(value, name)
@@ -420,9 +498,41 @@ class ProfileLikelihoodWorkspace:
             raise ValueError("residual information must be non-negative")
         if np.any(profiled > raw * (1.0 + 1.e-10) + np.finfo(float).tiny):
             raise ValueError("profiled residual information exceeds raw information")
-        profiled = np.where(profiled <= raw * self.zero_information_relative_norm**2, 0.0, profiled)
-        return self._finish(raw, profiled, reductions.signal_data_residual_inner,
-                            reductions.signal_bias_residual_inner)
+        if reductions.data_raw is not None:
+            if np.any(reductions.data_raw < 0.0) or np.any(reductions.data_profiled < 0.0):
+                raise ValueError("data residual information must be non-negative")
+            if np.any(reductions.data_profiled > reductions.data_raw * (1.0 + 1.e-10) + np.finfo(float).tiny):
+                raise ValueError("profiled data residual information exceeds raw information")
+        uncertain, error_bound = self.refinement_mask(reductions, bias_whitened=bias_whitened)
+        data_inner = None if reductions.signal_data_residual_inner is None else reductions.signal_data_residual_inner.copy()
+        bias_inner = None if reductions.signal_bias_residual_inner is None else reductions.signal_bias_residual_inner.copy()
+        profiled = profiled.copy()
+        if np.any(uncertain) and _vectors is not None and self.exact_refinement_available:
+            if self._exact_refinement is None:
+                self._exact_refinement = ExactProfileRefinement(self.nuisance_whitened, self.prior_precision,
+                                                               self.nuisance_rank)
+            exact = self._exact_refinement
+            if exact.supported:
+                signals, data, bias = _vectors
+                exact_bias = None if bias is None else exact.residual(bias)
+                for row in np.flatnonzero(uncertain):
+                    signal = exact.residual(signals[row])
+                    exact_information = exact.inner(signal, signal)
+                    profiled[row] = float(exact_information)
+                    if exact_information and profiled[row] == 0.0:
+                        error_bound[row] = np.nextafter(0.0, 1.0)
+                        continue
+                    if data is not None:
+                        data_inner[row] = float(exact.inner(signal, exact.residual(data[row])))
+                    if exact_bias is not None:
+                        bias_inner[row] = float(exact.inner(signal, exact_bias))
+                    error_bound[row] = max(4.0 * np.finfo(float).eps * profiled[row],
+                                           np.spacing(profiled[row]) if profiled[row] > 0.0 else 0.0)
+                    uncertain[row] = error_bound[row] > self.relative_precision_target * profiled[row]
+        # Unresolved precision is a failed numerical evaluation, not zero
+        # information or an ordinary nondetection. Preserve its error bound.
+        profiled[uncertain] = np.nan
+        return self._finish(raw, profiled, data_inner, bias_inner, error_bound)
 
     def _bank(self, values: ArrayLike, what: str) -> np.ndarray:
         bank = _array(values, what, ndim=2)
@@ -439,12 +549,12 @@ class ProfileLikelihoodWorkspace:
         return bias
 
     def _finish(self, raw: np.ndarray, profiled: np.ndarray, data_inner: np.ndarray | None,
-                bias_inner: np.ndarray | None) -> SignalBankResult:
+                bias_inner: np.ndarray | None, error_bound: np.ndarray) -> SignalBankResult:
         positive = profiled > 0.0
         statistics = {
             "fisher_raw": raw, "fisher_profiled": profiled,
             "sigma_amplitude": sigma_amplitude(profiled), "q_asimov": profiled,
-            "degradation": degradation(raw, profiled),
+            "degradation": degradation(raw, profiled), "projection_error_bound": error_bound,
         }
         for numerator, amplitude_name, z_name, q_name, signed in (
             (data_inner, "amplitude_hat", "z_mismatch", "q_mismatch", True),
@@ -455,7 +565,7 @@ class ProfileLikelihoodWorkspace:
             amplitude = np.full_like(profiled, np.nan)
             amplitude[positive] = numerator[positive] / profiled[positive]
             z, q = amplitude_significance(amplitude, profiled, signed=signed)
-            if not np.all(np.isfinite(amplitude[positive])) or not np.all(np.isfinite(q)):
+            if not np.all(np.isfinite(amplitude[positive])) or not np.all(np.isfinite(q[positive])):
                 raise ValueError("fitted amplitude or statistic is non-finite for an identifiable template")
             statistics.update({amplitude_name: amplitude, z_name: z, q_name: q})
         return SignalBankResult(**statistics)
