@@ -66,13 +66,18 @@ class GridIndex:
     x_coords: np.ndarray
     indices: np.ndarray
     spacing_arcsec: float
+    layout_indices: np.ndarray | None = None
 
     def __post_init__(self) -> None:
+        spacing = _positive(self.spacing_arcsec, "spacing_arcsec")
         for name in ("y_coords", "x_coords"):
             coords = np.asarray(getattr(self, name), dtype=float)
             if coords.ndim != 1 or coords.size == 0 or not np.all(np.isfinite(coords)) \
                     or np.any(np.diff(coords) <= 0.0):
                 raise ValueError(f"{name} must be a non-empty, finite, increasing vector")
+            tolerance = 4.0 * np.spacing(max(float(np.max(np.abs(coords))), spacing))
+            if np.any(np.abs(np.diff(coords) - spacing) > tolerance + 16.0 * np.finfo(float).eps * spacing):
+                raise ValueError(f"{name} must be uniformly separated by spacing_arcsec")
             object.__setattr__(self, name, _read_only(coords))
         indices = np.asarray(self.indices)
         if indices.ndim != 2 or indices.shape[1] != 2 or indices.shape[0] == 0 or indices.dtype.kind not in "iu":
@@ -82,7 +87,27 @@ class GridIndex:
         if np.unique(indices, axis=0).shape[0] != indices.shape[0]:
             raise ValueError("indices must not repeat a lattice node")
         object.__setattr__(self, "indices", _read_only(indices.astype(np.int64)))
-        object.__setattr__(self, "spacing_arcsec", _positive(self.spacing_arcsec, "spacing_arcsec"))
+        object.__setattr__(self, "spacing_arcsec", spacing)
+        original = indices if self.layout_indices is None else np.asarray(self.layout_indices)
+        if original.ndim != 2 or original.shape[1] != 2 or original.shape[0] == 0 or original.dtype.kind not in "iu":
+            raise ValueError("layout_indices must be a non-empty integer (n, 2) array")
+        if np.any(original < 0) or np.any(original >= np.asarray(self.shape)[None, :]):
+            raise ValueError("layout_indices must lie inside the lattice")
+        if np.unique(original, axis=0).shape[0] != original.shape[0]:
+            raise ValueError("layout_indices must not repeat a lattice node")
+        occupied = np.zeros(self.shape, dtype=bool)
+        occupied[original[:, 0], original[:, 1]] = True
+        if not np.all(occupied[indices[:, 0], indices[:, 1]]):
+            raise ValueError("indices must belong to the original layout_indices")
+        object.__setattr__(self, "layout_indices", _read_only(original.astype(np.int64)))
+
+    def layout_boundary(self) -> np.ndarray:
+        """Boundary of the original evaluated layout on the full coordinate lattice."""
+        occupied = np.zeros(self.shape, dtype=bool)
+        occupied[self.layout_indices[:, 0], self.layout_indices[:, 1]] = True
+        padded = np.pad(occupied, 1, constant_values=False)
+        interior = padded[:-2, 1:-1] & padded[2:, 1:-1] & padded[1:-1, :-2] & padded[1:-1, 2:]
+        return occupied & ~interior
 
     def __setstate__(self, state: dict[str, object]) -> None:
         """Unpickle through the constructor checks; numpy restores arrays writeable."""
@@ -151,6 +176,14 @@ class PositionSet:
                 boundary = np.asarray(self.boundary)
                 if boundary.dtype != bool or boundary.shape != (count,):
                     raise ValueError(f"boundary must be a boolean vector of length {count}")
+                original_boundary = lattice.layout_boundary()
+                selected = np.zeros(lattice.shape, dtype=bool)
+                selected[lattice.indices[:, 0], lattice.indices[:, 1]] = True
+                if np.any(original_boundary & ~selected):
+                    raise ValueError("boundary must be None when original boundary nodes were omitted")
+                expected = original_boundary[lattice.indices[:, 0], lattice.indices[:, 1]]
+                if not np.array_equal(boundary, expected):
+                    raise ValueError("boundary flags must match the original layout geometry")
                 object.__setattr__(self, "boundary", _read_only(boundary))
             object.__setattr__(self, "cell_areas_arcsec2", _read_only(areas))
         object.__setattr__(self, "positions_yx", _read_only(positions))
@@ -188,7 +221,7 @@ class PositionSet:
         lattice = None
         if self.grid is not None:
             lattice = GridIndex(self.grid.y_coords, self.grid.x_coords, self.grid.indices[mask],
-                                self.grid.spacing_arcsec)
+                                self.grid.spacing_arcsec, self.grid.layout_indices)
         boundary = None
         if self.boundary is not None and not np.any(self.boundary & ~mask):
             boundary = self.boundary[mask]

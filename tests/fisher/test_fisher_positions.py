@@ -17,6 +17,36 @@ def full_grid(spacing=1.0, half_width=2.0, centre=(0.0, 0.0)):
     return grid_positions(centre, spacing_arcsec=spacing, half_width_arcsec=half_width, annulus=None)
 
 
+@pytest.mark.parametrize("y,x,spacing", [([-1., 0., 1.], [-1., 0., 1.], 2.0),
+    ([-1., 0., 3.], [-2., 0., 1.], 1.0)])
+def test_declared_grid_spacing_must_match_both_coordinate_axes(y, x, spacing):
+    with pytest.raises(ValueError, match="spacing"):
+        GridIndex(np.array(y), np.array(x), np.array([(0, 0), (1, 1)]), spacing)
+
+
+def test_grid_boundary_claim_is_validated_against_original_membership():
+    from dataclasses import replace
+
+    layout = full_grid()
+    with pytest.raises(ValueError, match="boundary"):
+        replace(layout, boundary=np.zeros(len(layout), dtype=bool))
+    keep = np.ones(len(layout), dtype=bool)
+    keep[12] = False
+    sparse = layout.select(keep)
+    np.testing.assert_array_equal(sparse.boundary, layout.boundary[keep])
+    assert sparse.boundary.sum() == 16
+    np.testing.assert_array_equal(sparse.grid.layout_indices, layout.grid.indices)
+    restored = pickle.loads(pickle.dumps(sparse))
+    np.testing.assert_array_equal(restored.grid.layout_indices, layout.grid.indices)
+
+
+def test_single_axis_and_translated_floating_lattices_validate():
+    one = GridIndex(np.array([0.3]), np.array([1.1, 1.2, 1.3]), np.array([(0, 0), (0, 2)]), 0.1)
+    assert one.shape == (1, 3)
+    one_node = GridIndex(np.array([0.3]), np.array([1.1]), np.array([(0, 0)]), 0.1)
+    assert one_node.shape == (1, 1)
+
+
 @pytest.mark.parametrize("centre, spacing, half_width, coords_y, coords_x", [
     ((0.25, -0.25), 0.5, 1.1, [-0.75, -0.25, 0.25, 0.75, 1.25], [-1.25, -0.75, -0.25, 0.25, 0.75]),
     ((0.0, 0.0), 1.0, 2.9999999999, [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0], [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0]),
