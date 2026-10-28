@@ -1,4 +1,4 @@
-"""JAX node templates with dynamic radial tables and host profiled-bank finishing."""
+"""Analytic JAX halo templates and an explicit shared singular-integration route."""
 
 from __future__ import annotations
 
@@ -13,8 +13,7 @@ from ..statistics import BankReductions, SignalBankResult, residual_blocks
 from .base import BankAccumulator, EngineContext, checked_positions
 from .fft import convolution_fft_shape
 from .jax_profiles import build_light_evaluator, verification_points
-from .radial import (MATCHED_SAMPLES, MISMATCHED_SAMPLES, check_coverage, interpolate_log_grid,
-                     radial_deflection, radial_grid)
+from ...scene.halo_numerics import spherical_deflections
 
 
 class JaxTemplateEngine:
@@ -29,6 +28,13 @@ class JaxTemplateEngine:
         scene = context.smooth_scene
         if scene.plane_count > 2 or context.hypothesis_redshift != scene.spec.lens.redshift:
             raise ValueError("JAX templates require a two-plane scene and a lens-plane subhalo")
+        singular_halos = context.smooth_scene.perturbers
+        if (context.hypothesis_model.type in ("PointMass", "SIS")
+                or any(halo.model.type in ("PointMass", "SIS") for halo in singular_halos)):
+            from .reference import ReferenceEngine
+            self._integrated_reference = ReferenceEngine(context, workers=1, progress=progress)
+            return
+        self._integrated_reference = None
         self._shape_native = scene.spec.grid.shape
         n_pix = self._shape_native[0] * self._shape_native[1]
         coordinates = np.asarray(scene.grid.over_sampled, dtype=float)
@@ -48,11 +54,8 @@ class JaxTemplateEngine:
             for key, group in scene.light_groups.items() if group.plane == "source"}
         self._model_slots = self._kernel_slots(context.model_kernels)
         self._truth_slots = None if context.truth_kernels is None else self._kernel_slots(context.truth_kernels)
-        self._grid = radial_grid(coordinates, context.lens_centre_yx, context.domain_radius_arcsec,
-                                 samples=MISMATCHED_SAMPLES if context.mismatched else MATCHED_SAMPLES)
         self._radial_tables: OrderedDict[float, Any] = OrderedDict()
         self._coords, self._alpha_macro_fit = jnp.asarray(coordinates), jnp.asarray(macro)
-        self._log_radii = jnp.asarray(self._grid.log_radii)
         self._mu0_flat = jnp.asarray(np.asarray(context.mean_model_adu, dtype=float).reshape(-1))
         self._mask_flat_idx = jnp.asarray(np.flatnonzero(context.data_space.mask.reshape(-1)))
         self._scale_source = float(context.exposure.exposure_time_s)
@@ -112,11 +115,7 @@ class JaxTemplateEngine:
 
     def _signal_for_position(self, position_yx, alpha_radial):
         delta = self._coords - position_yx[None, :]
-        radius = jnp.sqrt(delta[:, 0] ** 2 + delta[:, 1] ** 2)
-        radius_safe = jnp.clip(radius, jnp.exp(self._log_radii[0]), None)
-        log_radius = jnp.log(radius_safe)
-        alpha_r = interpolate_log_grid(log_radius, self._log_radii, alpha_radial, self._grid.affine)
-        alpha_sub = alpha_r[:, None] * delta / radius_safe[:, None]
+        alpha_sub = spherical_deflections(self.context.hypothesis_model.type, delta, alpha_radial, jnp)
         images = self._images(alpha_sub)
         model = self._convolution(images, self._model_slots)
         mu_model = model.reshape(-1) * self._scale_source / self._gain + self._model_constant
@@ -152,8 +151,8 @@ class JaxTemplateEngine:
     def _table(self, mass):
         table = self._radial_tables.pop(float(mass), None)
         if table is None:
-            profile = self.context.hypothesis(mass, (0.0, 0.0)).autolens_profile()
-            table = jnp.asarray(radial_deflection(profile, self._grid.radii))
+            halo = self.context.hypothesis(mass, (0.0, 0.0))
+            table = {key: jnp.asarray(value) for key, value in halo.lensing().parameters.items()}
         self._radial_tables[float(mass)] = table
         while len(self._radial_tables) > 8:
             self._radial_tables.popitem(last=False)
@@ -162,8 +161,9 @@ class JaxTemplateEngine:
     def evaluate(self, positions_yx: np.ndarray, masses_msun: Sequence[float]) -> list[SignalBankResult]:
         if self._closed:
             raise RuntimeError("JAX engine is closed")
+        if self._integrated_reference is not None:
+            return self._integrated_reference.evaluate(positions_yx, masses_msun)
         positions = checked_positions(positions_yx)
-        check_coverage(self._grid, positions, self.context.lens_centre_yx)
         masses = tuple(masses_msun)
         if not masses:
             raise ValueError("masses_msun must be non-empty")
@@ -210,11 +210,21 @@ class JaxTemplateEngine:
                                  for name, values in reductions.items()})
 
     def describe(self) -> Mapping[str, Any]:
-        return {"kind": self.kind, "batch_size": self.batch_size, "radial_samples": len(self._grid.radii),
+        if self._integrated_reference is not None:
+            from ...scene.singular_integration import POLICY
+            return {"kind": "reference", "requested_kind": self.kind, "workers": 1,
+                    "execution_route": "shared-adaptive-singular-brightness", "integration_policy": POLICY,
+                    "device": "cpu", "jax_accelerated": False}
+        return {"kind": self.kind, "batch_size": self.batch_size, "radial_samples": 0,
+                "halo_evaluation": "analytic-profile-specific",
                 "device": str(jax.devices()[0]), "projection": self.context.data_space.whitener.mode}
 
     def close(self) -> None:
         if self._closed:
+            return
+        if self._integrated_reference is not None:
+            self._integrated_reference.close()
+            self._closed = True
             return
         for function in (self._signals, self._reductions):
             if function is not None:

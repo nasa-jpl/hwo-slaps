@@ -206,9 +206,10 @@ def test_halo_records_round_trip_and_pickle(model, planck15):
 
 @pytest.mark.backend
 def test_halo_profiles_are_the_autolens_classes_of_their_types(planck15):
-    import autolens as al
+    from hwoslaps.scene import halo_profiles
 
-    for model, profile_class in ((POINT_MASS, al.mp.PointMass), (SIS, al.mp.IsothermalSph), (NFW, al.mp.NFWSph)):
+    for model, profile_class in ((POINT_MASS, halo_profiles.PointMass), (SIS, halo_profiles.IsothermalSph),
+                                 (NFW, halo_profiles.NFWSph)):
         halo = make_halo(model, 1.0e9, (0.4, -0.8), redshift=0.2, source_redshift=0.6, cosmology=planck15)
         profile = halo.autolens_profile()
         assert type(profile) is profile_class and profile.centre == (0.4, -0.8)

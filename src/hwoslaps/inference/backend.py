@@ -40,6 +40,9 @@ class CompatAnalysisImaging(al.AnalysisImaging):
         if self._use_jax:
             self._register_fit_imaging_pytrees()
         tracer = self.tracer_via_instance_from(instance=instance)
+        from .integrated_tracer import integrated_tracer
+        tracer = integrated_tracer(tracer, use_jax=self._use_jax,
+                                   force=getattr(self, "_hwoslaps_singular_integrated", False))
         dataset_model = self.dataset_model_via_instance_from(instance=instance)
         adapt_images = self.adapt_images_via_instance_from(instance=instance, galaxies=tracer.galaxies)
         keywords = {"dataset": self.dataset, "tracer": tracer, "dataset_model": dataset_model,
@@ -48,13 +51,8 @@ class CompatAnalysisImaging(al.AnalysisImaging):
                              if name in _FIT_IMAGING_KEYWORDS and value is not None})
 
 
-ANALYSIS_CLASS: type = (
-    al.AnalysisImaging
-    if "dataset_model" in inspect.signature(al.AnalysisImaging.adapt_images_via_instance_from).parameters
-    else CompatAnalysisImaging
-)
-"""The analysis class fits use: ``CompatAnalysisImaging`` while the installed AutoGalaxy lacks the
-``dataset_model`` keyword, ``al.AnalysisImaging`` once it has it."""
+ANALYSIS_CLASS: type = CompatAnalysisImaging
+"""The analysis class also preserves the shared singular-image integration contract."""
 
 
 def ensure_jax_x64() -> None:
@@ -82,7 +80,7 @@ def require_jax_fitness_api() -> None:
                            f"lack the JAX likelihood API: {', '.join(missing)}")
 
 
-def make_analysis(imaging: Any, *, cosmology: Any, use_jax: bool) -> Any:
+def make_analysis(imaging: Any, *, cosmology: Any, use_jax: bool, integrate_singular: bool = False) -> Any:
     """The analysis of ``imaging`` under ``cosmology``, the instance the truth scene traced with.
 
     AutoLens falls back to Planck15 when no cosmology is given, which is wrong for any other
@@ -91,7 +89,12 @@ def make_analysis(imaging: Any, *, cosmology: Any, use_jax: bool) -> Any:
     if use_jax:
         ensure_jax_x64()
         require_jax_fitness_api()
+    if use_jax and integrate_singular:
+        from ..scene.singular_integration import SingularIntegrationCapabilityError
+        raise SingularIntegrationCapabilityError(
+            'JAX nonlinear PointMass/SIS pixel integration and its derivatives are unsupported; use NumPy fits')
     analysis = ANALYSIS_CLASS(dataset=imaging, cosmology=cosmology, use_jax=use_jax)
+    analysis._hwoslaps_singular_integrated = integrate_singular
     if use_jax and analysis._use_jax is not True:
         raise RuntimeError("the JAX likelihood was requested, but the analysis does not report _use_jax")
     return analysis

@@ -98,35 +98,26 @@ class TNFWM200SubhaloSph(halo_profiles.TruncatedNFWSph):
         self.log10_m200, self.mass_mapping = _scalar(log10_m200), mass_mapping
 
 
-class NFWM200SubhaloSph(al.mp.NFWSph):
+class NFWM200SubhaloSph(halo_profiles.NFWSph):
     def __init__(self, centre=(0.0, 0.0), log10_m200=7.0, mass_mapping=None):
         scales = _scales(mass_mapping, "NFW", centre, log10_m200)
         super().__init__(centre=centre, **scales)
         self.log10_m200, self.mass_mapping = _scalar(log10_m200), mass_mapping
 
 
-class SISM200Subhalo(al.mp.IsothermalSph):
+class SISM200Subhalo(halo_profiles.IsothermalSph):
     def __init__(self, centre=(0.0, 0.0), log10_m200=7.0, mass_mapping=None):
         scales = _scales(mass_mapping, "SIS", centre, log10_m200)
         super().__init__(centre=centre, **scales)
         self.log10_m200, self.mass_mapping = _scalar(log10_m200), mass_mapping
 
 
-class PointMassM200Subhalo(al.mp.PointMass):
+class PointMassM200Subhalo(halo_profiles.PointMass):
     def __init__(self, centre=(0.0, 0.0), log10_m200=7.0, mass_mapping=None):
         scales = _scales(mass_mapping, "PointMass", centre, log10_m200)
         super().__init__(centre=centre, **scales)
         self.log10_m200, self.mass_mapping = _scalar(log10_m200), mass_mapping
 
-    def _cartesian_grid_via_radial_from(self, grid, radius, xp=np, **kwargs):
-        """Unwrap AutoArray radius values only on the JAX path, as the pinned paper adapter does."""
-        if xp is np:
-            return super()._cartesian_grid_via_radial_from(grid=grid, radius=radius, xp=xp, **kwargs)
-        grid_values = grid.array if hasattr(grid, "array") else grid
-        radius_values = radius.array if hasattr(radius, "array") else radius
-        angles = xp.arctan2(grid_values[:, 0], grid_values[:, 1])
-        directions = xp.stack((xp.sin(angles), xp.cos(angles)), axis=-1)
-        return xp.multiply(radius_values[:, None], directions)
 
 
 def freed_profile_class(model: str) -> type:

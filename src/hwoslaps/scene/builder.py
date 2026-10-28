@@ -208,6 +208,9 @@ def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, 
                 image = image + _read_only(profile.image_2d_from(grid=plane_grid))
             image.setflags(write=False)
             images[key] = image
+    from .singular_integration import correct_group_images
+    images = correct_group_images(tracer, grid, images, light_profiles, groups, redshifts,
+                                  force=spec.subhalo.type in ("PointMass", "SIS"))
     for key, image in images.items():
         if not np.all(np.isfinite(image)):
             raise ValueError(f"the {key} light image has non-finite values")

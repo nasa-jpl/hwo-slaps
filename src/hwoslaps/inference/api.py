@@ -83,7 +83,11 @@ class PreparedCase:
                           for galaxy in model.galaxies for _, component in galaxy.components)
             objective = jax_objective(self.analysis, self.autofit_models[role], model.lower, model.upper,
                                       check_gradient_domain=checked)
-            self._objectives[role] = guard_circular_mass_gradient(objective, model)
+            from .halo_gradients import guard_halo_cusp_gradient
+            grids = (self.data.imaging.grids.lp, self.data.imaging.grids.blurring)
+            coordinates = np.concatenate([np.asarray(grid.over_sampled) for grid in grids if grid is not None])
+            self._objectives[role] = guard_halo_cusp_gradient(
+                guard_circular_mass_gradient(objective, model), model, coordinates)
         return self._objectives[role]
 
 
@@ -166,7 +170,10 @@ def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observati
     free = tuple(parameter.name for parameter in prepared.nuisances.parameters if parameter.kind == "scene")
     models = build_role_models(prepared.scene, trial, free, fit, use_jax=use_jax)
     converted = {role: autofit_model(getattr(models, role)) for role in ("smooth", "subhalo")}
-    analysis = make_analysis(data.imaging, cosmology=prepared.scene.cosmology.autogalaxy(), use_jax=use_jax)
+    singular = trial.model.type in ("PointMass", "SIS") or any(
+        halo.model.type in ("PointMass", "SIS") for halo in prepared.scene.perturbers)
+    analysis = make_analysis(data.imaging, cosmology=prepared.scene.cosmology.autogalaxy(), use_jax=use_jax,
+                             integrate_singular=singular)
     record = {"prepared": dict(prepared.record), "hypothesis": trial.to_mapping(),
               "observation": {"kind": observation.kind, "noise_seed": observation.noise_seed,
                               "config_digest": observation.config_digest, "data_digest": array_digest(observation.data_adu),

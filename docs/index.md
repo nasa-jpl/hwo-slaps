@@ -42,6 +42,7 @@ New users should read these in order:
 | [Summaries and mass reach](guide/analysis.md) | Detection thresholds, apertures, areas, mass reach and plots |
 | [Observations](guide/observations.md) | Expected and noisy images, smooth controls and the noise model |
 | [PSFs and PSF errors](guide/psfs.md) | Kernel and optical PSFs, wavefront errors, knowledge error and chromatic PSFs |
+| [Halo numerics](guide/halo_numerics.md) | Central values, singular pixel integrals and supported derivatives |
 | [Nonlinear fits](guide/nonlinear.md) | Checking a forecast with PyAutoLens and Nautilus fits |
 | [Populations and batches](guide/batches.md) | Running many lenses as one resumable batch |
 | [Saving and loading](guide/saving.md) | Result files and the provenance they carry |
@@ -83,6 +84,7 @@ guide/analysis
 guide/observations
 guide/psfs
 guide/nonlinear
+guide/halo_numerics
 guide/batches
 guide/saving
 ```

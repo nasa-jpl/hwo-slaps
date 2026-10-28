@@ -439,13 +439,9 @@ class Halo:
 
     def autolens_profile(self, *, centre: tuple[float, float] | None = None) -> Any:
         """The AutoLens mass profile of this halo, at ``centre`` when given (radial tables use the origin)."""
-        import autolens as al
+        from . import halo_profiles
 
-        if self.model.type == "TNFW":
-            from .halo_profiles import TruncatedNFWSph
-            profile_class = TruncatedNFWSph
-        else:
-            profile_class = getattr(al.mp, self.model.profile_class)
+        profile_class = getattr(halo_profiles, self.model.profile_class)
         return profile_class(centre=self.position_yx_arcsec if centre is None else tuple(centre),
                              **self.lensing().parameters)
 
