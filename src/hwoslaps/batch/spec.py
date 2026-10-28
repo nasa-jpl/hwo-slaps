@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from ..analysis.nonlinear import RoleAcceptance
-from ..config.checks import (Boolean, ConfigError, Integer, Key, ListOf, MapOf, Nullable,
+from ..config.checks import (Boolean, ConfigError, Identifier, Integer, Key, ListOf, MapOf, Nullable,
                              Pair, Real, Table, Text, Union, Variants)
 from ..config.loading import read_yaml
 from ..config.schema import EngineConfig, ROOT_TABLE, compose_config, resolve_config
@@ -284,7 +284,7 @@ _ARM_TABLE = Table((Key('name', _NAME, 'arm name'), Key('overrides', _Mapping(),
 _POPULATION_TABLE = POPULATION_TABLE.extend((
     Key('seed', Integer(min=0), 'population stream seed'), Key('count', _COUNT, 'member count'),
     Key('start', Integer(min=0), 'first absolute population index', 0),
-    Key('name_prefix', _NAME, 'population member name prefix', 'system'),
+    Key('name_prefix', Identifier(), 'population member name prefix', 'system'),
 ))
 _SIMULATE_TABLE = Table((Key('inject', Boolean(), 'inject the configured scene hypothesis'),
                         Key('noise', Boolean(), 'draw detector noise'),

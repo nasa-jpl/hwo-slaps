@@ -14,7 +14,7 @@ from typing import Any
 import numpy as np
 from scipy.special import ndtr, ndtri
 
-from ..config.checks import ConfigError, Integer, Key, ListOf, MapOf, Nullable, Real, Sha256, Table, Text, Variants
+from ..config.checks import ConfigError, Identifier, Integer, Key, ListOf, MapOf, Nullable, Real, Sha256, Table, Text, Variants
 from ..config.schema import ConfigSource, EngineConfig, parse_config, resolve_config
 from ..identity import file_digest, json_ready, mapping_digest
 from ..seeding import member_seed, stream_rng
@@ -360,8 +360,10 @@ def iter_population_members(base: ConfigSource, spec: PopulationSpec | Mapping[s
     """
     spec = spec if isinstance(spec, PopulationSpec) else PopulationSpec.from_mapping(spec, base_dir = base_dir)
     count, seed, start = (_integer(value, name) for value, name in ((count, "count"), (seed, "seed"), (start, "start")))
-    if not isinstance(name_prefix, str) or re.fullmatch(r"[A-Za-z0-9_]+", name_prefix) is None:
-        raise PopulationError("name_prefix: letters/digits/underscores required")
+    try:
+        name_prefix = Identifier()(name_prefix, "name_prefix")
+    except ConfigError as error:
+        raise PopulationError(str(error)) from error
     config = resolve_config(base, base_dir = base_dir)
     mapping = config.to_mapping()
     targets = _bind_targets(mapping, spec.bind)

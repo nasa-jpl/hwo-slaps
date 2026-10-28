@@ -7,6 +7,30 @@ from hwoslaps.batch import parse_batch, plan_batch
 from hwoslaps.config.checks import ConfigError
 
 
+@pytest.mark.parametrize("prefix", ["lens_sample", "lens-sample", "lens.sample"])
+def test_population_prefix_parsing_and_planning_share_accepted_names(tiny_batch_spec, prefix):
+    from hwoslaps.population import iter_population_members
+
+    spec = tiny_batch_spec(population={"name_prefix": prefix})
+    planned = plan_batch(spec)
+    direct = tuple(iter_population_members(spec.base, spec.population.spec, spec.population.count,
+                                          seed=spec.population.seed, name_prefix=prefix))
+    assert [member.run_name for member in planned.members] == [member.run_name for member in direct]
+
+
+@pytest.mark.parametrize("prefix", ["", ".", "..", "a/b", "a\\b"])
+def test_population_prefix_invalid_names_fail_at_both_input_boundaries(tiny_batch_spec, prefix):
+    from hwoslaps.population import PopulationError, iter_population_members
+
+    valid = tiny_batch_spec()
+    mapping = valid.to_mapping()
+    mapping["population"]["name_prefix"] = prefix
+    with pytest.raises(ValueError, match="name_prefix"):
+        parse_batch(mapping, base_dir=valid.base_dir)
+    with pytest.raises(PopulationError, match="name_prefix"):
+        next(iter_population_members(valid.base, valid.population.spec, 1, seed=3, name_prefix=prefix))
+
+
 _FAMILY = {'trials': {'kind': 'explicit', 'explicit': [{'members': 'all', 'mass_msun': 1e8,
                                                      'position_yx': [.1, .2]}]},
            'inject': True, 'noise': False, 'fit': {'mode': 'fixed_template'}}
