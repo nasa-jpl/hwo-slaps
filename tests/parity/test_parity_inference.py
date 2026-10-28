@@ -37,8 +37,11 @@ def _inputs(case, expected, manifest, paper_digest):
     assert case.data.pixel_count == record["n_unmasked_pixels"]
     # Geometry, actual kernels and prior boxes are unchanged input contracts.
     # Padded rendering deliberately changes data/noise, recorded below.
-    for values, key in ((imaging.psf.kernel.native, "psf_digest"), (np.asarray(imaging.mask).astype(float), "mask_digest")):
+    for values, key in ((imaging.psf.kernel.native, "psf_digest"), ((~case.data.mask).astype(float), "mask_digest")):
         assert paper_digest.array(values) == record[key], key
+    padding = case.data.record["rendering"]["padding_yx"]
+    expected_backend_mask = np.pad(~case.data.mask, tuple((p, p) for p in padding), constant_values=True)
+    np.testing.assert_array_equal(np.asarray(imaging.mask), expected_backend_mask)
     assert paper_digest.kernel(imaging.psf.kernel.native) == record["psf_fit_sha256"]
     for role, oracle_role in (("smooth", "smooth"), ("subhalo", "freed")):
         model = case.model(role)
@@ -76,9 +79,13 @@ def test_current_nonlinear_likelihood_has_independent_gaussian_normalization(pre
             changes[role] = {term: {"historical": expected["reference__"+oracle_role+"_"+term].tolist(),
                                    "current": [row[term] for row in live]} for term in TERMS}
     record = manifest["scenes"]["n1_nonlinear_likelihood"]["dataset"]
+    py, px = case.data.record["rendering"]["padding_yx"]
+    shape = case.data.record["shape"]
+    crop = (slice(py, py+shape[0]), slice(px, px+shape[1]))
     write_receipt(tmp_path, "nonlinear_gaussian", {"terms": changes, "cross_consumer_prediction_errors": prediction_errors, "data_identity": {
-        "historical_data_digest": record["data_digest"], "current_data_digest": paper_digest.array(case.data.imaging.data.native),
-        "historical_noise_digest": record["noise_map_digest"], "current_noise_digest": paper_digest.array(case.data.imaging.noise_map.native)}}, record_property)
+        "historical_data_digest": record["data_digest"], "current_detector_data_digest": paper_digest.array(np.asarray(case.data.imaging.data.native)[crop]),
+        "historical_noise_digest": record["noise_map_digest"], "current_detector_noise_digest": paper_digest.array(np.asarray(case.data.imaging.noise_map.native)[crop]),
+        "backend_render_shape": list(case.data.imaging.mask.shape), "detector_shape": list(shape)}}, record_property)
 
 
 @pytest.mark.xtx_gpu
