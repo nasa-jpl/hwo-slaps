@@ -3,6 +3,9 @@ from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 import re
+import os
+import shutil
+import tempfile
 
 from ..artifacts import write_json, write_yaml
 from ..config.loading import read_yaml
@@ -13,19 +16,30 @@ from .jobs import BatchPlan, Job, MemberRecord, PlannedArm, build_plan, plan_bat
 from .state import BatchConflict, read_json
 
 
-def plan_history(output):
+def _retire_publication(pending):
+    # Remove the recovery authority atomically before disposable stage cleanup.
+    # An interruption during rmtree must not leave a half-deleted live journal.
+    retired = pending.with_name('.frozen-stage-retired-' + os.urandom(16).hex())
+    os.rename(pending, retired)
+    shutil.rmtree(retired)
+
+
+def plan_history(output, *, _uncommitted=None):
     """Read immutable revisions; every append retains the full previous realization."""
     root = output / 'frozen_plan.yaml'
     seal = output / 'frozen_plan.json'
     revisions = {}
     for path in output.glob('frozen_plan_r*'):
+        if path == _uncommitted:
+            continue
         match = re.fullmatch(r'frozen_plan_r([0-9]{6})\.(yaml|json)', path.name)
         if match is None:
             raise BatchConflict(f'unknown frozen-plan revision file: {path}')
         revisions.setdefault(int(match[1]), set()).add(match[2])
-    if root.exists() != seal.exists() or revisions and not root.exists():
+    root_exists = root.exists() and root != _uncommitted
+    if root_exists != seal.exists() or revisions and not root_exists:
         raise BatchConflict('persisted frozen plan and its byte-identity seal must both be present')
-    if not root.exists():
+    if not root_exists:
         return []
     if set(revisions) != set(range(1, len(revisions) + 1)) or any(kinds != {'yaml', 'json'} for kinds in revisions.values()):
         raise BatchConflict('frozen-plan revisions must be contiguous and paired with their seals')
@@ -50,6 +64,78 @@ def plan_history(output):
                     raise BatchConflict(f'frozen-plan revision changed previous {key}')
         history.append((path, record, sha))
     return history
+
+
+def _recover_publication(output):
+    """Undo only the checked, uncommitted writes of our interrupted transaction.
+
+    The seal is the commit point. A transaction is staged completely before any
+    visible write, and jobs cannot start until persist_plan returns. Arbitrary
+    orphan files, changed bytes and results in an uncommitted cohort conflict.
+    """
+    pending = output / '.frozen-plan-pending'
+    if not pending.exists():
+        return
+    if pending.is_symlink() or not pending.is_dir():
+        raise BatchConflict('invalid frozen-plan publication directory')
+    manifest = read_json(pending / 'transaction.json')
+    if set(manifest) != {'schema', 'previous_sha256', 'plan', 'files'} or manifest['schema'] != 1:
+        raise BatchConflict('invalid frozen-plan publication transaction')
+    name = manifest['plan']
+    if not isinstance(name, str) or re.fullmatch(r'frozen_plan(?:_r[0-9]{6})?\.yaml', name) is None:
+        raise BatchConflict('invalid frozen-plan transaction target')
+    target = output / name
+    files = manifest['files']
+    if (not isinstance(files, dict) or name not in files or str(Path(name).with_suffix('.json')) not in files):
+        raise BatchConflict('incomplete frozen-plan publication transaction')
+    for relative, sha in files.items():
+        path = Path(relative)
+        if (path.is_absolute() or '..' in path.parts or not path.parts
+                or relative not in (name, str(Path(name).with_suffix('.json')))
+                and (len(path.parts) < 3 or path.parts[0] != 'members'
+                     or path.name not in ('member.json', 'member_config.yaml', 'effective_config.yaml'))):
+            raise BatchConflict('invalid frozen-plan transaction file path')
+        staged = pending / path
+        if (staged.is_symlink() or not staged.is_file() or file_digest(staged) != sha
+                or not staged.resolve().is_relative_to(pending.resolve())):
+            raise BatchConflict(f'changed staged frozen-plan bytes: {staged}')
+        destination = output / path
+        if (not destination.resolve().is_relative_to(output.resolve())
+                or destination.exists() and (destination.is_symlink() or file_digest(destination) != sha)):
+            raise BatchConflict(f'changed uncommitted frozen-plan bytes: {destination}')
+    committed = target.with_suffix('.json').exists()
+    history = plan_history(output, _uncommitted=None if committed else target)
+    prior = history[:-1] if committed else history
+    previous = prior[-1][2] if prior else None
+    if previous != manifest['previous_sha256']:
+        raise BatchConflict('frozen-plan transaction does not extend the committed history')
+    expected_name = f'frozen_plan_r{len(prior):06d}.yaml' if prior else 'frozen_plan.yaml'
+    protected = {entry['run_name'] for _, record, _ in prior for entry in record['members']}
+    if name != expected_name or any(Path(path).parts[0] == 'members' and Path(path).parts[1] in protected for path in files):
+        raise BatchConflict('frozen-plan transaction overlaps committed storage')
+    if committed:
+        if not history or history[-1][0] != target or any(not (output / path).is_file() for path in files):
+            raise BatchConflict('committed frozen-plan transaction has missing files')
+    else:
+        # Check every affected member subtree before deleting anything. No job or
+        # unrelated file may have been produced from an uncommitted realization.
+        roots = {output / Path(path).parts[0] / Path(path).parts[1]
+                 for path in files if Path(path).parts[0] == 'members'}
+        for root in roots:
+            if any(path.is_symlink() or path.is_file() and str(path.relative_to(output)) not in files
+                   for path in root.rglob('*')):
+                raise BatchConflict(f'uncommitted frozen cohort contains unexpected files or job output: {root}')
+        for relative in reversed(files):
+            path = output / relative
+            path.unlink(missing_ok=True)
+            parent = path.parent
+            while parent != output:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    break
+                parent = parent.parent
+    _retire_publication(pending)
 
 
 def count_spec(spec, count):
@@ -120,6 +206,7 @@ def persisted_members(output, spec):
 
 
 def persist_plan(output, plan):
+    _recover_publication(output)
     history = plan_history(output)
     identity = mapping_digest(science_spec(plan.spec))
     if history:
@@ -127,6 +214,16 @@ def persist_plan(output, plan):
         if (len(plan.members) < len(prior['members'])
                 or prior['spec_identity'] != mapping_digest(science_spec(count_spec(plan.spec, len(prior['members']))))):
             raise BatchConflict('only an increased population count can append to the frozen plan')
+    output.mkdir(parents=True, exist_ok=True)
+    staging = tempfile.TemporaryDirectory(prefix='.frozen-stage-', dir=output)
+    stage = Path(staging.name)
+    files = {}
+    def publish(path, mapping, writer):
+        relative = path.relative_to(output)
+        staged = stage / relative
+        writer(staged, mapping)
+        files[str(relative)] = file_digest(staged)
+        return staged
     entries = []
     for member in plan.members:
         root = output / 'members' / member.run_name
@@ -135,9 +232,9 @@ def persist_plan(output, plan):
             if read_json(paths['record']) != member.to_mapping():
                 raise BatchConflict(f'persisted population member changed: {paths["record"]}')
         else:
-            write_json(paths['record'], member.to_mapping())
+            paths['record'] = publish(paths['record'], member.to_mapping(), write_json)
         if not paths['config'].exists():
-            write_yaml(paths['config'], member.config.to_mapping())
+            paths['config'] = publish(paths['config'], member.config.to_mapping(), write_yaml)
         entries.append({'index': member.index, 'run_name': member.run_name,
                         'record_sha256': file_digest(paths['record']), 'config_sha256': file_digest(paths['config'])})
     arms = []
@@ -147,7 +244,7 @@ def persist_plan(output, plan):
             if parse_config(read_yaml(path)).digest() != arm.config_digest:
                 raise BatchConflict(f'persisted effective configuration changed: {path}')
         else:
-            write_yaml(path, arm.config.to_mapping())
+            path = publish(path, arm.config.to_mapping(), write_yaml)
         arms.append({'member_index': arm.member.index, 'name': arm.name, 'base_name': arm.base_name,
                      'direction': arm.direction, 'config_digest': arm.config_digest, 'sha256': file_digest(path)})
     record = {'schema': 1, 'spec_identity': identity,
@@ -163,6 +260,7 @@ def persist_plan(output, plan):
     if history:
         prior = history[-1][1]
         if record['spec_identity'] == prior['spec_identity']:
+            staging.cleanup()
             return
         for key in ('members', 'arms', 'jobs'):
             if mapping_digest({'items': record[key][:len(prior[key])]}) != mapping_digest({'items': prior[key]}):
@@ -173,15 +271,31 @@ def persist_plan(output, plan):
         path = output / f'frozen_plan_r{len(history):06d}.yaml'
     else:
         path = output / 'frozen_plan.yaml'
-    write_yaml(path, native_ready(record))
-    seal = {'schema': 1, 'sha256': file_digest(path)}
+    staged_plan = publish(path, native_ready(record), write_yaml)
+    seal = {'schema': 1, 'sha256': file_digest(staged_plan)}
     if history:
         seal['previous_sha256'] = history[-1][2]
-    write_json(path.with_suffix('.json'), seal)
+    publish(path.with_suffix('.json'), seal, write_json)
+    write_json(stage / 'transaction.json', {'schema': 1, 'previous_sha256': history[-1][2] if history else None,
+                                          'plan': path.name, 'files': files})
+    pending = output / '.frozen-plan-pending'
+    os.rename(stage, pending)
+    # Link exact staged bytes without replacing a file. The final seal is last.
+    # Keep the journal on any interruption so recovery can check every write.
+    for relative in files:
+        destination = output / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(pending / relative, destination)
+        except FileExistsError as error:
+            raise BatchConflict(f'frozen-plan publication destination already exists: {destination}') from error
+    _retire_publication(pending)
+    staging.cleanup()
 
 
 def restored_plan(output, spec):
     """Return the checked frozen realization, or plan the first session."""
+    _recover_publication(output)
     history = plan_history(output)
     if not history:
         if not any((output / 'members').glob('*/member.json')):

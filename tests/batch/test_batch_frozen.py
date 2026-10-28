@@ -2,6 +2,7 @@
 from copy import deepcopy
 from dataclasses import replace
 import json
+from pathlib import Path
 
 import pytest
 
@@ -215,3 +216,69 @@ def test_extension_rejects_other_science_changes_and_unsealed_member_directories
     with pytest.raises(BatchConflict):
         restored_plan(output, requested)
     assert not (output / 'frozen_plan_r000001.yaml').exists()
+
+
+@pytest.mark.parametrize('append,boundary', [(append, boundary) for append, count in ((False, 8), (True, 5))
+                                           for boundary in range(count + 1)])
+def test_transaction_interruption_at_each_live_publication_boundary(tiny_batch_spec, tmp_path, monkeypatch, append, boundary):
+    import hwoslaps.batch.frozen as frozen
+    spec = tiny_batch_spec()
+    output = tmp_path / 'transaction'
+    original = plan_batch(spec)
+    if append:
+        persist_plan(output, original)
+        # A committed scientific product must survive every interrupted append.
+        write_json(output / original.jobs[0].job_id / 'result-receipt.json', {'accepted': True})
+    before = {path.relative_to(output): path.read_bytes() for path in output.rglob('*') if path.is_file()}
+    requested = replace(spec, population=replace(spec.population, count=3)) if append else spec
+    plan = restored_plan(output, requested)
+    actual_link, actual_rename = frozen.os.link, frozen.os.rename
+    published = []
+    def link(source, destination, *args, **kwargs):
+        result = actual_link(source, destination, *args, **kwargs)
+        relative = Path(destination).relative_to(output)
+        if not relative.parts[0].startswith('.'):
+            published.append(relative)
+            if len(published) == boundary:
+                raise KeyboardInterrupt('after live publication')
+        return result
+    def rename(source, destination, *args, **kwargs):
+        result = actual_rename(source, destination, *args, **kwargs)
+        if Path(destination).name == '.frozen-plan-pending' and boundary == 0:
+            raise KeyboardInterrupt('after transaction preparation')
+        return result
+    with monkeypatch.context() as fault:
+        fault.setattr(frozen.os, 'link', link)
+        fault.setattr(frozen.os, 'rename', rename)
+        with pytest.raises(KeyboardInterrupt):
+            persist_plan(output, plan)
+    committed = boundary == (5 if append else 8)
+    # Rollback makes the prior cohort usable; an already committed seal is kept.
+    resumed = restored_plan(output, requested if committed or not append else spec)
+    assert len(resumed.members) == (len(plan.members) if committed else len(original.members))
+    assert all((output / path).read_bytes() == data for path, data in before.items())
+    assert not (output / '.frozen-plan-pending').exists()
+    persist_plan(output, restored_plan(output, requested))
+    assert [job.digest() for job in restored_plan(output, requested).jobs] == [job.digest() for job in plan.jobs]
+
+
+def test_interrupted_transaction_refuses_modified_or_unexpected_live_files(tiny_batch_spec, tmp_path, monkeypatch):
+    import hwoslaps.batch.frozen as frozen
+    output = tmp_path / 'changed-transaction'
+    spec = tiny_batch_spec()
+    original = frozen.os.link
+    def interrupted(source, destination, *args, **kwargs):
+        result = original(source, destination, *args, **kwargs)
+        if Path(destination) == output / 'members/system_000000/member.json':
+            raise KeyboardInterrupt
+        return result
+    with monkeypatch.context() as fault:
+        fault.setattr(frozen.os, 'link', interrupted)
+        with pytest.raises(KeyboardInterrupt):
+            persist_plan(output, plan_batch(spec))
+    product = output / 'members/system_000000/unexpected-result.bin'
+    product.write_bytes(b'preserve evidence')
+    before = {path.relative_to(output): path.read_bytes() for path in output.rglob('*') if path.is_file()}
+    with pytest.raises(BatchConflict, match='unexpected files or job output'):
+        restored_plan(output, spec)
+    assert before == {path.relative_to(output): path.read_bytes() for path in output.rglob('*') if path.is_file()}
