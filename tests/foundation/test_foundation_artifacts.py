@@ -53,6 +53,24 @@ def observation_value(noisy=False, include_lens=False):
     return observed.draw(11) if noisy else observed
 
 
+@pytest.mark.parametrize("removed", [0, 4], ids=["boundary", "interior"])
+def test_sparse_forecast_round_trip_retains_original_layout_membership(tmp_path, removed):
+    original = forecast_value()
+    keep = np.ones(len(original.positions), dtype=bool)
+    keep[removed] = False
+    sparse = type(original)(original.masses_msun, original.positions.select(keep),
+        original.fisher_raw[:, keep], original.fisher_profiled[:, keep], original.amplitude_hat[:, keep],
+        original.amplitude_spurious[:, keep], original.psf_relation, original.config, original.provenance)
+    loaded = load_forecast(save_forecast(sparse, tmp_path / "sparse.npz"))
+    np.testing.assert_array_equal(loaded.positions.grid.layout_indices, original.positions.grid.indices)
+    np.testing.assert_array_equal(loaded.positions.grid.indices, sparse.positions.grid.indices)
+    if sparse.boundary is None:
+        assert loaded.boundary is None
+    else:
+        np.testing.assert_array_equal(loaded.boundary, sparse.boundary)
+    assert not loaded.positions.grid.layout_indices.flags.writeable
+
+
 def case_value(custom_mask=False):
     from hwoslaps.inference.result import CaseResult, ObservationRecord, RoleFit
     from hwoslaps.inference.settings import FitSpec, PixelMask, SamplerSettings

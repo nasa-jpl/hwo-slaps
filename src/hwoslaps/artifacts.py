@@ -34,7 +34,7 @@ _AMPLITUDES = {"amplitude_hat": ("amplitude_hat", "q_mismatch", "z_mismatch"),
                "amplitude_spurious": ("amplitude_spurious", "q_spurious", "z_spurious")}
 _FORECAST_REQUIRED = {"schema_version", "artifact_kind", "masses_msun", "positions_yx", "positions_json",
                       "config_json", "provenance_json", "psf_relation", "template_status", *_STATISTICS}
-_GRID_ARRAYS = {"grid_y_coords", "grid_x_coords", "grid_indices"}
+_GRID_ARRAYS = {"grid_y_coords", "grid_x_coords", "grid_indices", "grid_layout_indices"}
 
 
 def _publish(path, writer) -> Path:
@@ -209,7 +209,7 @@ def save_forecast(result: ForecastResult, path) -> Path:
             members[name] = getattr(positions, name)
     if positions.grid is not None:
         members.update(grid_y_coords=positions.grid.y_coords, grid_x_coords=positions.grid.x_coords,
-                       grid_indices=positions.grid.indices)
+                       grid_indices=positions.grid.indices, grid_layout_indices=positions.grid.layout_indices)
     return _npz(path, members)
 
 
@@ -249,7 +249,8 @@ def load_forecast(path) -> ForecastResult:
     if (layout["kind"] == "grid") != bool(present_grid):
         raise ValueError("grid metadata and arrays disagree")
     grid = None if not present_grid else GridIndex(_float_array(members, "grid_y_coords"),
-        _float_array(members, "grid_x_coords"), members["grid_indices"], layout["spacing_arcsec"])
+        _float_array(members, "grid_x_coords"), members["grid_indices"], layout["spacing_arcsec"],
+        layout_indices=members["grid_layout_indices"])
     if "boundary" in members and members["boundary"].dtype != bool:
         raise ValueError("boundary must have bool dtype")
     positions = PositionSet(layout["kind"], _float_array(members, "positions_yx"), tuple(layout["centre_yx"]),
