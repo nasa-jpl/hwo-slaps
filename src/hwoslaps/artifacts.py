@@ -392,7 +392,7 @@ def load_observation(path) -> Observation:
 
 
 def save_case(result: CaseResult, path) -> Path:
-    """Publish a version-1 nonlinear case JSON archive without overwriting a file.
+    """Publish a version-2 nonlinear case JSON archive without overwriting a file.
 
     Parameters
     ----------
@@ -409,7 +409,7 @@ def save_case(result: CaseResult, path) -> Path:
     from .inference.result import CaseResult
     if not isinstance(result, CaseResult):
         raise TypeError("save_case requires a CaseResult")
-    return write_json(path, {"schema": "hwoslaps.case", "version": 1, "result": result.to_mapping()})
+    return write_json(path, {"schema": "hwoslaps.case", "version": 2, "result": result.to_mapping()})
 
 
 def load_case(path) -> CaseResult:
@@ -418,7 +418,7 @@ def load_case(path) -> CaseResult:
     Parameters
     ----------
     path : path-like
-        Version-1 nonlinear case JSON filename.
+        Version-2 nonlinear case JSON filename.
 
     Returns
     -------
@@ -435,7 +435,7 @@ def load_case_snapshot(path) -> tuple[CaseResult, str]:
     Parameters
     ----------
     path : path-like
-        Version-1 nonlinear case JSON filename.
+        Version-2 nonlinear case JSON filename.
 
     Returns
     -------
@@ -448,7 +448,7 @@ def load_case_snapshot(path) -> tuple[CaseResult, str]:
     content, digest = read_file_snapshot(path)
     value = _json_value(content.decode("utf-8"))
     _keys(value, ("schema", "version", "result"), "case artifact")
-    if value["schema"] != "hwoslaps.case" or type(value["version"]) is not int or value["version"] != 1:
+    if value["schema"] != "hwoslaps.case" or type(value["version"]) is not int or value["version"] != 2:
         raise ValueError("unsupported case artifact schema")
     return CaseResult.from_mapping(value["result"]), digest
 

@@ -153,6 +153,20 @@ def test_case_round_trip_preserves_typed_result(tmp_path, monkeypatch, custom_ma
     assert path.read_bytes() == (replacement_bytes if replace_after_read else original_bytes)
 
 
+@pytest.mark.backend
+def test_case_quality_format_has_an_explicit_current_version(tmp_path):
+    path = save_case(case_value(), tmp_path / "current.json")
+    value = json.loads(path.read_text())
+    assert value["version"] == 2
+    assert "quality" in value["result"]["smooth"]
+    for unsupported in (1, 3):
+        value["version"] = unsupported
+        other = tmp_path / f"unsupported-{unsupported}.json"
+        other.write_text(json.dumps(value))
+        with pytest.raises(ValueError, match="unsupported case artifact schema"):
+            load_case(other)
+
+
 @pytest.mark.parametrize("writer,payload", [(save_forecast, forecast_value()), (save_observation, observation_value()),
                                           pytest.param(save_case, case_value(), marks=pytest.mark.backend), (write_json, {"x": 1}),
                                           (write_yaml, {"x": 1})])

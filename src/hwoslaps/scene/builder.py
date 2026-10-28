@@ -12,9 +12,11 @@ Plane assembly rule, shared by the truth scene and the fit models (``inference.h
 3. The galaxy ``source`` is last.
 The tracer receives the galaxies in this order and groups them into planes by redshift.
 
-Every light image is the block mean of the light on the over-sampled grid (detected e-/s
-per pixel sample). A scene with one source light group and no lens light is rendered by
-``tracer.image_2d_from``, the route of the RASTI-26-183 paper code that the paper anchors pin.
+Light images are detected rates per native pixel. They ordinarily use block means of
+over-sampled light. A declared singular-halo scene instead uses convergence-checked
+source-pixel integrals, shared by smooth controls, injected scenes and supported fits.
+A scene with one source light group and no lens light uses ``tracer.image_2d_from``
+before any required integration correction.
 """
 
 from __future__ import annotations

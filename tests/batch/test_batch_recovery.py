@@ -277,7 +277,7 @@ def test_changed_job_during_recovery_is_a_conflict(tiny_batch_spec, tmp_path, er
     from hwoslaps.batch import BatchConflict, parse_batch
     from hwoslaps.batch.jobs import plan_batch
     family = {'trials': {'kind': 'forecast_argmax', 'masses_msun': [1e8]}, 'inject': True,
-              'noise': False, 'fit': {'mode': 'fixed_template'}}
+              'noise': False, 'fit': {'mode': 'fixed_template'}, 'comparison_policy': 'diagnostic'}
     spec = tiny_batch_spec(population={'count': 1}, execution={'workers_per_device': 1}, nonlinear={'n': family},
                           forecast_positions={'kind': 'grid', 'spacing_arcsec': .01, 'half_width_arcsec': .6})
     forecast_job = next(job for job in plan_batch(spec).jobs if job.kind == 'forecast')
