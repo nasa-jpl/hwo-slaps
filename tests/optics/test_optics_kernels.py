@@ -17,6 +17,20 @@ from hwoslaps.optics.kernels import DetectorPSF, KernelBinding, convolve_real_sp
 SCALE = 0.03
 
 
+def test_equal_kernel_bytes_cannot_hide_incompatible_sampling():
+    from hwoslaps.optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
+
+    values = np.eye(3) / 3.0
+    first = DetectorPSF.from_array(values, SCALE, normalize=False)
+    wrong = DetectorPSF.from_array(values, 0.1, normalize=False)
+    for groups in ({"first": first, "other": wrong}, {"other": wrong, "first": first}):
+        with pytest.raises(ValueError, match="pixel scale"):
+            KernelBinding.from_groups(groups)
+    compatible = DetectorPSF.from_array(values, SCALE + PIXEL_SCALE_ATOL_ARCSEC / 2.0, normalize=False)
+    binding = KernelBinding.from_groups({"first": first, "other": compatible})
+    assert len(binding.kernels) == 1
+
+
 def _kernel(seed, shape=(5, 5)):
     values = np.random.default_rng(seed).random(shape)
     return values / values.sum()

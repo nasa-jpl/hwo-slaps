@@ -251,7 +251,13 @@ class KernelBinding:
 
     @classmethod
     def from_groups(cls, kernels: Mapping[str, DetectorPSF]) -> KernelBinding:
-        """Bind each group to its kernel; groups whose kernels are bitwise equal share one entry."""
+        """Validate shared angular sampling, then deduplicate equal kernel arrays."""
+        supplied = tuple(kernels.values())
+        if not supplied or not all(isinstance(kernel, DetectorPSF) for kernel in supplied):
+            raise ValueError("a kernel binding needs at least one DetectorPSF")
+        scale = supplied[0].pixel_scale_arcsec
+        if any(abs(kernel.pixel_scale_arcsec - scale) > PIXEL_SCALE_ATOL_ARCSEC for kernel in supplied):
+            raise ValueError("kernels of a binding must share one pixel scale")
         distinct: list[DetectorPSF] = []
         position: dict[str, int] = {}
         index: dict[str, int] = {}
