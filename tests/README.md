@@ -41,25 +41,31 @@ environment.
 
 ## Paper parity
 
-`tests/parity/` compares five synthetic forecast scenes, optical kernels and fixed-vector
-nonlinear likelihoods with values computed by the tagged RASTI code. A separate CPU
-reference check uses the archived sys0043 production inputs: a COSMOS source, a 522 x 522
-image at 0.00716 arcsec/pixel, the 999 x 999 science35 kernel and HWO detector noise.
-The production oracle is a new evaluation of those inputs using the submitted code;
-historical per-node forecast arrays were not archived.
+`tests/parity/` keeps historical fixtures and manifests byte-for-byte, with a separate
+SHA-256 seal. Unchanged optics, prior, mask and asset identities remain exact. Corrected
+rendering, halo evaluation, Image geometry and nuisance projection use independent
+current-policy oracles rather than the old output arrays.
 
-`tests/scripts/generate_paper_parity.py` generates these tagged-code oracles. This command
-writes only the synthetic inputs; it does not compare them with committed fixtures:
+The forecast oracle applies pivoted augmented Householder QR to live whitened nuisance
+columns and Gaussian-prior rows, then measures residual norms and signed inner products.
+Every archived mass is tested on a declared centre/opposite-corner subset of the five
+synthetic grids. The production control uses all three archived sys0043 positions and
+its original COSMOS, 522 x 522 detector, 999 x 999 kernel and HWO inputs. Each process
+shares a checked preparation across engines. Receipts attached to the JUnit XML report
+cohort indices, historical/current values, changed input digests and actual execution.
 
-```bash
-python tests/scripts/generate_paper_parity.py --inputs-only --out /path/to/new-inputs
-```
+Current fixed-vector likelihoods are checked against independent Gaussian arithmetic;
+JAX gradients are checked against finite differences. Current fit/refinement runs use
+an explicit per-role likelihood-call cap of 12,000. Archived intermediate-engine maxima
+are independently rescored on current data as comparison candidates, and provisional
+posterior/evidence outputs keep their quality labels. No sampler budget is raised or
+run relaunched automatically by these tests.
 
-Regenerating the original expected values requires a checkout of the tagged RASTI code
-and a GPU. The separate `--production-anchor` mode requires the original configuration
-and job receipt and runs on the CPU. Its oracle records input and submitted-source hashes.
-The `*_8fa6209` fixtures instead preserve continuity with an intermediate engine revision;
-they do not establish submitted-paper nonlinear refinement parity under the slam1 boxes.
+`tests/scripts/generate_paper_parity.py` remains the historical tagged-code generator.
+Its `--inputs-only` mode writes inputs without comparing committed fixtures. Its
+`--production-anchor` mode recorded a new submitted-code evaluation of archived inputs;
+those arrays were not historical per-node campaign outputs. Regenerating expected arrays
+with the current implementation would not supply an independent oracle.
 
 ## Writing tests
 

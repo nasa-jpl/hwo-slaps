@@ -24,7 +24,8 @@ runner sets up the AutoArray configuration the tests expect. Batch tests need Li
 
 CI runs the core tests on Python 3.11 and 3.12 with both the validated dependency
 constraints and the latest compatible releases. The full scientific environment
-uses `constraints/validated.txt`; CPU backend and GPU jobs run on manual dispatch.
+uses `constraints/validated.txt`. Pull requests also run a compact pinned CPU scientific
+invariant lane. The complete CPU backend and GPU jobs run on manual dispatch.
 The GPU job needs an existing self-hosted Linux GPU runner and a prepared scientific
 environment.
 
@@ -34,29 +35,34 @@ RASTI code, or from comparisons between the reference and JAX engines.
 
 ## Paper parity
 
-`tests/parity/` checks the forecast, optics and nonlinear likelihood against fixtures
-computed with the RASTI code for five test scenes. The reference engine must reproduce
-the RASTI reference-engine values bit for bit, and the JAX engine on a GPU must reproduce
-the RASTI GPU values bit for bit. The JAX engine on a CPU must agree to a few parts per
-million. The fixtures were made by `tests/scripts/generate_paper_parity.py`,
-which runs the tagged RASTI code. To regenerate the synthetic inputs without
-executing the tagged code:
+`tests/parity/` preserves the tagged-code fixtures as immutable historical evidence.
+Their kernels, prior tables, masks, assets, configuration files and archive hashes stay
+exact checks. Corrected nuisance projection, halo values, Image coordinates and padded
+rendering deliberately change some rendered inputs, forecast statistics and nonlinear
+likelihoods. Current outputs therefore do not have to reproduce the old arrays.
 
-```bash
-python tests/scripts/generate_paper_parity.py --inputs-only --out /path/to/new-inputs
-```
+Current forecast controls use an independent augmented Householder QR calculation of
+residual norms and signed inner products, with Gaussian-prior rows included. They check
+all archived masses at a declared centre/corner subset of each synthetic grid and all
+three archived sys0043 production positions. The production control retains its COSMOS
+source, 522 x 522 detector, 999 x 999 science35 kernel and HWO noise inputs. Reference
+and JAX execution share one checked preparation to avoid repeating expensive rendering.
+The tests record cohort indices, unchanged input identities, changed input digests,
+old and new statistics, numerical-oracle errors and actual execution routes.
 
-This command writes inputs; it does not compare them with the committed fixtures.
+Fixed-vector nonlinear checks independently recompute Gaussian likelihood terms and
+compare JAX gradients with finite differences. The `*_8fa6209` fit endpoints are rescored
+as candidates on current data; bounded current searches and refinement must recover at
+least those candidate likelihoods within the declared optimization tolerance. Their
+posterior values retain the current sampling-quality labels. These checks establish
+current numerical contracts, not submitted-paper campaign reproduction.
 
-A separate CPU reference check uses the archived sys0043 production inputs, including
-the COSMOS source, 522 x 522 image, 999 x 999 science35 kernel and HWO noise. Its expected
-values were newly evaluated with the submitted code; historical per-node arrays were
-not archived. The generator's `--production-anchor` mode requires the original
-configuration and job receipt and records their hashes and the submitted-source hashes.
-
-The `*_8fa6209` fixtures preserve intermediate-engine behaviour. In particular, the
-nonlinear fit fixture is a continuity check, not submitted-paper refinement parity
-under the slam1 boxes.
+The original fixture generator, `tests/scripts/generate_paper_parity.py`, requires the
+tagged source for historical outputs. Its `--inputs-only` mode writes new input files;
+it neither verifies nor replaces committed fixtures. The separate `--production-anchor`
+mode evaluated archived production inputs with submitted code; historical per-node
+campaign arrays were not archived. Never regenerate expected arrays with the current
+engine to make these checks pass.
 
 ## Writing tests
 

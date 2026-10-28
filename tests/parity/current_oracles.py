@@ -97,7 +97,9 @@ def forecast_oracle(preparation, masses, positions):
                 spurious = float(residual@bias_residual/information)
                 for prefix, value in (("mismatch", amplitude), ("spurious", spurious)):
                     rows["amplitude_hat" if prefix == "mismatch" else "amplitude_spurious"].append(value)
-                    z = value*np.sqrt(information)
+                    # Amplitudes retain their sign; z_spurious is the declared
+                    # unsigned magnitude, while z_mismatch is signed.
+                    z = (value if prefix == "mismatch" else abs(value))*np.sqrt(information)
                     rows["z_"+prefix].append(z)
                     rows["q_"+prefix].append(z*z)
         for name in fields:
@@ -126,9 +128,13 @@ def historical_changes(result, expected, indices, fields):
         new = np.asarray(getattr(result, name))
         finite = np.isfinite(old) & np.isfinite(new)
         fractional = np.divide(new-old, old, out=np.full_like(new, np.nan), where=finite & (old != 0))
-        changes[name] = {"historical": old.tolist(), "current": new.tolist(),
-                         "max_absolute_change": float(np.max(np.abs(new[finite]-old[finite]))),
-                         "max_fractional_change": float(np.nanmax(np.abs(fractional)))}
+        def numbers(array):
+            return [[float(value) if np.isfinite(value) else None for value in row] for row in array]
+        defined = np.isfinite(fractional)
+        changes[name] = {"historical": numbers(old), "current": numbers(new),
+                         "historical_nonfinite_count": int(np.count_nonzero(~np.isfinite(old))),
+                         "max_absolute_change": float(np.max(np.abs(new[finite]-old[finite]))) if np.any(finite) else None,
+                         "max_fractional_change": float(np.max(np.abs(fractional[defined]))) if np.any(defined) else None}
     return changes
 
 

@@ -122,5 +122,9 @@ hwoslaps simulate scene.yaml instrument.yaml --noise-seed 11 -o out/noisy
 
 `--smooth` simulates without a subhalo; `--expected` omits the noise draw.
 [Populations and batches](guide/batches.md) describes the replacement campaign interface.
-The parity suite compares five synthetic scenes with the tagged implementation;
-it does not reproduce every paper campaign or its scientific selection rules.
+The archived parity fixtures remain unchanged evidence from the tagged implementation.
+Current-engine tests retain exact checks on unchanged inputs and use independent
+residual-space and likelihood oracles for corrected numerical behavior. They report
+old-to-new changes rather than claiming paper reproduction. Forecast schema 3 and case
+schema 2 retain numerical validity, precision bounds, and sampling-quality records;
+loaders accept their current schemas only.

@@ -3,8 +3,9 @@
 A forecast is a linear approximation. To check it, HWO-SLAPS fits a simulated
 observation with full lens models: once with a smooth lens (the **smooth role**) and
 once with a subhalo (the **subhalo role**). It uses PyAutoLens for the model
-and the Nautilus nested sampler for the search, and can then polish each best fit with
-a gradient optimizer. The result is
+and dispatches each role by its free dimension: exact evaluation for zero dimensions,
+bounded scalar search and normalized integration for one, and Nautilus for higher
+dimensions. A JAX gradient optimizer can then polish a sampled maximum. The result is
 
 $$
 q_\mathrm{signed} = 2\left(\ln L_\mathrm{subhalo} - \ln L_\mathrm{smooth}\right),
@@ -73,6 +74,16 @@ In every mode, the lens and source parameters listed as scene nuisances in the
 prepared forecast are free in both roles, inside uniform boxes centred on their true
 values. Parameters in `forecast.nuisances.fixed` stay fixed in the fit too. The fit
 does not include the forecast's background-offset or wavefront nuisance directions.
+
+A scalar role integrates in its declared prior coordinate, including a log-mass
+coordinate when configured. Exact/scalar records retain their state inline and do not
+create dummy sampler parameters or raw Nautilus files.
+
+`n_like_max` is a per-role budget. Scalar truth, search, integration and polishing
+evaluations share that cap, with cached values reused; API preflight and truth-anchor
+checks are separate recorded overhead. Nautilus stops in likelihood batches, so inspect
+its achieved call count and stopping diagnostics. A finite budget can leave posterior
+or evidence quality provisional. No budget increase or retry follows automatically.
 
 ## Prior boxes
 
@@ -188,12 +199,14 @@ Each role's `acceptance_status` is one of:
 | Status | Meaning |
 |---|---|
 | `accepted_repeatable_profile` | Refinement passed every acceptance check |
+| `exact_evaluation` | The zero-dimensional role was evaluated exactly |
+| `accepted_bounded_scalar` | The bounded scalar maximum passed its search checks |
 | `unresolved_optimization` | Refinement ran but did not pass every check |
 | `sampler_only` | No refinement was requested; the value is the sampler's maximum |
 | `verified_zero_residual_anchor` | The role was evaluated at the truth and fits the data exactly |
 | `failed` | The search failed; there is no likelihood |
 
-Without `refine`, both roles are `sampler_only`, which is enough for exploring but not
+Without `refine`, sampled roles are `sampler_only`, which is enough for exploring but not
 for the paper's classification rule below. `verified_zero_residual_anchor` occurs only with
 `FitSpec(h1="truth_anchor")`, which evaluates the subhalo role at the true subhalo instead
 of searching, for checks on noise-free data.

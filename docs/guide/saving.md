@@ -6,9 +6,9 @@ checked years later without the original scripts.
 
 | Product | Save | Load | Format |
 |---|---|---|---|
-| Forecast | `save_forecast(result, path)` | `load_forecast(path)` | NumPy `.npz` |
-| Observation | `save_observation(observation, path)` | `load_observation(path)` | NumPy `.npz` |
-| Nonlinear case | `save_case(case, path)` | `load_case(path)` | JSON |
+| Forecast | `save_forecast(result, path)` | `load_forecast(path)` | NumPy `.npz`, schema 3 |
+| Observation | `save_observation(observation, path)` | `load_observation(path)` | NumPy `.npz`, schema 1 |
+| Nonlinear case | `save_case(case, path)` | `load_case(path)` | JSON, schema 2 |
 
 ```python
 from hwoslaps import load_forecast, save_forecast
@@ -55,6 +55,13 @@ Forecast schema 3 stores `template_status` beside the primary arrays and preserv
 `failed_numeric` retains an invalid or provisional row explicitly; detection
 queries raise on these rows unless the caller chooses exclusion and reports the
 excluded cohort. The loader accepts the current schema only.
+
+Case schema 2 stores independent optimization and posterior/evidence quality, live
+sampler stopping diagnostics, exact/scalar strategy records, and forecast compatibility
+inputs. Finite provisional values survive saving; the quality labels and default
+scientific exclusions survive loading. The backend PDF weight-usability heuristic
+does not establish completion. Use the submitted tag to read historical products;
+changing a schema number cannot convert their scientific conventions.
 
 ## Command-line runs
 
