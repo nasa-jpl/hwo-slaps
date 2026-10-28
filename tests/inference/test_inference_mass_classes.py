@@ -86,29 +86,6 @@ def test_truncated_nfw_class_traces_under_jax():
         return (profile.deflections_yx_2d_from(grid=grid, xp=xp).array,
                 profile.convergence_2d_from(grid=grid, xp=xp).array)
 
-    expected = values(al.mp.NFWTruncatedSph, 0.03, np)
-    plain = values(TruncatedNFWSph, 0.03, np)
-    compiled = jax.jit(lambda kappa: values(TruncatedNFWSph, kappa, jnp))(0.03)
-    for parent, actual, traced in zip(expected, plain, compiled, strict=True):
-        np.testing.assert_array_equal(actual, parent)
-        np.testing.assert_allclose(traced, parent, rtol=1e-13, atol=0.)
-    derivative = jax.jit(jax.jacfwd(lambda kappa: values(TruncatedNFWSph, kappa, jnp)))(0.03)
-    for actual, parent in zip(derivative, expected, strict=True):
-        np.testing.assert_allclose(actual, parent / 0.03, rtol=1e-13, atol=0.)
-
-    parent_profile = al.mp.NFWTruncatedSph(kappa_s=0.03, scale_radius=1., truncation_radius=10.)
-    adapter_profile = TruncatedNFWSph(kappa_s=0.03, scale_radius=1., truncation_radius=10.)
-    for name in ("coord_func_f", "coord_func_g"):
-        for radius in (0.8, 1.2, np.array([0.8, 1., 1.2], dtype=complex)):
-            np.testing.assert_array_equal(getattr(adapter_profile, name)(radius, xp=jnp),
-                                          getattr(parent_profile, name)(radius, xp=jnp))
-        # Scalar G(1) in the parent rounds to complex64; the regular correction is float64.
-        regular_value = 1. if name == "coord_func_f" else 1. / 3.
-        for xp in (np, jnp):
-            actual = np.asarray(getattr(adapter_profile, name)(1., xp=xp))
-            assert actual.dtype == np.dtype("complex128")
-            np.testing.assert_array_equal(actual, np.array([regular_value], dtype=complex))
-
     def density_at_radius(radius):
         return 100. / ((100. + radius**2) * radius * (1. + radius)**2)
 
@@ -132,6 +109,44 @@ def test_truncated_nfw_class_traces_under_jax():
                         0., np.inf, epsabs=1e-12, epsrel=1e-12)[0]
         return 4 * kappa * (interior + x**2 * exterior) / x
 
+    # Direct 3-D density integrals anchor values independently of the parent's
+    # cancellation-prone formula and its historical complex scalar rounding.
+    delta = POINTS - np.array([0.02, -0.03])
+    radial = np.hypot(delta[:, 0], delta[:, 1])
+    ratios = radial / 0.2
+    expected = (np.array([0.2 * projected_deflection(ratio, 0.03) for ratio in ratios])[:, None]
+                * delta / radial[:, None],
+                np.array([projected_density(ratio, 0.03)[0] for ratio in ratios]))
+    plain = values(TruncatedNFWSph, 0.03, np)
+    compiled = jax.jit(lambda kappa: values(TruncatedNFWSph, kappa, jnp))(0.03)
+    for oracle, actual, traced in zip(expected, plain, compiled, strict=True):
+        np.testing.assert_allclose(actual, oracle, rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(traced, oracle, rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(traced, actual, rtol=1e-13, atol=0.)
+    derivative = jax.jit(jax.jacfwd(lambda kappa: values(TruncatedNFWSph, kappa, jnp)))(0.03)
+    for actual, oracle, reference in zip(derivative, expected, plain, strict=True):
+        np.testing.assert_allclose(actual, oracle / 0.03, rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(actual, reference / 0.03, rtol=1e-13, atol=0.)
+
+    adapter_profile = TruncatedNFWSph(kappa_s=0.03, scale_radius=1., truncation_radius=10.)
+    for name, power in (("coord_func_f", 1), ("coord_func_g", 2)):
+        # Independent projection integrals use (1+x*cosh(t))**-1 for F
+        # and **-2 for G; truncating at t=40 leaves <1.1e-17 in F.
+        for radius in (0.8, 1.2, np.array([0.8, 1., 1.2], dtype=complex)):
+            real = np.real(np.asarray(radius))
+            expected_function = np.array([quad(lambda t: 1. / (1. + value * np.cosh(t))**power,
+                                               0., 40., epsabs=1e-12, epsrel=1e-12)[0]
+                                          for value in real.reshape(-1)]).reshape(real.shape)
+            for xp in (np, jnp):
+                np.testing.assert_allclose(getattr(adapter_profile, name)(radius, xp=xp),
+                                           expected_function, rtol=1e-13, atol=1e-14)
+        regular_value = 1. if name == "coord_func_f" else 1. / 3.
+        for xp in (np, jnp):
+            actual = np.asarray(getattr(adapter_profile, name)(1., xp=xp))
+            assert actual.dtype == np.dtype("float64")
+            assert actual.shape == ()
+            assert actual == regular_value
+
     for radius in (0.8, 1., 1.2):
         point_grid = al.Grid2DIrregular(values=[[radius, 0.]])
 
@@ -143,13 +158,13 @@ def test_truncated_nfw_class_traces_under_jax():
                                    profile.convergence_2d_from(grid=point_grid, xp=xp).array.reshape(-1)))
 
         arguments = np.array([1., 0., 0.])
-        parent = geometry_values(al.mp.NFWTruncatedSph, arguments, np)
-        np.testing.assert_array_equal(geometry_values(TruncatedNFWSph, arguments, np), parent)
-        np.testing.assert_allclose(jax.jit(lambda value: geometry_values(TruncatedNFWSph, value, jnp))(arguments),
-                                   parent, rtol=1e-13, atol=0.)
         kappa, radial_derivative = projected_density(radius, 0.03)
-        assert parent[2] == pytest.approx(kappa, rel=1e-12)
-        alpha = parent[0]
+        alpha = projected_deflection(radius, 0.03)
+        expected_values = np.array([alpha, 0., kappa])
+        np.testing.assert_allclose(geometry_values(TruncatedNFWSph, arguments, np), expected_values,
+                                   rtol=1e-12, atol=1e-14)
+        np.testing.assert_allclose(jax.jit(lambda value: geometry_values(TruncatedNFWSph, value, jnp))(arguments),
+                                   expected_values, rtol=1e-12, atol=1e-14)
         # Axisymmetric alpha'(R)=2*kappa(R)-alpha(R)/R fixes scale and centre derivatives.
         expected_gradient = np.array([[2 * (alpha - radius * kappa), -(2 * kappa - alpha / radius), 0.],
                                       [0., 0., -alpha / radius],
@@ -162,11 +177,19 @@ def test_truncated_nfw_class_traces_under_jax():
                                    err_msg=f"TNFW reverse scale/centre derivatives at radius/scale={radius}")
         step = 1e-3
         # The five-point stencil resolves small off-point derivatives without widening tolerances.
+        def density_geometry(arguments):
+            scale, centre_y, centre_x = arguments
+            offset = np.array([radius - centre_y, -centre_x])
+            distance = np.hypot(*offset)
+            ratio = distance / scale
+            radial_alpha = scale * projected_deflection(ratio, 0.03)
+            return np.r_[radial_alpha * offset / distance, projected_density(ratio, 0.03)[0]]
+
         finite_difference = np.column_stack([
-            (-geometry_values(al.mp.NFWTruncatedSph, arguments + 2 * step * direction, np) +
-             8 * geometry_values(al.mp.NFWTruncatedSph, arguments + step * direction, np) -
-             8 * geometry_values(al.mp.NFWTruncatedSph, arguments - step * direction, np) +
-             geometry_values(al.mp.NFWTruncatedSph, arguments - 2 * step * direction, np)) / (12 * step)
+            (-density_geometry(arguments + 2 * step * direction) +
+             8 * density_geometry(arguments + step * direction) -
+             8 * density_geometry(arguments - step * direction) +
+             density_geometry(arguments - 2 * step * direction)) / (12 * step)
             for direction in np.eye(3)])
         np.testing.assert_allclose(actual_gradient, finite_difference, rtol=1e-5, atol=1e-9)
 
@@ -216,9 +239,7 @@ def test_truncated_nfw_class_traces_under_jax():
             return jnp.concatenate((profile.deflections_yx_2d_from(grid=point_grid, xp=jnp).array.reshape(-1),
                                     profile.convergence_2d_from(grid=point_grid, xp=jnp).array.reshape(-1)))
 
-        parent = al.mp.NFWTruncatedSph(centre=(0., 0.), kappa_s=kappa_s, scale_radius=1., truncation_radius=10.)
-        dimensionless_grid = al.Grid2DIrregular(values=[[ratio, 0.]])
-        alpha = float(parent.deflections_yx_2d_from(grid=dimensionless_grid).array[0, 0]) * scale
+        alpha = projected_deflection(ratio, kappa_s) * scale
         kappa, radial_derivative = projected_density(ratio, kappa_s)
         np.testing.assert_allclose(jax.jit(freed_values)(8.), [alpha, 0., kappa], rtol=1e-12, atol=1e-14)
         # Fixed concentration and tau give kappa_s and theta_s proportional to M**(1/3).
@@ -269,8 +290,8 @@ def test_fit_traces_with_the_scene_cosmology(prepared_forecast_factory):
     from hwoslaps.inference.backend import ANALYSIS_CLASS
 
     prepared = prepared_forecast_factory({"cosmology": {"name": None, **CUSTOM}, "scene": {
-        "perturbers": {"halos": [{"type": "PointMass", "mass_msun": 1e8,
-                                  "centre": [-0.2, 0.5], "redshift": 0.4}]}}})
+        "perturbers": {"halos": [{"type": "NFW", "concentration": {"kind": "fixed", "value": 20.},
+                                  "mass_msun": 1e8, "centre": [-0.2, 0.5], "redshift": 0.4}]}}})
     trial = prepared.hypothesis(1e8, (0.4, -0.6))
     case = prepare_case(prepared, trial, prepared.observation, fit=FitSpec(mode="fixed_template"), use_jax=False)
     truth = case.truth_vector("smooth")
@@ -279,3 +300,20 @@ def test_fit_traces_with_the_scene_cosmology(prepared_forecast_factory):
     wrong_analysis = ANALYSIS_CLASS(dataset=case.data.imaging, use_jax=False)
     instance = case.autofit_models["smooth"].instance_from_vector(vector=truth.tolist())
     assert float(wrong_analysis.fit_from(instance=instance).chi_squared) > 1e-8
+
+
+@pytest.mark.parametrize("kind", ["PointMass", "SIS"])
+@pytest.mark.parametrize("redshift", [0.1, 0.4])
+def test_off_plane_singular_fit_reports_capability_boundary(minimal_mapping, kind, redshift):
+    from hwoslaps.fisher.api import prepare_forecast
+    from hwoslaps.inference.api import prepare_case
+    from hwoslaps.scene.singular_integration import SingularIntegrationCapabilityError
+
+    minimal_mapping["scene"]["subhalo"] = {"type": kind, "redshift": redshift}
+    minimal_mapping["forecast"]["nuisances"] = {"fixed": ["*"], "background_offset": False}
+    with prepare_forecast(minimal_mapping) as prepared:
+        trial = prepared.hypothesis(1.e8, (0.4, -0.6))
+        case = prepare_case(prepared, trial, prepared.observation, fit=FitSpec(mode="fixed_template"), use_jax=False)
+        with pytest.raises(SingularIntegrationCapabilityError, match="two-plane scene and a lens-plane halo"):
+            # FitImaging constructs lazily; chi-square forces the prediction.
+            case.chi_squared("subhalo", case.truth_vector("subhalo"))

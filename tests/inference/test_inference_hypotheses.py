@@ -36,8 +36,11 @@ def test_role_models_at_truth_render_the_truth_scene(variant, prepared_forecast_
                       "ell_comps": [0.1, 0.0], "effective_radius": 0.4, "intensity": 0.2}}}}}
     elif variant == "perturbers":
         overrides = {"scene": {"perturbers": {"halos": [
-            {"type": "SIS", "mass_msun": 1.0e8, "centre": [0.2, 0.3], "redshift": 0.2},
-            {"type": "PointMass", "mass_msun": 1.0e7, "centre": [-0.2, 0.5], "redshift": 0.4}]}}}
+            {"type": "NFW", "concentration": {"kind": "fixed", "value": 20.},
+             "mass_msun": 1.0e8, "centre": [0.2, 0.3], "redshift": 0.2},
+            {"type": "TNFW", "concentration": {"kind": "fixed", "value": 12.},
+             "truncation": {"kind": "tau", "tau": 10.},
+             "mass_msun": 1.0e7, "centre": [-0.2, 0.5], "redshift": 0.4}]}}}
     prepared = prepared_forecast_factory(overrides)
     halo = prepared.hypothesis(1.0e8, (0.4, -0.6))
     models = _models(prepared, halo, FitSpec(mode="fixed_template"))
@@ -181,3 +184,16 @@ def test_image_rotation_priors_follow_the_parameter_registry(prepared_forecast_f
     np.testing.assert_array_equal(model.upper[indices[-1:]], [17.0])
     converted = autofit_model(model)
     assert [".".join(path) for path in converted.unique_prior_paths] == list(model.parameter_names)
+
+
+@pytest.mark.parametrize("kind", ["PointMass", "SIS"])
+@pytest.mark.parametrize("redshift", [0.1, 0.4])
+def test_multiplane_singular_perturbers_have_explicit_capability_boundary(
+        prepared_forecast_factory, kind, redshift):
+    from hwoslaps.scene.singular_integration import SingularIntegrationCapabilityError
+
+    # The multi-plane assembly contract above uses removable NFW/TNFW values.
+    # True singularities additionally require a validated image-plane integral.
+    with pytest.raises(SingularIntegrationCapabilityError, match="two-plane scene and a lens-plane halo"):
+        prepared_forecast_factory({"scene": {"perturbers": {"halos": [
+            {"type": kind, "mass_msun": 1.e8, "centre": [0.2, 0.3], "redshift": redshift}]}}})
