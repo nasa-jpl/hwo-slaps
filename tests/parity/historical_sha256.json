@@ -1,0 +1,28 @@
+{
+  "archived_engine_commit": "a7e154ea89e172708beb189c47bb4a95c4c717c0",
+  "submitted_commit": "41621de8ca861e425e1caddb7a599d5c1032751f",
+  "purpose": "Immutable archived inputs and outputs; current-engine tests use independent numerical oracles, never regenerated expected arrays.",
+  "sha256": {
+    "detector_kernel.npy": "29f18a68d294868a3091d1d9f79da6ffd6dcce684247a3ab1f25fb4eb2e645c4",
+    "engine/p1_optical_matched.yaml": "d708766a5acdc994918b1f3e4c656cae2466e7a7f15da120c4e3077e1b914847",
+    "engine/p2_delta_knowledge_error.yaml": "71833963ecc13c1970bf50ee0064c43b4f6be2a35c0317bd2bcb63e7dca84a4c",
+    "engine/p3_image_source_kernel.yaml": "43c28c0cbbc6903f2d0026a735177e6489ed01b2c77525d390fcb3ec63c1e0ea",
+    "engine/p4_subhalo_pointmass.yaml": "6404fa97b499f33d3e9aabc04f10499c579024a297d3e4d0c70bd02ff6f0e964",
+    "engine/p4_subhalo_sis.yaml": "e49731f8aa1eafdc2e132cb46f80078accc66424a716bdcf36838fb8b6c46cc7",
+    "inference/fit_engine_8fa6209.json": "1168e013989093816f3fcd6d702f9937b47a3c112feea9b23a878eb4bb354454",
+    "k1_paper_kernel.json": "5e17866a0b0c1dd337a69e47ae2bdb82b7a9e36931ad4e56e031269da2e5e1dc",
+    "manifest.json": "bd61fe31f23b6056c39a39c08e614e21346a2b0a0fc15da6746092aee099d82c",
+    "n1_nonlinear_likelihood.npz": "6304882d9029e8f8aa48ec025623b4c4a3dac18fbda601fd26c1e7f3320dd3f8",
+    "p1_optical_matched.npz": "f193960107017a94e45c1516616eebcd9a691573bc6a267941d0eed4c596be1f",
+    "p2_delta_knowledge_error.npz": "e3adf3ba9fd95bef935f83048beab94f28fe0732462420b833b3d863f5c2393d",
+    "p3_image_source_kernel.npz": "faa39d40fa16712a08b64b2f030f03a2bbaee2104f4f3a1b0d4c48f370da5329",
+    "p4_subhalo_pointmass.npz": "02af5d36c685c71b173112568d4e5394fb903100782a7698bfed55d62ea6e644",
+    "p4_subhalo_sis.npz": "ce71664e790c5c5bfe7682147412efd5c0cb0348c5c8576f13c259ac6967b323",
+    "production/cosmos_48849_hlr011.npz": "c67570fdc56068fc900e3428f6b6ff2d5ffce8f459858c302c6de1461d24ed21",
+    "production/engine/production_sys0043.yaml": "1c62f9a56637fbf854127d434ddedfbde05f18a3bddb868affa60c9360f8dbc3",
+    "production/forecast.npz": "8384922dae868561740227bc8deb590ff2d3f53c021708111c1f793f651eb34e",
+    "production/oracle.json": "13be56d6a686a02f23e9b953248d4f7ffb5499e26c407fac5aca0198b943fc32",
+    "production/submitted_code_41621de.sha256": "1f7014245cd5e0db68436e2395ee3eb4a95af355b28d96d2db839c8cf5d273aa",
+    "source_image.npz": "d21baa3933629cc49474c098c73306e08b2fc08a508af220809ae9dca2aed6d5"
+  }
+}

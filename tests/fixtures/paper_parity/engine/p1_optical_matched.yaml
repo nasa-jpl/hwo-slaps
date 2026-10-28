@@ -1,0 +1,51 @@
+run_name: paper_parity_p1
+seed: 11
+cosmology: {name: Planck15}
+scene:
+  grid: {shape: [100, 100], pixel_scale_arcsec: 0.03, over_sample_size: 4}
+  lens:
+    redshift: 0.2
+    mass:
+      mass: {type: Isothermal, centre: [0.0, 0.0], einstein_radius: 1.0, ell_comps: [0.1, 0.0]}
+  source:
+    redshift: 0.6
+    light:
+      light: {type: Exponential, centre: [-0.03, 0.08], ell_comps: [0.14516129, 0.25142673],
+              intensity: 2.0, effective_radius: 0.11}
+  subhalo:
+    type: NFW
+    concentration: {kind: moline2017_eq7, x_sub: 1.0, h: null}
+    redshift: null
+psf:
+  truth:
+    kind: optical
+    pupil: {kind: hex_segmented, diameter_m: 7.225765, pixels: 128, supersampling: 2, rings: 2,
+            segment_point_to_point_m: 1.65, gap_m: 0.006}
+    focal_length_m: 144.0
+    wavelength_nm: 500.0
+    detector_oversampling: 11
+    kernel_shape: [17, 17]
+    wavefront:
+      segment_hexikes: {0: {4: 10.0}, 3: {5: 8.0}, 7: {6: 12.0}}
+      zernikes: {4: 5.0, 5: 5.0, 8: 5.0}
+  model: {kind: matched}
+instrument:
+  detector: {gain_e_per_adu: 1.0, read_noise_e: 0.2, dark_current_e_per_s: 0.002}
+observation:
+  exposure_time_s: 900.0
+  sky: {rate_e_per_s: 1.0}
+forecast:
+  positions: {kind: grid, spacing_arcsec: 0.4, half_width_arcsec: 1.2, annulus: null}
+  mask: {kind: all_pixels}
+  nuisances:
+    fixed: []
+    steps: {position: 0.001, einstein_radius: 0.001, ellipticity: 0.001, amplitude: 0.01, size: 0.01}
+    priors: {}
+    background_offset: true
+    wavefront:
+      modes:
+        segment_hexikes: {segments: [0, 3], nolls: [1, 2]}
+        zernikes: {nolls: [4, 5]}
+      step_nm: 1.0
+      prior_sigma_nm: 5.0
+  noise_covariance: null
