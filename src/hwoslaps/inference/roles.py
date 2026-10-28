@@ -38,7 +38,8 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
     truth_log_likelihood = case.log_likelihood(role, case.truth_vector(role))
     dimension = len(model.parameter_names)
     if dimension <= 1:
-        return _deterministic_role(case, role, truth_log_likelihood=truth_log_likelihood, start=start), None
+        return _deterministic_role(case, role, truth_log_likelihood=truth_log_likelihood,
+                                   sampler=sampler, start=start), None
     outcome = run_search(fit_model=model, model=case.autofit_models[role], analysis=case.analysis, role=role,
                          n_live=sampler.n_live(role, case.fit.mode), settings=sampler, seed=sampler_seed,
                          case_dir=case_dir, case_id=case_id, data_identity=case.data.record, session=session)
@@ -83,7 +84,7 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
 
 
 def _deterministic_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *,
-                        truth_log_likelihood: float, start: float) -> RoleFit:
+                        truth_log_likelihood: float, sampler: SamplerSettings, start: float) -> RoleFit:
     model = case.model(role)
     dimension = len(model.parameter_names)
     strategy = "exact" if dimension == 0 else "scalar"
@@ -91,8 +92,17 @@ def _deterministic_role(case: PreparedCase, role: Literal["smooth", "subhalo"], 
     try:
         outcome = (exact_likelihood(truth_log_likelihood) if dimension == 0 else
                    scalar_likelihood(lambda values: case.log_likelihood(role, values),
-                                     model.lower[0], model.upper[0], parameter_name=model.parameter_names[0]))
+                                     model.lower[0], model.upper[0], parameter_name=model.parameter_names[0],
+                                     max_likelihood_calls=sampler.n_like_max,
+                                     initial_evaluation=(case.truth_vector(role)[0], truth_log_likelihood)))
         vector, likelihood, record = outcome.best_vector, outcome.best_log_likelihood, outcome.record
+        record["requested_likelihood_calls"] = sampler.n_like_max
+        record["call_count_convention"] = {
+            "role": "truth plus all new scalar search, quadrature and polishing evaluations",
+            "external_preflight": "validate_nonlinear evaluates one truth likelihood per role before dispatch",
+            "validate_nonlinear_preflight_calls_per_role": 1,
+            "external_preflight_in_budget": False, "separate_refinement_calls": 0,
+            "cache_hits_counted": False}
     except Exception as exception:
         error = f"{type(exception).__name__}: {exception}"
     return RoleFit(role=role, strategy=strategy, status="success" if error is None else "failed",

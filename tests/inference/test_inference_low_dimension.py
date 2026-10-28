@@ -99,6 +99,99 @@ def test_flat_scalar_likelihood_has_uniform_posterior_and_normalized_evidence():
     assert outcome.record["optimization_accepted"] and outcome.record["integration_complete"]
 
 
+@pytest.mark.parametrize("mu", [.0009, .9991])
+@pytest.mark.parametrize("integrate", [False, True])
+def test_broad_edge_gaussian_is_refined_inside_both_endpoint_intervals(mu, integrate):
+    sigma = .05
+    outcome = scalar_likelihood(lambda x: -.5 * ((x[0] - mu) / sigma) ** 2,
+                                0., 1., parameter_name="x", integrate=integrate)
+    assert outcome.best_vector[0] == pytest.approx(mu, abs=2.e-8)
+    assert outcome.best_log_likelihood == pytest.approx(0., abs=1.e-10)
+    assert outcome.record["optimization_accepted"]
+    if integrate:
+        expected = math.log(sigma * math.sqrt(2. * math.pi)
+                            * (norm.cdf((1. - mu) / sigma) - norm.cdf(-mu / sigma)))
+        assert outcome.record["integration_complete"]
+        assert outcome.record["log_evidence"] == pytest.approx(expected, abs=1.e-9)
+
+
+@pytest.mark.parametrize("integrate", [False, True])
+def test_known_high_incumbent_is_preserved_and_exposes_unresolved_structure(integrate):
+    centre = .371234567
+
+    def likelihood(values):
+        return float(np.logaddexp(0., 50. - .5 * ((values[0] - centre) / 1.e-7) ** 2))
+
+    outcome = scalar_likelihood(likelihood, 0., 1., parameter_name="x", integrate=integrate,
+                                initial_evaluation=(centre, likelihood((centre,))))
+    assert outcome.best_vector == (centre,)
+    assert outcome.best_log_likelihood == 50.
+    assert not outcome.record["optimization_accepted"]
+    assert not outcome.record["integration_complete"]
+    assert outcome.record["known_incumbent_exceeds_resolved_mesh"]
+    assert outcome.record["posterior_quantiles"] is None and outcome.record["log_evidence"] is None
+
+
+@pytest.mark.parametrize("budget", [1, 10, 150])
+def test_scalar_hard_cap_preserves_partial_maximum_and_counts_every_new_call(budget):
+    calls = []
+
+    def likelihood(values):
+        calls.append(values[0])
+        return -(values[0] - .4) ** 2
+
+    outcome = scalar_likelihood(likelihood, 0., 1., parameter_name="x", max_likelihood_calls=budget)
+    assert len(calls) == outcome.record["likelihood_calls"] == budget
+    assert outcome.best_log_likelihood == max(-(x - .4) ** 2 for x in calls)
+    assert not outcome.record["optimization_accepted"] and not outcome.record["integration_complete"]
+    assert outcome.record["budget_exhausted"] and outcome.record["budget_exhausted_stage"] == "optimization"
+
+
+def test_quadrature_budget_exhaustion_does_not_invalidate_an_accepted_maximum():
+    objective = lambda values: -.5 * ((values[0] - .4) / .1) ** 2
+    maximum = scalar_likelihood(objective, 0., 1., parameter_name="x", integrate=False)
+    budget = maximum.record["likelihood_calls"] + 10
+    calls = []
+
+    def counted(values):
+        calls.append(values[0])
+        return objective(values)
+
+    outcome = scalar_likelihood(counted, 0., 1., parameter_name="x", max_likelihood_calls=budget)
+    assert len(calls) == outcome.record["likelihood_calls"] == budget
+    assert outcome.record["optimization_accepted"] and not outcome.record["integration_complete"]
+    assert outcome.record["budget_exhausted_stage"] == "quadrature"
+
+
+@pytest.mark.parametrize("dimension", [0, 1])
+def test_capped_role_counts_truth_with_search_and_retains_the_known_incumbent(dimension, tmp_path):
+    calls = []
+    model = SimpleNamespace(parameter_names=("x",) if dimension else (), truth=np.full(dimension, .5),
+                            lower=np.zeros(dimension), upper=np.ones(dimension))
+
+    def likelihood(role, vector):
+        value = 3. - sum((x - .4) ** 2 for x in vector)
+        calls.append((tuple(vector), value))
+        return value
+
+    case = SimpleNamespace(model=lambda role: model, truth_vector=lambda role: model.truth,
+                           log_likelihood=likelihood)
+    budget = 10 if dimension else 1
+    fitted, outcome = roles.run_search_role(case, "smooth", sampler=SamplerSettings(n_like_max=budget),
+                                           sampler_seed=7, refine=None, session=None, case_dir=tmp_path, case_id="case")
+    assert outcome is None and len(calls) == fitted.strategy_record["likelihood_calls"] == budget
+    assert fitted.log_likelihood == max(value for _, value in calls)
+    assert fitted.strategy_record["precomputed_likelihood_calls"] == 1
+    assert fitted.strategy_record["likelihood_function_calls"] == budget - 1
+    assert fitted.strategy_record["call_count_convention"]["external_preflight_in_budget"] is False
+    if dimension:
+        assert fitted.acceptance_status is RoleStatus.UNRESOLVED
+        assert fitted.strategy_record["stop_reason"] == "likelihood_budget_exhausted"
+        assert fitted.evidence_quality != "complete" and fitted.posterior_quality != "complete"
+    else:
+        assert fitted.acceptance_status is RoleStatus.EXACT
+
+
 @pytest.mark.parametrize("dimension", [0, 1])
 def test_roles_dispatch_without_sampler_or_refinement_and_round_trip(dimension, tmp_path, monkeypatch):
     model = SimpleNamespace(parameter_names=tuple(["x"] * dimension), truth=np.full(dimension, .5),
@@ -169,6 +262,41 @@ def test_each_mixed_dimension_role_dispatches_independently(dimension, mode, tmp
         fitted_roles["subhalo"].sampler, retention=retention))
     checked = case_status(result, acceptance=acceptance, require_retained_state=True, stationarity_tolerance=None)
     assert checked.status == "accepted"
+
+
+@pytest.mark.backend
+@pytest.mark.parametrize("dimension", [0, 1])
+def test_public_role_budget_reports_preflight_separately(prepared_forecast_factory, dimension, tmp_path, monkeypatch):
+    from hwoslaps.inference.api import PreparedCase, validate_nonlinear
+    from hwoslaps.scene.parameters import scene_parameters
+    from hwoslaps.simulation import simulate
+
+    original = prepared_forecast_factory()
+    fixed = [parameter.name for parameter in scene_parameters(original.scene.spec)
+             if not dimension or parameter.name != "source.light.light.intensity"]
+    prepared = prepared_forecast_factory({"forecast": {"nuisances": {"fixed": fixed, "background_offset": False}}})
+    trial = prepared.hypothesis(1.e8, (.4, -.6))
+    observation = simulate(prepared, subhalo=trial, noise_seed=None)
+    calls = {"smooth": 0, "subhalo": 0}
+    direct = PreparedCase.log_likelihood
+
+    def counted(case, role, vector):
+        calls[role] += 1
+        return direct(case, role, vector)
+
+    monkeypatch.setattr(PreparedCase, "log_likelihood", counted)
+    budget = 10 if dimension else 1
+    result = validate_nonlinear(prepared, trial, observation, fit=FitSpec(mode="fixed_template"),
+                                sampler=SamplerSettings(n_like_max=budget), sampler_seed=7, output_dir=tmp_path)
+    for role in ("smooth", "subhalo"):
+        fitted = result.role(role)
+        assert calls[role] == budget + 1  # one public preflight, then the capped role
+        assert fitted.strategy_record["likelihood_calls"] == budget
+        if dimension:
+            assert fitted.acceptance_status is RoleStatus.UNRESOLVED
+            assert fitted.evidence_quality != "complete" and fitted.posterior_quality != "complete"
+        else:
+            assert fitted.acceptance_status is RoleStatus.EXACT
 
 
 @pytest.mark.backend
