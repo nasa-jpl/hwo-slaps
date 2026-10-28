@@ -9,7 +9,8 @@ observation, so the noise map always describes the expectation.
 from __future__ import annotations
 
 import types
-from dataclasses import dataclass, replace
+from copy import copy
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Final, Literal, Mapping
 
 import numpy as np
@@ -102,8 +103,9 @@ def parse_observation(mapping: Mapping[str, Any], path: str = "observation") -> 
 class Observation:
     """An expected or noisy detector image of a scene, with the light it was made from.
 
-    Arrays and mappings are read-only, and arrays are shaped like the grid, so the expected
-    observation and its draws can share them. ``light_rate_e_per_s`` is the convolved light of
+    Public construction detaches arrays from their caller and makes arrays and mappings
+    read-only. Arrays are shaped like the grid, so the expected observation and its draws
+    can share them. ``light_rate_e_per_s`` is the convolved light of
     every plane in detected e-/s per pixel (round-off negatives kept);
     ``light_rate_by_plane_e_per_s`` holds it per plane, ``"source"`` always and ``"lens"``
     with lens light, and without lens light its ``"source"`` entry is the total itself.
@@ -159,10 +161,25 @@ class Observation:
         if set(self.sampling) != set(self.psfs.group_index):
             raise ValueError(f"sampling covers {sorted(self.sampling)}; the light groups are "
                              f"{sorted(self.psfs.group_index)}")
-        object.__setattr__(self, "light_rate_by_plane_e_per_s",
-                           types.MappingProxyType(dict(self.light_rate_by_plane_e_per_s)))
         sampling = {key: check_finite_number(f"sampling[{key!r}]", value, positive=False)
                     for key, value in self.sampling.items()}
+        # Copy each distinct input once: expected data/mean and source-only total/plane
+        # rates intentionally share objects. A read-only caller view may still have a
+        # writable base, so its write flag alone never establishes ownership.
+        owned = {}
+
+        def detached(array):
+            key = id(array)
+            if key not in owned:
+                value = np.array(array, copy=True)
+                value.flags.writeable = False
+                owned[key] = value
+            return owned[key]
+
+        for name in ("data_adu", "expected_adu", "noise_map_adu", "light_rate_e_per_s"):
+            object.__setattr__(self, name, detached(getattr(self, name)))
+        by_plane = {plane: detached(rate) for plane, rate in self.light_rate_by_plane_e_per_s.items()}
+        object.__setattr__(self, "light_rate_by_plane_e_per_s", types.MappingProxyType(by_plane))
         object.__setattr__(self, "sampling", types.MappingProxyType(sampling))
 
     @property
@@ -182,7 +199,13 @@ class Observation:
             raise ValueError("a noisy observation cannot be drawn again; draw from the expected observation")
         data = draw_noisy_adu(self.counts_e(), self.exposure, seed)
         data.flags.writeable = False
-        return replace(self, kind="noisy", data_adu=data, noise_seed=int(seed))
+        # The existing fields already belong to this immutable observation; share
+        # them internally without invoking the public constructor's ownership copy.
+        noisy = copy(self)
+        object.__setattr__(noisy, "kind", "noisy")
+        object.__setattr__(noisy, "data_adu", data)
+        object.__setattr__(noisy, "noise_seed", int(seed))
+        return noisy
 
     def to_mapping(self) -> dict[str, Any]:
         return {
