@@ -255,9 +255,12 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
     smooth = build_scene(setup.scene, cosmology, subhalo=None, perturbers=perturbers, assets=assets, loaded_seds=setup.loaded_seds)
     sampling = native_sampling_variation(smooth)
     psfs = bind_psfs(resolved, setup.scene, setup.instrument, truth=truth, loaded_seds=setup.loaded_seds)
+    from ..scene.rendering import RenderGeometry
+    geometry = RenderGeometry.from_bindings(setup.scene.grid, psfs.truth_kernels, psfs.model_kernels)
     observation = observe(smooth, psfs.truth_kernels, setup.exposure, config_digest=config_digest,
-                          photometry=setup.photometry, sampling=sampling)
-    renderer = SceneRenderer(setup.scene, cosmology, perturbers, setup.exposure, assets=assets, loaded_seds=setup.loaded_seds)
+                          photometry=setup.photometry, sampling=sampling, geometry=geometry)
+    renderer = SceneRenderer(setup.scene, cosmology, perturbers, setup.exposure, assets=assets,
+                             loaded_seds=setup.loaded_seds, geometry=geometry)
     mean_model = renderer.mean_adu(smooth, psfs.model_kernels) if psfs.mismatched else observation.expected_adu
     mean_model.flags.writeable = False
     positions = _positions(resolved.forecast.positions, smooth)
@@ -282,7 +285,7 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
                             workspace=workspace, bias_whitened=bias, lens_centre_yx=setup.scene.lens_centre,
                             domain_radius_arcsec=positions.domain_radius_arcsec, model_constant_adu=model_constant,
                             truth_constant_adu=truth_constant)
-    record = {"config_digest": config_digest, "comparison_digest": comparison_digest,
+    record = {"config_digest": config_digest, "comparison_digest": comparison_digest, "rendering": geometry.to_mapping(),
               "file_digests": file_digests, "psf_relation": psfs.relation,
               "truth_kernels": psfs.truth_kernels.to_mapping(), "model_kernels": psfs.model_kernels.to_mapping(),
               "truth_convolver_digests": [array_digest(np.asarray(kernel.convolver().kernel.native))
@@ -312,6 +315,7 @@ def _provenance(prepared: PreparedForecast, positions: PositionSet) -> dict[str,
         "truth_kernels": prepared.psfs.truth_kernels.to_mapping(), "model_kernels": prepared.psfs.model_kernels.to_mapping(),
         "psf_relation": prepared.psfs.relation, "knowledge_error": None if draw is None else draw.to_mapping(),
         "spectral": prepared.psfs.spectral, "photometry": None if prepared.observation.photometry is None else prepared.observation.photometry.to_mapping(),
+        "rendering": json_ready(prepared.record["rendering"]),
         "statistic": "profiled_linear_gaussian_q", "halo_model": spec.subhalo.type,
         "subhalo_redshift": spec.lens.redshift if spec.subhalo_redshift is None else spec.subhalo_redshift,
         "mass_definition": spec.subhalo.mass_definition, "perturbers": [halo.to_mapping() for halo in prepared.scene.perturbers],

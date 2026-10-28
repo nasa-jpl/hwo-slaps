@@ -8,13 +8,14 @@ import types
 
 import numpy as np
 
-from ..observation.expected import Exposure, convolve_light
+from ..observation.expected import Exposure, convolve_scene_light
 from ..optics.kernels import KernelBinding, convolve_real_space
 from ..scene.builder import Scene, build_scene
 from ..scene.cosmology import Cosmology
 from ..scene.halos import Halo
 from ..scene.image_source import ImageAsset, frozen_value
 from ..scene.spec import SceneSpec
+from ..scene.rendering import RenderGeometry, render_scene_light, rendering_geometry
 from ..spectra.sed import SED
 
 
@@ -28,6 +29,7 @@ class SceneRenderer:
     exposure: Exposure
     assets: Mapping[str, ImageAsset] = field(kw_only=True)
     loaded_seds: Mapping[str, SED] = field(default_factory=dict, kw_only=True)
+    geometry: RenderGeometry | None = field(default=None, kw_only=True)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "assets", types.MappingProxyType(dict(self.assets)))
@@ -39,7 +41,7 @@ class SceneRenderer:
 
     def light_rate(self, scene: Scene, binding: KernelBinding,
                    planes: Collection[str] | None = None) -> np.ndarray:
-        rates = convolve_light(scene.light_images, scene.light_groups, binding, scene.pixel_scale_arcsec)
+        rates = convolve_scene_light(scene, binding, geometry=self.geometry)
         selected = [rates[plane] for plane in ("lens", "source")
                     if plane in rates and (planes is None or plane in planes)]
         if not selected:
@@ -54,11 +56,13 @@ class SceneRenderer:
 
     def derivative_adu(self, scene: Scene, binding: KernelBinding,
                        derivatives: Sequence[np.ndarray] | Mapping[str, np.ndarray]) -> np.ndarray:
+        geometry = rendering_geometry(scene, binding, self.geometry)
+        _, images = render_scene_light(scene, geometry)
         if isinstance(derivatives, Mapping):
             if set(derivatives) != set(scene.light_images) or set(scene.light_images) != set(binding.group_index):
                 raise ValueError("one derivative kernel is required for each bound light group")
             terms = []
-            for group, image in scene.light_images.items():
+            for group, image in images.items():
                 derivative = derivatives[group]
                 if np.shape(derivative) != binding.for_group(group).shape:
                     raise ValueError(f"derivative support differs for light group {group}")
@@ -66,9 +70,11 @@ class SceneRenderer:
             total = terms[0]
             for term in terms[1:]:
                 total = total + term
-            return self.exposure.signal_adu(total)
+            return self.exposure.signal_adu(geometry.crop(total))
         if len(derivatives) != len(binding.kernels):
             raise ValueError("derivatives must be aligned with binding.kernels")
+        if any(np.shape(derivative) != kernel.shape for derivative, kernel in zip(derivatives, binding.kernels)):
+            raise ValueError("derivative support differs from the bound kernel")
         if set(scene.light_groups) != set(binding.group_index):
             raise ValueError("derivative binding must cover the scene's light groups")
         partitions: dict[tuple[str, int], list[str]] = {}
@@ -76,14 +82,14 @@ class SceneRenderer:
             partitions.setdefault((definition.plane, binding.group_index[group]), []).append(group)
         terms = []
         for (_, index), members in partitions.items():
-            light = scene.light_images[members[0]]
+            light = images[members[0]]
             for member in members[1:]:
-                light = light + scene.light_images[member]
+                light = light + images[member]
             terms.append(convolve_real_space(light, derivatives[index], scene.pixel_scale_arcsec))
         total = terms[0]
         for term in terms[1:]:
             total = total + term
-        return self.exposure.signal_adu(total)
+        return self.exposure.signal_adu(geometry.crop(total))
 
     def __reduce__(self):
         # Scene values and asset metadata are mapping proxies; workers receive their
@@ -91,7 +97,7 @@ class SceneRenderer:
         assets = {path: (asset.sb, asset.pixel_scale_arcsec, _transport_value(asset.metadata, frozen=False), asset.digest)
                   for path, asset in self.assets.items()}
         return (_restore_renderer, (_transport_value(self.spec, frozen=False), self.cosmology, self.perturbers,
-                                    self.exposure, assets, _transport_value(self.loaded_seds, frozen=False)))
+                                    self.exposure, assets, _transport_value(self.loaded_seds, frozen=False), self.geometry))
 
 
 def _transport_value(value, *, frozen):
@@ -106,10 +112,10 @@ def _transport_value(value, *, frozen):
     return value
 
 
-def _restore_renderer(spec, cosmology, perturbers, exposure, records, seds):
+def _restore_renderer(spec, cosmology, perturbers, exposure, records, seds, geometry=None):
     assets = {path: ImageAsset(samples, scale, frozen_value(metadata), digest)
               for path, (samples, scale, metadata, digest) in records.items()}
     for asset in assets.values():
         asset.sb.setflags(write=False)
     return SceneRenderer(_transport_value(spec, frozen=True), cosmology, perturbers, exposure, assets=assets,
-                         loaded_seds=_transport_value(seds, frozen=True))
+                         loaded_seds=_transport_value(seds, frozen=True), geometry=geometry)

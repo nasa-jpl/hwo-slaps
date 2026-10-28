@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from ..optics.kernels import DetectorPSF, KernelBinding
     from ..scene.spec import LightGroup
 
-__all__ = ["Exposure", "Plane", "convolve_light"]
+__all__ = ["Exposure", "Plane", "convolve_light", "convolve_scene_light"]
 
 Plane = Literal["lens", "source"]
 _PLANE_ORDER: tuple[Plane, ...] = ("lens", "source")
@@ -184,3 +184,13 @@ def _check_round_off(rate: np.ndarray, plane: Plane) -> None:
     if lowest < -tolerance:
         raise ValueError(f"the convolved {plane}-plane light reaches {lowest!r}, below the FFT round-off "
                          f"bound {-tolerance!r}: the rendered light is negative")
+
+
+def convolve_scene_light(scene, binding, *, geometry=None):
+    """Convolve real exterior sky, then crop onto the unchanged detector pixels."""
+    from ..scene.rendering import render_scene_light, rendering_geometry
+
+    geometry = rendering_geometry(scene, binding, geometry)
+    _, images = render_scene_light(scene, geometry)
+    rates = convolve_light(images, scene.light_groups, binding, scene.pixel_scale_arcsec)
+    return {plane: np.array(geometry.crop(rate), copy=True) for plane, rate in rates.items()}

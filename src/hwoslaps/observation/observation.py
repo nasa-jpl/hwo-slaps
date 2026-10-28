@@ -20,7 +20,7 @@ from ..instrument import check_finite_number
 from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
 from ..spectra.bandpass import BANDPASS_TABLE, BandpassSpec, parse_bandpass
 from ..spectra.sed import SED_TABLE, SEDSpec, parse_sed
-from .expected import Exposure, Plane, convolve_light
+from .expected import Exposure, Plane, convolve_scene_light
 from .noise import draw_noisy_adu
 
 if TYPE_CHECKING:
@@ -203,14 +203,14 @@ class Observation:
 
 
 def observe(scene: Scene, kernels: KernelBinding, exposure: Exposure, *, config_digest: str | None,
-            photometry: PhotometryRecord | None, sampling: Mapping[str, float]) -> Observation:
+            photometry: PhotometryRecord | None, sampling: Mapping[str, float], geometry=None) -> Observation:
     """The expected observation of ``scene`` through the truth kernels ``kernels``.
 
     No random generator is used. The caller supplies ``sampling`` measured on the fiducial
     smooth scene once during preparation. It is recorded without another light evaluation,
     including when ``scene`` contains an injected subhalo.
     """
-    by_plane = convolve_light(scene.light_images, scene.light_groups, kernels, scene.pixel_scale_arcsec)
+    by_plane = convolve_scene_light(scene, kernels, geometry=geometry)
     total = by_plane["lens"] + by_plane["source"] if "lens" in by_plane else by_plane["source"]
     expected = exposure.mean_adu(total)
     noise_map = exposure.noise_map_adu(total)

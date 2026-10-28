@@ -49,7 +49,7 @@ def simulate(source: ConfigSource | PreparedForecast, *, subhalo: Halo | None, n
             scene = source.renderer.scene(subhalo=subhalo)
             expected = observe(scene, source.psfs.truth_kernels, source.observation.exposure,
                                config_digest=source.record["config_digest"], photometry=source.observation.photometry,
-                               sampling=source.observation.sampling)
+                               sampling=source.observation.sampling, geometry=source.renderer.geometry)
     else:
         config = resolve_config(source, base_dir=base_dir)
         identity = config.capture_identity()

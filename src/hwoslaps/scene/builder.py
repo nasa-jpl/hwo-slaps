@@ -35,7 +35,8 @@ from .profiles import PROFILE_TYPES, instantiate
 from ..spectra.sed import SED
 from .spec import ComponentSpec, GridSpec, LightGroup, SceneSpec
 
-__all__ = ["Scene", "build_scene", "native_sampling_variation", "render_component_unlensed"]
+__all__ = ["Scene", "build_scene", "native_sampling_variation", "render_component_unlensed",
+           "over_sampled_grid", "native_light_array"]
 
 _GRID_TEMPLATES: OrderedDict[tuple[tuple[int, int], float, int], Any] = OrderedDict()
 _GRID_TEMPLATE_LIMIT = 4
@@ -90,7 +91,7 @@ def _set_writeable(value: Any, writeable: bool, seen: set[int]) -> None:
             _set_writeable(item, writeable, seen)
 
 
-def _over_sampled_grid(grid: GridSpec) -> Any:
+def over_sampled_grid(grid: GridSpec) -> Any:
     """A detached AutoLens ``Grid2D`` of the grid spec.
 
     ``Grid2D.uniform`` builds the uniform sub-pixel grid with a Python loop over pixels, which
@@ -125,7 +126,7 @@ def _check_halo(halo: Halo, spec: SceneSpec, cosmology: Cosmology, label: str) -
                          f"source is at z = {spec.source.redshift} in {cosmology!r}")
 
 
-def _read_only(image: Any) -> np.ndarray:
+def native_light_array(image: Any) -> np.ndarray:
     array = np.array(image.native.array, dtype=float)
     array.flags.writeable = False
     return array
@@ -180,17 +181,17 @@ def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, 
     attributes["source"], redshifts["source"] = source_light, spec.source.redshift
     galaxies = {name: al.Galaxy(redshift=redshifts[name], **profiles) for name, profiles in attributes.items()}
 
-    grid = _over_sampled_grid(spec.grid)
+    grid = over_sampled_grid(spec.grid)
     tracer = al.Tracer(galaxies=list(galaxies.values()), cosmology=cosmology.autogalaxy())
     groups = spec.light_groups(loaded_seds=loaded_seds)
     if set(groups) <= {"lens", "source"}:
         light_profiles = {"lens": tuple(lens_light.values())} if lens_light else {}
         light_profiles["source"] = tuple(source_light.values())
         if list(groups) == ["source"]:
-            images = {"source": _read_only(tracer.image_2d_from(grid=grid))}
+            images = {"source": native_light_array(tracer.image_2d_from(grid=grid))}
         else:
             traced = tracer.traced_grid_2d_list_from(grid=grid)
-            images = {plane: _read_only(galaxies[plane].image_2d_from(
+            images = {plane: native_light_array(galaxies[plane].image_2d_from(
                 grid=traced[tracer.plane_redshifts.index(redshifts[plane])])) for plane in ("lens", "source")}
     else:
         traced = tracer.traced_grid_2d_list_from(grid=grid)
@@ -203,9 +204,9 @@ def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, 
                              for layout in PROFILE_TYPES[component.type].layout(component.values))
             light_profiles[key] = selected
             plane_grid = traced[tracer.plane_redshifts.index(redshifts[group.plane])]
-            image = _read_only(selected[0].image_2d_from(grid=plane_grid))
+            image = native_light_array(selected[0].image_2d_from(grid=plane_grid))
             for profile in selected[1:]:
-                image = image + _read_only(profile.image_2d_from(grid=plane_grid))
+                image = image + native_light_array(profile.image_2d_from(grid=plane_grid))
             image.setflags(write=False)
             images[key] = image
     from .singular_integration import correct_group_images
@@ -247,4 +248,4 @@ def render_component_unlensed(component: ComponentSpec, grid: GridSpec, *, asset
     if component.role != "light":
         raise ValueError(f"component {component.name!r} is a {component.role} component; only light renders")
     (profile,) = instantiate(component, assets=assets).values()
-    return _read_only(profile.image_2d_from(grid=_over_sampled_grid(grid)))
+    return native_light_array(profile.image_2d_from(grid=over_sampled_grid(grid)))

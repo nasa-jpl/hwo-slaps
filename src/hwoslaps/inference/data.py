@@ -12,6 +12,7 @@ import numpy as np
 from ..fisher.data_space import psf_border_mask
 from ..identity import KernelIdentity, array_digest
 from ..scene.image_source import frozen_value
+from ..scene.rendering import RenderGeometry
 from ..observation.observation import Observation
 from ..optics.kernels import PIXEL_SCALE_ATOL_ARCSEC, DetectorPSF, make_convolver
 from .settings import OBJECTIVE_VERSION
@@ -102,10 +103,14 @@ def build_fit_data(observation: Observation, model_kernel: DetectorPSF, *, mask_
     noise = np.asarray(observation.noise_map_adu, dtype=float) * gain / time
     import autolens as al
 
-    mask = al.Mask2D(mask=~include, pixel_scales=observation.pixel_scale_arcsec)
+    # The exterior pixels never enter the likelihood. They provide real emitting
+    # sky for AutoLens's light/blurring grids on the same native response as truth.
+    geometry = RenderGeometry.from_kernels(observation.grid, model_kernel, *observation.psfs.kernels)
+    mask = al.Mask2D(mask=~geometry.pad(include, fill=False), pixel_scales=observation.pixel_scale_arcsec)
     convolver = make_convolver(np.array(model_kernel.kernel, dtype=float, copy=True),
                                model_kernel.pixel_scale_arcsec)
-    imaging = al.Imaging(data=al.Array2D(values=data, mask=mask), noise_map=al.Array2D(values=noise, mask=mask),
+    imaging = al.Imaging(data=al.Array2D(values=geometry.pad(data), mask=mask),
+                         noise_map=al.Array2D(values=geometry.pad(noise, fill=1.0), mask=mask),
                          psf=convolver, over_sample_size_lp=over_sample_size)
     sampling = _consistent_sampling(imaging, int(over_sample_size))
     fitted = np.asarray(imaging.psf.kernel.native, dtype=float)
@@ -119,5 +124,6 @@ def build_fit_data(observation: Observation, model_kernel: DetectorPSF, *, mask_
               "fitted_kernel": KernelIdentity(array_digest(fitted), tuple(fitted.shape),
                                                model_kernel.pixel_scale_arcsec).to_mapping(),
               "objective_version": OBJECTIVE_VERSION, "over_sample_size": sampling,
-              "analysis_class": "hwoslaps.inference.backend:CompatAnalysisImaging"}
+              "analysis_class": "hwoslaps.inference.backend:CompatAnalysisImaging",
+              "rendering": geometry.to_mapping()}
     return FitData(imaging=imaging, kind=observation.kind, mask=include, record=record)

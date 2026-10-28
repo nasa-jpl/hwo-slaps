@@ -36,13 +36,18 @@ class JaxTemplateEngine:
             return
         self._integrated_reference = None
         self._shape_native = scene.spec.grid.shape
-        n_pix = self._shape_native[0] * self._shape_native[1]
-        coordinates = np.asarray(scene.grid.over_sampled, dtype=float)
+        from ...scene.rendering import RenderGeometry
+        self._geometry = context.renderer.geometry or RenderGeometry.from_bindings(
+            scene.spec.grid, context.model_kernels, context.truth_kernels)
+        self._shape_render = self._geometry.shape
+        render_grid = self._geometry.grid()
+        n_pix = self._shape_render[0] * self._shape_render[1]
+        coordinates = np.asarray(render_grid.over_sampled, dtype=float)
         self._sub_per_pix = coordinates.shape[0] // n_pix
         if (coordinates.shape[0] != n_pix * self._sub_per_pix or
-                not bool(np.all(np.asarray(scene.grid.over_sampler.sub_is_uniform)))):
+                not bool(np.all(np.asarray(render_grid.over_sampler.sub_is_uniform)))):
             raise ValueError("JAX templates require uniform over-sampling with consecutive-block binning")
-        macro = np.asarray(scene.tracer.deflections_yx_2d_from(grid=scene.grid.over_sampled), dtype=float)
+        macro = np.asarray(scene.tracer.deflections_yx_2d_from(grid=render_grid.over_sampled), dtype=float)
         traced = coordinates - macro
         from ...scene.image_profile import ImageLightProfile
         source_profiles = [profile for key, group in scene.light_groups.items() if group.plane == "source"
@@ -82,21 +87,22 @@ class JaxTemplateEngine:
             groups = tuple(key for key in self._light_evaluators if binding.group_index[key] == index)
             if not groups:
                 continue
-            shape = convolution_fft_shape(self._shape_native, kernel.shape)
-            slots.append((jnp.asarray(np.fft.rfft2(kernel.kernel, s=shape)), kernel.shape[0] // 2,
-                          kernel.shape[1] // 2, shape, groups))
+            shape = convolution_fft_shape(self._shape_render, kernel.shape)
+            slots.append((jnp.asarray(np.fft.rfft2(kernel.kernel, s=shape)),
+                          kernel.shape[0] // 2 + self._geometry.padding[0],
+                          kernel.shape[1] // 2 + self._geometry.padding[1], shape, groups))
         return tuple(slots)
 
     def _images(self, alpha_sub):
         traced = self._coords - self._alpha_macro_fit - alpha_sub
         images = {}
-        n_pix = self._shape_native[0] * self._shape_native[1]
+        n_pix = self._shape_render[0] * self._shape_render[1]
         for group, evaluators in self._light_evaluators.items():
             brightness = jnp.zeros(traced.shape[0])
             for evaluator in evaluators:
                 brightness = brightness + evaluator(traced)
             image = brightness.reshape(n_pix, self._sub_per_pix).mean(axis=1)
-            images[group] = image.reshape(self._shape_native)
+            images[group] = image.reshape(self._shape_render)
         return images
 
     def _convolution(self, images, slots):
