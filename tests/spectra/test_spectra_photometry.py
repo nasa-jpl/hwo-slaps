@@ -17,6 +17,18 @@ def band():
     return build_bandpass(parse_bandpass({"kind": "top_hat", "min_nm": 450.0, "max_nm": 550.0, "throughput": 0.21}, "band"))
 
 
+def test_exact_redshifted_table_band_edges_preserve_public_photon_rates(spectral_file):
+    from hwoslaps.spectra.photometry import band_mean_throughput
+
+    table = spectral_file([400.0, 700.0], [1.0, 1.0], suffix="csv")
+    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": "fnu", "frame": "rest"}, "sed"), redshift=0.7)
+    response = build_bandpass(parse_bandpass({"kind": "top_hat", "min_nm": 680.0,
+                                             "max_nm": 1190.0, "throughput": 0.4}, "band"))
+    assert band_mean_throughput(response, sed) == pytest.approx(0.4, rel=1e-14)
+    assert rate_from_ab(24.0, response, 33.6, sed=sed) == pytest.approx(
+        rate_from_ab(24.0, response, 33.6), rel=1e-13)
+
+
 def test_flat_fnu_top_hat_rates_match_paper_closed_form():
     response = band()
     assert ab_to_fnu_jy(0.0) == 3631.0

@@ -10,6 +10,20 @@ from hwoslaps.config.checks import ConfigError
 from hwoslaps.spectra.sed import build_sed, parse_sed
 
 
+@pytest.mark.parametrize("redshift", [0.1, 0.2, 0.65, 0.7, 1.5, 3.3])
+def test_rest_table_support_accepts_roundtrip_endpoints_without_extrapolation(spectral_file, redshift):
+    table = spectral_file([400.0, 700.0], [1.0, 2.0], suffix="csv")
+    sed = build_sed(parse_sed({"kind": "table", **table, "quantity": "fnu", "frame": "rest"}, "sed"),
+                    redshift=redshift)
+    knots = sed.knots_m()
+    np.testing.assert_allclose(sed.fnu(knots), [1.0, 2.0], rtol=1e-15)
+    np.testing.assert_allclose(np.exp(sed.log_fnu(knots)), [1.0, 2.0], rtol=1e-15)
+    for outside in (knots[0] * (1.0 - 1e-10), knots[-1] * (1.0 + 1e-10)):
+        for evaluate in (sed.fnu, sed.log_fnu):
+            with pytest.raises(ValueError, match="support"):
+                evaluate([outside])
+
+
 @pytest.mark.parametrize("mapping,expected", [({"kind": "flat_fnu"}, [1.0, 1.0, 1.0]),
     ({"kind": "flat_flambda"}, [0.25, 1.0, 4.0]), ({"kind": "power_law", "index": -2.0}, [0.25, 1.0, 4.0])])
 def test_analytic_sed_shapes_follow_frequency_convention(mapping, expected):

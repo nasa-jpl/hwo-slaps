@@ -103,8 +103,12 @@ class SED:
     def _table_evaluation(self, wavelengths: np.ndarray, *, logarithmic: bool = False) -> tuple[np.ndarray, np.ndarray]:
         evaluated = wavelengths / (1.0 + self.redshift) if self.spec.frame == "rest" else wavelengths
         coordinates, values = self.table.wavelengths_m, self.table.values
-        if np.any(evaluated < coordinates[0]) or np.any(evaluated > coordinates[-1]):
+        lower, upper = coordinates[0], coordinates[-1]
+        tolerance = 4.0 * np.finfo(float).eps * np.abs([lower, upper])
+        if np.any(evaluated < lower - tolerance[0]) or np.any(evaluated > upper + tolerance[1]):
             raise ValueError(f"{self.spec.table.path}: SED wavelengths exceed the table support")
+        # Wavelength-unit and redshift round trips can move an endpoint by a few ULPs.
+        evaluated = np.clip(evaluated, lower, upper)
         if not logarithmic:
             return evaluated, np.interp(evaluated, coordinates, values)
         # The same linear-in-wavelength interpolant, with its non-negative
