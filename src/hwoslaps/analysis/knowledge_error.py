@@ -18,14 +18,32 @@ import numpy as np
 
 from ..fisher.result import ForecastResult
 from .binomial import BinomialCount, clopper_pearson
+from .reductions import InvalidPolicy, TemplateValidity, _invalid_policy, _read_only, _report_mapping, _reported
 
-__all__ = ["KnowledgeErrorAreas", "ToleranceCriterion", "ToleranceResult", "SeparationResult",
+__all__ = ["KnowledgeErrorAreas", "KnownDetectionCounts", "ToleranceCriterion", "ToleranceResult", "SeparationResult",
            "knowledge_error_areas", "knowledge_error_tolerance", "first_separating_amplitude"]
 
 
 @dataclass(frozen=True, eq=False)
+class KnownDetectionCounts:
+    """Healthy detections only; incomplete cohort totals are not inferred."""
+
+    reference: np.ndarray
+    mismatch: np.ndarray
+    retained: np.ndarray
+    spurious: np.ndarray
+    spurious_in_selection: np.ndarray
+
+
+@dataclass(frozen=True, eq=False)
 class KnowledgeErrorAreas:
-    """Per-mass counts and areas; ratios are NaN below the reference count floor."""
+    """Counts/areas on a fixed reference cohort, with explicit completeness.
+
+    Reported incomplete quantities and ratios below the reference count floor
+    are NaN. ``known_counts`` retain integer healthy detections for diagnostics.
+    The reference cohort depends only on the reference and declared selection,
+    so changing mismatch failures cannot alter its denominator.
+    """
 
     masses_msun: np.ndarray
     q_threshold: float
@@ -43,6 +61,33 @@ class KnowledgeErrorAreas:
     retention: np.ndarray
     detected_area_ratio: np.ndarray
     spurious_ratio: np.ndarray
+
+    reference_cohort: np.ndarray
+    reference_validity: TemplateValidity
+    mismatch_validity: TemplateValidity
+    domain_validity: TemplateValidity
+    known_counts: KnownDetectionCounts
+    invalid_policy: InvalidPolicy
+
+    def to_mapping(self) -> dict[str, Any]:
+        """JSON-ready report with null incomplete quantities and validity/cohort records."""
+        return _report_mapping(self) | {
+            "reference_validity": self.reference_validity.to_mapping(),
+            "mismatch_validity": self.mismatch_validity.to_mapping(),
+            "domain_validity": self.domain_validity.to_mapping(),
+            "selection_complete": self.selection_complete.tolist(),
+            "complete": self.complete.tolist(),
+        }
+
+    @property
+    def selection_complete(self) -> np.ndarray:
+        """Whether both selected forecasts are usable at each mass."""
+        return _read_only(self.reference_validity.complete & self.mismatch_validity.complete)
+
+    @property
+    def complete(self) -> np.ndarray:
+        """Whether every reported selected and full-domain quantity is complete."""
+        return _read_only(self.selection_complete & self.domain_validity.complete)
 
 
 def _same_array(first: np.ndarray, second: np.ndarray, name: str) -> None:
@@ -75,14 +120,21 @@ def _pair_identity(reference: ForecastResult, mismatched: ForecastResult) -> Non
 
 
 def knowledge_error_areas(reference: ForecastResult, mismatched: ForecastResult, *, q_threshold: float,
-                          min_reference_count: int, selection: np.ndarray | None = None) -> KnowledgeErrorAreas:
-    """Reduce comparable forecasts, whose configurations may differ only in ``psf.model``.
+                          min_reference_count: int, selection: np.ndarray | None = None,
+                          invalid_policy: InvalidPolicy = "raise") -> KnowledgeErrorAreas:
+    """Reduce comparable forecasts, retaining a fixed reference-detection cohort.
 
     Both results must have identical mass/position bytes, uniform cell areas,
     comparison digest, mask digest, nuisance order and complete truth bindings.
     An aperture selection gives retention K and spurious ratio F; spurious area
     also covers every evaluated position. Mismatch detections require positive amplitudes.
+    Zero-information q=0 rows remain usable. Failures raise by default; under
+    ``report``, affected quantities are NaN and healthy counts remain separate
+    diagnostics. No mismatch failure removes a reference detection from the
+    denominator. A common caller-declared selection fixes the same spatial
+    estimand across error amplitudes.
     """
+    _invalid_policy(invalid_policy)
     _pair_identity(reference, mismatched)
     if isinstance(min_reference_count, (bool, np.bool_)) or not isinstance(min_reference_count, Integral) \
             or min_reference_count < 1:
@@ -91,24 +143,39 @@ def knowledge_error_areas(reference: ForecastResult, mismatched: ForecastResult,
     selected = np.ones(size, dtype=bool) if selection is None else np.asarray(selection)
     if selected.dtype != bool or selected.shape != (size,):
         raise ValueError(f"selection must be a boolean vector of length {size}")
-    correct = reference.detections(q_threshold=q_threshold, metric="q_asimov")
-    detected = mismatched.detections(q_threshold=q_threshold, metric="q_mismatch")
-    spurious = mismatched.detections(q_threshold=q_threshold, metric="q_spurious")
-    counts = [np.count_nonzero(values[:, chosen], axis=1) for values, chosen in (
+    domain = np.ones(size, dtype=bool)
+    reference_validity = TemplateValidity.from_result(reference, selected)
+    mismatch_validity = TemplateValidity.from_result(mismatched, selected)
+    domain_validity = TemplateValidity.from_result(mismatched, domain)
+    if invalid_policy == "raise":
+        reference_validity.require_complete("reference selection")
+        # Full-domain spurious area consumes every mismatch position.
+        domain_validity.require_complete("mismatched domain")
+    correct = reference.detections(q_threshold=q_threshold, metric="q_asimov", invalid_policy="exclude")
+    detected = mismatched.detections(q_threshold=q_threshold, metric="q_mismatch", invalid_policy="exclude")
+    spurious = mismatched.detections(q_threshold=q_threshold, metric="q_spurious", invalid_policy="exclude")
+    cohort = correct & selected[None, :]
+    known = [np.count_nonzero(values[:, chosen], axis=1) for values, chosen in (
         (correct, selected), (detected, selected), (correct & detected, selected),
-        (spurious, np.ones(size, dtype=bool)), (spurious, selected))]
-    # PositionSet guarantees uniform spacing**2; retain the paper count-times-area arithmetic.
+        (spurious, domain), (spurious, selected))]
+    selection_complete = reference_validity.complete & mismatch_validity.complete
+    completeness = (reference_validity.complete, mismatch_validity.complete, selection_complete,
+                    domain_validity.complete, mismatch_validity.complete)
+    counts = [_reported(count, complete) for count, complete in zip(known, completeness, strict=True)]
+    # PositionSet guarantees uniform spacing**2. The reference denominator is
+    # independent of mismatch validity, including across different amplitudes.
     areas = [count * reference.cell_areas_arcsec2[0] for count in counts]
-    eligible = counts[0] >= min_reference_count
+    eligible = selection_complete & (known[0] >= min_reference_count)
     ratios = []
-    # Uniform cell area cancels; dividing counts preserves inclusive ratio gates.
-    for numerator in (counts[2], counts[1], counts[4]):
+    for numerator in (known[2], known[1], known[4]):
         ratio = np.full(reference.masses_msun.shape, np.nan)
-        np.divide(numerator, counts[0], out=ratio, where=eligible)
+        np.divide(numerator, known[0], out=ratio, where=eligible)
         ratios.append(ratio)
     return KnowledgeErrorAreas(reference.masses_msun, float(q_threshold), int(min_reference_count),
                                counts[0], areas[0], counts[1], areas[1], counts[2], areas[2],
-                               counts[3], areas[3], counts[4], areas[4], *ratios)
+                               counts[3], areas[3], counts[4], areas[4], *ratios,
+                               _read_only(cohort), reference_validity, mismatch_validity, domain_validity,
+                               KnownDetectionCounts(*(_read_only(count) for count in known)), invalid_policy)
 
 
 def _finite_number(value: float, name: str) -> float:

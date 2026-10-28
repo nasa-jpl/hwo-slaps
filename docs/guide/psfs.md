@@ -175,6 +175,19 @@ The ratios are `NaN` at masses where the matched forecast detects fewer than
 `min_reference_count` positions, because a ratio of a few cells is too noisy to use.
 `spurious_area_arcsec2` covers every position, inside the selection or not.
 
+Numerical failures raise by default. With `invalid_policy="report"`, affected
+counts, areas and ratios are `NaN`; `known_counts` retain healthy detections as
+diagnostics. `reference_validity`, `mismatch_validity` and `domain_validity`
+report identifiable, zero-information and failed counts. Zero information is a
+usable $q=0$ outcome. `reference_cohort` depends only on the matched reference and
+selection, so changing failures in a mismatch arm cannot shrink the denominator.
+Use one declared selection at every error amplitude. A complete aperture can
+still give finite ratios when failures outside it make the full-domain spurious
+area unavailable; `selection_complete` and `complete` distinguish these cases.
+`areas.to_mapping()` preserves these flags, counts and cohort in strict JSON,
+using `null` for unavailable numbers.
+
+
 ### Tolerances
 
 The **tolerance** is the largest error amplitude that still passes two gates across the

@@ -40,6 +40,8 @@ error.
 | `detectable_area_arcsec2` | Detections times the grid cell area (grid positions only) |
 | `boundary_detectable` | Whether any detection lies on the edge of the position grid |
 | `selected_count`, `q_threshold`, `metric` | What the summary was computed from |
+| `validity` | Per-mass counts of identifiable, zero-information and failed templates |
+| `known_detectable_count` | Healthy detections retained as a diagnostic when a cohort is incomplete |
 
 If `boundary_detectable` is true, the detectable region reaches the edge of your grid,
 and a larger grid could find a larger area. Widen `half_width_arcsec` until it is false
@@ -48,6 +50,18 @@ selection, so a small aperture well inside the grid can still report true.
 
 For the mismatch statistics, `q_max` counts a position with a negative fitted
 amplitude as zero.
+
+Zero-information templates have $q=0$ and an unidentified fitted amplitude; they
+remain usable nondetections. Consumed numerical failures raise by default.
+`summarize(..., invalid_policy="report")` retains the selected cohort and status
+counts, while returning `NaN` for incomplete counts, fractions, areas and maxima.
+`known_detectable_count` counts only healthy detections and does not estimate the
+failed positions. Failures outside the selection and grid boundary are irrelevant
+to that summary. Failed boundary evaluations make `boundary_detectable` unavailable
+(`None`); `boundary_validity` reports their counts. Mass reach rejects incomplete
+curves rather than interpreting missing values as nondetections.
+`summary.to_mapping()` encodes missing values as JSON `null` alongside the validity
+counts and can be passed directly to `artifacts.write_json`.
 
 ## Apertures
 

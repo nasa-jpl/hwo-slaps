@@ -4,6 +4,8 @@ from importlib import import_module
 _PUBLIC_API = {
     "summarize": ("reductions", "summarize"),
     "ForecastSummary": ("reductions", "ForecastSummary"),
+    "TemplateValidity": ("reductions", "TemplateValidity"),
+    "InvalidPolicy": ("reductions", "InvalidPolicy"),
     "aperture_selection": ("reductions", "aperture_selection"),
     "crossing": ("reach", "crossing"),
     "mass_reach": ("reach", "mass_reach"),
@@ -13,6 +15,7 @@ _PUBLIC_API = {
     "clopper_pearson": ("binomial", "clopper_pearson"),
     "knowledge_error_areas": ("knowledge_error", "knowledge_error_areas"),
     "KnowledgeErrorAreas": ("knowledge_error", "KnowledgeErrorAreas"),
+    "KnownDetectionCounts": ("knowledge_error", "KnownDetectionCounts"),
     "knowledge_error_tolerance": ("knowledge_error", "knowledge_error_tolerance"),
     "ToleranceCriterion": ("knowledge_error", "ToleranceCriterion"),
     "ToleranceResult": ("knowledge_error", "ToleranceResult"),

@@ -45,7 +45,7 @@ def _pair():
     fitted[0, 1] = -10
     spurious = np.zeros((1, 16))
     spurious[0, [1, 6, 8, 9, 10]] = 1
-    spurious[0, 11], spurious[0, 12] = -10, np.nan
+    spurious[0, 11], spurious[0, 12] = -10, 0.0
     return reference, _result(layout, np.full((1, 16), 4), amplitude_hat=fitted, amplitude_spurious=spurious)
 
 
@@ -77,8 +77,8 @@ def test_ratios_are_nan_below_the_reference_floor():
     for row, count in enumerate((20, 33, 100)):
         information[row, :count] = 4
     reference = _result(layout, information)
-    mismatch = _result(layout, information, amplitude_hat=np.ones_like(information),
-                       amplitude_spurious=np.zeros_like(information))
+    mismatch = _result(layout, information, amplitude_hat=np.where(information > 0.0, 1.0, np.nan),
+                       amplitude_spurious=np.where(information > 0.0, 0.0, np.nan))
     areas = knowledge_error_areas(reference, mismatch, q_threshold=4, min_reference_count=33)
     np.testing.assert_array_equal(areas.reference_count, [20, 33, 100])
     assert areas.reference_area_arcsec2.tobytes() == np.array([n * 0.05 ** 2 for n in (20, 33, 100)]).tobytes()
@@ -321,3 +321,151 @@ def test_zero_amplitude_knowledge_error_gives_unit_retention(minimal_mapping):
     np.testing.assert_array_equal(areas.detected_area_ratio, [1])
     np.testing.assert_array_equal(areas.spurious_ratio, [0])
     np.testing.assert_array_equal(areas.spurious_area_arcsec2, [0])
+
+
+def _validity_pair():
+    layout = grid_positions((0.0, 0.0), spacing_arcsec=1.0, half_width_arcsec=1.0, annulus=None)
+    information = np.full((1, 9), 4.0)
+    reference = _result(layout, information)
+    mismatch = _result(layout, information, amplitude_hat=np.ones_like(information),
+                       amplitude_spurious=np.zeros_like(information))
+    return reference, mismatch
+
+
+@pytest.mark.parametrize("outcome", ["finite_nondetection", "zero_information", "failed_numeric"])
+def test_failed_statistics_are_distinct_from_true_nondetections_and_zero_information(outcome):
+    reference, mismatch = _validity_pair()
+    information = mismatch.fisher_profiled.copy()
+    fitted, spurious = mismatch.amplitude_hat.copy(), mismatch.amplitude_spurious.copy()
+    if outcome == "zero_information":
+        information[0, 0], fitted[0, 0], spurious[0, 0] = 0.0, np.nan, np.nan
+    elif outcome == "finite_nondetection":
+        fitted[0, 0] = 0.0
+    else:
+        fitted[0, 0] = np.nan
+    mismatch = _result(reference.positions, information, amplitude_hat=fitted, amplitude_spurious=spurious)
+    if outcome == "failed_numeric":
+        with pytest.raises(ValueError, match="failed_numeric"):
+            knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1)
+    areas = knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                                  invalid_policy="report")
+    assert areas.reference_count[0] == 9
+    assert areas.known_counts.retained[0] == 8
+    assert areas.reference_cohort.shape == reference.q_asimov.shape
+    np.testing.assert_array_equal(areas.reference_cohort, True)
+    assert areas.mismatch_validity.evaluated_count == 9
+    assert areas.mismatch_validity.failed_numeric_count[0] == (outcome == "failed_numeric")
+    assert areas.mismatch_validity.zero_information_count[0] == (outcome == "zero_information")
+    if outcome == "failed_numeric":
+        assert np.isnan(areas.retention[0]) and np.isnan(areas.spurious_ratio[0])
+        assert np.isnan(areas.spurious_count[0]) and np.isnan(areas.mismatch_count[0])
+        assert not areas.complete[0]
+    else:
+        assert areas.retention[0] == 8 / 9
+        assert areas.spurious_ratio[0] == 0.0
+        assert areas.mismatch_count[0] == 8 and areas.complete[0]
+
+
+def test_failed_nodes_do_not_shrink_reference_cohort_across_mismatch_amplitudes():
+    reference, healthy = _validity_pair()
+    reports = []
+    for failed_positions in ([], [0], [0, 1, 2], list(range(9))):
+        fitted = healthy.amplitude_hat.copy()
+        fitted[0, failed_positions] = np.nan
+        mismatch = _result(reference.positions, healthy.fisher_profiled, amplitude_hat=fitted,
+                           amplitude_spurious=healthy.amplitude_spurious)
+        reports.append(knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                                              invalid_policy="report"))
+    for report, failed_count in zip(reports, (0, 1, 3, 9), strict=True):
+        np.testing.assert_array_equal(report.reference_cohort, reports[0].reference_cohort)
+        assert report.reference_count[0] == 9
+        assert report.mismatch_validity.failed_numeric_count[0] == failed_count
+        assert report.known_counts.retained[0] == 9 - failed_count
+        if failed_count:
+            assert np.isnan(report.retention[0]) and np.isnan(report.spurious_ratio[0])
+        else:
+            assert report.retention[0] == 1.0 and report.spurious_ratio[0] == 0.0
+
+
+def test_common_selection_gives_complete_ratios_without_hiding_full_domain_failures():
+    reference, healthy = _validity_pair()
+    # One declared spatial cohort is shared by every error amplitude.
+    selected = np.arange(9) >= 2
+    cohort = None
+    for failed_position in (0, 1):
+        fitted = healthy.amplitude_hat.copy()
+        fitted[0, failed_position] = np.nan
+        mismatch = _result(reference.positions, healthy.fisher_profiled, amplitude_hat=fitted,
+                           amplitude_spurious=healthy.amplitude_spurious)
+        with pytest.raises(ValueError, match="mismatched domain"):
+            knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                                  selection=selected)
+        report = knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                                       selection=selected, invalid_policy="report")
+        assert report.selection_complete[0] and not report.complete[0]
+        assert report.reference_count[0] == 7
+        assert report.retention[0] == 1.0 and report.spurious_ratio[0] == 0.0
+        assert np.isnan(report.spurious_area_arcsec2[0])
+        assert report.mismatch_validity.failed_numeric_count[0] == 0
+        assert report.domain_validity.failed_numeric_count[0] == 1
+        if cohort is not None:
+            np.testing.assert_array_equal(report.reference_cohort, cohort)
+        cohort = report.reference_cohort
+
+
+def test_failed_reference_leaves_reference_counts_and_comparison_ratios_unavailable():
+    reference, mismatch = _validity_pair()
+    information = reference.fisher_profiled.copy()
+    information[0, 0] = np.nan
+    reference = _result(reference.positions, information)
+    with pytest.raises(ValueError, match="reference selection"):
+        knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1)
+    report = knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                                   invalid_policy="report")
+    assert report.reference_validity.failed_numeric_count[0] == 1
+    assert report.known_counts.reference[0] == 8
+    assert np.isnan(report.reference_count[0]) and np.isnan(report.reference_area_arcsec2[0])
+    assert np.isnan(report.retention[0]) and np.isnan(report.spurious_ratio[0])
+    assert report.mismatch_count[0] == 9 and report.spurious_count[0] == 0
+
+
+def test_finite_provisional_failure_is_not_treated_as_a_usable_detection():
+    reference, mismatch = _validity_pair()
+    status = mismatch.template_status.copy()
+    status[0, 0] = "failed_numeric"
+    mismatch = replace(mismatch, template_status=status)
+    with pytest.raises(ValueError, match="failed_numeric"):
+        knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1)
+    report = knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                                   invalid_policy="report")
+    assert report.known_counts.mismatch[0] == 8
+    assert np.isnan(report.mismatch_count[0]) and np.isnan(report.retention[0])
+
+
+@pytest.mark.parametrize("policy", ["exclude", "ignore", None, True])
+def test_area_requires_a_declared_validity_policy(policy):
+    reference, mismatch = _validity_pair()
+    with pytest.raises(ValueError, match="invalid_policy"):
+        knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                              invalid_policy=policy)
+
+
+def test_area_report_json_preserves_null_ratios_and_fixed_cohort(tmp_path):
+    from hwoslaps.artifacts import write_json
+    reference, mismatch = _validity_pair()
+    fitted = mismatch.amplitude_hat.copy()
+    fitted[0, 0] = np.nan
+    mismatch = _result(reference.positions, mismatch.fisher_profiled, amplitude_hat=fitted,
+                       amplitude_spurious=mismatch.amplitude_spurious)
+    report = knowledge_error_areas(reference, mismatch, q_threshold=4.0, min_reference_count=1,
+                                   invalid_policy="report")
+    mapping = report.to_mapping()
+    assert mapping["retention"] == [None] and mapping["spurious_ratio"] == [None]
+    assert mapping["reference_count"] == [9]
+    assert mapping["reference_cohort"] == [[True] * 9]
+    assert mapping["mismatch_validity"]["failed_numeric_count"] == [1]
+    assert mapping["known_counts"]["retained"] == [8]
+    assert mapping["complete"] == [False] and mapping["selection_complete"] == [False]
+    path = write_json(tmp_path / "areas.json", mapping)
+    assert json.loads(path.read_text()) == mapping
+    assert "NaN" not in path.read_text() and "Infinity" not in path.read_text()

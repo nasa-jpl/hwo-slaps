@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from hwoslaps.analysis.reach import adaptive_mass_reach, crossing, mass_reach
-from hwoslaps.analysis.reductions import ForecastSummary
+from hwoslaps.analysis.reductions import ForecastSummary, TemplateValidity
 
 
 @pytest.mark.parametrize("target,expected", [(0.25, 10**7.25), (0.75, 10**7.75)])
@@ -121,7 +121,9 @@ def test_mass_reach_reads_the_named_summary_quantity():
         masses_msun=np.array([1e7, 1e8, 1e9]), q_threshold=10.0, metric="q_asimov", selected_count=4,
         q_max=np.array([2.0, 20.0, 200.0]), detectable_count=np.array([0, 1, 4]),
         detectable_fraction=np.array([0.0, 0.25, 1.0]), detectable_area_arcsec2=np.array([0.0, 0.01, 0.04]),
-        boundary_detectable=np.array([False, False, True]))
+        boundary_detectable=np.array([False, False, True]),
+        validity=TemplateValidity(4, np.full(3, 4), np.zeros(3, dtype=int), np.zeros(3, dtype=int)),
+        boundary_validity=None, known_detectable_count=np.array([0, 1, 4]), invalid_policy="raise")
     for quantity, target, interpolation in (("q_max", 10.0, "log"), ("detectable_fraction", 0.5, "linear"),
                                             ("detectable_area_arcsec2", 0.02, "log")):
         reach = mass_reach(summary, quantity=quantity, target=target, interpolation=interpolation)

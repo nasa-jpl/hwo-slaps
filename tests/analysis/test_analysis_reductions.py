@@ -93,18 +93,22 @@ def test_non_finite_values_at_consumed_positions_raise():
     selection = layout.within((0.0, 0.0), 1.0)
     information = np.full((1, 25), 4.0)
     amplitude = np.full((1, 25), 2.0)
-    interior = information.copy()
-    interior[0, 6] = 0.0
-    skipped = forecast(layout, interior, amplitude_hat=np.where(interior > 0, amplitude, nan),
-                       amplitude_spurious=amplitude)
+    interior = amplitude.copy()
+    interior[0, 6] = np.nan  # Failed interior row outside selection and boundary.
+    skipped = forecast(layout, information, amplitude_hat=interior, amplitude_spurious=amplitude)
     np.testing.assert_array_equal(summarize(skipped, q_threshold=10.0, selection=selection).q_max, [16.0])
-    with pytest.raises(ValueError, match="q_mismatch is not finite at a selected or boundary position"):
+    with pytest.raises(ValueError, match="selected positions contains failed_numeric"):
         summarize(skipped, q_threshold=10.0)
-    edge = information.copy()
-    edge[0, 0] = 0.0
-    clipped = forecast(layout, edge, amplitude_hat=np.where(edge > 0, amplitude, nan), amplitude_spurious=amplitude)
-    with pytest.raises(ValueError, match="not finite at a selected or boundary position"):
+    edge = amplitude.copy()
+    edge[0, 0] = np.nan
+    clipped = forecast(layout, information, amplitude_hat=edge, amplitude_spurious=amplitude)
+    with pytest.raises(ValueError, match="boundary positions contains failed_numeric"):
         summarize(clipped, q_threshold=10.0, selection=selection)
+    report = summarize(clipped, q_threshold=10.0, selection=selection, invalid_policy="report")
+    np.testing.assert_array_equal(report.validity.failed_numeric_count, [0])
+    np.testing.assert_array_equal(report.boundary_validity.failed_numeric_count, [1])
+    assert report.boundary_detectable is None
+    np.testing.assert_array_equal(report.q_max, [16.0])
 
 
 def test_empty_aperture_and_empty_selection_raise():
@@ -113,3 +117,94 @@ def test_empty_aperture_and_empty_selection_raise():
         aperture_selection(small, centre_yx=(5.0, 5.0), radius_arcsec=0.5)
     with pytest.raises(ValueError, match="at least one position"):
         summarize(small, q_threshold=1.0, selection=np.zeros(9, dtype=bool))
+
+
+@pytest.mark.parametrize("metric", ["q_asimov", "q_mismatch", "q_spurious"])
+def test_zero_information_is_usable_but_unidentified_in_every_summary_metric(metric):
+    positions = explicit_positions([[0.0, 0.0], [0.1, 0.0], [0.2, 0.0]], (0.0, 0.0))
+    result = forecast(positions, [[0.0, 4.0, 4.0]], amplitude_hat=[[np.nan, 0.0, 2.0]],
+                      amplitude_spurious=[[np.nan, 0.0, 1.0]])
+    summary = summarize(result, q_threshold=3.0, metric=metric)
+    np.testing.assert_array_equal(summary.validity.valid_count, [2])
+    np.testing.assert_array_equal(summary.validity.zero_information_count, [1])
+    np.testing.assert_array_equal(summary.validity.failed_numeric_count, [0])
+    np.testing.assert_array_equal(summary.validity.complete, [True])
+    assert summary.validity.evaluated_count == summary.selected_count == 3
+    assert summary.detectable_count[0] == (2 if metric == "q_asimov" else 1)
+    assert np.isfinite(summary.q_max[0]) and np.isfinite(summary.detectable_fraction[0])
+
+
+@pytest.mark.parametrize("failure", ["nonfinite_amplitude", "nonfinite_information", "finite_provisional"])
+def test_report_retains_fixed_selection_and_explicit_unknown_aggregate(failure):
+    from dataclasses import replace
+    positions = explicit_positions([[0.0, 0.0], [0.1, 0.0], [0.2, 0.0]], (0.0, 0.0))
+    information = np.full((2, 3), 4.0)
+    fitted = np.ones((2, 3))
+    if failure == "nonfinite_amplitude":
+        fitted[0, 1] = np.nan
+    elif failure == "nonfinite_information":
+        information[0, 1] = np.inf
+    result = forecast(positions, information, amplitude_hat=fitted, amplitude_spurious=np.zeros((2, 3)))
+    if failure == "finite_provisional":
+        status = result.template_status.copy()
+        status[0, 1] = "failed_numeric"
+        result = replace(result, template_status=status)
+    with pytest.raises(ValueError, match="failed_numeric"):
+        summarize(result, q_threshold=3.0)
+    summary = summarize(result, q_threshold=3.0, invalid_policy="report")
+    assert summary.selected_count == 3 and summary.invalid_policy == "report"
+    np.testing.assert_array_equal(summary.validity.failed_numeric_count, [1, 0])
+    np.testing.assert_array_equal(summary.validity.valid_count, [2, 3])
+    np.testing.assert_array_equal(summary.known_detectable_count, [2, 3])
+    np.testing.assert_array_equal(summary.detectable_count, [np.nan, 3])
+    np.testing.assert_array_equal(summary.detectable_fraction, [np.nan, 1.0])
+    np.testing.assert_array_equal(summary.q_max, [np.nan, 4.0])
+    assert summary.detectable_area_arcsec2 is None
+
+
+def test_report_does_not_make_an_entirely_failed_grid_a_zero_area():
+    layout = lattice(1.0, 1.0)
+    information = np.full((1, 9), 4.0)
+    result = forecast(layout, information, amplitude_hat=np.full((1, 9), np.nan),
+                      amplitude_spurious=np.zeros((1, 9)))
+    summary = summarize(result, q_threshold=3.0, invalid_policy="report")
+    assert summary.validity.failed_numeric_count[0] == summary.selected_count == 9
+    assert summary.known_detectable_count[0] == 0
+    for field in ("q_max", "detectable_count", "detectable_fraction", "detectable_area_arcsec2"):
+        assert np.isnan(getattr(summary, field)[0]), field
+    assert summary.boundary_detectable is None
+
+
+@pytest.mark.parametrize("policy", ["exclude", "ignore", None, True])
+def test_summary_requires_a_declared_validity_policy(policy):
+    result = forecast(lattice(1.0, 1.0), np.ones((1, 9)))
+    with pytest.raises(ValueError, match="invalid_policy"):
+        summarize(result, q_threshold=1.0, invalid_policy=policy)
+
+
+
+def test_mass_reach_rejects_reported_missing_values_instead_of_creating_a_nondetection_bound():
+    from hwoslaps.analysis import mass_reach
+    positions = explicit_positions([[0.0, 0.0], [0.1, 0.0]], (0.0, 0.0))
+    result = forecast(positions, [[1.0, 1.0], [4.0, 4.0]], amplitude_hat=[[1.0, 1.0], [np.nan, 1.0]],
+                      amplitude_spurious=np.zeros((2, 2)))
+    report = summarize(result, q_threshold=3.0, invalid_policy="report")
+    for quantity in ("q_max", "detectable_fraction"):
+        with pytest.raises(ValueError, match="values and target must be finite"):
+            mass_reach(report, quantity=quantity, target=0.5, interpolation="linear")
+
+
+def test_report_json_uses_null_and_retains_validity_through_strict_public_writer(tmp_path):
+    import json
+    from hwoslaps.artifacts import write_json
+    positions = explicit_positions([[0.0, 0.0], [0.1, 0.0]], (0.0, 0.0))
+    result = forecast(positions, [[4.0, 4.0]], amplitude_hat=[[1.0, np.nan]], amplitude_spurious=[[0.0, 0.0]])
+    report = summarize(result, q_threshold=3.0, invalid_policy="report")
+    mapping = report.to_mapping()
+    assert mapping["q_max"] == [None] and mapping["detectable_fraction"] == [None]
+    assert mapping["validity"]["failed_numeric_count"] == [1]
+    assert mapping["validity"]["complete"] == [False]
+    assert mapping["selected_count"] == 2 and mapping["known_detectable_count"] == [1]
+    path = write_json(tmp_path / "summary.json", mapping)
+    assert json.loads(path.read_text()) == mapping
+    assert "NaN" not in path.read_text() and "Infinity" not in path.read_text()
