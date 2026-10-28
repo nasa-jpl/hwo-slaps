@@ -81,7 +81,8 @@ create dummy sampler parameters or raw Nautilus files.
 
 `n_like_max` is a per-role budget. Scalar truth, search, integration and polishing
 evaluations share that cap, with cached values reused; API preflight and truth-anchor
-checks are separate recorded overhead. Nautilus stops in likelihood batches, so inspect
+checks are separate overhead under the recorded budget convention. Nautilus stops in
+likelihood batches, so inspect
 its achieved call count and stopping diagnostics. A finite budget can leave posterior
 or evidence quality provisional. No budget increase or retry follows automatically.
 

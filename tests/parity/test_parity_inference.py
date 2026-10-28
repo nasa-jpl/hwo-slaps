@@ -59,6 +59,16 @@ def _assert_gaussian(case, role, vector):
 def test_current_nonlinear_likelihood_has_independent_gaussian_normalization(prepared, manifest, paper_digest, tmp_path, record_property):
     case = _n1(prepared, False)
     changes = {}
+    # Independent consumers of the same physical truth: scene/PSF renderer
+    # versus nonlinear AutoLens model construction and its blurring-grid path.
+    preparation = prepared("p2_delta_knowledge_error", "reference")
+    prediction_errors = {}
+    for role in ("smooth", "subhalo"):
+        scene = preparation.renderer.scene(subhalo=case.hypothesis if role == "subhalo" else None)
+        expected_model = preparation.renderer.light_rate(scene, preparation.psfs.model_kernels)[case.data.mask]
+        actual_model = np.asarray(case.fit_at(role, case.truth_vector(role)).model_data)
+        np.testing.assert_allclose(actual_model, expected_model, rtol=2.e-12, atol=2.e-12)
+        prediction_errors[role] = float(np.max(np.abs(actual_model-expected_model)))
     with np.load(FIXTURES/"n1_nonlinear_likelihood.npz", allow_pickle=False) as expected:
         _inputs(case, expected, manifest, paper_digest)
         for role, oracle_role in (("smooth", "smooth"), ("subhalo", "freed")):
@@ -66,7 +76,7 @@ def test_current_nonlinear_likelihood_has_independent_gaussian_normalization(pre
             changes[role] = {term: {"historical": expected["reference__"+oracle_role+"_"+term].tolist(),
                                    "current": [row[term] for row in live]} for term in TERMS}
     record = manifest["scenes"]["n1_nonlinear_likelihood"]["dataset"]
-    write_receipt(tmp_path, "nonlinear_gaussian", {"terms": changes, "data_identity": {
+    write_receipt(tmp_path, "nonlinear_gaussian", {"terms": changes, "cross_consumer_prediction_errors": prediction_errors, "data_identity": {
         "historical_data_digest": record["data_digest"], "current_data_digest": paper_digest.array(case.data.imaging.data.native),
         "historical_noise_digest": record["noise_map_digest"], "current_noise_digest": paper_digest.array(case.data.imaging.noise_map.native)}}, record_property)
 
