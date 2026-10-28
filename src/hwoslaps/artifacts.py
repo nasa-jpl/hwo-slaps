@@ -2,7 +2,7 @@
 
 Forecast NPZ schema 3 records the arrays and layout of a ForecastResult. Observation
 NPZ schema 1 records detector images, exposure, distinct kernels and fiducial sampling.
-Case JSON schema 1 records the typed nonlinear result. Loaders accept only these
+Case JSON schema 2 records the typed nonlinear result. Loaders accept only these
 versions and never unpickle. Equal NPZ content has equal ZIP timestamps and bytes.
 """
 from __future__ import annotations

@@ -136,4 +136,3 @@ def render_scene_light(scene, geometry: RenderGeometry) -> tuple[Any, dict[str, 
             raise ValueError(f"the {key} padded light image has non-finite values")
         image.setflags(write=False)
     return grid, images
-
