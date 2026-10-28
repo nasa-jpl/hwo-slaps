@@ -28,9 +28,10 @@ cuda12 = ["hwoslaps[jax]", "jax-cuda12-plugin[with_cuda]==0.4.38", "jax-cuda12-p
 inference = ["hwoslaps[lensing,jax]", "autofit==2026.5.14.2", "nautilus-sampler==1.0.5", "scikit-learn==1.8.0"]
 plot = ["matplotlib>=3.7"]
 test = ["pytest>=8"]
+scientific-test = ["hwoslaps[test]", "lenstronomy==1.14.2", "mpmath==1.4.1"]
 validated = ["numpy==1.26.4", "scipy==1.17.1", "astropy==7.2.0", "PyYAML==6.0.3",
              "numba==0.65.1", "threadpoolctl==3.6.0"]
-all = ["hwoslaps[lensing,optics,jax,inference,plot,test,validated]"]
+all = ["hwoslaps[lensing,optics,jax,inference,plot,scientific-test,validated]"]
 
 [project.scripts]
 hwoslaps = "hwoslaps.cli:main"
