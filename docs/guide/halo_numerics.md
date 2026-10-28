@@ -34,6 +34,10 @@ The corrected images enter the existing native PSF convolution. This procedure
 integrates brightness before convolution; it does not average deflections or
 introduce a softened halo. It currently supports two-plane scenes with the
 singular halos in the lens plane. Other geometries raise a capability error.
+An off-plane halo coordinate belongs to its own traced plane; it cannot be used
+as an image-plane quadrature split without validating that mapping and the light
+in every intervening plane. Ordinary off-plane NFW/TNFW forecasts retain their
+own-plane coordinate convention.
 
 Reference forecasts, truth scenes, and NumPy nonlinear fits use this operator.
 A requested JAX forecast containing PointMass/SIS runs the shared reference

@@ -30,7 +30,8 @@ def test_named_forecast_radii_keep_foreground_hypotheses_valid(minimal_mapping, 
     from hwoslaps.fisher.api import forecast, prepare_forecast
     from hwoslaps.scene.critical_curve import effective_einstein_radius
 
-    minimal_mapping["scene"]["subhalo"] = {"type": "PointMass", "redshift": 0.1}
+    minimal_mapping["scene"]["subhalo"] = {"type": "NFW", "redshift": 0.1,
+                                           "concentration": {"kind": "fixed", "value": 20.0}}
     minimal_mapping["forecast"]["positions"] = {"kind": "ring", "count": 4, "radius": radius}
     with prepare_forecast(minimal_mapping) as prepared:
         expected = (prepared.scene.einstein_radius() if radius == "einstein_radius" else
@@ -49,7 +50,8 @@ def test_named_forecast_radii_keep_foreground_hypotheses_valid(minimal_mapping, 
 def test_off_plane_forecasts_use_supplied_own_plane_coordinates(minimal_mapping, redshift, positions):
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
-    minimal_mapping["scene"]["subhalo"] = {"type": "PointMass", "redshift": redshift}
+    minimal_mapping["scene"]["subhalo"] = {"type": "NFW", "redshift": redshift,
+                                           "concentration": {"kind": "fixed", "value": 20.0}}
     minimal_mapping["forecast"]["positions"] = positions
     with prepare_forecast(minimal_mapping) as prepared:
         if positions["kind"] == "explicit":
@@ -65,6 +67,26 @@ def test_off_plane_forecasts_use_supplied_own_plane_coordinates(minimal_mapping,
         result = forecast(prepared, masses_msun=[1.0e8])
         np.testing.assert_array_equal(result.positions_yx, prepared.positions.positions_yx)
         assert np.all(np.isfinite(result.q_asimov))
+
+
+@pytest.mark.parametrize("kind", ["PointMass", "SIS"])
+@pytest.mark.parametrize("redshift", [0.1, 0.45])
+@pytest.mark.parametrize("engine", ["reference", "jax"])
+def test_off_plane_singular_halos_require_a_validated_pixel_integral(minimal_mapping, kind, redshift, engine):
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+    from hwoslaps.scene.singular_integration import SingularIntegrationCapabilityError
+    from hwoslaps.simulation import simulate
+
+    minimal_mapping["scene"]["grid"].update(shape=[5, 5], over_sample_size=1)
+    minimal_mapping["scene"]["subhalo"] = {"type": kind, "redshift": redshift}
+    minimal_mapping["forecast"]["positions"] = {"kind": "explicit", "positions_yx": [[0.11, -0.13]]}
+    minimal_mapping["forecast"]["nuisances"] = {"fixed": ["*"], "background_offset": False}
+    with prepare_forecast(minimal_mapping, execution=Execution(engine=engine)) as prepared:
+        halo = prepared.hypothesis(1e8, (0.11, -0.13))
+        with pytest.raises(SingularIntegrationCapabilityError, match="two-plane scene and a lens-plane halo"):
+            forecast(prepared, masses_msun=[1e8])
+        with pytest.raises(SingularIntegrationCapabilityError, match="two-plane scene and a lens-plane halo"):
+            simulate(prepared, subhalo=halo, noise_seed=None)
 
 
 @pytest.mark.parametrize("engine", ["reference", "jax"])
