@@ -37,7 +37,8 @@ across hosts; physical inputs and file identities remain checked exactly.
 | `file_digests` | The SHA-256 of every file the configuration referenced |
 | `truth_kernels`, `model_kernels`, `psf_relation` | The PSF kernels and how the model relates to the truth |
 | `photometry`, `spectral` | How magnitudes became detected rates, and the chromatic weights |
-| `nuisance_names`, `nuisance_rank`, `gram_condition_number` | The profiled parameters and the conditioning of their fit |
+| `nuisance_names`, `nuisance_rank`, `normalized_design_condition_number` | The profiled parameters and conditioning in normalized augmented coordinates |
+| `nuisance_projection` | SVD method, normalized singular values, rank tolerance and refinement diagnostics |
 | `mask`, `positions`, `noise_covariance` | The pixels and trial positions used |
 | `halo_model`, `mass_definition`, `subhalo_redshift`, `cosmology` | The subhalo model |
 | `sampling` | The pixel sampling diagnostic |
@@ -45,7 +46,14 @@ across hosts; physical inputs and file identities remain checked exactly.
 | `hwoslaps_version` | The package version |
 
 A `nuisance_rank` smaller than the number of nuisance names means some nuisance
-directions were indistinguishable and were dropped from the fit.
+directions fell below the normalized singular-value cutoff. The projection
+record also reports whether a tenfold smaller tolerance would change the rank.
+
+Forecast schema 3 stores `template_status` beside the primary arrays. A
+`zero_information` template has $q=0$ and an unidentified fitted amplitude.
+`failed_numeric` retains an invalid or provisional row explicitly; detection
+queries raise on these rows unless the caller chooses exclusion and reports the
+excluded cohort. The loader accepts the current schema only.
 
 ## Command-line runs
 

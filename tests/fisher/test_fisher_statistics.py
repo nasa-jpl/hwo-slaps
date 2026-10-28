@@ -1,10 +1,7 @@
-"""Profiled linear-Gaussian algebra of fisher.statistics.
+"""Profiled linear-Gaussian residuals, priors, units and identifiability.
 
-Oracles: closed forms of the Schur complement written out here, planted
-amplitudes recovered exactly, explicit inverse-covariance algebra, hand values
-of the pseudo-inverse cutoff, and literals printed by the 974cee9
-``modeling.fisher_core`` workspace on a hand bank (run-directory script
-``probes/sta_literals.py``, W1-STA ledger).
+Independent oracles use analytic controls and augmented QR. Protocol, covariance,
+threading and immutability checks retain their separate numerical protections.
 """
 
 import pickle
@@ -14,7 +11,7 @@ import numpy as np
 import pytest
 from threadpoolctl import threadpool_limits
 
-from hwoslaps.fisher.statistics import BankReductions, ProfileLikelihoodWorkspace, SignalBankResult, Whitener
+from hwoslaps.fisher.statistics import BankReductions, ProfileLikelihoodWorkspace, SignalBankResult, Whitener, residual_blocks
 
 nan, inf = np.nan, np.inf
 BANK_FIELDS = tuple(field.name for field in fields(SignalBankResult))
@@ -27,15 +24,18 @@ def workspace(design, precision=None):
                                       [f"n{i}" for i in range(p)])
 
 
-def reductions_of(signals, design, data=None, bias=None):
-    """The reductions an accelerator returns for whitened vectors it never sends to the host."""
+def reductions_of(signals, space, data=None, bias=None):
+    """Device residual-space protocol; independent numerical oracles are below."""
+    sr, sp = residual_blocks(signals, space.basis_data, space.basis_prior)
+    dr, dp = (None, None) if data is None else residual_blocks(data, space.basis_data, space.basis_prior)
+    br, bp = (None, None) if bias is None else residual_blocks(bias, space.basis_data, space.basis_prior)
     return BankReductions(
-        raw=np.einsum("ij,ij->i", signals, signals), cross=signals @ design,
+        raw=np.einsum("ij,ij->i", signals, signals),
+        profiled=np.einsum("ij,ij->i", sr, sr) + np.einsum("ij,ij->i", sp, sp),
         finite=np.all(np.isfinite(signals), axis=1),
-        signal_data_inner=None if data is None else np.einsum("ij,ij->i", signals, data),
-        data_cross=None if data is None else data @ design,
+        signal_data_residual_inner=None if data is None else np.einsum("ij,ij->i", sr, dr) + np.einsum("ij,ij->i", sp, dp),
         data_finite=None if data is None else np.all(np.isfinite(data), axis=1),
-        signal_bias_inner=None if bias is None else signals @ bias)
+        signal_bias_residual_inner=None if bias is None else sr @ br + sp @ bp)
 
 
 def assert_banks_equal(actual, expected):
@@ -108,7 +108,7 @@ def test_mismatch_and_spurious_amplitudes_recover_planted_values(n_nuisance):
     np.testing.assert_allclose(bank.q_spurious, (betas * [2.0, 3.0]) ** 2, rtol=1e-10)
 
 
-def test_bank_finisher_reproduces_974cee9_bits():
+def test_bank_finisher_preserves_well_conditioned_closed_form_values():
     design = np.array([[1.0, 0.5], [0.25, -1.0], [2.0, 0.75], [0.75, 0.0]])
     signals = np.array([[1.0, 2.0, -1.0, 0.5], [0.0, 0.0, 0.0, 0.0], [0.3, -0.7, 1.1, 2.0],
                         [-0.4, 0.9, 0.6, -1.2]])
@@ -130,9 +130,10 @@ def test_bank_finisher_reproduces_974cee9_bits():
         "z_spurious": [0.009720386057359228, nan, 0.0032838426800547113, 0.0024122480450076973],
     }
     for name, values in expected.items():
-        assert getattr(bank, name).tobytes() == np.array(values).tobytes(), name
+        np.testing.assert_allclose(getattr(bank, name), np.nan_to_num(values) if name.startswith(("q_", "z_")) else values,
+                                   rtol=2e-12, atol=1e-14, equal_nan=True, err_msg=name)
     assert space.nuisance_rank == 2
-    assert space.condition_number == 4.56873856363062
+    assert 1.0 <= space.condition_number < 3.0
 
 
 def test_reductions_finish_equal_to_dense_bank():
@@ -142,28 +143,28 @@ def test_reductions_finish_equal_to_dense_bank():
     bias = 0.1 * rng.normal(size=30)
     space = workspace(design, np.array([0.0, 2.0, 0.0, 0.5]))
     dense = space.evaluate_bank(signals, data_whitened=data, bias_whitened=bias)
-    reduced = space.evaluate_reductions(reductions_of(signals, design, data, bias), bias_whitened=bias)
+    reduced = space.evaluate_reductions(reductions_of(signals, space, data, bias), bias_whitened=bias)
     assert_banks_equal(reduced, dense)
-    halves = BankReductions.concatenate([reductions_of(signals[:2], design, data[:2], bias),
-                                         reductions_of(signals[2:], design, data[2:], bias)])
+    halves = BankReductions.concatenate([reductions_of(signals[:2], space, data[:2], bias),
+                                         reductions_of(signals[2:], space, data[2:], bias)])
     joined = space.evaluate_reductions(halves, bias_whitened=bias)
     for name in BANK_FIELDS:
         np.testing.assert_allclose(getattr(joined, name), getattr(dense, name), rtol=1e-12, err_msg=name)
     broken = signals.copy()
     broken[3, 7] = np.nan
     with pytest.raises(ValueError, match="signals_whitened contains non-finite"):
-        space.evaluate_reductions(reductions_of(broken, design))
+        space.evaluate_reductions(reductions_of(broken, space))
     broken_data = data.copy()
     broken_data[0, 0] = np.inf
     with pytest.raises(ValueError, match="data_whitened contains non-finite"):
-        space.evaluate_reductions(reductions_of(signals, design, broken_data))
+        space.evaluate_reductions(reductions_of(signals, space, broken_data))
     with pytest.raises(ValueError, match="together"):
-        space.evaluate_reductions(reductions_of(signals, design), bias_whitened=bias)
+        space.evaluate_reductions(reductions_of(signals, space), bias_whitened=bias)
 
 
 @pytest.mark.parametrize("design", [np.empty((3, 0)), np.array([[1.0], [1.0], [0.0]])], ids=["no-nuisance",
                                                                                             "absorbing-nuisance"])
-def test_zero_information_statistics_are_undefined(design):
+def test_zero_information_amplitudes_are_unidentified_and_q_is_zero(design):
     signals = np.array([[0.0, 0.0, 0.0], [2.0, 2.0, 0.0]])
     signals = signals[:1] if design.shape[1] == 0 else signals
     data = np.ones_like(signals)
@@ -171,8 +172,11 @@ def test_zero_information_statistics_are_undefined(design):
     np.testing.assert_array_equal(bank.fisher_profiled, 0.0)
     np.testing.assert_array_equal(bank.sigma_amplitude, inf)
     np.testing.assert_array_equal(bank.degradation, 0.0)
-    for name in ("amplitude_hat", "q_mismatch", "z_mismatch", "amplitude_spurious", "q_spurious", "z_spurious"):
+    for name in ("amplitude_hat", "amplitude_spurious"):
         assert np.all(np.isnan(getattr(bank, name))), name
+    for name in ("q_mismatch", "z_mismatch", "q_spurious", "z_spurious"):
+        np.testing.assert_array_equal(getattr(bank, name), 0.0)
+    np.testing.assert_array_equal(bank.template_status, "zero_information")
 
 
 def test_pseudoinverse_is_invariant_to_duplicate_columns_and_uniform_rescaling():
@@ -194,11 +198,11 @@ def test_pseudoinverse_is_invariant_to_duplicate_columns_and_uniform_rescaling()
     assert duplicated.nuisance_rank == 3
 
 
-def test_gram_cutoff_depends_on_individual_column_units():
+def test_normalized_svd_cutoff_is_invariant_to_individual_column_units():
     signal = np.array([[0.0, 1.0]])
     small_column = workspace(np.diag([1.0, 1.0e-7]))
-    assert small_column.evaluate_bank(signal).fisher_profiled[0] == 1.0
-    assert small_column.nuisance_rank == 1
+    assert small_column.evaluate_bank(signal).fisher_profiled[0] == 0.0
+    assert small_column.nuisance_rank == 2
     unit_columns = workspace(np.eye(2))
     assert unit_columns.evaluate_bank(signal).fisher_profiled[0] == 0.0
     assert unit_columns.nuisance_rank == 2
@@ -244,16 +248,17 @@ def test_host_algebra_does_not_depend_on_the_caller_thread_count(n_nuisance):
     design = rng.normal(size=(2000, n_nuisance))
     signals, data = rng.normal(size=(256, 2000)), rng.normal(size=(256, 2000))
     bias = rng.normal(size=2000)
-    reductions = reductions_of(signals, design, data, bias)
     runs = []
     for threads in (1, 4):
         with threadpool_limits(limits=threads):
             whitener = Whitener.from_covariance(covariance)
             space = workspace(design, np.linspace(0.0, 1.0, n_nuisance))
             bank = space.evaluate_bank(signals, data_whitened=data, bias_whitened=bias)
+            with threadpool_limits(limits=1):
+                reductions = reductions_of(signals, space, data, bias)
             reduced = space.evaluate_reductions(reductions, bias_whitened=bias)
             runs.append({"cholesky_factor": whitener.cholesky_factor, "whitened": whitener.apply(block),
-                         "normal_pinv": space.normal_pinv,
+                         "basis_data": space.basis_data,
                          **{f"bank.{name}": getattr(bank, name) for name in BANK_FIELDS},
                          **{f"reduced.{name}": getattr(reduced, name) for name in BANK_FIELDS}})
     single, threaded = runs
@@ -283,14 +288,12 @@ def test_workspace_refuses_inconsistent_nuisance_inputs(names, precision, match)
         ProfileLikelihoodWorkspace(np.eye(3)[:, :2], np.array(precision), names)
 
 
-def test_significantly_negative_profiled_information_raises():
+@pytest.mark.parametrize("profiled, message", [(-1.0, "non-negative"), (2.0, "exceeds raw"), (np.inf, "non-finite")])
+def test_invalid_residual_reductions_raise(profiled, message):
     space = workspace(np.eye(2))
-    with pytest.raises(ValueError, match="significantly negative"):
-        space.evaluate_reductions(BankReductions(raw=np.array([1.0]), cross=np.array([[2.0, 0.0]]),
-                                                 finite=np.array([True])))
-    rounding = space.evaluate_reductions(BankReductions(raw=np.array([1.0]), cross=np.array([[1.0 + 1e-12, 0.0]]),
-                                                        finite=np.array([True])))
-    assert rounding.fisher_profiled[0] == 0.0
+    with pytest.raises(ValueError, match=message):
+        space.evaluate_reductions(BankReductions(raw=np.array([1.0]), profiled=np.array([profiled]),
+                                                finite=np.array([True])))
 
 
 def mismatched_bank():
@@ -301,7 +304,7 @@ def mismatched_bank():
 
 @pytest.mark.parametrize("build, names", [
     (lambda: workspace([[1.0, 0.0], [0.5, 2.0], [0.0, 1.0]], np.array([0.0, 0.5])),
-     ("nuisance_whitened", "normal_pinv")),
+     ("nuisance_whitened", "prior_precision", "basis_data", "basis_prior", "normalized_singular_values")),
     (mismatched_bank, BANK_FIELDS),
     (lambda: Whitener.from_sigma([0.5, 2.0]), ("sigma",)),
     (lambda: Whitener.from_covariance([[4.0, 1.0], [1.0, 3.0]]), ("cholesky_factor",)),
@@ -324,3 +327,67 @@ def test_non_finite_whitened_inputs_raise(field):
     with pytest.raises(ValueError, match="non-finite"):
         workspace(arrays["design"]).evaluate_bank(arrays["signals"], data_whitened=arrays["data"],
                                                   bias_whitened=arrays["bias"])
+
+
+def augmented_qr_oracle(design, precision, signals, data, bias):
+    """Independent augmented QR calculation with explicit stacked prior rows."""
+    p = design.shape[1]
+    augmented = np.vstack((design, np.diag(np.sqrt(precision))))
+    q, _ = np.linalg.qr(augmented, mode="reduced")
+    def residual(values):
+        padded = np.pad(values, ((0, 0), (0, p)))
+        return padded - (padded @ q) @ q.T
+    sr, dr, br = residual(signals), residual(data), residual(bias[None, :])[0]
+    information = np.einsum("ij,ij->i", sr, sr)
+    return information, np.einsum("ij,ij->i", sr, dr) / information, sr @ br / information
+
+
+@pytest.mark.parametrize("gaussian", [False, True])
+def test_independent_augmented_qr_and_individual_unit_changes(gaussian):
+    rng = np.random.default_rng(17829)
+    design = rng.normal(size=(40, 6))
+    precision = np.exp(rng.normal(size=6)) if gaussian else np.zeros(6)
+    signals, data, bias = rng.normal(size=(5, 40)), rng.normal(size=(5, 40)), rng.normal(size=40)
+    expected = augmented_qr_oracle(design, precision, signals, data, bias)
+    for scales in (np.ones(6), 10.0 ** np.array([-12, -5, 0, 3, 7, 12])):
+        space = workspace(design / scales, precision / scales**2)
+        actual = space.evaluate_bank(signals, data_whitened=data, bias_whitened=bias)
+        for name, oracle in zip(("q_asimov", "amplitude_hat", "amplitude_spurious"), expected):
+            np.testing.assert_allclose(getattr(actual, name), oracle, rtol=3e-12, atol=2e-14, err_msg=name)
+        assert space.nuisance_rank == 6
+        assert not space.rank_tolerance_sensitive
+
+
+def test_prior_residual_is_included_and_unit_transformed():
+    # s=J is absorbed with flat prior; a unit Gaussian constraint leaves F=1/2.
+    for scale in (1e-12, 1.0, 1e12):
+        space = workspace([[scale], [0.0]], [scale**2])
+        bank = space.evaluate_bank([[1.0, 0.0]], data_whitened=[[-2.0, 0.0]], bias_whitened=[3.0, 0.0])
+        np.testing.assert_allclose(bank.q_asimov, [0.5], rtol=1e-14)
+        np.testing.assert_allclose(bank.amplitude_hat, [-2.0], rtol=1e-14)
+        np.testing.assert_allclose(bank.amplitude_spurious, [3.0], rtol=1e-14)
+        np.testing.assert_array_equal(bank.template_status, "valid")
+
+
+def test_exact_and_near_span_keep_small_physical_information():
+    # Subtractive normal-equation information loses this positive 1e-16 signal.
+    design = np.array([[1.0, 0.0], [0.0, 1e-12], [0.0, 0.0], [0.0, 0.0]])
+    signals = np.array([[1e4, -2e4, 0.0, 0.0], [1e4, -2e4, 1e-8, 0.0], [0.0, 0.0, 0.0, 0.0]])
+    bank = workspace(design).evaluate_bank(signals, data_whitened=-0.7 * signals,
+                                            bias_whitened=[0.0, 0.0, 2e-9, 0.0])
+    assert bank.q_asimov[0] == 0.0
+    assert bank.q_asimov[1] == pytest.approx(1e-16, rel=1e-14)
+    assert bank.amplitude_hat[1] == pytest.approx(-0.7, rel=1e-14)
+    assert bank.amplitude_spurious[1] == pytest.approx(0.2, rel=1e-14)
+    np.testing.assert_array_equal(bank.template_status, ["zero_information", "valid", "zero_information"])
+
+
+def test_true_degeneracy_zero_columns_and_rank_tolerance_refinement():
+    space = workspace([[1.0, 2.0, 0.0], [0.0, 0.0, 0.0]])
+    assert space.nuisance_rank == 1
+    np.testing.assert_allclose(space.evaluate_bank([[0.0, 3.0]]).q_asimov, [9.0])
+    design = np.array([[1.0, 1.0], [0.0, 1e-12], [0.0, 0.0]])
+    coarse = ProfileLikelihoodWorkspace(design, [0.0, 0.0], ["a", "b"], rcond=1e-12)
+    refined = ProfileLikelihoodWorkspace(design, [0.0, 0.0], ["a", "b"], rcond=1e-13)
+    assert coarse.rank_tolerance_sensitive
+    assert coarse.nuisance_rank == 1 and coarse.rank_at_refined_tolerance == refined.nuisance_rank == 2

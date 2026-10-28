@@ -68,6 +68,8 @@ class ForecastResult:
     ``amplitude_hat`` and ``amplitude_spurious`` exist exactly when the model PSF
     differs from the truth (``psf_relation`` other than ``"matched"``).
     ``config`` and ``provenance`` are kept in their JSON form.
+    ``template_status`` records valid, zero-information and numerical-failure
+    rows; explicit failures can retain provisional finite statistics.
     """
 
     masses_msun: np.ndarray
@@ -79,6 +81,7 @@ class ForecastResult:
     psf_relation: str
     config: Mapping[str, Any]
     provenance: Mapping[str, Any]
+    template_status: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         masses = np.asarray(self.masses_msun, dtype=float)
@@ -91,8 +94,8 @@ class ForecastResult:
             values = np.asarray(getattr(self, name), dtype=float)
             if values.shape != shape:
                 raise ValueError(f"{name} must have shape {shape} (masses, positions), got {values.shape}")
-            if not np.all(np.isfinite(values)) or np.any(values < 0.0):
-                raise ValueError(f"{name} must be finite and non-negative")
+            if np.any(values < 0.0):
+                raise ValueError(f"{name} must be non-negative; non-finite values require failed_numeric status")
             object.__setattr__(self, name, _read_only(values))
         if not isinstance(self.psf_relation, str) or not self.psf_relation:
             raise ValueError(f"psf_relation must be a non-empty string, got {self.psf_relation!r}")
@@ -109,6 +112,24 @@ class ForecastResult:
                 if values.shape != shape:
                     raise ValueError(f"{name} must have shape {shape} (masses, positions), got {values.shape}")
                 object.__setattr__(self, name, _read_only(values))
+        failed = ~np.isfinite(self.fisher_raw) | ~np.isfinite(self.fisher_profiled)
+        zero = self.fisher_profiled == 0.0
+        for name in ("amplitude_hat", "amplitude_spurious"):
+            values = getattr(self, name)
+            if values is not None:
+                with np.errstate(over="ignore", invalid="ignore"):
+                    fitted_q = (values * np.sqrt(self.fisher_profiled))**2
+                failed |= (~zero & (~np.isfinite(values) | ~np.isfinite(fitted_q))) | (zero & ~np.isnan(values))
+        inferred = np.where(failed, "failed_numeric", np.where(zero, "zero_information", "valid"))
+        status = inferred if self.template_status is None else np.asarray(self.template_status)
+        if status.shape != shape or status.dtype.kind != "U" or not np.all(np.isin(
+                status, ("valid", "zero_information", "failed_numeric"))):
+            raise ValueError("template_status must have the statistic shape and valid, zero_information or failed_numeric values")
+        # Explicit failure may retain provisional finite values; a valid/zero
+        # record can never disguise failed or inconsistently identified values.
+        if np.any((status != "failed_numeric") & (status != inferred)):
+            raise ValueError("template_status is inconsistent with information or fitted amplitudes")
+        object.__setattr__(self, "template_status", _read_only(status))
         for name in ("config", "provenance"):
             mapping = getattr(self, name)
             if not isinstance(mapping, Mapping):
@@ -193,12 +214,21 @@ class ForecastResult:
         """The statistic of the data and model pair: ``q_mismatch`` with a mismatched model PSF."""
         return "q_asimov" if self.amplitude_hat is None else "q_mismatch"
 
-    def detections(self, *, q_threshold: float, metric: Metric | None = None) -> np.ndarray:
+    def detections(self, *, q_threshold: float, metric: Metric | None = None,
+                   invalid_policy: Literal["raise", "exclude"] = "raise") -> np.ndarray:
         """Boolean ``(masses, positions)`` detections at the caller's threshold, by :func:`is_detection`.
 
         ``metric`` defaults to :attr:`detection_metric`; ``q_asimov`` stays
         available as the matched diagnostic and ``q_spurious`` as the null control.
+        Failed numerical templates raise by default. Explicit exclusion leaves
+        their mask in :attr:`template_status`; zero information remains distinct.
         """
+        if invalid_policy not in ("raise", "exclude"):
+            raise ValueError("invalid_policy must be 'raise' or 'exclude'")
+        failed = self.template_status == "failed_numeric"
+        if invalid_policy == "raise" and np.any(failed):
+            raise ValueError(f"forecast contains {np.count_nonzero(failed)} failed_numeric templates; "
+                             "use an explicit exclusion policy and report the excluded cohort")
         chosen = self.detection_metric if metric is None else metric
         if chosen not in ("q_asimov", "q_mismatch", "q_spurious"):
             raise ValueError(f"metric must be q_asimov, q_mismatch or q_spurious, got {chosen!r}")
@@ -208,4 +238,4 @@ class ForecastResult:
         amplitude = None
         if chosen != "q_asimov":
             amplitude = self.amplitude_hat if chosen == "q_mismatch" else self.amplitude_spurious
-        return is_detection(values, amplitude, q_threshold=q_threshold)
+        return is_detection(values, amplitude, q_threshold=q_threshold) & ~failed

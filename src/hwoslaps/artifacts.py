@@ -1,6 +1,6 @@
 """Versioned scientific artifacts, published atomically without replacing existing files.
 
-Forecast NPZ schema 2 records the arrays and layout of a ForecastResult. Observation
+Forecast NPZ schema 3 records the arrays and layout of a ForecastResult. Observation
 NPZ schema 1 records detector images, exposure, distinct kernels and fiducial sampling.
 Case JSON schema 1 records the typed nonlinear result. Loaders accept only these
 versions and never unpickle. Equal NPZ content has equal ZIP timestamps and bytes.
@@ -33,7 +33,7 @@ _STATISTICS = ("fisher_raw", "fisher_profiled", "sigma_amplitude", "q_asimov", "
 _AMPLITUDES = {"amplitude_hat": ("amplitude_hat", "q_mismatch", "z_mismatch"),
                "amplitude_spurious": ("amplitude_spurious", "q_spurious", "z_spurious")}
 _FORECAST_REQUIRED = {"schema_version", "artifact_kind", "masses_msun", "positions_yx", "positions_json",
-                      "config_json", "provenance_json", "psf_relation", *_STATISTICS}
+                      "config_json", "provenance_json", "psf_relation", "template_status", *_STATISTICS}
 _GRID_ARRAYS = {"grid_y_coords", "grid_x_coords", "grid_indices"}
 
 
@@ -193,7 +193,8 @@ def save_forecast(result: ForecastResult, path) -> Path:
     layout = {"kind": positions.kind, "centre_yx": positions.centre_yx,
               "domain_radius_arcsec": positions.domain_radius_arcsec,
               "spacing_arcsec": None if positions.grid is None else positions.grid.spacing_arcsec}
-    members = {"schema_version": np.asarray(2, dtype=np.int64), "artifact_kind": np.asarray("forecast"),
+    members = {"schema_version": np.asarray(3, dtype=np.int64), "artifact_kind": np.asarray("forecast"),
+               "template_status": result.template_status,
                "masses_msun": result.masses_msun, "positions_yx": positions.positions_yx,
                "positions_json": np.asarray(canonical_json(layout)),
                "config_json": np.asarray(json.dumps(json_ready(result.config), separators=(",", ":"), allow_nan=False)),
@@ -218,7 +219,7 @@ def load_forecast(path) -> ForecastResult:
     Parameters
     ----------
     path : path-like
-        Version-2 forecast NPZ filename.
+        Version-3 forecast NPZ filename.
 
     Returns
     -------
@@ -238,7 +239,7 @@ def load_forecast(path) -> ForecastResult:
                 *(name for group in _AMPLITUDES.values() for name in group)}
     if not _FORECAST_REQUIRED <= members.keys() or members.keys() - _FORECAST_REQUIRED - optional:
         raise ValueError("invalid forecast artifact member set")
-    if _scalar(members, "schema_version", "iu") != 2 or _scalar(members, "artifact_kind", "U") != "forecast":
+    if _scalar(members, "schema_version", "iu") != 3 or _scalar(members, "artifact_kind", "U") != "forecast":
         raise ValueError("unsupported forecast artifact schema")
     layout = _json_member(members, "positions_json")
     _keys(layout, ("kind", "centre_yx", "domain_radius_arcsec", "spacing_arcsec"), "forecast positions")
@@ -265,7 +266,7 @@ def load_forecast(path) -> ForecastResult:
                             _float_array(members, "fisher_raw"), _float_array(members, "fisher_profiled"),
                             amplitudes["amplitude_hat"], amplitudes["amplitude_spurious"],
                             _scalar(members, "psf_relation", "U"), _json_member(members, "config_json"),
-                            _json_member(members, "provenance_json"))
+                            _json_member(members, "provenance_json"), members["template_status"])
     for name in (*_STATISTICS, *(key for group in _AMPLITUDES.values() for key in group)):
         if name in members:
             stored = _float_array(members, name)

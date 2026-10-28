@@ -40,11 +40,12 @@ def test_mismatch_detections_require_positive_amplitude():
     amplitude_spurious = np.array([[-1.0, 1.0, 0.8, 0.0], [nan, -0.9, 0.9, 0.1]])
     mismatched = result(information, amplitude_hat=amplitude_hat, amplitude_spurious=amplitude_spurious)
     assert mismatched.detection_metric == "q_mismatch"
-    np.testing.assert_array_equal(mismatched.detections(q_threshold=10.0),
+    np.testing.assert_array_equal(mismatched.detections(q_threshold=10.0, invalid_policy="exclude"),
                                   [[True, False, False, False], [False, True, False, True]])
-    np.testing.assert_array_equal(mismatched.detections(q_threshold=10.0, metric="q_spurious"),
+    np.testing.assert_array_equal(mismatched.detections(q_threshold=10.0, metric="q_spurious", invalid_policy="exclude"),
                                   [[False, True, True, False], [False, False, True, False]])
-    np.testing.assert_array_equal(mismatched.detections(q_threshold=10.0, metric="q_asimov"), np.ones((2, 4), bool))
+    np.testing.assert_array_equal(mismatched.detections(q_threshold=10.0, metric="q_asimov", invalid_policy="exclude"),
+                                  mismatched.template_status != "failed_numeric")
     matched = result(information)
     assert matched.detection_metric == "q_asimov"
     with pytest.raises(ValueError, match="q_mismatch was not evaluated"):
@@ -56,7 +57,7 @@ def test_mismatch_detections_require_positive_amplitude():
         is_detection(information, amplitude_hat[:, :2], q_threshold=10.0)
 
 
-def test_properties_reproduce_974cee9_bank_statistics_bitwise():
+def test_properties_preserve_finite_bank_statistics_and_zero_information_limit():
     raw = np.array([[4.0, 9.0, 2.5], [1.0, 0.0, 7.3]])
     profiled = np.array([[3.0, 9.0, 0.25], [0.0, 0.0, 6.9399999999999995]])
     amplitude_hat = np.array([[1.0666666666666667, -0.23333333333333334, 1.0], [nan, nan, 0.03746397694524496]])
@@ -67,11 +68,11 @@ def test_properties_reproduce_974cee9_bank_statistics_bitwise():
         "sigma_amplitude": [0.5773502691896258, 0.3333333333333333, 2.0, inf, inf, 0.37959480900056175],
         "z_asimov": [1.7320508075688772, 3.0, 0.5, 0.0, 0.0, 2.634387974463898],
         "degradation": [0.75, 1.0, 0.1, 0.0, 0.0, 0.9506849315068493],
-        "z_mismatch": [1.8475208614068024, -0.7, 0.5, nan, nan, 0.09869465034014605],
-        "q_mismatch": [3.413333333333333, 0.48999999999999994, 0.25, nan, nan, 0.00974063400576369],
-        "z_spurious": [0.023094010767585032, 0.30000000000000004, 0.009999999999999998, nan, nan,
+        "z_mismatch": [1.8475208614068024, -0.7, 0.5, 0.0, 0.0, 0.09869465034014605],
+        "q_mismatch": [3.413333333333333, 0.48999999999999994, 0.25, 0.0, 0.0, 0.00974063400576369],
+        "z_spurious": [0.023094010767585032, 0.30000000000000004, 0.009999999999999998, 0.0, 0.0,
                        0.7614671868551266],
-        "q_spurious": [0.0005333333333333334, 0.09000000000000002, 9.999999999999996e-05, nan, nan,
+        "q_spurious": [0.0005333333333333334, 0.09000000000000002, 9.999999999999996e-05, 0.0, 0.0,
                        0.5798322766570603],
         "q_asimov": [3.0, 9.0, 0.25, 0.0, 0.0, 6.9399999999999995],
     }
@@ -87,7 +88,7 @@ def test_result_validates_axes_metadata_and_provenance():
         result(good, fisher_raw=np.ones((3, 2)))
     with pytest.raises(ValueError, match="masses_msun"):
         result(good, masses=np.array([1e8, -1e8]))
-    with pytest.raises(ValueError, match="finite and non-negative"):
+    with pytest.raises(ValueError, match="non-negative"):
         result(np.array([[1.0, -1.0, 1.0], [1.0, 1.0, 1.0]]))
     with pytest.raises(ValueError, match="together or not at all"):
         result(good, amplitude_hat=good)
@@ -125,3 +126,47 @@ def test_result_arrays_are_read_only():
         for copy in (forecast, restored):
             with pytest.raises(ValueError, match="read-only"):
                 getattr(copy, name)[0] = 0.0
+
+
+def test_failed_numerics_are_distinct_from_zero_information_and_nondetection(tmp_path):
+    from hwoslaps.artifacts import load_forecast, save_forecast
+    forecast = result([[0.0, 1.0, 4.0, 9.0]],
+                      amplitude_hat=[[np.nan, 0.5, -1.0, np.nan]],
+                      amplitude_spurious=[[np.nan, 0.0, -0.1, 0.0]])
+    np.testing.assert_array_equal(forecast.template_status,
+                                  [["zero_information", "valid", "valid", "failed_numeric"]])
+    assert forecast.q_mismatch[0, 0] == 0.0
+    assert np.isnan(forecast.amplitude_hat[0, 0])
+    with pytest.raises(ValueError, match="failed_numeric"):
+        forecast.detections(q_threshold=1.0)
+    np.testing.assert_array_equal(forecast.detections(q_threshold=1.0, invalid_policy="exclude"),
+                                  [[False, False, False, False]])
+    restored = load_forecast(save_forecast(forecast, tmp_path / "status.npz"))
+    np.testing.assert_array_equal(restored.template_status, forecast.template_status)
+    np.testing.assert_array_equal(restored.amplitude_hat, forecast.amplitude_hat)
+    assert not restored.template_status.flags.writeable
+    with pytest.raises(ValueError, match="failed_numeric"):
+        restored.detections(q_threshold=1.0)
+
+
+def test_explicit_failed_status_can_preserve_provisional_finite_statistics(tmp_path):
+    from dataclasses import replace
+    from hwoslaps.artifacts import load_forecast, save_forecast
+    forecast = replace(result([[4.0, 9.0]]), template_status=np.array([["valid", "failed_numeric"]]))
+    restored = load_forecast(save_forecast(forecast, tmp_path / "provisional.npz"))
+    np.testing.assert_array_equal(restored.template_status, forecast.template_status)
+    with pytest.raises(ValueError, match="inconsistent"):
+        replace(result([[0.0]]), template_status=np.array([["valid"]]))
+
+
+@pytest.mark.parametrize("information", [np.nan, np.inf])
+def test_nonfinite_primary_information_is_retained_as_failed_and_never_a_nondetection(information, tmp_path):
+    from hwoslaps.artifacts import load_forecast, save_forecast
+    forecast = result([[information, 1.0]], fisher_raw=[[2.0, 2.0]])
+    np.testing.assert_array_equal(forecast.template_status, [["failed_numeric", "valid"]])
+    with pytest.raises(ValueError, match="failed_numeric"):
+        forecast.detections(q_threshold=1.0)
+    with np.errstate(invalid="ignore"):
+        restored = load_forecast(save_forecast(forecast, tmp_path / "failed.npz"))
+    np.testing.assert_array_equal(restored.template_status, forecast.template_status)
+    np.testing.assert_array_equal(restored.fisher_profiled, forecast.fisher_profiled)

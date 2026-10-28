@@ -1,33 +1,20 @@
-"""Profiled linear-Gaussian algebra for banks of subhalo signal templates.
+"""Stable profiled linear-Gaussian algebra in augmented data/prior space.
 
-Near the smooth model the whitened mean image is ``mu0 + A s + J eta`` for a
-subhalo amplitude ``A``, signal template ``s`` and nuisance design ``J`` (one
-column per nuisance parameter). Profiling ``eta`` under Gaussian priors of
-precision ``P`` leaves the information on ``A``
+With whitened nuisance design J and diagonal Gaussian precision P, form
+A = [J; diag(sqrt(P))] and normalize each nonzero augmented column. An SVD
+retains singular values greater than max(rcond, p*eps) times the largest.
+The default rcond=1e-12 acts on singular values in normalized coordinates,
+not eigenvalues of a normal matrix in arbitrary physical parameter units.
 
-    F = s.s - (s.J) N+ (J.s),    N = 0.5 (J^T J + (J^T J)^T) + diag(P),
+Signals, data and bias are augmented with zero prior rows. Information is the
+squared norm of the orthogonal signal residual, including its prior block;
+fitted and spurious numerators are residual inner products. A second projection
+pass removes floating point leakage along the retained basis. No information
+or numerator is obtained by subtracting two large scalar reductions.
 
-where the pseudo-inverse ``N+`` keeps the eigenvalues of ``N`` above
-``max(rcond, p eps) max|lambda|``. The cutoff is relative to the largest
-eigenvalue, so one common rescaling of every column (priors scaled alike)
-leaves ``F`` unchanged, but it depends on the units of individual columns:
-with flat priors, ``J = diag(1, 1e-7)`` and ``s = (0, 1)`` give ``F = 1`` at
-rank 1, while the same span with ``J = I`` gives ``F = 0``. ``nuisance_rank``
-and ``condition_number`` show when the cutoff acts.
-
-``q_asimov = F`` is the Asimov statistic of a unit-amplitude template. For data
-residuals ``d`` made with another PSF and a fixed truth-minus-model bias ``b``,
-the profiled fitted amplitudes are
-
-    a_hat = (s.d - (s.J) N+ (J.d)) / F,    a_spurious = (s.b - (s.J) N+ (J.b)) / F,
-
-with ``z_mismatch = a_hat sqrt(F)``, ``z_spurious = |a_spurious| sqrt(F)`` and
-``q = z**2``; amplitudes and their statistics are NaN where ``F = 0``.
-
-The derived statistics are module functions shared by the bank finisher and
-:class:`hwoslaps.fisher.result.ForecastResult`, so a forecast's properties are
-the bank's bits. Dense whitening and the workspace algebra run with one BLAS
-thread, so results do not depend on the caller's thread count.
+Zero-information templates have q=0 and unidentified (NaN) fitted amplitudes.
+Non-finite inputs or reductions raise explicitly. Dense host algebra uses one
+BLAS thread and accelerators return only residual-space scalar reductions.
 """
 
 from __future__ import annotations
@@ -43,7 +30,7 @@ from threadpoolctl import threadpool_limits
 
 __all__ = [
     "BankReductions", "ProfileLikelihoodWorkspace", "SignalBankResult", "Whitener",
-    "amplitude_significance", "degradation", "sigma_amplitude", "z_asimov",
+    "amplitude_significance", "degradation", "residual_blocks", "sigma_amplitude", "z_asimov",
 ]
 
 
@@ -68,9 +55,9 @@ def degradation(fisher_raw: np.ndarray, fisher_profiled: np.ndarray) -> np.ndarr
 
 def amplitude_significance(amplitude: np.ndarray, fisher_profiled: np.ndarray, *,
                            signed: bool) -> tuple[np.ndarray, np.ndarray]:
-    """``(z, q = z**2)`` of a fitted amplitude: ``z = a sqrt(F)`` (``|a| sqrt(F)`` unsigned), NaN where ``F <= 0``."""
+    """``(z, q = z**2)`` of a fitted amplitude: ``z = a sqrt(F)`` (``|a| sqrt(F)`` unsigned), zero where ``F = 0``; amplitudes remain unidentified."""
     positive = fisher_profiled > 0.0
-    z = np.full_like(fisher_profiled, np.nan, dtype=float)
+    z = np.where(fisher_profiled == 0.0, 0.0, np.nan)
     scale = amplitude[positive] if signed else np.abs(amplitude[positive])
     z[positive] = scale * np.sqrt(fisher_profiled[positive])
     return z, z**2
@@ -169,44 +156,48 @@ class Whitener:
             return np.linalg.solve(self.cholesky_factor, array)
 
 
+def residual_blocks(values, basis_data, basis_prior):
+    """Project row vectors (or one vector) without materializing augmented rows.
+
+    This array-only primitive is shared by NumPy and JAX. The prior residual
+    is essential: discarding it changes a Gaussian-constrained profile fit.
+    Storage is O(batch*n_data + batch*n_prior), independent of bank size.
+    """
+    coefficients = values @ basis_data
+    data = values - coefficients @ basis_data.T
+    prior = -(coefficients @ basis_prior.T)
+    correction = data @ basis_data + prior @ basis_prior
+    return data - correction @ basis_data.T, prior - correction @ basis_prior.T
+
+
 @dataclass(frozen=True, eq=False)
 class BankReductions:
-    """Reductions over the whitened data axis, one row per signal.
+    """Device reductions of orthogonal residuals, one row per signal.
 
-    ``raw = s.s``, ``cross = s @ J``; with data residuals ``signal_data_inner =
-    s.d`` and ``data_cross = d @ J``; with a bias ``signal_bias_inner = s.b``.
-    ``finite`` and ``data_finite`` carry the all-finite verdict of each whitened
-    vector, taken where the vectors existed (an accelerator never sends them to
-    the host).
+    ``profiled`` includes squared data AND prior residual blocks. Optional
+    numerators are residual inner products, never differences of raw products.
+    Finiteness verdicts are taken on device while the source vectors exist.
     """
 
     raw: np.ndarray
-    cross: np.ndarray
+    profiled: np.ndarray
     finite: np.ndarray
-    signal_data_inner: np.ndarray | None = None
-    data_cross: np.ndarray | None = None
+    signal_data_residual_inner: np.ndarray | None = None
     data_finite: np.ndarray | None = None
-    signal_bias_inner: np.ndarray | None = None
+    signal_bias_residual_inner: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         raw = _array(self.raw, "raw", ndim=1)
         size = raw.shape[0]
-        cross = _array(self.cross, "cross", ndim=2)
-        if cross.shape[0] != size:
-            raise ValueError(f"cross must have {size} rows, got shape {cross.shape}")
-        values = {"raw": raw, "cross": cross, "finite": self._verdict(self.finite, "finite", size)}
-        data = (self.signal_data_inner, self.data_cross, self.data_finite)
-        if any(value is None for value in data) and not all(value is None for value in data):
-            raise ValueError("signal_data_inner, data_cross and data_finite are given together or not at all")
-        if self.signal_data_inner is not None:
-            values["signal_data_inner"] = self._row(self.signal_data_inner, "signal_data_inner", size)
-            data_cross = _array(self.data_cross, "data_cross", ndim=2)
-            if data_cross.shape != cross.shape:
-                raise ValueError(f"data_cross must have the shape of cross {cross.shape}, got {data_cross.shape}")
-            values["data_cross"] = data_cross
+        values = {"raw": raw, "profiled": self._row(self.profiled, "profiled", size),
+                  "finite": self._verdict(self.finite, "finite", size)}
+        if (self.signal_data_residual_inner is None) != (self.data_finite is None):
+            raise ValueError("signal_data_residual_inner and data_finite are given together or not at all")
+        for name in ("signal_data_residual_inner", "signal_bias_residual_inner"):
+            if getattr(self, name) is not None:
+                values[name] = self._row(getattr(self, name), name, size)
+        if self.data_finite is not None:
             values["data_finite"] = self._verdict(self.data_finite, "data_finite", size)
-        if self.signal_bias_inner is not None:
-            values["signal_bias_inner"] = self._row(self.signal_bias_inner, "signal_bias_inner", size)
         for name, value in values.items():
             object.__setattr__(self, name, value)
 
@@ -231,7 +222,7 @@ class BankReductions:
 
     @staticmethod
     def concatenate(parts: Sequence[BankReductions]) -> BankReductions:
-        """Join batches in order; every part must carry the same optional reductions."""
+        """Join batches in order; every part carries the same optional reductions."""
         return BankReductions(**_concatenated(parts, BankReductions))
 
 
@@ -281,6 +272,11 @@ class SignalBankResult:
         self.__post_init__()
 
     @property
+    def template_status(self) -> np.ndarray:
+        """Identifiability per signal; failed numerical evaluations raise earlier."""
+        return _read_only(np.where(self.fisher_profiled == 0.0, "zero_information", "valid"))
+
+    @property
     def size(self) -> int:
         """Number of signals."""
         return int(self.fisher_raw.shape[0])
@@ -306,27 +302,11 @@ def _concatenated(parts: Sequence[BankReductions | SignalBankResult], kind: type
     return joined
 
 
-def _symmetric_pseudo_inverse(matrix: np.ndarray, rcond: float) -> tuple[np.ndarray, int, float]:
-    if matrix.size == 0:
-        return np.zeros_like(matrix), 0, 1.0
-    symmetric = 0.5 * (matrix + matrix.T)
-    eigenvalues, eigenvectors = np.linalg.eigh(symmetric)
-    max_abs = float(np.max(np.abs(eigenvalues)))
-    tolerance = 0.0 if max_abs == 0.0 else max(rcond, symmetric.shape[0] * np.finfo(float).eps) * max_abs
-    keep = eigenvalues > tolerance
-    if not np.any(keep):
-        return np.zeros_like(symmetric), 0, np.inf
-    kept_vectors = eigenvectors[:, keep]
-    pseudo_inverse = (kept_vectors * (1.0 / eigenvalues[keep])) @ kept_vectors.T
-    condition = float(np.max(eigenvalues[keep]) / np.min(eigenvalues[keep]))
-    return pseudo_inverse, int(np.count_nonzero(keep)), condition
-
-
 class ProfileLikelihoodWorkspace:
     """Profiled amplitude statistics for one whitened nuisance design.
 
     The design ``(n_data, p)`` (``p`` may be 0) fixes the data size; the
-    normal matrix and its pseudo-inverse are built once. Attributes are fixed at
+    normalized augmented SVD and residual basis are built once. Attributes are fixed at
     construction and the stored arrays are read-only.
     """
 
@@ -354,27 +334,49 @@ class ProfileLikelihoodWorkspace:
         self.n_nuisance: int = int(n_nuisance)
         self.nuisance_names: tuple[str, ...] = names
         self.nuisance_whitened: np.ndarray = _read_only(design)
+        self.prior_precision = _read_only(precision)
+        self.rank_relative_tolerance = max(float(rcond), max(1, n_nuisance) * np.finfo(float).eps)
         with threadpool_limits(limits=1):
-            gram = self.nuisance_whitened.T @ self.nuisance_whitened
-            normal = 0.5 * (gram + gram.T) + np.diag(precision)
-            pseudo_inverse, rank, condition = _symmetric_pseudo_inverse(normal, float(rcond))
-        pseudo_inverse.setflags(write=False)
-        self.normal_pinv: np.ndarray = pseudo_inverse
-        self.nuisance_rank: int = rank
-        self.condition_number: float = condition
+            augmented = np.vstack((design, np.diag(np.sqrt(precision))))
+            # Scale via maxima first to avoid overflow/underflow in column norms.
+            maxima = np.max(np.abs(augmented), axis=0)
+            nonzero = maxima > 0.0
+            scaled = np.zeros_like(augmented)
+            scaled[:, nonzero] = augmented[:, nonzero] / maxima[nonzero]
+            norms = np.sqrt(np.sum(scaled * scaled, axis=0))
+            scaled[:, nonzero] /= norms[nonzero]
+            try:
+                basis, singular, _ = np.linalg.svd(scaled, full_matrices=False)
+            except np.linalg.LinAlgError as error:
+                raise ValueError("normalized augmented nuisance SVD failed") from error
+        _require_finite(singular, "normalized nuisance singular values")
+        largest = float(singular[0]) if singular.size else 0.0
+        keep = singular > self.rank_relative_tolerance * largest
+        refined = singular > self.rank_relative_tolerance * 0.1 * largest
+        self.nuisance_rank = int(np.count_nonzero(keep))
+        self.rank_at_refined_tolerance = int(np.count_nonzero(refined))
+        self.rank_tolerance_sensitive = self.nuisance_rank != self.rank_at_refined_tolerance
+        self.condition_number = (float(singular[keep][0] / singular[keep][-1]) if self.nuisance_rank else
+                                 (1.0 if n_nuisance == 0 else np.inf))
+        self.normalized_singular_values = _read_only(singular)
+        self.basis_data = _read_only(basis[:self.n_data, keep])
+        self.basis_prior = _read_only(basis[self.n_data:, keep])
+        # A norm at the roundoff floor is unidentified. This squared threshold
+        # does not erase genuinely small residuals at sqrt(eps)*signal scale.
+        self.zero_information_relative_norm = 8.0 * np.finfo(float).eps * max(1.0, np.sqrt(self.nuisance_rank))
 
     def __setstate__(self, state: dict[str, object]) -> None:
-        """Unpickle with the stored arrays read-only again; numpy restores them writeable."""
+        """Restore read-only arrays after unpickling."""
         self.__dict__.update(state)
-        self.nuisance_whitened.setflags(write=False)
-        self.normal_pinv.setflags(write=False)
+        for name in ("nuisance_whitened", "prior_precision", "normalized_singular_values", "basis_data", "basis_prior"):
+            getattr(self, name).setflags(write=False)
 
     def evaluate_bank(self, signals_whitened: ArrayLike, *, data_whitened: ArrayLike | None = None,
                       bias_whitened: ArrayLike | None = None) -> SignalBankResult:
         """Statistics of whitened signals ``(n_signals, n_data)``.
 
-        ``data_whitened`` (same shape) pairs each signal with the data residual
-        it is fitted to; ``bias_whitened`` ``(n_data,)`` is the fixed bias.
+        Optional data pairs with each signal; bias is a fixed ``(n_data,)``
+        vector. Only the current bank's data and prior residuals are retained.
         """
         signals = self._bank(signals_whitened, "signals_whitened")
         data = None
@@ -384,43 +386,43 @@ class ProfileLikelihoodWorkspace:
                 raise ValueError(f"data_whitened must have the signals' shape {signals.shape}, got {data.shape}")
         bias = None if bias_whitened is None else self._bias(bias_whitened)
         with threadpool_limits(limits=1):
-            design = self.nuisance_whitened
+            sr, sp = residual_blocks(signals, self.basis_data, self.basis_prior)
             raw = np.einsum("ij,ij->i", signals, signals)
-            cross = signals @ design
-            signal_data_inner = data_cross = None
+            profiled = np.einsum("ij,ij->i", sr, sr) + np.einsum("ij,ij->i", sp, sp)
+            data_inner = bias_inner = None
             if data is not None:
-                signal_data_inner = np.einsum("ij,ij->i", signals, data)
-                data_cross = data @ design
-            signal_bias_inner = nuisance_bias = None
+                dr, dp = residual_blocks(data, self.basis_data, self.basis_prior)
+                data_inner = np.einsum("ij,ij->i", sr, dr) + np.einsum("ij,ij->i", sp, dp)
             if bias is not None:
-                signal_bias_inner = signals @ bias
-                nuisance_bias = design.T @ bias
-            return self._finish(raw, cross, signal_data_inner, data_cross, signal_bias_inner, nuisance_bias)
+                br, bp = residual_blocks(bias, self.basis_data, self.basis_prior)
+                bias_inner = sr @ br + sp @ bp
+            return self.evaluate_reductions(BankReductions(raw, profiled, np.ones(len(signals), dtype=bool),
+                data_inner, None if data is None else np.ones(len(signals), dtype=bool), bias_inner),
+                bias_whitened=bias)
 
     def evaluate_reductions(self, reductions: BankReductions, *,
                             bias_whitened: ArrayLike | None = None) -> SignalBankResult:
-        """Statistics from reductions taken off the host; equal to :meth:`evaluate_bank` on the same vectors."""
-        if reductions.cross.shape[1] != self.n_nuisance:
-            raise ValueError(f"cross must have {self.n_nuisance} columns, got {reductions.cross.shape[1]}")
+        """Finish residual-space reductions without transferring image banks."""
         if not np.all(reductions.finite):
             raise ValueError("signals_whitened contains non-finite values")
-        _require_finite(reductions.raw, "raw")
-        _require_finite(reductions.cross, "cross")
-        if reductions.signal_data_inner is not None:
-            if not np.all(reductions.data_finite):
-                raise ValueError("data_whitened contains non-finite values")
-            _require_finite(reductions.signal_data_inner, "signal_data_inner")
-            _require_finite(reductions.data_cross, "data_cross")
-        if (reductions.signal_bias_inner is None) != (bias_whitened is None):
-            raise ValueError("signal_bias_inner and bias_whitened are given together or not at all")
-        bias = None
+        if reductions.data_finite is not None and not np.all(reductions.data_finite):
+            raise ValueError("data_whitened contains non-finite values")
+        for name in ("raw", "profiled", "signal_data_residual_inner", "signal_bias_residual_inner"):
+            value = getattr(reductions, name)
+            if value is not None:
+                _require_finite(value, name)
+        if (reductions.signal_bias_residual_inner is None) != (bias_whitened is None):
+            raise ValueError("signal_bias_residual_inner and bias_whitened are given together or not at all")
         if bias_whitened is not None:
-            _require_finite(reductions.signal_bias_inner, "signal_bias_inner")
-            bias = self._bias(bias_whitened)
-        with threadpool_limits(limits=1):
-            nuisance_bias = None if bias is None else self.nuisance_whitened.T @ bias
-            return self._finish(reductions.raw, reductions.cross, reductions.signal_data_inner,
-                                reductions.data_cross, reductions.signal_bias_inner, nuisance_bias)
+            self._bias(bias_whitened)
+        raw, profiled = reductions.raw, reductions.profiled
+        if np.any(raw < 0.0) or np.any(profiled < 0.0):
+            raise ValueError("residual information must be non-negative")
+        if np.any(profiled > raw * (1.0 + 1.e-10) + np.finfo(float).tiny):
+            raise ValueError("profiled residual information exceeds raw information")
+        profiled = np.where(profiled <= raw * self.zero_information_relative_norm**2, 0.0, profiled)
+        return self._finish(raw, profiled, reductions.signal_data_residual_inner,
+                            reductions.signal_bias_residual_inner)
 
     def _bank(self, values: ArrayLike, what: str) -> np.ndarray:
         bank = _array(values, what, ndim=2)
@@ -436,39 +438,24 @@ class ProfileLikelihoodWorkspace:
         _require_finite(bias, "bias_whitened")
         return bias
 
-    def _finish(self, raw: np.ndarray, cross: np.ndarray, signal_data_inner: np.ndarray | None,
-                data_cross: np.ndarray | None, signal_bias_inner: np.ndarray | None,
-                nuisance_bias: np.ndarray | None) -> SignalBankResult:
-        if self.n_nuisance == 0:
-            profiled = raw.copy()
-        else:
-            profiled = raw - np.einsum("ij,jk,ik->i", cross, self.normal_pinv, cross)
-            if np.any(profiled < -1.0e-10 * np.maximum(raw, 1.0)):
-                raise ValueError("profiled information is significantly negative for at least one signal: "
-                                 "the nuisance design or priors are numerically inconsistent")
-            profiled = np.where(profiled < 0.0, 0.0, profiled)
+    def _finish(self, raw: np.ndarray, profiled: np.ndarray, data_inner: np.ndarray | None,
+                bias_inner: np.ndarray | None) -> SignalBankResult:
         positive = profiled > 0.0
         statistics = {
-            "fisher_raw": raw,
-            "fisher_profiled": profiled,
-            "sigma_amplitude": sigma_amplitude(profiled),
-            "q_asimov": profiled,
+            "fisher_raw": raw, "fisher_profiled": profiled,
+            "sigma_amplitude": sigma_amplitude(profiled), "q_asimov": profiled,
             "degradation": degradation(raw, profiled),
         }
-        if signal_data_inner is not None:
-            numerator = signal_data_inner
-            if self.n_nuisance > 0:
-                numerator = numerator - np.einsum("ij,jk,ik->i", cross, self.normal_pinv, data_cross)
-            amplitude_hat = np.full_like(profiled, np.nan, dtype=float)
-            amplitude_hat[positive] = numerator[positive] / profiled[positive]
-            z, q = amplitude_significance(amplitude_hat, profiled, signed=True)
-            statistics.update(amplitude_hat=amplitude_hat, z_mismatch=z, q_mismatch=q)
-        if signal_bias_inner is not None:
-            numerator = signal_bias_inner
-            if self.n_nuisance > 0:
-                numerator = numerator - cross @ (self.normal_pinv @ nuisance_bias)
-            amplitude_spurious = np.full_like(profiled, np.nan, dtype=float)
-            amplitude_spurious[positive] = numerator[positive] / profiled[positive]
-            z, q = amplitude_significance(amplitude_spurious, profiled, signed=False)
-            statistics.update(amplitude_spurious=amplitude_spurious, z_spurious=z, q_spurious=q)
+        for numerator, amplitude_name, z_name, q_name, signed in (
+            (data_inner, "amplitude_hat", "z_mismatch", "q_mismatch", True),
+            (bias_inner, "amplitude_spurious", "z_spurious", "q_spurious", False),
+        ):
+            if numerator is None:
+                continue
+            amplitude = np.full_like(profiled, np.nan)
+            amplitude[positive] = numerator[positive] / profiled[positive]
+            z, q = amplitude_significance(amplitude, profiled, signed=signed)
+            if not np.all(np.isfinite(amplitude[positive])) or not np.all(np.isfinite(q)):
+                raise ValueError("fitted amplitude or statistic is non-finite for an identifiable template")
+            statistics.update({amplitude_name: amplitude, z_name: z, q_name: q})
         return SignalBankResult(**statistics)

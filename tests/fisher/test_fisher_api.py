@@ -298,7 +298,7 @@ def test_rank_zero_nuisance_has_json_serializable_condition_metadata(minimal_map
         assert np.isinf(prepared.workspace.condition_number)
         result = forecast(prepared, masses_msun=[1.0e8])
         assert result.provenance["nuisance_rank"] == 0
-        assert result.provenance["gram_condition_number"] is None
+        assert result.provenance["normalized_design_condition_number"] is None
         assert result.provenance["nuisance_names"] == ["source.light.light.centre_y"]
         stored = load_forecast(save_forecast(result, tmp_path / "rank-zero.npz"))
         assert stored.provenance == result.provenance

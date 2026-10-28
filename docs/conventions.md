@@ -156,12 +156,30 @@ from a negative fitted amplitude is not a subhalo, so mismatch detections also r
 positive amplitude. *q* and $\sqrt{q}$ are local summaries for a subhalo of known mass
 and position; they do not include the cost of searching many positions.
 
-The nuisance fit uses a pseudo-inverse that drops eigen-directions smaller than
-$\max(10^{-12}, p\,\epsilon)$ times the largest eigenvalue, where $p$ is the number of nuisance
-parameters and $\epsilon$ is the double-precision machine epsilon. The result is unchanged if every
-nuisance column is rescaled by the same factor, but it depends on the relative units of
-individual columns. Each result records the nuisance rank and the condition number so
-you can see when this cutoff acts.
+The nuisance fit uses an augmented least-squares design $[J;\sqrt{P}]$ in
+whitened data and Gaussian-prior space. It normalizes each nonzero augmented
+column before retaining singular values above $\max(10^{-12},p\,\epsilon)$
+times the largest, where $p$ is the number of nuisance parameters. Changing a
+nuisance's units leaves the result unchanged when its Gaussian precision is
+transformed with it. Information is the squared orthogonal residual norm,
+including the prior rows; fitted amplitudes use residual inner products.
+
+Each result records the normalized singular values, retained rank, condition
+number and rank at a tenfold smaller tolerance. The condition number refers to
+the retained normalized augmented design. The rank-sensitivity flag identifies
+fits whose retained span changes under this tolerance refinement. Residual
+norms no larger than $8\epsilon\max(1,\sqrt{r})$ times the signal norm are
+classified as zero information, where $r$ is the retained rank. This floor
+removes roundoff-scale residuals without treating all small positive information
+as zero; ill-conditioned spans can retain small floating point residuals above
+that floor.
+
+`template_status` distinguishes `valid`, `zero_information` and `failed_numeric`
+trials. Zero information gives $q=0$ and an unidentified (`NaN`) fitted amplitude.
+Numerical failures raise during evaluation; retained failed result rows remain
+labelled and detection queries reject them by default. An explicit exclusion
+policy must report the omitted cohort. Forecast NPZ schema 3 stores these status
+labels; earlier schema versions are not accepted by the current loader.
 
 Forecasts can use a dense noise covariance in ADU², with one row per full-image pixel
 in flattened row order. The diagonal on selected pixels must match the squared noise

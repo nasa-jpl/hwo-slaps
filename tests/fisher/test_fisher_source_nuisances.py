@@ -57,3 +57,37 @@ def test_multicomponent_source_columns_have_registry_order_and_index_edges_fail(
     minimal_mapping["forecast"]["nuisances"]={"fixed":["source.light.light.sersic_index"]}
     with prepare_forecast(minimal_mapping) as prepared:
         assert "source.light.light.sersic_index" not in prepared.nuisances.names
+
+
+@pytest.mark.parametrize("engine", ["reference", "jax"])
+def test_public_image_flux_parameterization_preserves_templates_span_and_detections(engine):
+    from pathlib import Path
+    from hwoslaps.config import load_config
+    from hwoslaps.fisher.api import Execution, forecast, prepare_forecast
+    from hwoslaps.fisher.engines.reference import node_signal
+
+    config = load_config(Path(__file__).parents[1] / "fixtures/paper_parity/engine/p3_image_source_kernel.yaml")
+    baseline = None
+    for scale in (1.0, 1e6, 1e8):
+        equivalent = config.replace({"scene": {"source": {"light": {"light": {
+            "total_flux": 0.29 / scale, "flux_scale": scale}}}}})
+        with prepare_forecast(equivalent, execution=Execution(engine=engine)) as prepared:
+            result = forecast(prepared, masses_msun=[1e8])
+            # Reference detector templates verify the physical equality directly.
+            signals = None if engine != "reference" else np.stack([
+                node_signal(prepared.engine.payload, 1e8, tuple(p)) for p in prepared.positions.positions_yx])
+            values = (prepared.observation.expected_adu.copy(), prepared.observation.noise_map_adu.copy(),
+                      result.q_asimov.copy(), result.detections(q_threshold=25.0),
+                      prepared.workspace.basis_data.copy(), signals)
+            assert prepared.workspace.nuisance_rank == 10
+            if baseline is None:
+                baseline = values
+                continue
+            for actual, expected in zip(values[:2], baseline[:2]):
+                np.testing.assert_array_equal(actual, expected)
+            np.testing.assert_allclose(values[2], baseline[2], rtol=1e-11, atol=1e-13)
+            np.testing.assert_array_equal(values[3], baseline[3])
+            principal_cosines = np.linalg.svd(values[4].T @ baseline[4], compute_uv=False)
+            np.testing.assert_allclose(principal_cosines, 1.0, atol=2e-13, rtol=0.0)
+            if signals is not None:
+                np.testing.assert_array_equal(signals, baseline[5])

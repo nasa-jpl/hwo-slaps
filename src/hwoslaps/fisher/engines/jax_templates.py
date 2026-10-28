@@ -9,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ..statistics import BankReductions, SignalBankResult
+from ..statistics import BankReductions, SignalBankResult, residual_blocks
 from .base import BankAccumulator, EngineContext, checked_positions
 from .fft import convolution_fft_shape
 from .jax_profiles import build_light_evaluator, verification_points
@@ -64,7 +64,8 @@ class JaxTemplateEngine:
         self._bias_whitened = None
         if context.data_space.whitener.mode == "diagonal":
             self._sigma_masked = jnp.asarray(context.data_space.whitener.sigma)
-            self._nuisance_whitened = jnp.asarray(context.workspace.nuisance_whitened)
+            self._basis_data = jnp.asarray(context.workspace.basis_data)
+            self._basis_prior = jnp.asarray(context.workspace.basis_prior)
             self._bias_whitened = None if context.bias_whitened is None else jnp.asarray(context.bias_whitened)
             self._reductions = jax.jit(jax.vmap(self._reduction_for_position, in_axes=(0, None)))
 
@@ -135,15 +136,17 @@ class JaxTemplateEngine:
         else:
             model_whitened = signal[0] / self._sigma_masked
             data_whitened = signal[1] / self._sigma_masked
+        sr, sp = residual_blocks(model_whitened, self._basis_data, self._basis_prior)
         reductions = {"raw": jnp.sum(model_whitened * model_whitened),
-                      "cross": model_whitened @ self._nuisance_whitened,
+                      "profiled": jnp.sum(sr * sr) + jnp.sum(sp * sp),
                       "finite": jnp.all(jnp.isfinite(model_whitened))}
         if data_whitened is not None:
-            reductions["signal_data_inner"] = jnp.sum(model_whitened * data_whitened)
-            reductions["data_cross"] = data_whitened @ self._nuisance_whitened
+            dr, dp = residual_blocks(data_whitened, self._basis_data, self._basis_prior)
+            reductions["signal_data_residual_inner"] = jnp.sum(sr * dr) + jnp.sum(sp * dp)
             reductions["data_finite"] = jnp.all(jnp.isfinite(data_whitened))
         if self._bias_whitened is not None:
-            reductions["signal_bias_inner"] = model_whitened @ self._bias_whitened
+            br, bp = residual_blocks(self._bias_whitened, self._basis_data, self._basis_prior)
+            reductions["signal_bias_residual_inner"] = sr @ br + sp @ bp
         return reductions
 
     def _table(self, mass):
@@ -221,7 +224,7 @@ class JaxTemplateEngine:
         self._light_evaluators.clear()
         self._model_slots = self._truth_slots = ()
         for name in ("_coords", "_alpha_macro_fit", "_log_radii", "_mu0_flat", "_mask_flat_idx",
-                     "_model_constant", "_truth_constant", "_sigma_masked", "_nuisance_whitened",
+                     "_model_constant", "_truth_constant", "_sigma_masked", "_basis_data", "_basis_prior",
                      "_bias_whitened"):
             setattr(self, name, None)
         self._closed = True
