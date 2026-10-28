@@ -19,15 +19,51 @@ SUPPORT = MassSupport(6.0, 9.7)
     ([0.0, 10.0], [0.25, 0.75], (10.0 * (0.16 - 0.125) / 0.5, 10.0 * (0.5 - 0.125) / 0.5, 10.0)),
     ([1.0, 2.0, 3.0, 4.0], [0.01, 0.01, 0.01, 0.97], (3.0 + (0.16 - 0.025) / 0.49, 3.0 + (0.5 - 0.025) / 0.49, 4.0)),
     ([1.0, 2.0, 3.0, 4.0], [0.97, 0.01, 0.01, 0.01], (1.0, 1.0 + (0.5 - 0.485) / 0.49, 1.0 + (0.84 - 0.485) / 0.49)),
-    ([3.0, 1.0, 2.0, 4.0], [0.25, 0.25, 0.25, 0.25], tuple(np.quantile([3.0, 1.0, 2.0, 4.0], [0.16, 0.5, 0.84]))),
-    ([3.0, 1.0, 2.0], [0.0, 0.0, 0.0], tuple(np.quantile([3.0, 1.0, 2.0], [0.16, 0.5, 0.84]))),
+    ([3.0, 1.0, 2.0, 4.0], [0.25, 0.25, 0.25, 0.25], (1.14, 2.5, 3.86)),
     ([3.0, 1.0, 4.0, 1.5, 9.0, 2.6], None, tuple(np.quantile([3.0, 1.0, 4.0, 1.5, 9.0, 2.6], [0.16, 0.5, 0.84]))),
 ], ids=["asymmetric-two-point", "heavy-last-weight", "heavy-first-weight-clamps", "equal-weights",
-        "zero-weight-sum", "no-weights"])
+        "no-weights"])
 def test_weighted_quantiles_follow_the_midpoint_cdf(values, weights, expected):
     """Sorted samples sit at (cumsum(w) - w / 2) / sum(w); quantiles interpolate and clamp."""
     result = weighted_quantiles(np.asarray(values), None if weights is None else np.asarray(weights))
     assert result == pytest.approx(expected, rel=1.0e-12)
+
+
+def test_weighted_measure_ignores_zero_probability_and_representation():
+    expected = weighted_quantiles(np.array([2., 8., 10.]), np.array([1., 2., 1.]))
+    # Zeros below, inside and above support include nonfinite noncontributing values.
+    values = np.array([-100., 2., 5., 8., 10., 100., np.nan])
+    weights = np.array([0., 1., 0., 2., 1., 0., 0.])
+    for order in (np.arange(7), np.array([6, 5, 4, 3, 2, 1, 0]), np.array([2, 3, 0, 6, 4, 1, 5])):
+        for scale in (1.e-200, 1., 1.e200):
+            assert weighted_quantiles(values[order], weights[order] * scale) == pytest.approx(expected)
+    assert weighted_quantiles(np.array([6., 8., 10.]), np.array([0., 1., 0.])) == (8., 8., 8.)
+    # Splitting a tied atom cannot make its arbitrary sort order matter.
+    split_values, split_weights = np.array([2., 8., 8., 10.]), np.array([1., .1, 1.9, 1.])
+    assert weighted_quantiles(split_values, split_weights) == pytest.approx(expected)
+    assert weighted_quantiles(split_values[::-1], split_weights[::-1]) == pytest.approx(expected)
+
+
+def test_weighted_quantiles_are_continuous_at_equal_weights_and_overflow_safe():
+    values = np.array([0., 10.])
+    equal = weighted_quantiles(values, np.ones(2))
+    assert equal == (0., 5., 10.)
+    assert weighted_quantiles(values, np.array([1., 1. + 1.e-12])) == pytest.approx(equal, abs=1.e-10)
+    assert weighted_quantiles(values, np.full(2, np.finfo(float).max)) == equal
+    assert weighted_quantiles(values, None) == pytest.approx((1.6, 5., 8.4))
+
+
+@pytest.mark.parametrize(("values", "weights", "probabilities"), [
+    ([1., 2.], [0., 0.], [.5]), ([1., 2.], [-1., 2.], [.5]),
+    ([1., 2.], [np.inf, 1.], [.5]), ([1., 2.], [np.nan, 1.], [.5]),
+    ([np.nan, 2.], [1., 1.], [.5]), ([np.inf, 2.], None, [.5]),
+    ([], None, [.5]), ([[1., 2.]], [[1., 1.]], [.5]),
+    ([1., 2.], [1.], [.5]), ([1., 2.], [1., 1.], [-.1]),
+    ([1., 2.], None, [1.1]), ([1., 2.], [1., 1.], [np.nan]),
+])
+def test_quantiles_reject_invalid_probability_measures(values, weights, probabilities):
+    with pytest.raises(ValueError):
+        weighted_quantiles(values, weights, probabilities)
 
 
 def _subhalo_model():

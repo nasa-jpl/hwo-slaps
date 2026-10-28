@@ -111,23 +111,41 @@ def weighted_quantiles(values: np.ndarray, weights: np.ndarray | None,
 
     Sorted samples get cumulative probability ``(cumsum(w) - w / 2) / sum(w)`` and quantiles
     interpolate the sorted values against it, clamped to the smallest and largest sample.
-    Without weights, with fewer than two samples, with equal weights, or with a non-finite or
-    non-positive weight sum, the result is ``np.quantile`` of the values.
+    Zero-weight entries do not contribute knots; equal values share one probability atom.
+    All positive weights, including equal
+    weights, use this convention. Weights must be finite, nonnegative and have positive
+    support; contributing values must be finite. Without weights the separate contract is
+    NumPy's default linear quantile estimator on a nonempty finite one-dimensional array.
     """
     values = np.asarray(values, dtype=float)
+    probabilities = np.asarray(list(probabilities), dtype=float)
+    if probabilities.ndim != 1 or not np.all(np.isfinite(probabilities)) or np.any(
+            (probabilities < 0.0) | (probabilities > 1.0)):
+        raise ValueError("probabilities must be finite and between zero and one")
+    if values.ndim != 1 or values.size == 0:
+        raise ValueError("values must be a nonempty one-dimensional array")
     if weights is None:
-        return tuple(float(value) for value in np.quantile(values, list(probabilities)))
+        if not np.all(np.isfinite(values)):
+            raise ValueError("unweighted values must be finite")
+        return tuple(float(value) for value in np.quantile(values, probabilities))
     weights = np.asarray(weights, dtype=float)
     if weights.shape != values.shape:
         raise ValueError(f"weights of shape {weights.shape} do not match values of shape {values.shape}")
-    order = np.argsort(values)
+    if not np.all(np.isfinite(weights)) or np.any(weights < 0.0):
+        raise ValueError("weights must be finite and nonnegative")
+    positive = weights > 0.0
+    if not np.any(positive):
+        raise ValueError("weights must have positive support")
+    values, weights = values[positive], weights[positive]
+    if not np.all(np.isfinite(values)):
+        raise ValueError("positive-weight values must be finite")
+    order = np.argsort(values, kind="stable")
     sorted_values = values[order]
-    sorted_weights = weights[order]
-    if sorted_weights.size < 2 or np.all(sorted_weights == sorted_weights[0]):
-        return tuple(float(value) for value in np.quantile(values, list(probabilities)))
+    # Scaling first prevents overflow of the sum for otherwise valid finite measures.
+    sorted_weights = weights[order] / np.max(weights)
+    sorted_values, first = np.unique(sorted_values, return_index=True)
+    sorted_weights = np.add.reduceat(sorted_weights, first)
     normalization = float(np.sum(sorted_weights))
-    if not np.isfinite(normalization) or normalization <= 0.0:
-        return tuple(float(value) for value in np.quantile(values, list(probabilities)))
     cumulative = (np.cumsum(sorted_weights) - 0.5 * sorted_weights) / normalization
     return tuple(float(np.interp(probability, cumulative, sorted_values)) for probability in probabilities)
 
