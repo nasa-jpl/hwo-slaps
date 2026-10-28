@@ -81,6 +81,10 @@ def test_off_plane_singular_halos_require_a_validated_pixel_integral(minimal_map
     minimal_mapping["scene"]["subhalo"] = {"type": kind, "redshift": redshift}
     minimal_mapping["forecast"]["positions"] = {"kind": "explicit", "positions_yx": [[0.11, -0.13]]}
     minimal_mapping["forecast"]["nuisances"] = {"fixed": ["*"], "background_offset": False}
+    if engine == "jax":
+        with pytest.raises(ValueError, match="JAX templates require a two-plane scene and a lens-plane subhalo"):
+            prepare_forecast(minimal_mapping, execution=Execution(engine=engine))
+        return
     with prepare_forecast(minimal_mapping, execution=Execution(engine=engine)) as prepared:
         halo = prepared.hypothesis(1e8, (0.11, -0.13))
         with pytest.raises(SingularIntegrationCapabilityError, match="two-plane scene and a lens-plane halo"):
