@@ -1,6 +1,6 @@
 """The AutoGalaxy light profile of an image asset (backend glue: importing it loads AutoGalaxy).
 
-The image-source numerics of the RASTI-26-183 paper code, unchanged: the numpy path
+The image interpolation conventions of the RASTI-26-183 paper code: the numpy path
 interpolates with a linear ``RectBivariateSpline`` over the one-pixel zero pad, the array
 namespace path (JAX fits) with the explicit bilinear expression. Both are paper paths.
 """
@@ -70,11 +70,14 @@ class ImageLightProfile(ag.LightProfile):
     @aa.over_sample
     @aa.decorators.to_array
     @check_operated_only
-    @aa.decorators.transform
     def image_2d_from(self, grid: aa.type.Grid2DLike, xp=np, operated_only=None, **kwargs) -> aa.Array2D:
-        """Zero-padded bilinear surface brightness at sky (y, x) coordinates (translated to ``centre``)."""
+        """Zero-padded bilinear surface brightness at sky (y, x) coordinates.
+
+        Translate directly in Cartesian coordinates. The inherited polar transform has
+        singular derivatives at the centre even inside a smooth interpolation cell.
+        """
         if xp is np:
-            relative = np.asarray(grid, dtype=float)
+            relative = np.asarray(grid, dtype=float) - np.asarray(self.centre)
             dy = relative[:, 0]
             dx = relative[:, 1]
             theta = np.deg2rad(self.rotation_deg)
@@ -94,7 +97,7 @@ class ImageLightProfile(ag.LightProfile):
             return self.total_flux * self.flux_scale * brightness
 
         grid_values = grid.array if hasattr(grid, "array") else grid
-        relative = xp.asarray(grid_values, dtype=float)
+        relative = xp.asarray(grid_values, dtype=float) - xp.asarray(self.centre)
         dy = relative[:, 0]
         dx = relative[:, 1]
         theta = xp.deg2rad(self.rotation_deg)
