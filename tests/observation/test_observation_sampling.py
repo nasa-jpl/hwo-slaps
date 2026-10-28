@@ -1,7 +1,9 @@
 """Native-pixel convolution against an over-sampled reference: the sampling budget and its threshold.
 
 The forward model bins the over-sampled light to native pixels and then convolves with the
-pixel-integrated kernel. That is exact for light constant within each pixel. This oracle
+pixel-integrated kernel. This native convolution is a discrete approximation even for
+light constant separately within each pixel: it omits averaging over the emitting cell.
+This oracle
 measures the route against a reference that never bins: the light point-sampled on a grid
 REFERENCE_FACTOR times finer, convolved with the continuous pixel-integrated Gaussian and read
 at the native pixel centres. The budget is on the raw information ``sum (X / sigma)^2`` of the

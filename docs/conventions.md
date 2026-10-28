@@ -53,7 +53,10 @@ parameters to make a combination pass.
 | `PointMass` | Total mass | A point mass |
 | `SIS` | $M_{200c}$ | A singular isothermal sphere |
 | `NFW` | $M_{200c}$ | An untruncated NFW profile, with a fixed, power-law or Moliné et al. (2017) concentration |
-| `TNFW` | $M_{200c}$ of the parent NFW | An NFW profile with the Baltz, Marshall and Oguri (2009) *n* = 2 truncation; the total truncated mass is recorded |
+| `TNFW` | $M_{200c}$ of the parent NFW | An NFW profile with the Baltz, Marshall and Oguri (2009) *n* = 1 truncation; the total truncated mass is recorded |
+
+The truncation multiplies the parent density by $r_t^2/(r^2+r_t^2)$, the
+[*n* = 1 BMO family](https://arxiv.org/html/0705.0682v3#S2.E2). It falls as $r^{-5}$ at large radius.
 
 The Moliné relation is applied at the lens redshift and only within its calibrated
 range of $10^6$ to $10^{12}$ M☉. A subhalo off the lens plane is placed in the angular
@@ -101,17 +104,25 @@ model has no saturation, cosmic rays, interpixel capacitance or flat-field error
 
 ## Rendering and pixel sampling
 
-Light is evaluated on a grid oversampled by `over_sample_size`, binned to detector
-pixels, and convolved with a PSF that is already integrated over a detector pixel. This
-is exact when the light is constant within each detector pixel and approximate
-otherwise. Increasing the oversampling cannot recover structure lost in the binning.
+Light is evaluated on a grid oversampled by `over_sample_size`, binned to native
+pixels, and convolved with a PSF that is already integrated over a detector pixel.
+This discrete approximation does not average the PSF over the area of each emitting
+native pixel. Even light constant separately within each pixel can therefore have a
+discretization error. Increasing light oversampling refines the bins but cannot recover
+structure discarded before convolution.
+
+The emitting grid extends beyond the requested detector by the largest kernel half-width
+on each axis across the truth, model and light groups. Real lens and lensed-source light
+is evaluated there, convolved, and cropped onto the unchanged detector footprint.
 
 `Observation.sampling` measures the relative variation of the smooth scene's light
 within detector pixels, for each light group. In the calibration tests, values below
 0.063 kept the error in the subhalo signal information below 1% compared with a finer
 reference. The value is reported, not enforced. Some of the paper's test scenes exceed it, and
 small values do not guarantee small errors for every subhalo position. For a new kind of
-scene, compare against finer pixels. At `over_sample_size: 1` this diagnostic is zero
+scene, check the response against a finer independent reference at fixed detector
+geometry. A convergent optical convolution before detector integration is a separate
+renderer capability. At `over_sample_size: 1` this diagnostic is zero
 by construction and provides no constraint on unresolved within-pixel structure.
 
 ## Optics

@@ -125,10 +125,13 @@ print(prepared.observation.photometry.to_mapping())
 
 ## Pixel sampling
 
-HWO-SLAPS evaluates light on an oversampled grid, bins it to detector pixels, and then
-convolves it with a pixel-integrated PSF. This is exact when the light is nearly
-constant across each detector pixel. `observation.sampling` reports how far it is from
-that, as the relative variation of light within a pixel, for each light group (each light
+HWO-SLAPS evaluates light on an oversampled grid, bins it to native pixels, and then
+convolves it with a pixel-integrated PSF. This is a discrete approximation: the kernel
+does not also average over the emitting pixel's area. Real light is rendered outside
+the detector, then convolved and cropped to the requested pixels. A forecast preparation
+uses the largest support per axis across its truth, model and light-group kernels;
+a standalone simulation needs the truth support. `observation.sampling` reports the relative
+variation of light within a pixel, for each light group (each light
 component with its own spectrum, or all the light of a plane when no spectra are set):
 
 ```python
@@ -137,6 +140,9 @@ print(prepared.observation.sampling)     # {'source': 0.32274029790875214}
 
 In the tests that calibrated this diagnostic, values below 0.063 kept the error in the
 subhalo signal information below one percent. HWO-SLAPS does not enforce a limit.
-For larger values, or a new kind of scene, compare against a configuration with finer
-pixels before relying on the result. The minimal example uses coarse pixels on
+For larger values, or a new kind of scene, compare with an independent response
+reference at the same physical detector geometry before relying on the result.
+Increasing light oversampling alone cannot remove the native convolution approximation;
+convolution before final detector integration requires a separate renderer capability.
+The minimal example uses coarse pixels on
 purpose; the HWO reference has a value of about 0.024.

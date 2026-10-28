@@ -289,7 +289,7 @@ def truncation_tau(spec: TruncationSpec, c200: Any, xp: Any = np) -> Any:
 
 
 def bmo_mass_fraction(tau: Any, xp: Any = np) -> Any:
-    """Dimensionless total mass of the BMO profile, relative to 4 pi rho_s r_s^3."""
+    """Dimensionless total mass of BMO n=1, relative to 4 pi rho_s r_s^3."""
     squared = tau**2
     return squared / (squared + 1.0)**2 * ((squared - 1.0) * xp.log(tau) + tau * xp.pi - (squared + 1.0))
 
