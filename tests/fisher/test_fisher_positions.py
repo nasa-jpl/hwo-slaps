@@ -47,6 +47,20 @@ def test_single_axis_and_translated_floating_lattices_validate():
     assert one_node.shape == (1, 1)
 
 
+@pytest.mark.parametrize("coords,spacing", [(1e15 + np.arange(3), 0.6),
+    (1.0 + np.array([0.0, 1e-15, 3e-15]), 1.5e-15)])
+def test_coordinate_roundoff_cannot_hide_large_relative_spacing_errors(coords, spacing):
+    with pytest.raises(ValueError, match="spacing"):
+        GridIndex(coords, coords, np.array([(0, 0), (1, 1), (2, 2)]), spacing)
+
+
+@pytest.mark.parametrize("origin,spacing", [(1e15, 1.0), (1.0, 2.0**-48)])
+def test_exactly_represented_translated_lattices_keep_their_cell_scale(origin, spacing):
+    coords = origin + np.arange(3) * spacing
+    grid = GridIndex(coords, coords, np.array([(0, 0), (1, 1), (2, 2)]), spacing)
+    assert grid.spacing_arcsec == spacing
+
+
 @pytest.mark.parametrize("centre, spacing, half_width, coords_y, coords_x", [
     ((0.25, -0.25), 0.5, 1.1, [-0.75, -0.25, 0.25, 0.75, 1.25], [-1.25, -0.75, -0.25, 0.25, 0.75]),
     ((0.0, 0.0), 1.0, 2.9999999999, [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0], [-3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0]),

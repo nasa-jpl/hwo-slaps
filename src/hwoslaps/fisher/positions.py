@@ -75,7 +75,8 @@ class GridIndex:
             if coords.ndim != 1 or coords.size == 0 or not np.all(np.isfinite(coords)) \
                     or np.any(np.diff(coords) <= 0.0):
                 raise ValueError(f"{name} must be a non-empty, finite, increasing vector")
-            tolerance = 4.0 * np.spacing(max(float(np.max(np.abs(coords))), spacing))
+            # A large coordinate origin must not make a wrong cell area acceptable.
+            tolerance = min(4.0 * np.spacing(max(float(np.max(np.abs(coords))), spacing)), 1e-10 * spacing)
             if np.any(np.abs(np.diff(coords) - spacing) > tolerance + 16.0 * np.finfo(float).eps * spacing):
                 raise ValueError(f"{name} must be uniformly separated by spacing_arcsec")
             object.__setattr__(self, name, _read_only(coords))

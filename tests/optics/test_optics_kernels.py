@@ -31,6 +31,18 @@ def test_equal_kernel_bytes_cannot_hide_incompatible_sampling():
     assert len(binding.kernels) == 1
 
 
+def test_kernel_sampling_compatibility_is_independent_of_group_order():
+    from itertools import permutations
+    from hwoslaps.optics.kernels import PIXEL_SCALE_ATOL_ARCSEC
+
+    values = np.eye(3) / 3.0
+    kernels = [DetectorPSF.from_array(values, SCALE + offset * PIXEL_SCALE_ATOL_ARCSEC, normalize=False)
+               for offset in (-0.9, 0.0, 0.9)]
+    for ordered in permutations(kernels):
+        with pytest.raises(ValueError, match="pixel scale"):
+            KernelBinding.from_groups(dict(zip(("a", "b", "c"), ordered)))
+
+
 def _kernel(seed, shape=(5, 5)):
     values = np.random.default_rng(seed).random(shape)
     return values / values.sum()

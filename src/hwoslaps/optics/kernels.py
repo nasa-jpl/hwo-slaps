@@ -238,8 +238,8 @@ class KernelBinding:
         digests = [kernel.kernel_identity().sha256 for kernel in kernels]
         if len(set(digests)) != len(digests):
             raise ValueError("kernels of a binding must be distinct; equal kernels share one entry")
-        scale = kernels[0].pixel_scale_arcsec
-        if any(abs(kernel.pixel_scale_arcsec - scale) > PIXEL_SCALE_ATOL_ARCSEC for kernel in kernels):
+        scales = [kernel.pixel_scale_arcsec for kernel in kernels]
+        if max(scales) - min(scales) > PIXEL_SCALE_ATOL_ARCSEC:
             raise ValueError("kernels of a binding must share one pixel scale")
         index = dict(self.group_index)
         if not index or not all(isinstance(group, str) and group for group in index):
@@ -255,8 +255,8 @@ class KernelBinding:
         supplied = tuple(kernels.values())
         if not supplied or not all(isinstance(kernel, DetectorPSF) for kernel in supplied):
             raise ValueError("a kernel binding needs at least one DetectorPSF")
-        scale = supplied[0].pixel_scale_arcsec
-        if any(abs(kernel.pixel_scale_arcsec - scale) > PIXEL_SCALE_ATOL_ARCSEC for kernel in supplied):
+        scales = [kernel.pixel_scale_arcsec for kernel in supplied]
+        if max(scales) - min(scales) > PIXEL_SCALE_ATOL_ARCSEC:
             raise ValueError("kernels of a binding must share one pixel scale")
         distinct: list[DetectorPSF] = []
         position: dict[str, int] = {}
