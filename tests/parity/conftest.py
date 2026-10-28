@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from dataclasses import replace
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity"
 _NAME_MAP = {
@@ -57,9 +58,30 @@ def prepared():
     cache = {}
     def get(scene, engine):
         if (scene, engine) not in cache:
-            path = FIXTURES / "engine" / f"{scene}.yaml"
-            cache[scene, engine] = prepare_forecast(path, execution=Execution(engine=engine))
+            if engine == "reference":
+                path = FIXTURES / "engine" / f"{scene}.yaml"
+                cache[scene, engine] = prepare_forecast(path, execution=Execution(engine=engine))
+            else:
+                # Compare actual execution engines on one checked physical
+                # preparation, avoiding duplicate costly singular light integrals.
+                from hwoslaps.fisher.engines.base import make_engine
+                reference = get(scene, "reference")
+                execution = Execution(engine=engine)
+                actual = make_engine(engine, reference.engine.context, execution)
+                cache[scene, engine] = replace(reference, engine=actual, execution=execution)
         return cache[scene, engine]
     yield get
     for value in cache.values():
         value.close()
+
+
+@pytest.fixture(scope="module")
+def current_forecast_oracle(prepared):
+    from current_oracles import forecast_oracle
+    cache = {}
+    def get(scene, masses, positions):
+        key = (scene, tuple(masses), tuple(map(tuple, positions)))
+        if key not in cache:
+            cache[key] = forecast_oracle(prepared(scene, "reference"), masses, positions)
+        return cache[key]
+    return get
