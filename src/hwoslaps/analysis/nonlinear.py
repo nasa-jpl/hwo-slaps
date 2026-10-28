@@ -155,7 +155,8 @@ def scientific_outputs(cases: Iterable[CaseResult], *, include_provisional: bool
     """
     evidence, recoveries, excluded = [], [], Counter()
     for case in cases:
-        if case.delta_log_evidence is not None and (case.evidence_quality == "complete" or include_provisional):
+        if case.delta_log_evidence is not None and math.isfinite(case.delta_log_evidence) and (
+                case.evidence_quality == "complete" or include_provisional):
             evidence.append((case.case_id, case.delta_log_evidence))
         else:
             excluded[f"evidence_{case.evidence_quality}"] += 1

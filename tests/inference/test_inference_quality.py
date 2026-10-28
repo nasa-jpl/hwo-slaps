@@ -22,6 +22,9 @@ def _role(diagnostics):
 
 
 def test_quality_roundtrip_and_legacy_records_do_not_infer_completion():
+    unbounded = SamplerDiagnostics({"n_like_max": math.inf}, {"f_live": None}, True, True,
+                                   "criteria_satisfied", True)
+    assert SamplerDiagnostics.from_mapping(json.loads(json.dumps(unbounded.to_mapping(), allow_nan=False))) == unbounded
     diagnostic = SamplerDiagnostics({"n_eff": 500}, {"n_eff": 100}, False, False,
                                     "budget_exhausted", True)
     role = _role(diagnostic)

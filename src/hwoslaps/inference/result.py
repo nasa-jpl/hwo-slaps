@@ -116,6 +116,10 @@ class SamplerDiagnostics:
     stop_reason: str
     pdf_usable: bool | None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "requested", finite_json(self.requested))
+        object.__setattr__(self, "achieved", finite_json(self.achieved))
+
     def to_mapping(self) -> dict[str, Any]:
         return finite_json(dataclasses.asdict(self))
 
@@ -542,7 +546,7 @@ class CaseResult:
     @property
     def evidence_quality(self) -> str:
         """Quality of the retained raw evidence difference."""
-        if self.delta_log_evidence is None:
+        if self.delta_log_evidence is None or not math.isfinite(self.delta_log_evidence):
             return "unavailable"
         return "complete" if all(self.role(role).evidence_quality == "complete"
                                  for role in ("smooth", "subhalo")) else "provisional"
