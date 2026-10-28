@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 from scipy.signal import convolve2d
 
+from hwoslaps.identity import json_ready
 from hwoslaps.scene.rendering import RenderGeometry, render_scene_light
 from hwoslaps.observation.expected import convolve_scene_light
 from hwoslaps.scene.spec import GridSpec, LightGroup
@@ -122,7 +123,7 @@ def test_padded_jax_forecast_and_nonlinear_model_share_reference_response(gpu, m
         case = prepare_case(reference, trial, reference.observation, fit=FitSpec(mode="fixed_template"), use_jax=True)
         independent = prepare_case(reference, trial, reference.observation, fit=FitSpec(mode="fixed_template"), use_jax=False)
         response = left.provenance["comparison_inputs"]["response"]
-        assert response == case.data.record["comparison_inputs"]["response"]
+        assert json_ready(response) == json_ready(case.data.record["comparison_inputs"]["response"])
         assert response["operator"] == "native_binned_psf_padded_v1"
         assert response["light_integration"]["source"]["policy"] == "uniform_subpixel_mean"
         model = case.model("smooth")

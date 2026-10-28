@@ -170,7 +170,7 @@ def _fitness_pair(prepared, *, role="smooth"):
 
 
 @pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
-@pytest.mark.parametrize("family",["power_law","multipoles","shear","sersic","all","image","freed_sis","freed_point_mass"])
+@pytest.mark.parametrize("family",["power_law","multipoles","shear","sersic","all","image"])
 def test_real_persistent_fitness_matches_numpy_for_each_family(gpu,family,prepared_forecast_factory,image_asset):
     import jax
 
@@ -187,6 +187,23 @@ def test_real_persistent_fitness_matches_numpy_for_each_family(gpu,family,prepar
         reports.append(actual)
     if role=="subhalo":
         assert np.any(reports[0]!=reports[1]), "changed freed-role batches must change the actual likelihood"
+
+
+@pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
+@pytest.mark.parametrize("family",["freed_sis","freed_point_mass"])
+def test_singular_nonlinear_jax_requires_the_validated_numpy_integral(gpu,family,prepared_forecast_factory,image_asset):
+    import jax
+    from hwoslaps.inference.api import prepare_case
+    from hwoslaps.scene.singular_integration import SingularIntegrationCapabilityError
+
+    assert jax.default_backend()==("gpu" if gpu else "cpu")
+    prepared=prepared_forecast_factory(_family_overrides(family,image_asset))
+    halo=prepared.hypothesis(1.e8,(.1,-.15))
+    fit=FitSpec(mode="freed",mass_support=MassSupport(6.,9.7))
+    case=prepare_case(prepared,halo,prepared.observation,fit=fit,use_jax=False)
+    assert math.isfinite(case.log_likelihood("subhalo",case.truth_vector("subhalo")))
+    with pytest.raises(SingularIntegrationCapabilityError,match="JAX nonlinear PointMass/SIS pixel integration"):
+        prepare_case(prepared,halo,prepared.observation,fit=fit,use_jax=True)
 
 
 @pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])

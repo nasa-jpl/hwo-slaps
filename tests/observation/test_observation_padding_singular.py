@@ -5,6 +5,7 @@ from copy import deepcopy
 import numpy as np
 import pytest
 
+from hwoslaps.identity import json_ready
 pytestmark = pytest.mark.backend
 
 
@@ -44,7 +45,7 @@ def test_singular_padding_common_crop_and_public_fit_share_pixel_integrals(kind,
         actual = forecast(requested_jax, masses_msun=[1e8])
         np.testing.assert_array_equal(actual.q_asimov, expected.q_asimov)
         response = actual.provenance["comparison_inputs"]["response"]
-        assert response == case.data.record["comparison_inputs"]["response"]
+        assert json_ready(response) == json_ready(case.data.record["comparison_inputs"]["response"])
         assert response["operator"] == "native_binned_psf_padded_v1"
         assert response["light_integration"]["source"]["policy"] == "native-brightness-adaptive-v1"
         assert response["light_integration"]["source"]["max_cells"] == 1024
