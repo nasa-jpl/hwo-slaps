@@ -182,8 +182,16 @@ class ReferenceEngine:
         return [bank.finish() for bank in accumulators]
 
     def describe(self) -> Mapping[str, Any]:
-        return {"kind": self.kind, "workers": self.workers,
-                "start_method": "spawn" if self.workers > 1 else "serial"}
+        record = {"kind": self.kind, "workers": self.workers,
+                  "start_method": "spawn" if self.workers > 1 else "serial",
+                  "native_binning": "uniform-block-mean"}
+        if (self.context.hypothesis_model.type in ("PointMass", "SIS") or any(
+                halo.model.type in ("PointMass", "SIS") for halo in self.context.smooth_scene.perturbers)):
+            from ...scene.singular_integration import ATOL, MAX_CELLS, MAX_DEPTH, ORDERS, POLICY, RTOL
+            record.update(native_binning="adaptive-pixel-integral", integration_policy=POLICY,
+                          integration_rtol=RTOL, integration_atol=ATOL, integration_orders=list(ORDERS),
+                          integration_max_cells=MAX_CELLS, integration_max_depth=MAX_DEPTH)
+        return record
 
     def close(self) -> None:
         self._closed = True

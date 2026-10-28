@@ -24,3 +24,6 @@ def test_singular_hypothesis_signal_vanishes_with_mass_and_reports_cpu_route(min
         assert execution['requested_kind'] == 'jax'
         assert execution['jax_accelerated'] is False
         assert execution['device'] == 'cpu'
+        assert execution['native_binning'] == 'adaptive-pixel-integral'
+        assert execution['integration_rtol'] == 2.e-6
+        assert execution['integration_max_cells'] == 1024

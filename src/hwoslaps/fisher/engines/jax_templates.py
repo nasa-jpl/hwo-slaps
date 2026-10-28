@@ -211,12 +211,11 @@ class JaxTemplateEngine:
 
     def describe(self) -> Mapping[str, Any]:
         if self._integrated_reference is not None:
-            from ...scene.singular_integration import POLICY
-            return {"kind": "reference", "requested_kind": self.kind, "workers": 1,
-                    "execution_route": "shared-adaptive-singular-brightness", "integration_policy": POLICY,
-                    "device": "cpu", "jax_accelerated": False}
+            return dict(self._integrated_reference.describe()) | {
+                "requested_kind": self.kind, "execution_route": "shared-adaptive-singular-brightness",
+                "device": "cpu", "jax_accelerated": False}
         return {"kind": self.kind, "batch_size": self.batch_size, "radial_samples": 0,
-                "halo_evaluation": "analytic-profile-specific",
+                "halo_evaluation": "analytic-profile-specific", "native_binning": "uniform-block-mean",
                 "device": str(jax.devices()[0]), "projection": self.context.data_space.whitener.mode}
 
     def close(self) -> None:

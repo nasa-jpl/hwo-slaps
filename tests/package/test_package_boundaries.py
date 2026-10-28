@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "src"
 GLUE = {"scene.image_profile", "scene.multipole_profile", "scene.halo_profiles", "fisher.engines.jax_profiles",
         "fisher.engines.jax_templates", "inference.backend", "inference.subhalo_classes",
-        "inference.light_profiles", "inference.mass_profiles"}
+        "inference.light_profiles", "inference.mass_profiles", "inference.integrated_tracer"}
 BLOCKER = '''
 import importlib.abc, importlib.machinery, sys
 forbidden = {'autolens','autogalaxy','autoarray','autofit','autoconf','hcipy','jax','jaxlib','nautilus','numba','matplotlib'}
