@@ -65,10 +65,15 @@ def compare_forecast(reference: ForecastReference, *, hypothesis: Any, data: Map
             "noise": "Normalized noise values, whitening covariance and fiducial variance choice.",
             "nuisance_constraints": "Gaussian penalties, flat directions, and finite uniform fit boxes differ.",
         }[name])
+    mode = fitted.get("statistic", {}).get("amplitude")
+    statistic_status = ("not_assessed" if not inputs.get("statistic") or mode is None else
+                        "different" if reference.metric == "q_mismatch" or mode in ("local_search", "freed")
+                        else "approximation")
     checks["statistic_conventions"] = {
-        "status": "approximation" if inputs.get("statistic") and fitted.get("statistic") else "not_assessed",
+        "status": statistic_status,
         "forecast": inputs.get("statistic"), "fit": fitted.get("statistic"),
-        "reason": "Linear profiled q is compared with a nonlinear role likelihood ratio. Fixed/fitted signal "
-                  "amplitude, first-order nuisance response and one-sided conventions remain explicit approximations; "
-                  "compatibility does not establish numerical agreement or a calibrated search significance."}
+        "reason": "A q_mismatch forecast profiles a signed signal amplitude, whereas the nonlinear roles fit a "
+                  "physical halo. A position/mass search also differs from a fixed-node forecast. These targets "
+                  "require diagnostic comparison. A fixed-template q_asimov comparison retains the first-order "
+                  "approximation; compatibility establishes neither numerical agreement nor calibrated significance."}
     return ComparisonReport(checks)

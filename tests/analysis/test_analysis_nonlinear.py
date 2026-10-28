@@ -316,7 +316,7 @@ def _comparable(case):
               "response": {"operator": "native_detector_convolution_v1", "over_sample_size": 1},
               "noise": {"units": "e_per_s", "digest": "noise", "covariance": None, "fiducial": "smooth_scene"},
               "nuisance_constraints": {SCENE_PARAMETER: {"kind": "flat"}},
-              "statistic": {"name": "linear"}}
+              "statistic": {"name": "linear", "amplitude": "fixed_template"}}
     reference = dataclasses.replace(case.forecast_reference, scientific_inputs=inputs)
     data = {**case.data, "model_kernel": KERNEL.to_mapping(), "comparison_inputs": inputs}
     return dataclasses.replace(case, forecast_reference=reference, data=data)
@@ -365,6 +365,19 @@ def test_legacy_reference_is_unassessed_and_quality_defaults_exclude_provisional
         case.role(role).sampler, log_evidence=1., diagnostics=diagnostics)) for role in ("smooth", "subhalo")})
     assert scientific_outputs([complete]).evidence_differences == ((case.case_id, 3.),)
     assert classify_case(complete, _rule()).status == classify_case(case, _rule()).status == "accepted"
+
+
+@pytest.mark.parametrize("signal_target", ["profiled_amplitude", "local_search", "freed"])
+def test_strict_comparison_excludes_different_signal_statistic_targets(signal_target, case_factory):
+    case = _comparable(case_factory(12., forecast_q=12., amplitude=1. if signal_target == "profiled_amplitude" else None))
+    if signal_target != "profiled_amplitude":
+        inputs = {**case.data["comparison_inputs"], "statistic": {"name": "nonlinear", "amplitude": signal_target}}
+        case = dataclasses.replace(case, data={**case.data, "comparison_inputs": inputs})
+    pairs = [(case, classify_case(case, _rule()))]
+    table = detection_agreement(pairs)
+    assert table.comparison_differences["statistic_conventions"] == 1
+    assert table.excluded == {"incompatible_forecast": 1}
+    assert detection_agreement(pairs, comparison_policy="diagnostic").both == 1
 
 
 @pytest.mark.parametrize("invalid", ["empty", "mixed_rules", "foreign_node", "accepted_missing_statistic", "stale_classification"])
