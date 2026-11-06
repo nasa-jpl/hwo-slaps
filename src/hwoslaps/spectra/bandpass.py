@@ -246,7 +246,10 @@ def build_bandpass(spec: BandpassSpec) -> Bandpass:
             if isinstance(factor.power, (bool, np.bool_)) or not isinstance(factor.power, Integral) or factor.power < 1:
                 raise ValueError("a table response power must be an integer >= 1")
             table = read_table(factor.table)
-            if table.wavelengths_m[0] > support[0] or table.wavelengths_m[-1] < support[1]:
+            # Equivalent nm/um/angstrom/m endpoints can differ by a few conversion
+            # ulps. Admit only that roundoff, never a physically truncated table.
+            if (table.wavelengths_m[0] - support[0] > 4*np.spacing(support[0])
+                    or support[1] - table.wavelengths_m[-1] > 4*np.spacing(support[1])):
                 raise ValueError(f"{factor.table.path}: table does not cover bandpass support {support}")
             if np.any(table.values < 0.0) or np.any(table.values > 1.0):
                 raise ValueError(f"{factor.table.path}: throughput table values must be in [0, 1]")
@@ -266,7 +269,8 @@ def build_bandpass(spec: BandpassSpec) -> Bandpass:
     throughput = np.ones_like(wavelengths)
     for factor, table in curves:
         if table is not None:
-            throughput *= np.interp(wavelengths, table.wavelengths_m, table.values) ** factor.power
+            query = np.clip(wavelengths, table.wavelengths_m[0], table.wavelengths_m[-1])
+            throughput *= np.interp(query, table.wavelengths_m, table.values) ** factor.power
         else:
             throughput *= factor.throughput if isinstance(factor, TopHatBand) else factor.value
     return Bandpass(support, wavelengths, throughput, spec.label, files, spec)

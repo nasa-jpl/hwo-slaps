@@ -34,6 +34,31 @@ def test_product_response_applies_power_to_each_surface(spectral_file):
     assert band_mean_throughput(band) == pytest.approx(expected, rel=1.0e-9)
 
 
+@pytest.mark.parametrize("unit", ["nm", "angstrom", "um", "m"])
+@pytest.mark.parametrize("kind", ["table", "product"])
+def test_equivalent_table_endpoint_units_cover_the_same_band(spectral_file, unit, kind):
+    table = spectral_file([400.0, 700.0], [0.25, 0.75], unit=unit)
+    mapping = {"kind": "table", **table} if kind == "table" else {
+        "kind": "product", "factors": [{"kind": "table", **table}]}
+    band = build_bandpass(parse_bandpass({**mapping, "support_nm": [400.0, 700.0]}, "band"))
+    np.testing.assert_array_equal(band.wavelengths_m[[0, -1]], np.array([400.0, 700.0])/1.0e9)
+    np.testing.assert_allclose(band.throughput_at(band.wavelengths_m[[0, -1]]), [0.25, 0.75], atol=1.0e-15)
+    # Integral of the linear response a + b*lambda, weighted by d ln lambda.
+    a, b = 0.25 - 400.0/600.0, 1.0/600.0
+    expected = a + b*300.0/math.log(700.0/400.0)
+    assert band_mean_throughput(band) == pytest.approx(expected, rel=1.0e-9)
+
+
+@pytest.mark.parametrize("wavelengths", [[400.001, 700.0], [400.0, 699.999]])
+@pytest.mark.parametrize("kind", ["table", "product"])
+def test_endpoint_roundoff_allowance_still_rejects_truncated_tables(spectral_file, wavelengths, kind):
+    table = spectral_file(wavelengths, [0.25, 0.75], unit="um")
+    mapping = {"kind": "table", **table} if kind == "table" else {
+        "kind": "product", "factors": [{"kind": "table", **table}]}
+    with pytest.raises(ValueError, match="cover"):
+        build_bandpass(parse_bandpass({**mapping, "support_nm": [400.0, 700.0]}, "band"))
+
+
 @pytest.mark.parametrize("support,response,error", [([200.0, 550.0], [0.2, 0.5], "cover"),
                                                     ([450.0, 550.0], [0.2, 1.2], "unit|interval|\\[0, 1\\]")])
 def test_bandpass_tables_refuse_extrapolation_or_nonphysical_response(spectral_file, support, response, error):
