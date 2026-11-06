@@ -126,6 +126,23 @@ def test_complex_detector_data_is_rejected_before_real_conversion():
         replace(original, data_adu=original.data_adu + 1j)
 
 
+@pytest.mark.parametrize("noisy", [False, True], ids=["expected", "noisy"])
+@pytest.mark.parametrize("lens_light", [False, True], ids=["source-only", "mixed-assessment"])
+def test_unassessed_sampling_survives_construction_and_roundtrip(tmp_path, noisy, lens_light):
+    supplied = _inputs(noisy=noisy, lens_light=lens_light)
+    supplied["sampling"]["source"] = None
+    observation = Observation(**supplied)
+    supplied["sampling"]["source"] = 99.0
+    assert observation.sampling["source"] is None
+    with pytest.raises(TypeError):
+        observation.sampling["source"] = 0.0
+    restored = load_observation(save_observation(observation, tmp_path / "unassessed.npz"))
+    assert dict(restored.sampling) == dict(observation.sampling)
+    assert restored.to_mapping() == observation.to_mapping()
+    if lens_light:
+        assert restored.sampling["lens"] == 0.01
+
+
 @pytest.mark.parametrize("lens_light", [False, True], ids=["source-only", "lens-light"])
 def test_draw_and_load_retain_values_aliases_and_read_only_arrays(tmp_path, lens_light):
     expected = Observation(**_inputs(noisy=False, lens_light=lens_light))

@@ -50,6 +50,7 @@ jobs:
             tests/scene/test_singular_integration.py::test_physical_singular_pixel_against_independent_polar_integral \
             tests/scene/test_singular_integration.py::test_unresolved_integral_raises_without_inventing_a_central_value \
             tests/observation/test_observation_padding.py \
+            tests/observation/test_observation_sampling_supported_rendering.py \
             tests/inference/test_inference_image_gradients.py \
             tests/inference/test_inference_low_dimension.py \
             tests/inference/test_inference_recovery.py \

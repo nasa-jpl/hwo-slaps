@@ -222,25 +222,39 @@ def build_scene(spec: SceneSpec, cosmology: Cosmology, *, subhalo: Halo | None, 
                  light_profiles=types.MappingProxyType(light_profiles))
 
 
-def native_sampling_variation(scene: Scene) -> Mapping[str, float]:
+def native_sampling_variation(scene: Scene) -> Mapping[str, float | None]:
     """Relative within-pixel variation of each light group's lensed light.
 
     For the over-sampled samples ``s_ju`` of pixel ``j`` (block mean ``m_j``, the native image),
     ``sqrt(sum_j sum_u (s_ju - m_j)^2) / sqrt(sum_j sum_u m_j^2)``. It is zero by construction
     at ``over_sample_size: 1`` and cannot see structure within a pixel there.
+    A group is unassessed (None) when its renderer uses adaptive pixel integrals
+    rather than uniform samples, or its detector-only sample power is zero.
+    Exterior light can still contribute through the padded PSF in the latter case.
     """
-    traced = scene.tracer.traced_grid_2d_list_from(grid=scene.grid)
+    from .rendering import response_identity
+
+    policies = response_identity(scene, {})["light_integration"]
+    traced = None
     samples_per_pixel = scene.spec.grid.over_sample_size**2
     redshifts = {"lens": scene.spec.lens.redshift, "source": scene.spec.source.redshift}
     variations = {}
     for key, group in scene.light_groups.items():
+        if policies[group.plane]["policy"] != "uniform_subpixel_mean":
+            variations[key] = None
+            continue
+        if traced is None:
+            traced = scene.tracer.traced_grid_2d_list_from(grid=scene.grid)
         sub_grid = traced[scene.tracer.plane_redshifts.index(redshifts[group.plane])].over_sampled
         samples = sum(np.asarray(profile.image_2d_from(grid=sub_grid), dtype=float)
                       for profile in scene.light_profiles[key]).reshape(-1, samples_per_pixel)
+        if not np.all(np.isfinite(samples)):
+            raise ValueError(f"light group {key!r} has non-finite uniform sampling values")
         means = samples.mean(axis=1, keepdims=True)
         power = float(np.sum(means**2)) * samples_per_pixel
-        if not power > 0.0:
-            raise ValueError(f"light group {key!r} has no light on the grid")
+        if power == 0.0:
+            variations[key] = None
+            continue
         variations[key] = float(np.sqrt(np.sum((samples - means) ** 2) / power))
     return types.MappingProxyType(variations)
 

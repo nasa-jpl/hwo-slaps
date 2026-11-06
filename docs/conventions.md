@@ -115,15 +115,21 @@ The emitting grid extends beyond the requested detector by the largest kernel ha
 on each axis across the truth, model and light groups. Real lens and lensed-source light
 is evaluated there, convolved, and cropped onto the unchanged detector footprint.
 
-`Observation.sampling` measures the relative variation of the smooth scene's light
-within detector pixels, for each light group. In the calibration tests, values below
+`Observation.sampling` measures the relative variation of the smooth scene's uniform
+light samples within detector pixels, for each light group. It records `None` (JSON
+`null`) when a group uses adaptive pixel integration or has zero detector-only sample
+power. The latter can occur for exterior light that the padded PSF scatters onto the
+detector. These unassessed values are retained through noise draws and observation
+artifacts; physical rendering and integration failures still raise.
+
+In the calibration tests, numerical values below
 0.063 kept the error in the subhalo signal information below 1% compared with a finer
 reference. The value is reported, not enforced. Some of the paper's test scenes exceed it, and
 small values do not guarantee small errors for every subhalo position. For a new kind of
 scene, check the response against a finer independent reference at fixed detector
 geometry. A convergent optical convolution before detector integration is a separate
-renderer capability. At `over_sample_size: 1` this diagnostic is zero
-by construction and provides no constraint on unresolved within-pixel structure.
+renderer capability. For an assessed group at `over_sample_size: 1`, this diagnostic
+is zero by construction and provides no constraint on unresolved within-pixel structure.
 
 ## Optics
 

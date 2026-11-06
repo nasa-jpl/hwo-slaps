@@ -111,7 +111,8 @@ class Observation:
     with lens light, and without lens light its ``"source"`` entry is the total itself.
     ``noise_map_adu`` comes from the expected image for both kinds. ``sampling`` is the
     within-pixel variation of each fiducial smooth-scene light group, measured once by the
-    preparation caller and retained for injected observations and noise draws.
+    preparation caller and retained for injected observations and noise draws. A None
+    value explicitly records an unassessed group, rather than zero variation.
     """
 
     kind: Literal["expected", "noisy"]
@@ -127,7 +128,7 @@ class Observation:
     subhalo: Halo | None
     config_digest: str | None
     photometry: PhotometryRecord | None
-    sampling: Mapping[str, float]
+    sampling: Mapping[str, float | None]
 
     def __post_init__(self) -> None:
         if not isinstance(self.kind, str) or self.kind not in ("expected", "noisy"):
@@ -173,7 +174,7 @@ class Observation:
         if set(self.sampling) != set(self.psfs.group_index):
             raise ValueError(f"sampling covers {sorted(self.sampling)}; the light groups are "
                              f"{sorted(self.psfs.group_index)}")
-        sampling = {key: check_finite_number(f"sampling[{key!r}]", value, positive=False)
+        sampling = {key: None if value is None else check_finite_number(f"sampling[{key!r}]", value, positive=False)
                     for key, value in self.sampling.items()}
         for name in ("data_adu", "expected_adu", "noise_map_adu", "light_rate_e_per_s"):
             object.__setattr__(self, name, arrays[name])
@@ -226,7 +227,7 @@ class Observation:
 
 
 def observe(scene: Scene, kernels: KernelBinding, exposure: Exposure, *, config_digest: str | None,
-            photometry: PhotometryRecord | None, sampling: Mapping[str, float], geometry=None) -> Observation:
+            photometry: PhotometryRecord | None, sampling: Mapping[str, float | None], geometry=None) -> Observation:
     """The expected observation of ``scene`` through the truth kernels ``kernels``.
 
     No random generator is used. The caller supplies ``sampling`` measured on the fiducial

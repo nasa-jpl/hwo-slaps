@@ -138,6 +138,12 @@ component with its own spectrum, or all the light of a plane when no spectra are
 print(prepared.observation.sampling)     # {'source': 0.32274029790875214}
 ```
 
+Each value is a finite non-negative number or `None` for an unassessed group. The
+uniform-sample diagnostic is unassessed for adaptive pixel integration and for zero
+detector-only sample power, including an exterior component whose PSF contributes
+inside the detector. `None` survives noise draws and saved observations as JSON `null`.
+The diagnostic does not assess exterior emitting pixels.
+
 In the tests that calibrated this diagnostic, values below 0.063 kept the error in the
 subhalo signal information below one percent. HWO-SLAPS does not enforce a limit.
 For larger values, or a new kind of scene, compare with an independent response
