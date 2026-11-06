@@ -1,0 +1,146 @@
+{
+  "archive_provenance": {
+    "campaign": "psf_knowledge_fisher_v1",
+    "historical_per_node_replay": false,
+    "matched_job_receipt_sha256": "209d15de532ad47638ad5857c6bde0d33b892d107e54a073f9b8a52eb131669f",
+    "production_commit": "28a41c232eaccd508293f9af82fa0cc10d4127c3",
+    "staged_config_sha256": "508093ee43e09a56f4aa9eb4ae958c83b1a44d41cd1613b25f3d43c65e139541",
+    "system_id": "ladder_selected_sys0043"
+  },
+  "description": "New submitted-code oracle evaluation of genuine archived sys0043 production inputs; historical per-node results were not archived and are not claimed as replayed.",
+  "diagnostic_digests": {
+    "fisher_mask": "ae8daaf8e16ca793b309d77096c93cf09b611fee8e59b2cf9ad959b11f39e8b5",
+    "mu0_adu": "1cf90ee3105c5cabccee9a3b09306e05ec322d1f0e5954f2c4ab846cea03c9c3",
+    "mu0_model_adu": "1cf90ee3105c5cabccee9a3b09306e05ec322d1f0e5954f2c4ab846cea03c9c3",
+    "noisy_baseline_adu": "2a09e25d2739c80e5a6b6f6b7bab434ca9f4b50608c4d5781934f1e5d43b591d",
+    "nuisance_images": {
+      "lens.centre_x": "b8b44a9ec6c71b7885461e1b7cd6cf853a4b99e81f511bc75a200a171ead9638",
+      "lens.centre_y": "e3666f5118e66a337e752412368e41554ddc43f615493bbcd99b5ce6346ea79a",
+      "lens.einstein_radius": "e1d767116abeb770a21925e9b98650a210128c3f9d3d081228d98bee22b20638",
+      "lens.ell_comp_1": "ff9968dcf3a186db0115fe852b38a1c4f79e54de8fc17a595c2b2c33c256df26",
+      "lens.ell_comp_2": "11765b6feb253abd70fdcab1729921d1d19e1d427507c5b0d901bd7eb458fdf4",
+      "observation.background_offset_adu": "ae8daaf8e16ca793b309d77096c93cf09b611fee8e59b2cf9ad959b11f39e8b5",
+      "source.centre_x": "20fd2c4aceea06ad7461f2cc2eb56787db6ee8354c49c42c81b9059e6a4facaf",
+      "source.centre_y": "f3009c1176a945ba3db295f028dc3b41e369235d796a7e1015eab78c86eef4dc",
+      "source.effective_radius": "c9e903b740cce4fb9b4f6c9a2f2e84a871439ecaf78c496417c5bb65abf5349c",
+      "source.intensity": "d4584fb0dad1c30f5cd8e9419411a878d83b936f4cc08eec9d4c56707df85568"
+    },
+    "sigma_adu": "eb4c1401f8b23ac51a3d9392803a04018ba10d3ce51de34411d14d33705c9db4"
+  },
+  "engine_config": "engine/production_sys0043.yaml",
+  "engine_config_sha256": "1c62f9a56637fbf854127d434ddedfbde05f18a3bddb868affa60c9360f8dbc3",
+  "environment": {
+    "CUDA_VISIBLE_DEVICES": "",
+    "JAX_PLATFORMS": "cpu",
+    "MKL_NUM_THREADS": "1",
+    "NUMBA_DISABLE_JIT": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1"
+  },
+  "fit_kernel_sha256": "429a3702e050178c68b44d4de49e6a61acb595e4e5649120ba31c56470aae88c",
+  "fixture": "forecast.npz",
+  "fixture_sha256": "8384922dae868561740227bc8deb590ff2d3f53c021708111c1f793f651eb34e",
+  "generator": "tests/scripts/generate_paper_parity.py --production-anchor",
+  "generator_sha256": "2b8144116ae2883613ff36d6b288cf3948e69565493f218e361e4e576ef38c45",
+  "geometry": {
+    "detector_shape": [
+      522,
+      522
+    ],
+    "kernel_shape": [
+      999,
+      999
+    ],
+    "map_half_width_arcsec": 1.8629476214375018,
+    "over_sample_size": 4,
+    "pixel_scale_arcsec": 0.00716
+  },
+  "masses_msun": [
+    100000000.0
+  ],
+  "name": "production_sys0043",
+  "noise_seed": 1703553965,
+  "nuisance_prior_precision": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "observation": {
+    "detector": {
+      "dark_current": 0.002,
+      "gain": 1.0,
+      "read_noise": 0.28284271247461906,
+      "sky_background": 0.002510279845963486
+    },
+    "exposure_time": 2000.0,
+    "output_format": "pyautolens_ready",
+    "throughput": 1.0
+  },
+  "pixels_unmasked": 272484,
+  "positions_yx": [
+    [
+      -0.8,
+      0.0
+    ],
+    [
+      0.0,
+      0.8
+    ],
+    [
+      0.8,
+      0.0
+    ]
+  ],
+  "profiled_nuisance_names": [
+    "lens.centre_y",
+    "lens.centre_x",
+    "lens.einstein_radius",
+    "lens.ell_comp_1",
+    "lens.ell_comp_2",
+    "source.centre_y",
+    "source.centre_x",
+    "source.intensity",
+    "source.effective_radius",
+    "observation.background_offset_adu"
+  ],
+  "schema": 1,
+  "seconds": {
+    "detector_build": 40.222058727405965,
+    "total": 44.78694856353104
+  },
+  "source_asset": {
+    "file": "cosmos_48849_hlr011.npz",
+    "sha256": "c67570fdc56068fc900e3428f6b6ff2d5ffce8f459858c302c6de1461d24ed21"
+  },
+  "submitted_code": {
+    "git_tree": "2f185e14053017b85b084f0387906b813b99ec1d",
+    "paper_commit": "41621de8ca861e425e1caddb7a599d5c1032751f",
+    "paper_tag": "rasti-26-183-submitted",
+    "python_files_verified": 103,
+    "python_manifest_sha256": "1f7014245cd5e0db68436e2395ee3eb4a95af355b28d96d2db839c8cf5d273aa"
+  },
+  "truth_kernel_sha256": "429a3702e050178c68b44d4de49e6a61acb595e4e5649120ba31c56470aae88c",
+  "versions": {
+    "astropy": "7.2.0",
+    "autoarray": "2026.5.14.2",
+    "autoconf": "2026.5.14.2",
+    "autofit": "2026.5.14.2",
+    "autogalaxy": "2026.5.14.2",
+    "autolens": "2026.5.14.2",
+    "hcipy": "0.7.1.dev73+gcc853b392",
+    "jax": "0.4.38",
+    "jaxlib": "0.4.38",
+    "numba": "0.65.1",
+    "numpy": "1.26.4",
+    "python": "3.11.15",
+    "scipy": "1.17.1"
+  }
+}

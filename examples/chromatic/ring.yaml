@@ -1,0 +1,5 @@
+# Illustrative convergence layout: 36 positions at the effective Einstein radius.
+forecast:
+  positions: {kind: ring, count: 36, radius: einstein_radius}
+  mask: {kind: all_pixels}
+  nuisances: {}

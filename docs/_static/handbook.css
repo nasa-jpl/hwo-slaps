@@ -1,0 +1,29 @@
+:root {
+  --content-width: 54rem;
+  --sidebar-width: 17rem;
+}
+.sidebar-brand-text { font-weight: 600; }
+.sidebar-tree .reference { overflow-wrap: anywhere; }
+.content h1 { font-size: 2rem; letter-spacing: -.035em; }
+.content h2 { font-size: 1.45rem; letter-spacing: -.02em; }
+.content h3 { font-size: 1.15rem; }
+.content p, .content li { line-height: 1.65; }
+.content pre { font-size: .82rem; line-height: 1.6; }
+.content a.reference code { color: var(--color-link); }
+.content figure img { border-radius: .4rem; }
+table.docutils { width: 100%; font-size: .88rem; }
+table.docutils td, table.docutils th { vertical-align: top; }
+table.docutils td p { margin: .25rem 0; }
+.sig { overflow-wrap: anywhere; }
+@media (max-width: 40rem) {
+  .content h1 { font-size: 1.75rem; }
+  .content pre { font-size: .75rem; }
+}
+.pipeline { margin: 1.5rem 0; }
+.pipeline svg { width: 100%; height: auto; }
+.pipeline-group { fill: none; stroke: var(--color-background-border); stroke-dasharray: 4 4; }
+.pipeline-box rect { fill: var(--color-background-secondary); stroke: var(--color-brand-primary); stroke-width: 1.5; }
+.pipeline-title { fill: var(--color-foreground-primary); }
+.pipeline-note { fill: var(--color-foreground-secondary); }
+.pipeline-arrow { stroke: var(--color-brand-primary); }
+.pipeline-head polygon { fill: var(--color-brand-primary); }

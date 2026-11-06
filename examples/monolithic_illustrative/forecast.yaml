@@ -1,0 +1,5 @@
+# Illustrative: source-plane S/N aperture, with lens light included in detector variance.
+forecast:
+  positions: {kind: grid, spacing_arcsec: 0.1, half_width_arcsec: 1.8}
+  mask: {kind: source_snr, snr_min: 3.0}
+  nuisances: {}

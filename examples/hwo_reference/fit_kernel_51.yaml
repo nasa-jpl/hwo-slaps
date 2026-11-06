@@ -1,0 +1,3 @@
+# Reference overlay: the 51 x 51 kernel support used for the paper nonlinear fits.
+psf:
+  truth: {kernel_shape: [51, 51]}

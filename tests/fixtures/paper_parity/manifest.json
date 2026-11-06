@@ -1,0 +1,3095 @@
+{
+ "generator": "tests/scripts/generate_paper_parity.py",
+ "inputs": {
+  "configs/psf_priors/jwst_wss_drift_v1.yaml": "bfbececdcbe5fb37a4abcb018b63544d47c4c37ecc1900a539d62755b740c488",
+  "detector_kernel.npy": "29f18a68d294868a3091d1d9f79da6ffd6dcce684247a3ab1f25fb4eb2e645c4",
+  "source_image.npz": "d21baa3933629cc49474c098c73306e08b2fc08a508af220809ae9dca2aed6d5"
+ },
+ "invocation": "tests/scripts/generate_paper_parity.py --paper-tree /data/home/gvassilakis/engine-second-pass-20261005/paper_parity_gen/rasti_41621de --out tests/fixtures/paper_parity --work /data/home/gvassilakis/engine-second-pass-20261005/paper_parity_gen/work --gpu 0",
+ "lanes": {
+  "jax_gpu": {
+   "CUDA_VISIBLE_DEVICES": "<gpu>",
+   "JAX_ENABLE_X64": "1",
+   "MKL_NUM_THREADS": "1",
+   "NUMBA_DISABLE_JIT": "0",
+   "NUMEXPR_NUM_THREADS": "1",
+   "OMP_NUM_THREADS": "1",
+   "OPENBLAS_NUM_THREADS": "1",
+   "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+  },
+  "reference": {
+   "CUDA_VISIBLE_DEVICES": "",
+   "JAX_PLATFORMS": "cpu",
+   "MKL_NUM_THREADS": "1",
+   "NUMBA_DISABLE_JIT": "1",
+   "NUMEXPR_NUM_THREADS": "1",
+   "OMP_NUM_THREADS": "1",
+   "OPENBLAS_NUM_THREADS": "1"
+  },
+  "reference_numba": {
+   "CUDA_VISIBLE_DEVICES": "",
+   "JAX_PLATFORMS": "cpu",
+   "MKL_NUM_THREADS": "1",
+   "NUMBA_DISABLE_JIT": "0",
+   "NUMEXPR_NUM_THREADS": "1",
+   "OMP_NUM_THREADS": "1",
+   "OPENBLAS_NUM_THREADS": "1"
+  }
+ },
+ "numba_jit_invariance": {
+  "n1_nonlinear_likelihood": {
+   "freed_chi_squared": 0.0,
+   "freed_figure_of_merit": 0.0,
+   "freed_log_likelihood": 0.0,
+   "freed_log_likelihood_function": 0.0,
+   "freed_noise_normalization": 0.0,
+   "smooth_chi_squared": 0.0,
+   "smooth_figure_of_merit": 0.0,
+   "smooth_log_likelihood": 0.0,
+   "smooth_log_likelihood_function": 0.0,
+   "smooth_noise_normalization": 0.0
+  },
+  "p1_optical_matched": {
+   "degradation": 0.0,
+   "fisher_profiled": 0.0,
+   "fisher_raw": 0.0,
+   "q_asimov": 0.0,
+   "sigma_amplitude": 0.0
+  },
+  "p2_delta_knowledge_error": {
+   "amplitude_hat": 0.0,
+   "amplitude_spurious": 0.0,
+   "degradation": 0.0,
+   "fisher_profiled": 0.0,
+   "fisher_raw": 0.0,
+   "q_asimov": 0.0,
+   "q_mismatch": 0.0,
+   "q_spurious": 0.0,
+   "sigma_amplitude": 0.0,
+   "z_mismatch": 0.0,
+   "z_spurious": 0.0
+  },
+  "p3_image_source_kernel": {
+   "degradation": 0.0,
+   "fisher_profiled": 0.0,
+   "fisher_raw": 0.0,
+   "q_asimov": 0.0,
+   "sigma_amplitude": 0.0
+  },
+  "p4_subhalo_pointmass": {
+   "degradation": 0.0,
+   "fisher_profiled": 0.0,
+   "fisher_raw": 0.0,
+   "q_asimov": 0.0,
+   "sigma_amplitude": 0.0
+  },
+  "p4_subhalo_sis": {
+   "degradation": 0.0,
+   "fisher_profiled": 0.0,
+   "fisher_raw": 0.0,
+   "q_asimov": 0.0,
+   "sigma_amplitude": 0.0
+  }
+ },
+ "paper_commit": "41621de8ca861e425e1caddb7a599d5c1032751f",
+ "paper_only_keys": [
+  "plotting",
+  "modeling.enabled",
+  "modeling.detection",
+  "modeling.fisher.mode",
+  "modeling.fisher.map.engine",
+  "modeling.fisher.finite_diff.slope",
+  "modeling.fisher.finite_diff.multipole_comp",
+  "modeling.fisher.finite_diff.shear_comp"
+ ],
+ "paper_tag": "rasti-26-183-submitted",
+ "scenes": {
+  "n1_nonlinear_likelihood": {
+   "background_treatment": "subtract_known",
+   "dataset": {
+    "data_digest": "72ac0e37f9e04d9bf0943c88e5fbc42e7853c32cba7b89663746e2433cef8bf6",
+    "generation_sub_size": 4,
+    "mask_digest": "02c1747c6393ec91043d0a5af1da6e921792f391b1ac5e46a86b74aa484e2377",
+    "mask_name": "all_pixels_minus_psf_border",
+    "n_unmasked_pixels": 7056,
+    "noise_map_digest": "9a64ab44c54cd93667b5d5485f3347d4bde1bfdfe607895093162aa4c89610c4",
+    "objective_version": "consistent_sampling_v2",
+    "psf_case": "delta:e598a298ab285140",
+    "psf_digest": "a973b4b94b68563c135fc4d83758c670a0f3c833f50878e40f9382e00ec6f442",
+    "psf_fit_sha256": "7499d5e22583ca9c019728e1c3a4d9d33b49c7a88517996c2c1dd99ec0478da1"
+   },
+   "dataset_kind": "noisy",
+   "description": "noisy injected NFW trial at the P2 maximum-q node, fitted with the delta fit kernel; smooth and freed models at truth and perturbed",
+   "engine_config": "engine/p2_delta_knowledge_error.yaml",
+   "fit_mode": "freed",
+   "fixture": "n1_nonlinear_likelihood.npz",
+   "lanes": {
+    "jax_gpu": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "JAX_ENABLE_X64": "True",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+     },
+     "seconds": {
+      "total": 18.12242399249226
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "total": 2.26367524638772
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference_numba": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "total": 2.3298187172040343
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    }
+   },
+   "log10_m200_range": [
+    6.0,
+    9.7
+   ],
+   "mass_context_hash": "1cc382aeff97a52e",
+   "mass_msun": 1000000000.0,
+   "paper_config": {
+    "global_seed": 11,
+    "lensing": {
+     "cosmology": "Planck15",
+     "grid": {
+      "over_sample_size": 4,
+      "pixel_scale": 0.03,
+      "shape": [
+       100,
+       100
+      ]
+     },
+     "lens_galaxy": {
+      "mass": {
+       "centre": [
+        0.0,
+        0.0
+       ],
+       "einstein_radius": 1.0,
+       "ell_comps": [
+        0.1,
+        0.0
+       ],
+       "type": "Isothermal"
+      },
+      "redshift": 0.2
+     },
+     "source_galaxy": {
+      "light": {
+       "centre": [
+        -0.03,
+        0.08
+       ],
+       "effective_radius": 0.11,
+       "ell_comps": [
+        0.14516129,
+        0.25142673
+       ],
+       "intensity": 2.0,
+       "type": "Exponential"
+      },
+      "redshift": 0.6
+     },
+     "subhalo": {
+      "concentration": {
+       "h": null,
+       "model": "moline2017_eq7",
+       "x_sub": 1.0
+      },
+      "enabled": true,
+      "mass": 1000000000.0,
+      "model": "NFW",
+      "position": {
+       "centre": [
+        0.4,
+        -0.8
+       ],
+       "type": "direct"
+      }
+     }
+    },
+    "modeling": {
+     "detection": "fisher",
+     "enabled": true,
+     "fisher": {
+      "compute_psf_mode_scan": false,
+      "finite_diff": {
+       "centre_arcsec": 0.001,
+       "einstein_radius_arcsec": 0.001,
+       "ell_comp": 0.001,
+       "multipole_comp": 0.001,
+       "shear_comp": 0.001,
+       "slope": 0.001,
+       "source_intensity_frac": 0.01,
+       "source_reff_frac": 0.01
+      },
+      "include_background_offset": true,
+      "include_psf_nuisance": true,
+      "map": {
+       "engine": "reference",
+       "grid": {
+        "annulus": null,
+        "half_width_arcsec": 1.2,
+        "spacing_arcsec": 0.4
+       },
+       "type": "grid"
+      },
+      "mask_mode": "all_pixels",
+      "mode": "map",
+      "psf_basis": {
+       "global_zernikes": {
+        "mode_nolls": [
+         4,
+         5
+        ]
+       },
+       "segment_hexikes": {
+        "mode_nolls": [
+         1,
+         2
+        ],
+        "segments": [
+         0,
+         3
+        ]
+       }
+      },
+      "psf_mode_prior_sigmas": {
+       "global_zernikes": 5.0,
+       "segment_hexikes": 5.0
+      },
+      "psf_mode_steps": {
+       "global_zernikes": 1.0,
+       "segment_hexikes": 1.0,
+       "segment_pistons": 1.0,
+       "segment_tiptilts": 0.1
+      },
+      "snr_threshold": 3.0
+     },
+     "fit_psf": {
+      "delta": {
+       "amplitude_rms_nm": 10.0,
+       "family": "combined",
+       "prior_table": "/data/home/gvassilakis/engine-second-pass-20261005/paper_parity_gen/rasti_41621de/configs/psf_priors/jwst_wss_drift_v1.yaml",
+       "seed": 20261005
+      },
+      "mode": "delta"
+     }
+    },
+    "nonlinear_rendering": {
+     "objective_version": "consistent_sampling_v2"
+    },
+    "observation": {
+     "detector": {
+      "dark_current": 0.002,
+      "gain": 1.0,
+      "read_noise": 0.2,
+      "sky_background": 1.0
+     },
+     "exposure_time": 900.0,
+     "throughput": 1.0
+    },
+    "plotting": {
+     "enabled": false,
+     "output_dir": "/tmp"
+    },
+    "psf": {
+     "aberrations": {
+      "enable_global_zernikes": true,
+      "enable_segment_hexikes": true,
+      "enable_segment_pistons": false,
+      "enable_segment_tiptilts": false,
+      "global_zernikes": {
+       "4": 5.0,
+       "5": 5.0,
+       "8": 5.0
+      },
+      "segment_hexikes": {
+       "0": {
+        "4": 10.0
+       },
+       "3": {
+        "5": 8.0
+       },
+       "7": {
+        "6": 12.0
+       }
+      },
+      "segment_pistons": {},
+      "segment_tiptilts": {}
+     },
+     "hres_psf": {
+      "num_airy": 4,
+      "num_pix": 128,
+      "sampling": 5,
+      "save_highres_psf_npy": false,
+      "wavelength": 5e-07
+     },
+     "kernel": {
+      "shape_native": [
+       17,
+       17
+      ]
+     },
+     "telescope": {
+      "focal_length": 144.0,
+      "gap_size": 0.006,
+      "num_rings": 2,
+      "pupil_diameter": 7.225765,
+      "segment_point_to_point": 1.65,
+      "supersampling_factor": 2
+     }
+    },
+    "run_name": "paper_parity_p2"
+   },
+   "paper_config_jax_gpu_differs_only_in": [],
+   "perturbation_fraction_of_prior_width": 0.05,
+   "position_yx_arcsec": [
+    0.4,
+    -0.8
+   ],
+   "reference_vs_jax_gpu_max_relative_difference": {
+    "freed_chi_squared": 2.59464441418079e-15,
+    "freed_figure_of_merit": 1.399256851986138e-15,
+    "freed_log_likelihood": 1.399256851986138e-15,
+    "freed_log_likelihood_function": 1.399256851986138e-15,
+    "freed_noise_normalization": 0.0,
+    "smooth_chi_squared": 2.1735042305809226e-15,
+    "smooth_figure_of_merit": 1.2048125737259635e-15,
+    "smooth_log_likelihood": 1.2048125737259635e-15,
+    "smooth_log_likelihood_function": 1.2048125737259635e-15,
+    "smooth_noise_normalization": 0.0
+   },
+   "scene": "p2_delta_knowledge_error",
+   "trial": {
+    "concentration": 16.792762422153395,
+    "kappa_s": 0.007929842442861464,
+    "lens_redshift": 0.2,
+    "mass_msun": 1000000000.0,
+    "model": "NFW",
+    "position_yx_arcsec": [
+     0.4,
+     -0.8
+    ],
+    "profile_class": "NFWSph",
+    "scale_radius_arcsec": 0.34470421614743146,
+    "source_redshift": 0.6
+   },
+   "truth_kernel_sha256": "9e50ba91260311cf795ab8d9cebed1b9696b8528adb1be62b3f3ba8e9ab7b152"
+  },
+  "p1_optical_matched": {
+   "description": "segmented-pupil optical PSF, Exponential source, NFW subhalo, all-pixel mask, scalar and PSF-mode nuisance profiling",
+   "diagnostic_digests": {
+    "fisher_mask": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+    "mu0_adu": "8264bf5334fc2f6d3e996d34a9b308419dcd591b0614fe54e3482a7d69345afb",
+    "mu0_model_adu": "8264bf5334fc2f6d3e996d34a9b308419dcd591b0614fe54e3482a7d69345afb",
+    "nuisance_images": {
+     "lens.centre_x": "765ea4905ac731321aec6f4834808d83f9e5a4b578fa96692feed9295a6d1db7",
+     "lens.centre_y": "6a931f89f90d289d6a1045c2f3e09d38f0abd01a52b994abaa14bb411894c6bf",
+     "lens.einstein_radius": "fb071b1492a55583de6e1ae89d0f1389a8d30ee48216440d57b246b6e209c844",
+     "lens.ell_comp_1": "9f01a6855b12677242845a3b606d7263f2d58e9d4cd74f5d56cdea4efb4e8cc1",
+     "lens.ell_comp_2": "3ae11ff8a7bb66c4d2d896e1bf8a85c3d3e2bf78bad7639374bd2f4830c35219",
+     "observation.background_offset_adu": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+     "psf.global_zernikes[4]": "cdb201e07e2c6ec1a898df5a43cc6a2e05acd2c98345978504fc440142e80594",
+     "psf.global_zernikes[5]": "4088b47cf9ba77bdcd511514ef3a68ef80760c069ce4b99787600ad64d7e852f",
+     "psf.segment_hexikes[0][1]": "f3dbdf466770da37ddb676c45327c8aeddd8dd3211e40d7232ebf4faa9244519",
+     "psf.segment_hexikes[0][2]": "476647d56f2e4152c3177528dc2a908c366fbd3e59c9533fcc08db8dcd8f36a3",
+     "psf.segment_hexikes[3][1]": "121e17838d64e42f9a8acedc5103d03cd5cec4df4dba7c3a26749e5fcb328b1d",
+     "psf.segment_hexikes[3][2]": "32ff4c5fa952aa6b79a9cb6803478c49f4ee2a42e2353f766b729c655e317e33",
+     "source.centre_x": "14a97ee7a5e32c020cf305d2021dbebf95b7b3edfdf2f2383dab72feae865d6f",
+     "source.centre_y": "649331689bc3316731dce82bae22b3189eeaf3507f49de8b627ff980a1b56431",
+     "source.effective_radius": "c0be33be9385227186e6c18d02f52f417fcf58f28fb6dd1b0c9e62a23d3e5352",
+     "source.ell_comp_1": "d03463190dd8bd6bb4d77741a64a4a1d554a02d9bd2468a3b29d7323dc002be4",
+     "source.ell_comp_2": "90224c29ff80dec06485394b8547f7b559867b83149694037063142880cf83e1",
+     "source.intensity": "2aae03f97a9a0a7be5f29cbff71024bdcd79f3cd2b242b7f22ae12a53f6d08cb"
+    },
+    "sigma_adu": "4260c079bc40e059a6b8300492f9677882d9c6e75f6cbbb9c1f2abe134f6048c"
+   },
+   "engine_config": "engine/p1_optical_matched.yaml",
+   "fit_kernel_sha256": "9e50ba91260311cf795ab8d9cebed1b9696b8528adb1be62b3f3ba8e9ab7b152",
+   "fixture": "p1_optical_matched.npz",
+   "lanes": {
+    "jax_gpu": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "JAX_ENABLE_X64": "True",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+     },
+     "seconds": {
+      "detector_build": 3.035567077808082,
+      "total": 3.864171452820301
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 3.0991013906896114,
+      "total": 8.945532742887735
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference_numba": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 3.1040518013760448,
+      "total": 9.11061614472419
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    }
+   },
+   "masses_msun": [
+    10000000.0,
+    100000000.0,
+    1000000000.0
+   ],
+   "nuisance_prior_precision": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.04,
+    0.04,
+    0.04,
+    0.04,
+    0.04,
+    0.04
+   ],
+   "paper_config": {
+    "global_seed": 11,
+    "lensing": {
+     "cosmology": "Planck15",
+     "grid": {
+      "over_sample_size": 4,
+      "pixel_scale": 0.03,
+      "shape": [
+       100,
+       100
+      ]
+     },
+     "lens_galaxy": {
+      "mass": {
+       "centre": [
+        0.0,
+        0.0
+       ],
+       "einstein_radius": 1.0,
+       "ell_comps": [
+        0.1,
+        0.0
+       ],
+       "type": "Isothermal"
+      },
+      "redshift": 0.2
+     },
+     "source_galaxy": {
+      "light": {
+       "centre": [
+        -0.03,
+        0.08
+       ],
+       "effective_radius": 0.11,
+       "ell_comps": [
+        0.14516129,
+        0.25142673
+       ],
+       "intensity": 2.0,
+       "type": "Exponential"
+      },
+      "redshift": 0.6
+     },
+     "subhalo": {
+      "concentration": {
+       "h": null,
+       "model": "moline2017_eq7",
+       "x_sub": 1.0
+      },
+      "enabled": true,
+      "mass": 100000000.0,
+      "model": "NFW",
+      "position": {
+       "angle": 90.0,
+       "offset_pixels": 0,
+       "type": "angle"
+      }
+     }
+    },
+    "modeling": {
+     "detection": "fisher",
+     "enabled": true,
+     "fisher": {
+      "compute_psf_mode_scan": false,
+      "finite_diff": {
+       "centre_arcsec": 0.001,
+       "einstein_radius_arcsec": 0.001,
+       "ell_comp": 0.001,
+       "multipole_comp": 0.001,
+       "shear_comp": 0.001,
+       "slope": 0.001,
+       "source_intensity_frac": 0.01,
+       "source_reff_frac": 0.01
+      },
+      "include_background_offset": true,
+      "include_psf_nuisance": true,
+      "map": {
+       "engine": "reference",
+       "grid": {
+        "annulus": null,
+        "half_width_arcsec": 1.2,
+        "spacing_arcsec": 0.4
+       },
+       "type": "grid"
+      },
+      "mask_mode": "all_pixels",
+      "mode": "map",
+      "psf_basis": {
+       "global_zernikes": {
+        "mode_nolls": [
+         4,
+         5
+        ]
+       },
+       "segment_hexikes": {
+        "mode_nolls": [
+         1,
+         2
+        ],
+        "segments": [
+         0,
+         3
+        ]
+       }
+      },
+      "psf_mode_prior_sigmas": {
+       "global_zernikes": 5.0,
+       "segment_hexikes": 5.0
+      },
+      "psf_mode_steps": {
+       "global_zernikes": 1.0,
+       "segment_hexikes": 1.0,
+       "segment_pistons": 1.0,
+       "segment_tiptilts": 0.1
+      },
+      "snr_threshold": 3.0
+     }
+    },
+    "observation": {
+     "detector": {
+      "dark_current": 0.002,
+      "gain": 1.0,
+      "read_noise": 0.2,
+      "sky_background": 1.0
+     },
+     "exposure_time": 900.0,
+     "throughput": 1.0
+    },
+    "plotting": {
+     "enabled": false,
+     "output_dir": "/tmp"
+    },
+    "psf": {
+     "aberrations": {
+      "enable_global_zernikes": true,
+      "enable_segment_hexikes": true,
+      "enable_segment_pistons": false,
+      "enable_segment_tiptilts": false,
+      "global_zernikes": {
+       "4": 5.0,
+       "5": 5.0,
+       "8": 5.0
+      },
+      "segment_hexikes": {
+       "0": {
+        "4": 10.0
+       },
+       "3": {
+        "5": 8.0
+       },
+       "7": {
+        "6": 12.0
+       }
+      },
+      "segment_pistons": {},
+      "segment_tiptilts": {}
+     },
+     "hres_psf": {
+      "num_airy": 4,
+      "num_pix": 128,
+      "sampling": 5,
+      "save_highres_psf_npy": false,
+      "wavelength": 5e-07
+     },
+     "kernel": {
+      "shape_native": [
+       17,
+       17
+      ]
+     },
+     "telescope": {
+      "focal_length": 144.0,
+      "gap_size": 0.006,
+      "num_rings": 2,
+      "pupil_diameter": 7.225765,
+      "segment_point_to_point": 1.65,
+      "supersampling_factor": 2
+     }
+    },
+    "run_name": "paper_parity_p1"
+   },
+   "paper_config_jax_gpu_differs_only_in": [
+    "modeling.fisher.map.engine"
+   ],
+   "pixels_unmasked": 10000,
+   "profiled_nuisance_names": [
+    "lens.centre_y",
+    "lens.centre_x",
+    "lens.einstein_radius",
+    "lens.ell_comp_1",
+    "lens.ell_comp_2",
+    "source.centre_y",
+    "source.centre_x",
+    "source.ell_comp_1",
+    "source.ell_comp_2",
+    "source.intensity",
+    "source.effective_radius",
+    "observation.background_offset_adu",
+    "psf.segment_hexikes[0][1]",
+    "psf.segment_hexikes[0][2]",
+    "psf.segment_hexikes[3][1]",
+    "psf.segment_hexikes[3][2]",
+    "psf.global_zernikes[4]",
+    "psf.global_zernikes[5]"
+   ],
+   "reference_vs_jax_gpu_max_relative_difference": {
+    "degradation": 4.410401388827822e-07,
+    "fisher_profiled": 3.1547458958817574e-07,
+    "fisher_raw": 2.1383978502671142e-07,
+    "q_asimov": 3.1547458958817574e-07,
+    "sigma_amplitude": 1.5773730741091853e-07
+   },
+   "truth_kernel_sha256": "9e50ba91260311cf795ab8d9cebed1b9696b8528adb1be62b3f3ba8e9ab7b152"
+  },
+  "p2_delta_knowledge_error": {
+   "description": "P1 analysed with a delta PSF knowledge error drawn from the shipped JWST WSS drift prior at 10 nm RMS",
+   "diagnostic_digests": {
+    "fisher_mask": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+    "mu0_adu": "8264bf5334fc2f6d3e996d34a9b308419dcd591b0614fe54e3482a7d69345afb",
+    "mu0_model_adu": "d2f3224cc2c7e51bd2b26dcb210a30f6167d812a41aed99b13f1654f0c20cf41",
+    "nuisance_images": {
+     "lens.centre_x": "72512b68206e98297bfac3ddee652f7bd0afc978ac4520ae66ea5370fb1402a9",
+     "lens.centre_y": "e0528f65643536630a04321f6f2bb25746e4210f904c0c4cc4a7f30c9a284443",
+     "lens.einstein_radius": "28d3cbe3d00c2b0228539740d59677260a9b0714bb0650a4a5be6a216dca40e3",
+     "lens.ell_comp_1": "fa7bc30b9aeadca56554c714f8686f9b37d56edd6d769f119d057c80cee700b1",
+     "lens.ell_comp_2": "e28b3919083604354d3a6fad33ca17129a29afff0ab9d66375bfe62ff20d0dc0",
+     "observation.background_offset_adu": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+     "psf.global_zernikes[4]": "9efa666f9b424eac79eb7abf7b911f0b8336bc88ca0980e6dacfa15bf4d5b570",
+     "psf.global_zernikes[5]": "5ee2fc196a8aa9cd2f3b3efec4a4b92b67e12b4d9db99596d6762de63d18e337",
+     "psf.segment_hexikes[0][1]": "3c55de861935b269cf05babc11ca4ac353cc9fa1b13ebb1b8c2a8ac1191e4d3b",
+     "psf.segment_hexikes[0][2]": "f1997ea5733eabb2e4f5e4ddd2f5575a3dc1c5f33e8c1511d5d51c1f445d6d32",
+     "psf.segment_hexikes[3][1]": "9bf96c60e5348c7dc6e4c8f69ef898e610d544a390469890dadb9123eafddf53",
+     "psf.segment_hexikes[3][2]": "48e18eb9aa4bf4e7373a2b879020b5aee3d07ea535321aa62709232325f242df",
+     "source.centre_x": "db91800d0dcd38c522d914993ac2f726e4010ad1ca89bab73c2eed032f0dd2d4",
+     "source.centre_y": "3214f67df48fcdafb57ab561839506079ec3d27f6ade3d7635c5e92c03426f08",
+     "source.effective_radius": "22385639881e168c43e620430e3d4d78941641f2bfd47083c32f8483defcdf74",
+     "source.ell_comp_1": "cd4d3b503811a97867ffed0728e010bddbb4972cb7f0746079f0bcae2a5fb71e",
+     "source.ell_comp_2": "567be3887efd9e55fc6ccb17f84fc38b6031d978a79b52a3e1e6369cfdcbb605",
+     "source.intensity": "9c55428319d92179dbcf94f7ccf1832ce1feeb23a8d4856ba5093a782d5fca19"
+    },
+    "sigma_adu": "4260c079bc40e059a6b8300492f9677882d9c6e75f6cbbb9c1f2abe134f6048c"
+   },
+   "engine_config": "engine/p2_delta_knowledge_error.yaml",
+   "fit_kernel_sha256": "7499d5e22583ca9c019728e1c3a4d9d33b49c7a88517996c2c1dd99ec0478da1",
+   "fit_psf_delta": {
+    "delta_id": "e598a298ab285140",
+    "draw_aberrations": {
+     "enable_global_zernikes": true,
+     "enable_segment_hexikes": true,
+     "enable_segment_pistons": false,
+     "enable_segment_tiptilts": false,
+     "global_zernikes": [
+      [
+       4,
+       1.3345426254329853
+      ],
+      [
+       5,
+       2.105063423427757
+      ],
+      [
+       6,
+       1.788134928490602
+      ],
+      [
+       7,
+       -1.8858501495414235
+      ],
+      [
+       8,
+       -1.5150251397336874
+      ],
+      [
+       9,
+       3.133870461240056
+      ],
+      [
+       10,
+       3.4097202169630116
+      ],
+      [
+       11,
+       1.1665275108718713
+      ],
+      [
+       12,
+       3.994448781723971
+      ],
+      [
+       13,
+       -0.6856561416640936
+      ],
+      [
+       14,
+       -2.275071548658502
+      ],
+      [
+       15,
+       1.268737497359971
+      ],
+      [
+       16,
+       -4.038219942282974
+      ],
+      [
+       17,
+       -0.1007722092921604
+      ],
+      [
+       18,
+       -0.02309627895057638
+      ],
+      [
+       19,
+       -0.668033366946441
+      ],
+      [
+       20,
+       -7.405777546070042
+      ],
+      [
+       21,
+       1.563871754101113
+      ],
+      [
+       22,
+       -0.023661079843244406
+      ],
+      [
+       23,
+       0.18239522459123955
+      ],
+      [
+       24,
+       0.5447959548611141
+      ],
+      [
+       25,
+       0.6136672010926274
+      ],
+      [
+       26,
+       0.8995774066465351
+      ],
+      [
+       27,
+       0.6439616037122499
+      ],
+      [
+       28,
+       1.5709827380772015
+      ],
+      [
+       29,
+       -0.6221261492809477
+      ],
+      [
+       30,
+       -0.8858387110981526
+      ],
+      [
+       31,
+       -1.0278145149127231
+      ],
+      [
+       32,
+       -0.4550198061579521
+      ],
+      [
+       33,
+       0.09698921568176322
+      ],
+      [
+       34,
+       -7.266168256621328
+      ],
+      [
+       35,
+       0.094415563044922
+      ],
+      [
+       36,
+       1.3742198067657205
+      ],
+      [
+       37,
+       0.38069208449582986
+      ],
+      [
+       38,
+       1.0879691075307758
+      ],
+      [
+       39,
+       0.4686988102466804
+      ],
+      [
+       40,
+       0.017152729453379454
+      ],
+      [
+       41,
+       -0.2058892443590782
+      ],
+      [
+       42,
+       1.9896848594766856
+      ],
+      [
+       43,
+       -1.8905692548468616
+      ],
+      [
+       44,
+       0.13513010256369815
+      ],
+      [
+       45,
+       0.0652547670047949
+      ],
+      [
+       46,
+       -0.7761537065804983
+      ],
+      [
+       47,
+       -0.38913694829423
+      ],
+      [
+       48,
+       0.0940476389223965
+      ],
+      [
+       49,
+       -0.0386312530116237
+      ],
+      [
+       50,
+       -2.3570632965686897
+      ],
+      [
+       51,
+       0.32423050095241707
+      ],
+      [
+       52,
+       -0.02383153749066636
+      ],
+      [
+       53,
+       -0.27494671111479474
+      ],
+      [
+       54,
+       1.668137671951261
+      ],
+      [
+       55,
+       1.036283047453429
+      ]
+     ],
+     "segment_hexikes": [
+      [
+       0,
+       [
+        [
+         1,
+         1.0388124744854375
+        ],
+        [
+         2,
+         -0.798922380413595
+        ],
+        [
+         3,
+         -1.753422013812241
+        ],
+        [
+         4,
+         -0.7314791698203789
+        ],
+        [
+         5,
+         -0.11657023781416807
+        ],
+        [
+         6,
+         -0.3187475501976339
+        ],
+        [
+         7,
+         -0.40017104789209423
+        ],
+        [
+         8,
+         -1.8881850010368837
+        ],
+        [
+         9,
+         -0.6866868404372943
+        ],
+        [
+         10,
+         1.0451090018647
+        ]
+       ]
+      ],
+      [
+       1,
+       [
+        [
+         1,
+         -1.544000382991924
+        ],
+        [
+         2,
+         -0.6845596644276256
+        ],
+        [
+         3,
+         0.7707293080689088
+        ],
+        [
+         4,
+         -1.7815863653334887
+        ],
+        [
+         5,
+         -1.7559209341489237
+        ],
+        [
+         6,
+         1.5603506930438444
+        ],
+        [
+         7,
+         -0.16187870272912447
+        ],
+        [
+         8,
+         0.807130211305346
+        ],
+        [
+         9,
+         -1.6196137103791504
+        ],
+        [
+         10,
+         -0.5965564049228398
+        ]
+       ]
+      ],
+      [
+       2,
+       [
+        [
+         1,
+         -1.7760119235710314
+        ],
+        [
+         2,
+         2.9868832553333564
+        ],
+        [
+         3,
+         1.0927165269630266
+        ],
+        [
+         4,
+         1.6534295953664475
+        ],
+        [
+         5,
+         0.0034734325762617734
+        ],
+        [
+         6,
+         -0.2403838499254316
+        ],
+        [
+         7,
+         0.1735213658319948
+        ],
+        [
+         8,
+         1.172032178749458
+        ],
+        [
+         9,
+         0.5750329956340313
+        ],
+        [
+         10,
+         0.01185976430305509
+        ]
+       ]
+      ],
+      [
+       3,
+       [
+        [
+         1,
+         0.015497947822964682
+        ],
+        [
+         2,
+         0.9659030583143031
+        ],
+        [
+         3,
+         -2.394149027514321
+        ],
+        [
+         4,
+         0.0187581336404213
+        ],
+        [
+         5,
+         2.01923344584858
+        ],
+        [
+         6,
+         -0.4239649014467727
+        ],
+        [
+         7,
+         0.18058478732515795
+        ],
+        [
+         8,
+         -0.31224495515158496
+        ],
+        [
+         9,
+         0.4060626862312914
+        ],
+        [
+         10,
+         -0.28484319376605566
+        ]
+       ]
+      ],
+      [
+       4,
+       [
+        [
+         1,
+         -1.73172809434638
+        ],
+        [
+         2,
+         -2.192495854081292
+        ],
+        [
+         3,
+         -0.5592235283346201
+        ],
+        [
+         4,
+         -1.3507590793863207
+        ],
+        [
+         5,
+         0.29679198490359887
+        ],
+        [
+         6,
+         -0.9633270685381624
+        ],
+        [
+         7,
+         -1.4069918405367436
+        ],
+        [
+         8,
+         0.6682835570270603
+        ],
+        [
+         9,
+         0.34393825085829116
+        ],
+        [
+         10,
+         -1.104768944364942
+        ]
+       ]
+      ],
+      [
+       5,
+       [
+        [
+         1,
+         1.875478966698488
+        ],
+        [
+         2,
+         -0.34387954352258593
+        ],
+        [
+         3,
+         -1.8119298632409597
+        ],
+        [
+         4,
+         -0.8866677102324999
+        ],
+        [
+         5,
+         1.115417525709148
+        ],
+        [
+         6,
+         -1.4217666774103923
+        ],
+        [
+         7,
+         0.2734117249171545
+        ],
+        [
+         8,
+         0.7608180294149592
+        ],
+        [
+         9,
+         -0.7177706095575633
+        ],
+        [
+         10,
+         0.26732082913304295
+        ]
+       ]
+      ],
+      [
+       6,
+       [
+        [
+         1,
+         0.4454224077460757
+        ],
+        [
+         2,
+         -1.0083142934377483
+        ],
+        [
+         3,
+         -0.08495861853056677
+        ],
+        [
+         4,
+         0.22000946388637804
+        ],
+        [
+         5,
+         -1.844610947652582
+        ],
+        [
+         6,
+         -0.914980151009792
+        ],
+        [
+         7,
+         1.5093923776032903
+        ],
+        [
+         8,
+         -1.2972156503151988
+        ],
+        [
+         9,
+         -0.008230984414282706
+        ],
+        [
+         10,
+         0.3670056009002726
+        ]
+       ]
+      ],
+      [
+       7,
+       [
+        [
+         1,
+         0.6793136127464385
+        ],
+        [
+         2,
+         -1.1034445335332141
+        ],
+        [
+         3,
+         1.319289098762253
+        ],
+        [
+         4,
+         -0.09965697861920325
+        ],
+        [
+         5,
+         1.2056242657740657
+        ],
+        [
+         6,
+         -0.509414883512656
+        ],
+        [
+         7,
+         -0.15486586166975677
+        ],
+        [
+         8,
+         1.3321648255058482
+        ],
+        [
+         9,
+         -0.8303839257195601
+        ],
+        [
+         10,
+         1.6742401409226473
+        ]
+       ]
+      ],
+      [
+       8,
+       [
+        [
+         1,
+         -0.20906881302974298
+        ],
+        [
+         2,
+         1.9881340140892696
+        ],
+        [
+         3,
+         0.5231353729396218
+        ],
+        [
+         4,
+         -2.262930663362563
+        ],
+        [
+         5,
+         -0.9581818254082458
+        ],
+        [
+         6,
+         -3.708306508252031
+        ],
+        [
+         7,
+         0.12363904196035999
+        ],
+        [
+         8,
+         -1.5238146468380196
+        ],
+        [
+         9,
+         1.4037251442616643
+        ],
+        [
+         10,
+         0.1337757764948516
+        ]
+       ]
+      ],
+      [
+       9,
+       [
+        [
+         1,
+         0.7240418550953212
+        ],
+        [
+         2,
+         -3.438212643124311
+        ],
+        [
+         3,
+         -0.30890985406218247
+        ],
+        [
+         4,
+         0.9239411005469459
+        ],
+        [
+         5,
+         1.4235429965712219
+        ],
+        [
+         6,
+         -2.273475899721701
+        ],
+        [
+         7,
+         0.49459661703717134
+        ],
+        [
+         8,
+         -0.12073059637513656
+        ],
+        [
+         9,
+         1.0151664236168827
+        ],
+        [
+         10,
+         0.2875921209711271
+        ]
+       ]
+      ],
+      [
+       10,
+       [
+        [
+         1,
+         0.24446806803149945
+        ],
+        [
+         2,
+         1.5340056574378456
+        ],
+        [
+         3,
+         -2.10093168696766
+        ],
+        [
+         4,
+         -3.4605392439461085
+        ],
+        [
+         5,
+         0.8380953925428973
+        ],
+        [
+         6,
+         -2.322534582263777
+        ],
+        [
+         7,
+         -0.6321670607268736
+        ],
+        [
+         8,
+         0.9835238107805713
+        ],
+        [
+         9,
+         0.29953520918049864
+        ],
+        [
+         10,
+         -0.10233230039024256
+        ]
+       ]
+      ],
+      [
+       11,
+       [
+        [
+         1,
+         -0.9785574138382547
+        ],
+        [
+         2,
+         3.9907783627639017
+        ],
+        [
+         3,
+         -1.536866462136016
+        ],
+        [
+         4,
+         -0.327436041653732
+        ],
+        [
+         5,
+         0.9877665464903963
+        ],
+        [
+         6,
+         0.06208933689651889
+        ],
+        [
+         7,
+         -1.0668090384272138
+        ],
+        [
+         8,
+         0.7473326384466998
+        ],
+        [
+         9,
+         0.22319364421775909
+        ],
+        [
+         10,
+         -0.6234748484754385
+        ]
+       ]
+      ],
+      [
+       12,
+       [
+        [
+         1,
+         -0.5717407265163271
+        ],
+        [
+         2,
+         1.4494641518390663
+        ],
+        [
+         3,
+         0.7997808346142076
+        ],
+        [
+         4,
+         -3.761541342533967
+        ],
+        [
+         5,
+         -0.22612895418242526
+        ],
+        [
+         6,
+         4.442575013012103
+        ],
+        [
+         7,
+         1.3173084050904038
+        ],
+        [
+         8,
+         -0.5446122994512363
+        ],
+        [
+         9,
+         -0.831873486851277
+        ],
+        [
+         10,
+         0.37698052453244113
+        ]
+       ]
+      ],
+      [
+       13,
+       [
+        [
+         1,
+         1.1733659791453637
+        ],
+        [
+         2,
+         -1.455209202065973
+        ],
+        [
+         3,
+         1.582765652193743
+        ],
+        [
+         4,
+         -0.49274572917503
+        ],
+        [
+         5,
+         0.6028888537642377
+        ],
+        [
+         6,
+         1.912429423454148
+        ],
+        [
+         7,
+         0.6544845326240544
+        ],
+        [
+         8,
+         -0.7679256121663592
+        ],
+        [
+         9,
+         0.3861803399687821
+        ],
+        [
+         10,
+         0.3676247621151791
+        ]
+       ]
+      ],
+      [
+       14,
+       [
+        [
+         1,
+         -0.48220010347578085
+        ],
+        [
+         2,
+         0.8746449050340682
+        ],
+        [
+         3,
+         -2.3538464469482
+        ],
+        [
+         4,
+         0.40994636266088613
+        ],
+        [
+         5,
+         1.6667999621920588
+        ],
+        [
+         6,
+         0.42002419661128804
+        ],
+        [
+         7,
+         -0.33689668652883753
+        ],
+        [
+         8,
+         -0.7670294658424199
+        ],
+        [
+         9,
+         -0.6525414735818174
+        ],
+        [
+         10,
+         0.0967251763419401
+        ]
+       ]
+      ],
+      [
+       15,
+       [
+        [
+         1,
+         0.7476730997409474
+        ],
+        [
+         2,
+         -0.7899574516410636
+        ],
+        [
+         3,
+         -2.2100329890787656
+        ],
+        [
+         4,
+         0.35401326778898307
+        ],
+        [
+         5,
+         0.05701132836373327
+        ],
+        [
+         6,
+         -1.4843133076015225
+        ],
+        [
+         7,
+         -1.3143066727309376
+        ],
+        [
+         8,
+         -0.607148854128663
+        ],
+        [
+         9,
+         0.9446852449915665
+        ],
+        [
+         10,
+         -1.180362472135706
+        ]
+       ]
+      ],
+      [
+       16,
+       [
+        [
+         1,
+         -0.058360353114467675
+        ],
+        [
+         2,
+         -1.0331871835579671
+        ],
+        [
+         3,
+         -0.025750447571315418
+        ],
+        [
+         4,
+         -0.7774258666639685
+        ],
+        [
+         5,
+         -1.3429212274192746
+        ],
+        [
+         6,
+         -1.5758673785573702
+        ],
+        [
+         7,
+         1.1687961048348678
+        ],
+        [
+         8,
+         1.8246912095900558
+        ],
+        [
+         9,
+         1.5846059217112722
+        ],
+        [
+         10,
+         -0.5117869640963988
+        ]
+       ]
+      ],
+      [
+       17,
+       [
+        [
+         1,
+         -1.5478105219768057
+        ],
+        [
+         2,
+         -0.0013759891529815994
+        ],
+        [
+         3,
+         3.2735187402939214
+        ],
+        [
+         4,
+         0.3145589691791584
+        ],
+        [
+         5,
+         1.471062769215787
+        ],
+        [
+         6,
+         0.5382000278000412
+        ],
+        [
+         7,
+         -0.3326804192008846
+        ],
+        [
+         8,
+         0.9502155400177689
+        ],
+        [
+         9,
+         0.15760509076049686
+        ],
+        [
+         10,
+         -0.7908892790900062
+        ]
+       ]
+      ],
+      [
+       18,
+       [
+        [
+         1,
+         1.4488082767494184
+        ],
+        [
+         2,
+         -2.348585412873826
+        ],
+        [
+         3,
+         -0.33579049329668165
+        ],
+        [
+         4,
+         2.088077676504856
+        ],
+        [
+         5,
+         0.3315450395422387
+        ],
+        [
+         6,
+         -1.101450196764495
+        ],
+        [
+         7,
+         0.10182391859261901
+        ],
+        [
+         8,
+         1.2051124552895363
+        ],
+        [
+         9,
+         -1.000371763568227
+        ],
+        [
+         10,
+         0.5698316559823232
+        ]
+       ]
+      ]
+     ],
+     "segment_pistons": [],
+     "segment_tiptilts": []
+    },
+    "family": "combined",
+    "fit_kernel_sha256": "7499d5e22583ca9c019728e1c3a4d9d33b49c7a88517996c2c1dd99ec0478da1",
+    "fit_psf_config_hash": "972fa1560df32221",
+    "measured_draw_rms_nm": 10.0,
+    "prior_table_sha256": "bfbececdcbe5fb37a4abcb018b63544d47c4c37ecc1900a539d62755b740c488",
+    "requested_amplitude_rms_nm": 10.0,
+    "seed": 20261005,
+    "truth_kernel_sha256": "9e50ba91260311cf795ab8d9cebed1b9696b8528adb1be62b3f3ba8e9ab7b152",
+    "truth_psf_config_hash": "2942c3e0c05a83db"
+   },
+   "fixture": "p2_delta_knowledge_error.npz",
+   "lanes": {
+    "jax_gpu": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "JAX_ENABLE_X64": "True",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+     },
+     "seconds": {
+      "detector_build": 2.1328462986275554,
+      "total": 2.8610593993216753
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 2.13798376172781,
+      "total": 8.081823715940118
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference_numba": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 2.1490136170759797,
+      "total": 8.118895124644041
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    }
+   },
+   "masses_msun": [
+    10000000.0,
+    100000000.0,
+    1000000000.0
+   ],
+   "nuisance_prior_precision": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.04,
+    0.04,
+    0.04,
+    0.04,
+    0.04,
+    0.04
+   ],
+   "paper_config": {
+    "global_seed": 11,
+    "lensing": {
+     "cosmology": "Planck15",
+     "grid": {
+      "over_sample_size": 4,
+      "pixel_scale": 0.03,
+      "shape": [
+       100,
+       100
+      ]
+     },
+     "lens_galaxy": {
+      "mass": {
+       "centre": [
+        0.0,
+        0.0
+       ],
+       "einstein_radius": 1.0,
+       "ell_comps": [
+        0.1,
+        0.0
+       ],
+       "type": "Isothermal"
+      },
+      "redshift": 0.2
+     },
+     "source_galaxy": {
+      "light": {
+       "centre": [
+        -0.03,
+        0.08
+       ],
+       "effective_radius": 0.11,
+       "ell_comps": [
+        0.14516129,
+        0.25142673
+       ],
+       "intensity": 2.0,
+       "type": "Exponential"
+      },
+      "redshift": 0.6
+     },
+     "subhalo": {
+      "concentration": {
+       "h": null,
+       "model": "moline2017_eq7",
+       "x_sub": 1.0
+      },
+      "enabled": true,
+      "mass": 100000000.0,
+      "model": "NFW",
+      "position": {
+       "angle": 90.0,
+       "offset_pixels": 0,
+       "type": "angle"
+      }
+     }
+    },
+    "modeling": {
+     "detection": "fisher",
+     "enabled": true,
+     "fisher": {
+      "compute_psf_mode_scan": false,
+      "finite_diff": {
+       "centre_arcsec": 0.001,
+       "einstein_radius_arcsec": 0.001,
+       "ell_comp": 0.001,
+       "multipole_comp": 0.001,
+       "shear_comp": 0.001,
+       "slope": 0.001,
+       "source_intensity_frac": 0.01,
+       "source_reff_frac": 0.01
+      },
+      "include_background_offset": true,
+      "include_psf_nuisance": true,
+      "map": {
+       "engine": "reference",
+       "grid": {
+        "annulus": null,
+        "half_width_arcsec": 1.2,
+        "spacing_arcsec": 0.4
+       },
+       "type": "grid"
+      },
+      "mask_mode": "all_pixels",
+      "mode": "map",
+      "psf_basis": {
+       "global_zernikes": {
+        "mode_nolls": [
+         4,
+         5
+        ]
+       },
+       "segment_hexikes": {
+        "mode_nolls": [
+         1,
+         2
+        ],
+        "segments": [
+         0,
+         3
+        ]
+       }
+      },
+      "psf_mode_prior_sigmas": {
+       "global_zernikes": 5.0,
+       "segment_hexikes": 5.0
+      },
+      "psf_mode_steps": {
+       "global_zernikes": 1.0,
+       "segment_hexikes": 1.0,
+       "segment_pistons": 1.0,
+       "segment_tiptilts": 0.1
+      },
+      "snr_threshold": 3.0
+     },
+     "fit_psf": {
+      "delta": {
+       "amplitude_rms_nm": 10.0,
+       "family": "combined",
+       "prior_table": "/data/home/gvassilakis/engine-second-pass-20261005/paper_parity_gen/rasti_41621de/configs/psf_priors/jwst_wss_drift_v1.yaml",
+       "seed": 20261005
+      },
+      "mode": "delta"
+     }
+    },
+    "observation": {
+     "detector": {
+      "dark_current": 0.002,
+      "gain": 1.0,
+      "read_noise": 0.2,
+      "sky_background": 1.0
+     },
+     "exposure_time": 900.0,
+     "throughput": 1.0
+    },
+    "plotting": {
+     "enabled": false,
+     "output_dir": "/tmp"
+    },
+    "psf": {
+     "aberrations": {
+      "enable_global_zernikes": true,
+      "enable_segment_hexikes": true,
+      "enable_segment_pistons": false,
+      "enable_segment_tiptilts": false,
+      "global_zernikes": {
+       "4": 5.0,
+       "5": 5.0,
+       "8": 5.0
+      },
+      "segment_hexikes": {
+       "0": {
+        "4": 10.0
+       },
+       "3": {
+        "5": 8.0
+       },
+       "7": {
+        "6": 12.0
+       }
+      },
+      "segment_pistons": {},
+      "segment_tiptilts": {}
+     },
+     "hres_psf": {
+      "num_airy": 4,
+      "num_pix": 128,
+      "sampling": 5,
+      "save_highres_psf_npy": false,
+      "wavelength": 5e-07
+     },
+     "kernel": {
+      "shape_native": [
+       17,
+       17
+      ]
+     },
+     "telescope": {
+      "focal_length": 144.0,
+      "gap_size": 0.006,
+      "num_rings": 2,
+      "pupil_diameter": 7.225765,
+      "segment_point_to_point": 1.65,
+      "supersampling_factor": 2
+     }
+    },
+    "run_name": "paper_parity_p2"
+   },
+   "paper_config_jax_gpu_differs_only_in": [
+    "modeling.fisher.map.engine"
+   ],
+   "pixels_unmasked": 10000,
+   "profiled_nuisance_names": [
+    "lens.centre_y",
+    "lens.centre_x",
+    "lens.einstein_radius",
+    "lens.ell_comp_1",
+    "lens.ell_comp_2",
+    "source.centre_y",
+    "source.centre_x",
+    "source.ell_comp_1",
+    "source.ell_comp_2",
+    "source.intensity",
+    "source.effective_radius",
+    "observation.background_offset_adu",
+    "psf.segment_hexikes[0][1]",
+    "psf.segment_hexikes[0][2]",
+    "psf.segment_hexikes[3][1]",
+    "psf.segment_hexikes[3][2]",
+    "psf.global_zernikes[4]",
+    "psf.global_zernikes[5]"
+   ],
+   "reference_vs_jax_gpu_max_relative_difference": {
+    "amplitude_hat": 3.7021330161366404e-08,
+    "amplitude_spurious": 6.722813408835513e-07,
+    "degradation": 2.621585399221359e-08,
+    "fisher_profiled": 1.9910962927882775e-08,
+    "fisher_raw": 1.3397197706852984e-08,
+    "q_asimov": 1.9910962927882775e-08,
+    "q_mismatch": 7.546400032412664e-08,
+    "q_spurious": 1.331224091276413e-06,
+    "sigma_amplitude": 9.955481529921546e-09,
+    "z_mismatch": 3.773200086547912e-08,
+    "z_spurious": 6.656122671952688e-07
+   },
+   "truth_kernel_sha256": "9e50ba91260311cf795ab8d9cebed1b9696b8528adb1be62b3f3ba8e9ab7b152"
+  },
+  "p3_image_source_kernel": {
+   "description": "synthetic image source and an externally supplied detector kernel",
+   "diagnostic_digests": {
+    "fisher_mask": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+    "mu0_adu": "499449fd34573080dfac1ef59e24b5c4090c6dc221b4025d1c58e0e8971c5546",
+    "mu0_model_adu": "499449fd34573080dfac1ef59e24b5c4090c6dc221b4025d1c58e0e8971c5546",
+    "nuisance_images": {
+     "lens.centre_x": "a64a43e63caeaaa7d1182432d57a488fcd3cb0f6cb865492958b39d60b58c50d",
+     "lens.centre_y": "92b5b64ef2edf0dfea7730415b3a4b30dc7416a4de797bea908bcf13dd2f9b7e",
+     "lens.einstein_radius": "f36d64524f795f66affaf7d0da725373bf8bc5b3e916878bc85a3470af5686fe",
+     "lens.ell_comp_1": "f96d2faaf1542b262a9d0f1383f0e705bf435d61286a0f17da8221fa38fa4914",
+     "lens.ell_comp_2": "ffa6f845fd52c9ac6e60e366600ea0513eba042739f94e745c20655ba99e4a4f",
+     "observation.background_offset_adu": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+     "source.centre_x": "75bc3f490b6d11eec0faac6bc00f80688cc9a064b34442794fccbf6db0b1bc6c",
+     "source.centre_y": "a96409afc4bc778b6eb0ba7777a6deb9b72077688cdba99dc7bada2d1a43d669",
+     "source.effective_radius": "9cd4d32f915d2b15a483e7af7689f20764d14f63120c7e89333aef6fd29c6b15",
+     "source.intensity": "45f44514e27763bb2082934ed1810c1e250d326af98d581fec4ab57651e71ea7"
+    },
+    "sigma_adu": "1371f7737ba4948618e0f9e619b127bf67166779fa1e674c4211c95396c5567f"
+   },
+   "engine_config": "engine/p3_image_source_kernel.yaml",
+   "fit_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f",
+   "fixture": "p3_image_source_kernel.npz",
+   "lanes": {
+    "jax_gpu": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "JAX_ENABLE_X64": "True",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+     },
+     "seconds": {
+      "detector_build": 0.3768297154456377,
+      "total": 1.143880263902247
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 0.371893553994596,
+      "total": 2.5115959979593754
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference_numba": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 0.37452842481434345,
+      "total": 2.370757281780243
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    }
+   },
+   "masses_msun": [
+    100000000.0,
+    1000000000.0
+   ],
+   "nuisance_prior_precision": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "paper_config": {
+    "global_seed": 11,
+    "lensing": {
+     "cosmology": "Planck15",
+     "grid": {
+      "over_sample_size": 4,
+      "pixel_scale": 0.03,
+      "shape": [
+       100,
+       100
+      ]
+     },
+     "lens_galaxy": {
+      "mass": {
+       "centre": [
+        0.0,
+        0.0
+       ],
+       "einstein_radius": 1.0,
+       "ell_comps": [
+        0.1,
+        0.0
+       ],
+       "type": "Isothermal"
+      },
+      "redshift": 0.2
+     },
+     "source_galaxy": {
+      "light": {
+       "asset_path": "/data/home/gvassilakis/engine-second-pass-20261005/trees/parity/tests/fixtures/paper_parity/source_image.npz",
+       "centre": [
+        -0.03,
+        0.08
+       ],
+       "flux_scale": 1.0,
+       "rotation_deg": 30.0,
+       "size_scale": 1.0,
+       "total_flux": 0.29,
+       "type": "Image"
+      },
+      "redshift": 0.6
+     },
+     "subhalo": {
+      "concentration": {
+       "h": null,
+       "model": "moline2017_eq7",
+       "x_sub": 1.0
+      },
+      "enabled": true,
+      "mass": 100000000.0,
+      "model": "NFW",
+      "position": {
+       "angle": 90.0,
+       "offset_pixels": 0,
+       "type": "angle"
+      }
+     }
+    },
+    "modeling": {
+     "detection": "fisher",
+     "enabled": true,
+     "fisher": {
+      "compute_psf_mode_scan": false,
+      "finite_diff": {
+       "centre_arcsec": 0.001,
+       "einstein_radius_arcsec": 0.001,
+       "ell_comp": 0.001,
+       "multipole_comp": 0.001,
+       "shear_comp": 0.001,
+       "slope": 0.001,
+       "source_intensity_frac": 0.01,
+       "source_reff_frac": 0.01
+      },
+      "include_background_offset": true,
+      "include_psf_nuisance": false,
+      "map": {
+       "engine": "reference",
+       "grid": {
+        "annulus": null,
+        "half_width_arcsec": 1.2,
+        "spacing_arcsec": 0.6
+       },
+       "type": "grid"
+      },
+      "mask_mode": "all_pixels",
+      "mode": "map",
+      "snr_threshold": 3.0
+     }
+    },
+    "observation": {
+     "detector": {
+      "dark_current": 0.002,
+      "gain": 1.0,
+      "read_noise": 0.2,
+      "sky_background": 1.0
+     },
+     "exposure_time": 900.0,
+     "throughput": 1.0
+    },
+    "plotting": {
+     "enabled": false,
+     "output_dir": "/tmp"
+    },
+    "psf": {
+     "kernel": {
+      "normalize": true,
+      "path": "/data/home/gvassilakis/engine-second-pass-20261005/trees/parity/tests/fixtures/paper_parity/detector_kernel.npy",
+      "pixel_scale_arcsec": 0.03
+     },
+     "provider": "kernel"
+    },
+    "run_name": "paper_parity_p3"
+   },
+   "paper_config_jax_gpu_differs_only_in": [
+    "modeling.fisher.map.engine"
+   ],
+   "pixels_unmasked": 10000,
+   "profiled_nuisance_names": [
+    "lens.centre_y",
+    "lens.centre_x",
+    "lens.einstein_radius",
+    "lens.ell_comp_1",
+    "lens.ell_comp_2",
+    "source.centre_y",
+    "source.centre_x",
+    "source.intensity",
+    "source.effective_radius",
+    "observation.background_offset_adu"
+   ],
+   "reference_vs_jax_gpu_max_relative_difference": {
+    "degradation": 2.387095282622375e-07,
+    "fisher_profiled": 3.150193903873457e-07,
+    "fisher_raw": 1.6322559257027765e-07,
+    "q_asimov": 3.150193903873457e-07,
+    "sigma_amplitude": 1.5750970774523018e-07
+   },
+   "truth_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f"
+  },
+  "p4_subhalo_pointmass": {
+   "description": "point-mass subhalo with the detector kernel",
+   "diagnostic_digests": {
+    "fisher_mask": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+    "mu0_adu": "ff0a8a6cbb3d3719fc6f335c438dd0b2d0caea3ec902f84c1df6e91681a89814",
+    "mu0_model_adu": "ff0a8a6cbb3d3719fc6f335c438dd0b2d0caea3ec902f84c1df6e91681a89814",
+    "nuisance_images": {
+     "lens.centre_x": "cd084eea99be70e0643b8deb49a5c8925f7ebe98efe18b049d1dff31437281c3",
+     "lens.centre_y": "946af3a4d52ccdce5c0aebf1782f29131cdb68a67a1528c38cb983080d91cafc",
+     "lens.einstein_radius": "74acca7021b32abe0c101b45e638147903530f708a8094932b7acfc434984c82",
+     "lens.ell_comp_1": "37892ee0f0a393b7b34ced8a4c2bc7030bbd533595605f5957e3f7615ac53a86",
+     "lens.ell_comp_2": "dc72a60b011a29d1b85038ccd94d6b1b8c15f983e7e5c80884a3a72832e4fb03",
+     "observation.background_offset_adu": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+     "source.centre_x": "3ebc5049ffa9afaee61c74bf1d6c42f80b9834f060b07d03bde17371744615cb",
+     "source.centre_y": "7008cf373fb6bda79e18fa950634ecabd4ab3953f24327550c7171fd77db9b67",
+     "source.effective_radius": "faa5856fa14ef8d0f00625783b037e97f846b4bcce8a2626d876d6fa9efa7f93",
+     "source.ell_comp_1": "6b33520c3d67b778e6103a9417531412c79f98e56834e44d587b000f3b264f9c",
+     "source.ell_comp_2": "203d342926ce66ac2501fc0404c254318618faf761fca5fe4da86fad32a33f6c",
+     "source.intensity": "4dccef075e22a0dcf9014c909c58f2aa24d4b0cadd2f33ebc51389cc5bcfe01c"
+    },
+    "sigma_adu": "93a594058d31666af027425bb5170c1ce4331a424fc8d3ddc46875001d12170d"
+   },
+   "engine_config": "engine/p4_subhalo_pointmass.yaml",
+   "fit_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f",
+   "fixture": "p4_subhalo_pointmass.npz",
+   "lanes": {
+    "jax_gpu": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "JAX_ENABLE_X64": "True",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+     },
+     "seconds": {
+      "detector_build": 0.36973723117262125,
+      "total": 0.6077192202210426
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 0.3651276808232069,
+      "total": 0.8748921398073435
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference_numba": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 0.3672627666965127,
+      "total": 0.8276828797534108
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    }
+   },
+   "masses_msun": [
+    100000000.0,
+    1000000000.0
+   ],
+   "nuisance_prior_precision": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "paper_config": {
+    "global_seed": 11,
+    "lensing": {
+     "cosmology": "Planck15",
+     "grid": {
+      "over_sample_size": 4,
+      "pixel_scale": 0.03,
+      "shape": [
+       100,
+       100
+      ]
+     },
+     "lens_galaxy": {
+      "mass": {
+       "centre": [
+        0.0,
+        0.0
+       ],
+       "einstein_radius": 1.0,
+       "ell_comps": [
+        0.1,
+        0.0
+       ],
+       "type": "Isothermal"
+      },
+      "redshift": 0.2
+     },
+     "source_galaxy": {
+      "light": {
+       "centre": [
+        -0.03,
+        0.08
+       ],
+       "effective_radius": 0.11,
+       "ell_comps": [
+        0.14516129,
+        0.25142673
+       ],
+       "intensity": 2.0,
+       "type": "Exponential"
+      },
+      "redshift": 0.6
+     },
+     "subhalo": {
+      "enabled": true,
+      "mass": 100000000.0,
+      "model": "PointMass",
+      "position": {
+       "angle": 90.0,
+       "offset_pixels": 0,
+       "type": "angle"
+      }
+     }
+    },
+    "modeling": {
+     "detection": "fisher",
+     "enabled": true,
+     "fisher": {
+      "compute_psf_mode_scan": false,
+      "finite_diff": {
+       "centre_arcsec": 0.001,
+       "einstein_radius_arcsec": 0.001,
+       "ell_comp": 0.001,
+       "multipole_comp": 0.001,
+       "shear_comp": 0.001,
+       "slope": 0.001,
+       "source_intensity_frac": 0.01,
+       "source_reff_frac": 0.01
+      },
+      "include_background_offset": true,
+      "include_psf_nuisance": false,
+      "map": {
+       "engine": "reference",
+       "grid": {
+        "annulus": null,
+        "half_width_arcsec": 0.6,
+        "spacing_arcsec": 0.6
+       },
+       "type": "grid"
+      },
+      "mask_mode": "all_pixels",
+      "mode": "map",
+      "snr_threshold": 3.0
+     }
+    },
+    "observation": {
+     "detector": {
+      "dark_current": 0.002,
+      "gain": 1.0,
+      "read_noise": 0.2,
+      "sky_background": 1.0
+     },
+     "exposure_time": 900.0,
+     "throughput": 1.0
+    },
+    "plotting": {
+     "enabled": false,
+     "output_dir": "/tmp"
+    },
+    "psf": {
+     "kernel": {
+      "normalize": true,
+      "path": "/data/home/gvassilakis/engine-second-pass-20261005/trees/parity/tests/fixtures/paper_parity/detector_kernel.npy",
+      "pixel_scale_arcsec": 0.03
+     },
+     "provider": "kernel"
+    },
+    "run_name": "paper_parity_p4_pointmass"
+   },
+   "paper_config_jax_gpu_differs_only_in": [
+    "modeling.fisher.map.engine"
+   ],
+   "pixels_unmasked": 10000,
+   "profiled_nuisance_names": [
+    "lens.centre_y",
+    "lens.centre_x",
+    "lens.einstein_radius",
+    "lens.ell_comp_1",
+    "lens.ell_comp_2",
+    "source.centre_y",
+    "source.centre_x",
+    "source.ell_comp_1",
+    "source.ell_comp_2",
+    "source.intensity",
+    "source.effective_radius",
+    "observation.background_offset_adu"
+   ],
+   "reference_vs_jax_gpu_max_relative_difference": {
+    "degradation": 5.327655230173994e-07,
+    "fisher_profiled": 1.2153576359450315e-06,
+    "fisher_raw": 6.901763592434025e-07,
+    "q_asimov": 1.2153576359450315e-06,
+    "sigma_amplitude": 6.076790026986164e-07
+   },
+   "truth_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f"
+  },
+  "p4_subhalo_sis": {
+   "description": "SIS subhalo with the detector kernel",
+   "diagnostic_digests": {
+    "fisher_mask": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+    "mu0_adu": "ff0a8a6cbb3d3719fc6f335c438dd0b2d0caea3ec902f84c1df6e91681a89814",
+    "mu0_model_adu": "ff0a8a6cbb3d3719fc6f335c438dd0b2d0caea3ec902f84c1df6e91681a89814",
+    "nuisance_images": {
+     "lens.centre_x": "cd084eea99be70e0643b8deb49a5c8925f7ebe98efe18b049d1dff31437281c3",
+     "lens.centre_y": "946af3a4d52ccdce5c0aebf1782f29131cdb68a67a1528c38cb983080d91cafc",
+     "lens.einstein_radius": "74acca7021b32abe0c101b45e638147903530f708a8094932b7acfc434984c82",
+     "lens.ell_comp_1": "37892ee0f0a393b7b34ced8a4c2bc7030bbd533595605f5957e3f7615ac53a86",
+     "lens.ell_comp_2": "dc72a60b011a29d1b85038ccd94d6b1b8c15f983e7e5c80884a3a72832e4fb03",
+     "observation.background_offset_adu": "949278b8fe0c99c3a533b0d2ac790fe1c1935b8a59b5787bca22519f74d769cc",
+     "source.centre_x": "3ebc5049ffa9afaee61c74bf1d6c42f80b9834f060b07d03bde17371744615cb",
+     "source.centre_y": "7008cf373fb6bda79e18fa950634ecabd4ab3953f24327550c7171fd77db9b67",
+     "source.effective_radius": "faa5856fa14ef8d0f00625783b037e97f846b4bcce8a2626d876d6fa9efa7f93",
+     "source.ell_comp_1": "6b33520c3d67b778e6103a9417531412c79f98e56834e44d587b000f3b264f9c",
+     "source.ell_comp_2": "203d342926ce66ac2501fc0404c254318618faf761fca5fe4da86fad32a33f6c",
+     "source.intensity": "4dccef075e22a0dcf9014c909c58f2aa24d4b0cadd2f33ebc51389cc5bcfe01c"
+    },
+    "sigma_adu": "93a594058d31666af027425bb5170c1ce4331a424fc8d3ddc46875001d12170d"
+   },
+   "engine_config": "engine/p4_subhalo_sis.yaml",
+   "fit_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f",
+   "fixture": "p4_subhalo_sis.npz",
+   "lanes": {
+    "jax_gpu": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "0",
+      "JAX_ENABLE_X64": "True",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "XLA_PYTHON_CLIENT_PREALLOCATE": "false"
+     },
+     "seconds": {
+      "detector_build": 0.36930414475500584,
+      "total": 0.677262925542891
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "1",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 0.36519947834312916,
+      "total": 0.7776118805631995
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    },
+    "reference_numba": {
+     "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "JAX_PLATFORMS": "cpu",
+      "MKL_NUM_THREADS": "1",
+      "NUMBA_DISABLE_JIT": "0",
+      "NUMEXPR_NUM_THREADS": "1",
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1"
+     },
+     "seconds": {
+      "detector_build": 0.36804859805852175,
+      "total": 0.7348358202725649
+     },
+     "versions": {
+      "astropy": "7.2.0",
+      "autoarray": "2026.5.14.2",
+      "autoconf": "2026.5.14.2",
+      "autofit": "2026.5.14.2",
+      "autogalaxy": "2026.5.14.2",
+      "autolens": "2026.5.14.2",
+      "hcipy": "0.7.1.dev73+gcc853b392",
+      "jax": "0.4.38",
+      "jaxlib": "0.4.38",
+      "numba": "0.65.1",
+      "numpy": "1.26.4",
+      "python": "3.11.15",
+      "scipy": "1.17.1"
+     }
+    }
+   },
+   "masses_msun": [
+    100000000.0,
+    1000000000.0
+   ],
+   "nuisance_prior_precision": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+   ],
+   "paper_config": {
+    "global_seed": 11,
+    "lensing": {
+     "cosmology": "Planck15",
+     "grid": {
+      "over_sample_size": 4,
+      "pixel_scale": 0.03,
+      "shape": [
+       100,
+       100
+      ]
+     },
+     "lens_galaxy": {
+      "mass": {
+       "centre": [
+        0.0,
+        0.0
+       ],
+       "einstein_radius": 1.0,
+       "ell_comps": [
+        0.1,
+        0.0
+       ],
+       "type": "Isothermal"
+      },
+      "redshift": 0.2
+     },
+     "source_galaxy": {
+      "light": {
+       "centre": [
+        -0.03,
+        0.08
+       ],
+       "effective_radius": 0.11,
+       "ell_comps": [
+        0.14516129,
+        0.25142673
+       ],
+       "intensity": 2.0,
+       "type": "Exponential"
+      },
+      "redshift": 0.6
+     },
+     "subhalo": {
+      "enabled": true,
+      "mass": 100000000.0,
+      "model": "SIS",
+      "position": {
+       "angle": 90.0,
+       "offset_pixels": 0,
+       "type": "angle"
+      }
+     }
+    },
+    "modeling": {
+     "detection": "fisher",
+     "enabled": true,
+     "fisher": {
+      "compute_psf_mode_scan": false,
+      "finite_diff": {
+       "centre_arcsec": 0.001,
+       "einstein_radius_arcsec": 0.001,
+       "ell_comp": 0.001,
+       "multipole_comp": 0.001,
+       "shear_comp": 0.001,
+       "slope": 0.001,
+       "source_intensity_frac": 0.01,
+       "source_reff_frac": 0.01
+      },
+      "include_background_offset": true,
+      "include_psf_nuisance": false,
+      "map": {
+       "engine": "reference",
+       "grid": {
+        "annulus": null,
+        "half_width_arcsec": 0.6,
+        "spacing_arcsec": 0.6
+       },
+       "type": "grid"
+      },
+      "mask_mode": "all_pixels",
+      "mode": "map",
+      "snr_threshold": 3.0
+     }
+    },
+    "observation": {
+     "detector": {
+      "dark_current": 0.002,
+      "gain": 1.0,
+      "read_noise": 0.2,
+      "sky_background": 1.0
+     },
+     "exposure_time": 900.0,
+     "throughput": 1.0
+    },
+    "plotting": {
+     "enabled": false,
+     "output_dir": "/tmp"
+    },
+    "psf": {
+     "kernel": {
+      "normalize": true,
+      "path": "/data/home/gvassilakis/engine-second-pass-20261005/trees/parity/tests/fixtures/paper_parity/detector_kernel.npy",
+      "pixel_scale_arcsec": 0.03
+     },
+     "provider": "kernel"
+    },
+    "run_name": "paper_parity_p4_sis"
+   },
+   "paper_config_jax_gpu_differs_only_in": [
+    "modeling.fisher.map.engine"
+   ],
+   "pixels_unmasked": 10000,
+   "profiled_nuisance_names": [
+    "lens.centre_y",
+    "lens.centre_x",
+    "lens.einstein_radius",
+    "lens.ell_comp_1",
+    "lens.ell_comp_2",
+    "source.centre_y",
+    "source.centre_x",
+    "source.ell_comp_1",
+    "source.ell_comp_2",
+    "source.intensity",
+    "source.effective_radius",
+    "observation.background_offset_adu"
+   ],
+   "reference_vs_jax_gpu_max_relative_difference": {
+    "degradation": 2.2790841520880397e-10,
+    "fisher_profiled": 2.2792959410866151e-10,
+    "fisher_raw": 4.256593950820661e-14,
+    "q_asimov": 2.2792959410866151e-10,
+    "sigma_amplitude": 1.1396470957549424e-10
+   },
+   "truth_kernel_sha256": "ecbdc71438ceb76a7b9672d6b3c9fac358f2cfe6dfb3796114cb368286d7ad5f"
+  }
+ }
+}
