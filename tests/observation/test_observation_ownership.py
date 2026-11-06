@@ -90,6 +90,42 @@ def test_replace_noisy_data_reproduces_review_mutation_boundary():
     assert not replaced.data_adu.flags.writeable
 
 
+@pytest.mark.parametrize("dtype", ["float64", "float32", "int32", ">f8"])
+@pytest.mark.parametrize("noisy", [False, True], ids=["expected", "noisy"])
+@pytest.mark.parametrize("construction", ["direct", "replace"])
+def test_imported_real_detector_arrays_roundtrip(tmp_path, dtype, noisy, construction):
+    supplied = _inputs(noisy=noisy, lens_light=False)
+    converted = {}
+
+    def cast(array):
+        return converted.setdefault(id(array), array.astype(dtype))
+
+    for name in ("data_adu", "expected_adu", "noise_map_adu", "light_rate_e_per_s"):
+        supplied[name] = cast(supplied[name])
+    supplied["light_rate_by_plane_e_per_s"] = {
+        name: cast(array) for name, array in supplied["light_rate_by_plane_e_per_s"].items()}
+    original = Observation(**_inputs(noisy=noisy, lens_light=False))
+    observation = Observation(**supplied) if construction == "direct" else replace(original, **supplied)
+    loaded = load_observation(save_observation(observation, tmp_path / "imported.npz"))
+    assert loaded.to_mapping() == observation.to_mapping()
+    for name, array in _arrays(observation).items():
+        assert array.dtype == np.dtype("float64"), name
+        assert not array.flags.writeable
+        provided = (supplied["light_rate_by_plane_e_per_s"][name.removeprefix("plane:")]
+                    if name.startswith("plane:") else supplied[name])
+        np.testing.assert_array_equal(array, provided)
+        np.testing.assert_array_equal(_arrays(loaded)[name], array)
+    for item in (observation, loaded):
+        assert (item.data_adu is item.expected_adu) == (not noisy)
+        assert item.light_rate_by_plane_e_per_s["source"] is item.light_rate_e_per_s
+
+
+def test_complex_detector_data_is_rejected_before_real_conversion():
+    original = Observation(**_inputs(noisy=True, lens_light=False))
+    with pytest.raises(ValueError, match="data_adu.*real"):
+        replace(original, data_adu=original.data_adu + 1j)
+
+
 @pytest.mark.parametrize("lens_light", [False, True], ids=["source-only", "lens-light"])
 def test_draw_and_load_retain_values_aliases_and_read_only_arrays(tmp_path, lens_light):
     expected = Observation(**_inputs(noisy=False, lens_light=lens_light))

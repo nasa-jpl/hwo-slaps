@@ -103,9 +103,9 @@ def parse_observation(mapping: Mapping[str, Any], path: str = "observation") -> 
 class Observation:
     """An expected or noisy detector image of a scene, with the light it was made from.
 
-    Public construction detaches arrays from their caller and makes arrays and mappings
-    read-only. Arrays are shaped like the grid, so the expected observation and its draws
-    can share them. ``light_rate_e_per_s`` is the convolved light of
+    Public construction owns native float64 copies of real numeric arrays and makes
+    arrays and mappings read-only. Arrays are shaped like the grid, so the expected
+    observation and its draws can share them. ``light_rate_e_per_s`` is the convolved light of
     every plane in detected e-/s per pixel (round-off negatives kept);
     ``light_rate_by_plane_e_per_s`` holds it per plane, ``"source"`` always and ``"lens"``
     with lens light, and without lens light its ``"source"`` entry is the total itself.
@@ -148,12 +148,24 @@ class Observation:
                   "noise_map_adu": self.noise_map_adu, "light_rate_e_per_s": self.light_rate_e_per_s,
                   **{f"light_rate_by_plane_e_per_s[{plane}]": rate
                      for plane, rate in self.light_rate_by_plane_e_per_s.items()}}
+        # Copy each distinct input once: expected data/mean and source-only total/plane
+        # rates intentionally share objects. A read-only caller view may still have a
+        # writable base, so its write flag alone never establishes ownership.
+        owned = {}
         for name, array in arrays.items():
+            if array.dtype.kind not in "biuf":
+                raise ValueError(f"{name} must contain real numeric values")
             if array.shape != shape:
                 raise ValueError(f"{name} has shape {array.shape}; the grid is {shape}")
+            key = id(array)
+            if key not in owned:
+                value = np.array(array, dtype=np.float64, copy=True)
+                value.flags.writeable = False
+                owned[key] = value
+            array = arrays[name] = owned[key]
             if not np.all(np.isfinite(array)):
                 raise ValueError(f"{name} contains non-finite values")
-        if np.any(self.noise_map_adu <= 0.0):
+        if np.any(arrays["noise_map_adu"] <= 0.0):
             raise ValueError("noise_map_adu must be strictly positive")
         if any(abs(kernel.pixel_scale_arcsec - self.grid.pixel_scale_arcsec) > PIXEL_SCALE_ATOL_ARCSEC
                for kernel in self.psfs.kernels):
@@ -163,22 +175,10 @@ class Observation:
                              f"{sorted(self.psfs.group_index)}")
         sampling = {key: check_finite_number(f"sampling[{key!r}]", value, positive=False)
                     for key, value in self.sampling.items()}
-        # Copy each distinct input once: expected data/mean and source-only total/plane
-        # rates intentionally share objects. A read-only caller view may still have a
-        # writable base, so its write flag alone never establishes ownership.
-        owned = {}
-
-        def detached(array):
-            key = id(array)
-            if key not in owned:
-                value = np.array(array, copy=True)
-                value.flags.writeable = False
-                owned[key] = value
-            return owned[key]
-
         for name in ("data_adu", "expected_adu", "noise_map_adu", "light_rate_e_per_s"):
-            object.__setattr__(self, name, detached(getattr(self, name)))
-        by_plane = {plane: detached(rate) for plane, rate in self.light_rate_by_plane_e_per_s.items()}
+            object.__setattr__(self, name, arrays[name])
+        by_plane = {plane: arrays[f"light_rate_by_plane_e_per_s[{plane}]"]
+                    for plane in self.light_rate_by_plane_e_per_s}
         object.__setattr__(self, "light_rate_by_plane_e_per_s", types.MappingProxyType(by_plane))
         object.__setattr__(self, "sampling", types.MappingProxyType(sampling))
 
