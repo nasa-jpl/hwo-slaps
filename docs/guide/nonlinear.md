@@ -190,10 +190,17 @@ agrees, the gradient is finite, and the likelihood is consistent with a direct
 evaluation and with the sampler. Otherwise it is **unresolved**: its best value is kept,
 but it is not trusted for classification.
 
+The role also compares refinement with its already evaluated truth likelihood. If
+truth is better by more than `scalar_residual_tolerance`, the role retains truth as
+its provisional best and is unresolved. The original refinement diagnostics remain
+in `superseded_refinement`; truth does not count as an independent sampled start or
+change the sampler's evidence and posterior records.
+
 A profile can have a finite likelihood at a point where its gradient is undefined.
 Refinement keeps that value and records the gradient refusal. If the search supplied
-too few separated starts, the sampler's maximum is kept with an unresolved status
-and the start-selection reason. Neither situation discards a completed search.
+too few separated starts, the role keeps the sampler's maximum or a better known
+truth with an unresolved status and the start-selection reason. Neither situation
+discards a completed search.
 
 Each role's `acceptance_status` is one of:
 

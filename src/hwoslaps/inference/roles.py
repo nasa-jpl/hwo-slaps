@@ -35,7 +35,8 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
                     case_dir: Path, case_id: str) -> tuple[RoleFit, SearchOutcome | None]:
     start = time.perf_counter()
     model = case.model(role)
-    truth_log_likelihood = case.log_likelihood(role, case.truth_vector(role))
+    truth_vector = case.truth_vector(role)
+    truth_log_likelihood = case.log_likelihood(role, truth_vector)
     dimension = len(model.parameter_names)
     if dimension <= 1:
         return _deterministic_role(case, role, truth_log_likelihood=truth_log_likelihood,
@@ -70,6 +71,7 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
                     projected_gradient_linf=None, repeat_converged=None)
             else:
                 refinement = refine_maximum(starts, case.objective(role), refine)
+            refinement = _retain_known_truth(refinement, truth_vector, truth_log_likelihood, refine)
             log_likelihood = refinement.best_log_likelihood
             vector = refinement.best_vector
             if log_likelihood is None:
@@ -81,6 +83,28 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
                      box_edge_margins=_edge_margins(case, role, vector), anchor_chi2=None, error=error,
                      runtime_s=time.perf_counter() - start)
     return result, outcome
+
+
+def _retain_known_truth(refinement: RefineOutcome, truth_vector: np.ndarray,
+                        truth_log_likelihood: float, settings: RefineSettings) -> RefineOutcome:
+    """Keep an evaluated better incumbent without borrowing a local maximum's certificate."""
+    best = refinement.best_log_likelihood
+    if not np.isfinite(truth_log_likelihood) or (
+            best is not None and np.isfinite(best)
+            and truth_log_likelihood - best <= settings.scalar_residual_tolerance):
+        return refinement
+    # Truth has no independent sampled-start support or tighter repeat. The old
+    # certificate belongs to its own candidate, and remains available as evidence.
+    return RefineOutcome(
+        acceptance_status=RoleStatus.UNRESOLVED, best_log_likelihood=truth_log_likelihood,
+        best_vector=truth_vector, gates=dict.fromkeys(refinement.gates, False),
+        record={"known_truth_incumbent": {"guard_version": 1, "log_likelihood": truth_log_likelihood,
+                                        "vector": list(truth_vector),
+                                        "comparison_tolerance": settings.scalar_residual_tolerance,
+                                        "reason": "refinement did not support the better evaluated truth"},
+                "superseded_refinement": refinement.to_mapping(),
+                "procedure": settings.to_mapping(), "procedure_version": PROCEDURE_VERSION},
+        projected_gradient_linf=None, repeat_converged=None)
 
 
 def _deterministic_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *,
