@@ -15,6 +15,6 @@ def test_forecast_timing_script_reports_the_minimal_forecast(tmp_path):
                                 str(ROOT / "configs/minimal.yaml"), "--masses", "1e8", "1e9"],
                                cwd=tmp_path, capture_output=True, text=True, timeout=300, check=True)
     record = json.loads(completed.stdout)
-    assert record["engine"] == "reference" and record["nodes"] > 0
+    assert record["engine"]["kind"] == "reference" and record["nodes"] > 0
     assert set(record["seconds"]) == {"prepare", "forecast_first", "forecast_repeat"}
     assert not any(tmp_path.iterdir())

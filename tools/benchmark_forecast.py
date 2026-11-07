@@ -6,7 +6,9 @@ YAML files compose in order. Pin BLAS threads for comparable timings, for exampl
         configs/minimal.yaml --engine reference --masses 1e7 1e8 1e9
 
 With ``--engine jax`` the first forecast includes compilation and the repeated one
-does not.
+does not. The printed ``engine`` record describes the engine that ran: a scene with a
+PointMass or SIS subhalo or perturber runs on the CPU reference engine even when JAX is
+requested, and its record then shows ``jax_accelerated: false``.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ def main(argv=None):
         forecast(prepared, masses_msun=args.masses)
         seconds["forecast_repeat"] = perf_counter() - start
     nodes = len(result.positions_yx) * len(args.masses)
-    print(json.dumps({"configs": [str(path) for path in args.configs], "engine": args.engine, "nodes": nodes,
+    print(json.dumps({"configs": [str(path) for path in args.configs], "engine": result.provenance["engine"], "nodes": nodes,
                       "seconds": seconds, "nodes_per_second_repeat": nodes / seconds["forecast_repeat"]}, indent=2))
     return 0
 
