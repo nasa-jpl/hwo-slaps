@@ -125,6 +125,77 @@ def test_reused_or_foreign_identity_is_never_signaled(tmp_path):
                 os.close(descriptor)
 
 
+def _environ_unreadable(pid):
+    try:
+        Path(f'/proc/{pid}/environ').read_bytes()
+    except (PermissionError, ProcessLookupError):
+        return True
+    return False
+
+
+def test_exiting_member_with_released_memory_is_waited_out(tmp_path, monkeypatch):
+    # Freeing 4 GiB of small pages keeps the exiting worker alive with a root-only
+    # environ for tens of milliseconds, as GPU driver teardown does for longer. The /proc
+    # scan sometimes reaches the worker only once it is a zombie, so such a run repeats.
+    import hwoslaps.batch.processes as processes
+    exits = []
+    actual_exit_completes = processes._exit_completes
+    def observed_exit_completes(pid, descriptor):
+        exiting = processes._stat(pid)['flags'] & processes.PF_EXITING
+        completed = actual_exit_completes(pid, descriptor)
+        exits.append((pid, bool(exiting), completed))
+        return completed
+    monkeypatch.setattr(processes, '_exit_completes', observed_exit_completes)
+    for attempt in range(5):
+        touched, trigger = tmp_path / f'touched-{attempt}', tmp_path / f'exit-{attempt}'
+        process, record, log = _start(
+            'import ctypes, os, pathlib, time\n'
+            'ctypes.CDLL(None).prctl(41, 1, 0, 0, 0)\n'
+            'block = bytearray(b"\\x01") * (4 << 30)\n'
+            f'pathlib.Path({str(touched)!r}).touch()\n'
+            f'while not pathlib.Path({str(trigger)!r}).exists():\n'
+            '    time.sleep(.01)\n'
+            'os._exit(0)\n', tmp_path, f'exiting-{attempt}')
+        descriptor = open_pidfd(process.pid)
+        try:
+            _wait(touched.exists)
+            assert [member['pid'] for member in group_members(record)] == [process.pid]
+            trigger.touch()
+            deadline = time.monotonic() + 30.
+            while not _environ_unreadable(process.pid):
+                assert time.monotonic() < deadline, 'the worker did not begin exiting after the trigger'
+            assert group_members(record) == ()
+            assert pidfd_exited(descriptor) and process.wait(timeout=10.) == 0
+        finally:
+            try:
+                _close(process, record, log)
+            finally:
+                os.close(descriptor)
+        if exits:
+            assert exits == [(process.pid, True, True)], 'the scan must wait out the live exiting worker'
+            return
+    raise AssertionError('the scan never met a live exiting worker in five attempts')
+
+
+def test_live_member_whose_environment_is_unreadable_stays_unverified(tmp_path):
+    from hwoslaps.batch.state import BatchError
+    process, record, log = _start('import ctypes, time\nctypes.CDLL(None).prctl(4, 0, 0, 0, 0)\ntime.sleep(60)\n',
+                                  tmp_path, 'nondumpable')
+    descriptor = open_pidfd(process.pid)
+    try:
+        _wait(lambda: _environ_unreadable(process.pid))
+        start = time.monotonic()
+        with pytest.raises(BatchError, match=rf'ambiguous/foreign pids=\[{process.pid}\]'):
+            group_members(record)
+        assert time.monotonic() - start < 1., 'a live member that refuses verification must not be waited out'
+        assert not pidfd_exited(descriptor)
+    finally:
+        os.close(descriptor)
+        process.kill()
+        process.wait(timeout=10.)
+        log.close()
+
+
 def test_missing_bootstrap_cookie_refuses_and_actual_worker_eof_skips_science(tmp_path):
     import hashlib
     import hwoslaps.batch.worker as worker

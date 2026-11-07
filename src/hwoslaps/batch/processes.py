@@ -16,6 +16,9 @@ import time
 
 from .state import BatchError
 
+PF_EXITING = 0x4
+EXIT_WAIT_MS = 30_000
+
 
 def open_pidfd(pid):
     """Open a real Linux pidfd, including Python builds lacking os.pidfd_open."""
@@ -66,8 +69,8 @@ def boot_id():
 def _stat(pid):
     directory = Path('/proc') / str(pid)
     fields = (directory / 'stat').read_text().rsplit(')', 1)[1].split()
-    return {'pid': pid, 'state': fields[0], 'process_group': int(fields[2]),
-            'session_id': int(fields[3]), 'start_time': int(fields[19]), 'uid': directory.stat().st_uid}
+    return {'pid': pid, 'state': fields[0], 'process_group': int(fields[2]), 'session_id': int(fields[3]),
+            'flags': int(fields[6]), 'start_time': int(fields[19]), 'uid': directory.stat().st_uid}
 
 
 def _cookie(pid, identity_env):
@@ -87,6 +90,25 @@ def pidfd_exited(descriptor, timeout_ms=0):
         if not mask & (select.POLLIN | select.POLLHUP):
             raise BatchError('pidfd poll returned an unexpected event; process exit is unverified')
     return bool(events)
+
+
+def _exit_completes(pid, descriptor):
+    """Whether a pinned process whose environment cannot be read exits.
+
+    When an exiting task drops its memory map, the kernel makes /proc/<pid>/environ
+    root-only for the rest of its life, before the memory is freed and the open files
+    are released; GPU driver teardown can keep a worker in that exiting state for
+    seconds. A task the kernel marks as exiting is waited out; a live task that refuses
+    the read stays unverified. The flags only choose the wait: the outcome is always the
+    exit of the pinned process.
+    """
+    if pidfd_exited(descriptor):
+        return True
+    try:
+        exiting = _stat(pid)['flags'] & PF_EXITING
+    except (FileNotFoundError, ProcessLookupError):
+        exiting = False
+    return pidfd_exited(descriptor, EXIT_WAIT_MS if exiting else 50)
 
 
 def worker_record(pid, *, slot, device, identity, identity_env):
@@ -181,7 +203,7 @@ def _group_handles(record):
             except (FileNotFoundError, ProcessLookupError):
                 continue
             except PermissionError:
-                if not pidfd_exited(descriptor, 50):
+                if not _exit_completes(pid, descriptor):
                     ambiguous.append(pid)
             finally:
                 if not retain:
