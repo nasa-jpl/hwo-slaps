@@ -1,38 +1,24 @@
-"""
-Plotting module for HWO-SLAPS pipeline.
+"""Optional plots of current engine products; graphics imports occur on calls."""
 
-This module provides visualization functions for lensing, PSF, observation,
-and subhalo detection analysis.
-"""
+from importlib import import_module
 
-from .lensing_plots import plot_lensing_comparison, plot_lensing_baseline_scene
-from .psf_plots import (
-    plot_psf_comparison,
-    plot_psf_zoom,
-    plot_psf_system_overview,
-    plot_psf_complete_analysis
-)
-from .observation_plots import plot_observation_comparison
-from .detection_plots import (
-    plot_fisher_local_summary,
-    plot_fisher_psf_mode_scan,
-    plot_fisher_detection_map_summary,
-    plot_fisher_map_degradation,
-)
-from .registry import generate_all_plots, get_plot_registry
+_EXPORTS = {
+    "plot_statistic_map": ".forecast",
+    "plot_detection_map": ".forecast",
+    "plot_mass_curve": ".forecast",
+    "plot_knowledge_error": ".forecast",
+    "plot_kernel": ".optics",
+    "plot_pupil": ".optics",
+    "plot_observation": ".observation",
+}
+__all__ = list(_EXPORTS)
 
-__all__ = [
-    'plot_lensing_comparison',
-    'plot_lensing_baseline_scene',
-    'plot_psf_comparison',
-    'plot_psf_zoom',
-    'plot_psf_system_overview',
-    'plot_psf_complete_analysis',
-    'plot_observation_comparison',
-    'plot_fisher_local_summary',
-    'plot_fisher_psf_mode_scan',
-    'plot_fisher_detection_map_summary',
-    'plot_fisher_map_degradation',
-    'generate_all_plots',
-    'get_plot_registry'
-]
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    return getattr(import_module(_EXPORTS[name], __name__), name)
+
+
+def __dir__():
+    return sorted(__all__)

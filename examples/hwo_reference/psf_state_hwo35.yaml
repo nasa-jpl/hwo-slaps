@@ -1,0 +1,4 @@
+# Reference overlay: 35 nm aperture RMS, packaged static prior, combined family, seed 20260835.
+psf:
+  truth:
+    draw: {prior: {packaged: jwst_wss_static_v1}, amplitude_rms_nm: 35.0, seed: 20260835, family: combined}

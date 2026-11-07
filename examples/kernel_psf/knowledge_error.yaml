@@ -1,0 +1,4 @@
+# Illustrative model: a Moffat kernel whose FWHM is 2 percent greater than the truth.
+psf:
+  model: {kind: kernel, path: model_kernel.npy, pixel_scale_arcsec: 0.1,
+          file_sha256: 923100e01d1a9f918727f3f459cdc144a5cbe2451843eba4db258c84b787b64f}

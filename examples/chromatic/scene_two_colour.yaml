@@ -1,0 +1,21 @@
+# Illustrative: paper geometry, SED lens light, and two sources with different colours.
+run_name: chromatic_illustrative
+seed: 11
+cosmology: {name: Planck15}
+scene:
+  grid: {shape: [500, 500], pixel_scale_arcsec: 0.00716, over_sample_size: 4}
+  lens:
+    redshift: 0.2
+    mass:
+      main: {type: Isothermal, centre: [0.0, 0.0], einstein_radius: 1.0, ell_comps: [0.1, 0.0]}
+    light:
+      bulge: {type: Sersic, centre: [0.0, 0.0], ell_comps: [0.1, 0.0], sersic_index: 4.0,
+              effective_radius: 0.5, flux: {ab_mag: 20.5}, sed: {kind: power_law, index: -2.0}}
+  source:
+    redshift: 0.6
+    light:
+      disk: {type: Exponential, centre: [-0.03, 0.08], ell_comps: [0.14516129, 0.25142673],
+             effective_radius: 0.11, flux: {ab_mag: 24.9}, sed: {kind: flat_fnu}}
+      clump: {type: Exponential, centre: [-0.01, 0.12], ell_comps: [0.0, 0.0], effective_radius: 0.02,
+              flux: {ab_mag: 26.5}, sed: {kind: power_law, index: 2.0}}
+  subhalo: {type: NFW, concentration: {kind: moline2017_eq7, x_sub: 1.0}}
