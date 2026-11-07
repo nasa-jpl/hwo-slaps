@@ -10,7 +10,6 @@ sys.path.insert(0, str(DOCS / "_ext"))
 
 project = "HWO-SLAPS"
 author = "Georgios Vassilakis"
-copyright = "2025, California Institute of Technology"
 version_tree = ast.parse((ROOT / "src/hwoslaps/_version.py").read_text())
 release = next(ast.literal_eval(node.value) for node in version_tree.body
                if isinstance(node, ast.Assign)
@@ -56,6 +55,7 @@ html_theme_options = {
     "navigation_with_keys": True,
 }
 html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
+html_show_copyright = False
 html_show_sourcelink = True
 html_copy_source = True
 copybutton_prompt_text = r"\$ |>>> |\.\.\. "

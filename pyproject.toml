@@ -8,8 +8,6 @@ dynamic = ["version"]
 description = "Subhalo detectability forecasts and nonlinear validation for strong-lens imaging"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "Apache-2.0"
-license-files = ["LICENSE"]
 authors = [{ name = "Georgios Vassilakis" }]
 keywords = ["strong gravitational lensing", "dark matter subhalos", "point spread function", "forecast"]
 classifiers = ["Programming Language :: Python :: 3", "Programming Language :: Python :: 3.11",
