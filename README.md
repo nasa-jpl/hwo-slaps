@@ -39,9 +39,10 @@ else:
 
 ## Documentation
 
-The handbook in `docs/` covers installation, a quickstart, how the forecast works, a
-user guide for each task, worked examples including the HWO reference telescope, and the
-full API and configuration reference. To build it in a separate documentation environment:
+The handbook is online at <https://hwo-slaps.readthedocs.io>. It covers installation, a
+quickstart, how the forecast works, a user guide for each task, worked examples including
+the HWO reference telescope, and the full API and configuration reference. To build it
+locally in a separate documentation environment:
 
 ```bash
 python -m pip install -r docs/requirements.txt .
