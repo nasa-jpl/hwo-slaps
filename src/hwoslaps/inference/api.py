@@ -407,9 +407,6 @@ def _run_case(prepare: Callable[[], PreparedCase], trial: Halo, observation: Obs
     for role, likelihood in reference_likelihoods.items():
         if not math.isfinite(likelihood):
             raise ValueError(f"{role} {reference_label} likelihood is non-finite before any search")
-    if case.independent_scene:
-        data = replace(case.data, record=dict(case.data.record) | {"reference_log_likelihoods": reference_likelihoods})
-        case = replace(case, data=data, record=dict(case.record) | {"data": data.record})
     if fit.h1 == "truth_anchor":
         chi2 = case.chi_squared("subhalo", case.truth_vector("subhalo"))
         if not chi2 <= fit.anchor_chi2_tolerance:
@@ -449,10 +446,13 @@ def _run_case(prepare: Callable[[], PreparedCase], trial: Halo, observation: Obs
             evidence_difference = evidence1 - evidence0
     from ..provenance import capture_provenance
 
+    provenance = capture_provenance()
+    if case.independent_scene:
+        provenance["reference_log_likelihoods"] = reference_likelihoods
     return CaseResult(case_id, trial, ObservationRecord(observation.kind, observation.noise_seed,
                                                         observation.config_digest, array_digest(observation.data_adu),
                                                         observation.subhalo),
                        case.data.record, fit, sampler, int(sampler_seed), refine,
                        case.record["models"], smooth, subhalo, q_signed, q_clipped, evidence_difference,
                        recovery, forecast_reference, case.record["fitted_parameters"],
-                       case.record["comparison_digest"], capture_provenance())
+                       case.record["comparison_digest"], provenance)

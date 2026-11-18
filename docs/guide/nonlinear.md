@@ -89,7 +89,7 @@ parameters fixed. A forecast workspace is unnecessary for this fit.
 The result stores separate observation and fit identities. The simulation's
 injection stays in `case.observation.subhalo` for scoring, and the candidate is
 recorded in `case.hypothesis`. The likelihood at each nominal fit model is in
-`case.data["reference_log_likelihoods"]`. An optional forecast reference goes
+`case.provenance["reference_log_likelihoods"]`. An optional forecast reference goes
 through diagnostic comparison. The [batch guide](batches.md#fitting-a-saved-observation)
 shows how to fit several arms to a single saved image.
 

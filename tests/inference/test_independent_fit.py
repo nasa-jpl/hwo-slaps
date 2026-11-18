@@ -22,6 +22,10 @@ def _candidate(config, mass, position):
 def pair(minimal_mapping):
     minimal_mapping["forecast"]["nuisances"] = {"fixed": ["*"]}
     minimal_mapping["scene"]["lens"]["mass"]["mass"]["multipoles"] = {"m3": [0.01, -0.005]}
+    minimal_mapping["scene"]["perturbers"] = {"halos": [{
+        "type": "NFW", "mass_msun": 4e7, "centre": [-0.55, 0.35],
+        "concentration": {"kind": "fixed", "value": 11.0},
+    }]}
     truth = parse_config(minimal_mapping)
     simple = truth.replace({"scene": {"lens": {"mass": {"mass": {"multipoles": None}}}}})
     injected = _candidate(truth, 1e8, (0.0, 0.8))
@@ -51,7 +55,7 @@ def test_same_pixels_fit_with_different_scenes_and_candidate(pair, tmp_path):
     assert reduced.data["comparison_inputs"]["nuisance_constraints"] == hidden.data["comparison_inputs"]["nuisance_constraints"]
     assert reduced.q_signed == hidden.q_signed
     assert reduced.smooth.truth_log_likelihood is None
-    assert reduced.data["reference_log_likelihoods"]["smooth"] == reduced.smooth.log_likelihood
+    assert reduced.provenance["reference_log_likelihoods"]["smooth"] == reduced.smooth.log_likelihood
     assert load_case(save_case(reduced, tmp_path / "fit.json")).to_mapping() == reduced.to_mapping()
 
 
@@ -72,7 +76,8 @@ def test_fit_priors_and_reference_follow_the_fit_scene(pair, tmp_path):
     recipe = {"concentration": {"kind": "fixed", "value": 12.0}}
     fixed = ["lens.*", "source.light.light.centre_*", "source.light.light.ell_comp_*",
              "source.light.light.effective_radius"]
-    model = simple.replace({"scene": {"subhalo": recipe, "source": {"light": {"light": {"intensity": 1.1}}}},
+    model = simple.replace({"scene": {"subhalo": recipe, "perturbers": {"halos": []},
+                                      "source": {"light": {"light": {"intensity": 1.1}}}},
                             "forecast": {"nuisances": {"fixed": fixed}}})
     candidate = _candidate(model, 8e7, (0.1, 0.75))
     settings = dict(model=model, candidate=candidate, fit=FitSpec(mode="fixed_template"),
@@ -81,9 +86,10 @@ def test_fit_priors_and_reference_follow_the_fit_scene(pair, tmp_path):
     masked = fit_observation(replace(observation, subhalo=None), **settings)
     key = "source.light.light.intensity"
     assert candidate.model != observation.subhalo.model
+    assert not visible.data["fit_scene"]["perturbers"]
     assert visible.fitted_parameters == masked.fitted_parameters == (key,)
     box = visible.data["comparison_inputs"]["nuisance_constraints"][key]
     assert (box["lower"] + box["upper"]) / 2 == pytest.approx(1.1)
-    assert visible.data["reference_log_likelihoods"] == masked.data["reference_log_likelihoods"]
+    assert visible.provenance["reference_log_likelihoods"] == masked.provenance["reference_log_likelihoods"]
     assert visible.models == masked.models
     assert visible.q_signed is not None and visible.q_signed == masked.q_signed
