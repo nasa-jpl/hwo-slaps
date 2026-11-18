@@ -54,6 +54,8 @@ jobs:
             tests/inference/test_inference_low_dimension.py \
             tests/inference/test_inference_recovery.py \
             tests/inference/test_inference_quality.py \
+            tests/inference/test_independent_fit.py \
+            tests/batch/test_batch_saved_observation.py \
             tests/fisher/test_fisher_positions.py \
             tests/spectra/test_spectra_sed.py \
             tests/spectra/test_spectra_photometry.py \

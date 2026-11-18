@@ -53,6 +53,7 @@ generated from the source code. [All modules](api/index.rst) lists every public 
 
 | Name | Purpose |
 |---|---|
+| {py:func}`~hwoslaps.inference.api.fit_observation` | Fit an independently specified scene to a saved or in-memory observation |
 | {py:func}`~hwoslaps.inference.api.validate_nonlinear` | Fit smooth and subhalo models to an observation |
 | {py:func}`~hwoslaps.inference.api.prepare_case` | Build the fit data, models and likelihood without running a search |
 | {py:class}`~hwoslaps.inference.settings.FitSpec` | Fit mode, mask, prior boxes and mass support |

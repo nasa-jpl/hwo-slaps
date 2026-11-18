@@ -17,6 +17,7 @@ _PUBLIC_API = {
     "ForecastResult": ("fisher.result", "ForecastResult"),
     "summarize": ("analysis.reductions", "summarize"),
     "mass_reach": ("analysis.reach", "mass_reach"),
+    "fit_observation": ("inference.api", "fit_observation"),
     "prepare_case": ("inference.api", "prepare_case"),
     "validate_nonlinear": ("inference.api", "validate_nonlinear"),
     "FitSpec": ("inference.settings", "FitSpec"),

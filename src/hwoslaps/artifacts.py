@@ -2,7 +2,7 @@
 
 Forecast NPZ schema 3 records the arrays and layout of a ForecastResult. Observation
 NPZ schema 1 records detector images, exposure, distinct kernels and fiducial sampling.
-Case JSON schema 2 records the typed nonlinear result. Loaders accept only these
+Case JSON schemas 2 and 3 record matched and independent nonlinear results. Loaders accept only these
 versions and never unpickle. Equal NPZ content has equal ZIP timestamps and bytes.
 """
 from __future__ import annotations
@@ -337,6 +337,18 @@ def load_observation(path) -> Observation:
     Pickled members raise an error. Kernel bytes must match their recorded identity;
     injected halo reconstruction retains its normal physical validation requirements.
     """
+    return _observation_from_members(_read_npz(path))
+
+
+def load_observation_snapshot(path, *, expected_sha256: str) -> Observation:
+    """Decode the same observation archive bytes whose identity was pinned by the caller."""
+    content, digest = read_file_snapshot(path)
+    if digest != expected_sha256:
+        raise ValueError(f"saved observation bytes differ from the planned input: {path}")
+    return _observation_from_members(_read_npz(io.BytesIO(content)))
+
+
+def _observation_from_members(members: dict[str, np.ndarray]) -> Observation:
     from .instrument import Detector
     from .observation.expected import Exposure
     from .observation.normalization import PhotometryRecord
@@ -344,7 +356,6 @@ def load_observation(path) -> Observation:
     from .optics.kernels import DetectorPSF, KernelBinding
     from .scene.halos import Halo
     from .scene.spec import GridSpec
-    members = _read_npz(path)
     metadata = _json_member(members, "metadata_json")
     _keys(metadata, ("schema", "version", "kind", "noise_seed", "grid", "exposure", "kernels",
                      "subhalo", "config_digest", "photometry", "hwoslaps_version"), "observation metadata")
@@ -395,7 +406,7 @@ def load_observation(path) -> Observation:
 
 
 def save_case(result: CaseResult, path) -> Path:
-    """Publish a version-2 nonlinear case JSON archive without overwriting a file.
+    """Publish a nonlinear case JSON archive without overwriting a file.
 
     Parameters
     ----------
@@ -412,7 +423,8 @@ def save_case(result: CaseResult, path) -> Path:
     from .inference.result import CaseResult
     if not isinstance(result, CaseResult):
         raise TypeError("save_case requires a CaseResult")
-    return write_json(path, {"schema": "hwoslaps.case", "version": 2, "result": result.to_mapping()})
+    version = 3 if "fit_scene" in result.data else 2
+    return write_json(path, {"schema": "hwoslaps.case", "version": version, "result": result.to_mapping()})
 
 
 def load_case(path) -> CaseResult:
@@ -421,7 +433,7 @@ def load_case(path) -> CaseResult:
     Parameters
     ----------
     path : path-like
-        Version-2 nonlinear case JSON filename.
+        Version-2 or version-3 nonlinear case JSON filename.
 
     Returns
     -------
@@ -438,7 +450,7 @@ def load_case_snapshot(path) -> tuple[CaseResult, str]:
     Parameters
     ----------
     path : path-like
-        Version-2 nonlinear case JSON filename.
+        Version-2 or version-3 nonlinear case JSON filename.
 
     Returns
     -------
@@ -451,9 +463,12 @@ def load_case_snapshot(path) -> tuple[CaseResult, str]:
     content, digest = read_file_snapshot(path)
     value = _json_value(content.decode("utf-8"))
     _keys(value, ("schema", "version", "result"), "case artifact")
-    if value["schema"] != "hwoslaps.case" or type(value["version"]) is not int or value["version"] != 2:
+    if value["schema"] != "hwoslaps.case" or type(value["version"]) is not int or value["version"] not in (2, 3):
         raise ValueError("unsupported case artifact schema")
-    return CaseResult.from_mapping(value["result"]), digest
+    result = CaseResult.from_mapping(value["result"])
+    if (value["version"] == 3) != ("fit_scene" in result.data):
+        raise ValueError("unsupported case artifact schema for the recorded fitting workflow")
+    return result, digest
 
 
 def save_image_asset(asset: ImageAsset, path) -> Path:

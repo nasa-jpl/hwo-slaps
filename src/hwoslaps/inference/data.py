@@ -71,7 +71,7 @@ def _consistent_sampling(imaging: Any, size: int) -> dict[str, int | None]:
 
 
 def build_fit_data(observation: Observation, model_kernel: DetectorPSF, *, mask_name: str,
-                   base_mask: np.ndarray, over_sample_size: int) -> FitData:
+                   base_mask: np.ndarray, over_sample_size: int, independent: bool = False) -> FitData:
     """Build a fresh AutoLens dataset in e-/s; normalization touches only a model-kernel copy."""
     if model_kernel.shape == (1, 1):
         raise ValueError("a 1x1 model kernel leaves AutoArray an empty blurring grid; use a larger kernel")
@@ -92,7 +92,7 @@ def build_fit_data(observation: Observation, model_kernel: DetectorPSF, *, mask_
         raise ValueError("the fitted mask has no pixels after removing the model-kernel border")
     exposure = observation.exposure
     gain, time = float(exposure.detector.gain_e_per_adu), float(exposure.exposure_time_s)
-    if observation.kind == "expected":
+    if observation.kind == "expected" and not independent:
         data = np.array(observation.light_rate_e_per_s, dtype=float)
         background_adu = 0.0
     else:
@@ -105,7 +105,8 @@ def build_fit_data(observation: Observation, model_kernel: DetectorPSF, *, mask_
 
     # The exterior pixels never enter the likelihood. They provide real emitting
     # sky for AutoLens's light/blurring grids on the same native response as truth.
-    geometry = RenderGeometry.from_kernels(observation.grid, model_kernel, *observation.psfs.kernels)
+    padding_kernels = () if independent else observation.psfs.kernels
+    geometry = RenderGeometry.from_kernels(observation.grid, model_kernel, *padding_kernels)
     mask = al.Mask2D(mask=~geometry.pad(include, fill=False), pixel_scales=observation.pixel_scale_arcsec)
     convolver = make_convolver(np.array(model_kernel.kernel, dtype=float, copy=True),
                                model_kernel.pixel_scale_arcsec)

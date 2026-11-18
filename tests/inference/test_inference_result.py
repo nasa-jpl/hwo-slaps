@@ -60,6 +60,7 @@ RECORDS = {
     "anchor-role": lambda: _role(strategy="truth_anchor", sampler=None, refinement=None, anchor_chi2=3.0e-12,
                          box_edge_margins=None),
     "sampler-only-role": lambda: _role(role="smooth", refinement=None),
+    "independent-role": lambda: _role(truth_log_likelihood=None, reference_log_likelihood=16008.188),
     "unresolved-refinement": lambda: _refinement(RoleStatus.UNRESOLVED),
     "recovery-sampler-and-refined": lambda: SubhaloRecovery(
         sampler=_estimate(8.93), refined=_estimate(8.95), log10_mass_quantiles=(8.89, 8.94, 8.99),
@@ -94,6 +95,10 @@ def test_record_storage_writes_non_finite_numbers_as_null_and_refuses_unknown_ke
     assert mapping["refinement"]["acceptance_status"] == "accepted_repeatable_profile"
     with pytest.raises(ValueError, match="RoleFit record keys"):
         RoleFit.from_mapping({**mapping, "profile": None})
+    assert "reference_log_likelihood" not in mapping
+    for changes in ({"truth_log_likelihood": None}, {"reference_log_likelihood": 16008.188}):
+        with pytest.raises(ValueError, match="exactly one"):
+            RoleFit.from_mapping({**mapping, **changes})
     with pytest.raises(ValueError, match="SamplerRecord record keys"):
         SamplerRecord.from_mapping({key: value for key, value in mapping["sampler"].items() if key != "seed"})
 

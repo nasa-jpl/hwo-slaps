@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import os
 import types
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -13,12 +13,19 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ..identity import array_digest, mapping_digest
+from ..config.schema import ConfigSource, EngineConfig, resolve_config
+from ..identity import array_digest, mapping_digest, validate_file_manifest, validate_loaded_file
+from ..optics.kernels import DetectorPSF
+from ..observation.normalization import resolve_observing
 from ..observation.observation import Observation
-from ..scene.halos import Halo
-from ..scene.image_source import frozen_value
-from ..scene.parameters import scene_parameters
+from ..scene.builder import Scene, build_scene
+from ..scene.cosmology import Cosmology
+from ..scene.halos import Halo, make_halo
+from ..scene.image_source import frozen_value, load_scene_image_assets
+from ..scene.parameters import match_parameters, scene_parameters
+from ..scene.perturbers import realize_perturbers
 from ..scene.rendering import response_identity
+from ..spectra.bandpass import build_bandpass
 from .comparison import compare_forecast
 from .data import FitData, build_fit_data, support_half_widths
 from .fit_model import FitModel, autofit_model
@@ -32,7 +39,7 @@ if TYPE_CHECKING:
     from ..fisher.api import PreparedForecast
     from .backend import BackendSession
 
-__all__ = ["PreparedCase", "prepare_case", "validate_nonlinear"]
+__all__ = ["PreparedCase", "prepare_case", "validate_nonlinear", "fit_observation"]
 
 
 @dataclass(frozen=True, eq=False)
@@ -56,8 +63,17 @@ class PreparedCase:
             raise ValueError(f"role must be smooth or subhalo, got {role!r}")
         return getattr(self.models, role)
 
-    def truth_vector(self, role: str) -> np.ndarray:
+    @property
+    def independent_scene(self) -> bool:
+        return "fit_scene" in self.record
+
+    def reference_vector(self, role: str) -> np.ndarray:
         return self.model(role).truth
+
+    def truth_vector(self, role: str) -> np.ndarray:
+        if self.independent_scene:
+            raise ValueError("an independent fit has a model reference vector")
+        return self.reference_vector(role)
 
     def _instance(self, role: str, vector: Sequence[float]) -> Any:
         model = self.model(role)
@@ -157,22 +173,36 @@ def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observati
     This function prepares the comparison but does not run a sampler search.
     """
     kernel = _check_inputs(prepared, trial, observation, fit)
+    free = tuple(parameter.name for parameter in prepared.nuisances.parameters if parameter.kind == "scene")
+    return _assemble_case(prepared.scene, trial, observation, fit=fit, use_jax=use_jax,
+                          kernel=kernel, forecast_mask=prepared.mask, free=free,
+                          comparison_digest=prepared.record["comparison_digest"],
+                          preparation={"prepared": dict(prepared.record)},
+                          trial_recipe=prepared.config.to_mapping()["scene"]["subhalo"])
+
+
+def _assemble_case(scene: Scene, trial: Halo, observation: Observation, *, fit: FitSpec, use_jax: bool,
+                   kernel: DetectorPSF, forecast_mask: np.ndarray | None,
+                   free: tuple[str, ...], comparison_digest: str,
+                   preparation: Mapping[str, Any], trial_recipe: Mapping[str, Any]) -> PreparedCase:
     from .backend import ensure_jax_x64, make_analysis, require_jax_fitness_api
 
     if use_jax:
         ensure_jax_x64()
         require_jax_fitness_api()
+    independent = "fit_scene" in preparation
     if isinstance(fit.mask, PixelMask):
         mask_name, base_mask = "custom_minus_psf_border", fit.mask.values
+    elif fit.mask == "all_pixels_minus_psf_border":
+        mask_name, base_mask = fit.mask, np.ones(observation.grid.shape, dtype=bool)
     else:
-        mask_name = fit.mask
-        base_mask = (np.ones(observation.grid.shape, dtype=bool) if fit.mask == "all_pixels_minus_psf_border"
-                     else prepared.mask)
+        if forecast_mask is None:
+            raise ValueError("an independent fit requires all pixels or an explicit pixel mask")
+        mask_name, base_mask = fit.mask, forecast_mask
     data = build_fit_data(observation, kernel, mask_name=mask_name, base_mask=base_mask,
-                          over_sample_size=prepared.scene.spec.grid.over_sample_size)
-    free = tuple(parameter.name for parameter in prepared.nuisances.parameters if parameter.kind == "scene")
-    models = build_role_models(prepared.scene, trial, free, fit, use_jax=use_jax)
-    spec = prepared.scene.spec
+                          over_sample_size=scene.spec.grid.over_sample_size, independent=independent)
+    models = build_role_models(scene, trial, free, fit, use_jax=use_jax)
+    spec = scene.spec
     constraints = {}
     for parameter in scene_parameters(spec):
         if parameter.name in free:
@@ -180,13 +210,13 @@ def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observati
                 parameter.value, parameter.definition.domain)
             constraints[parameter.name] = {"kind": "uniform_box", "lower": bounds[0], "upper": bounds[1]}
     comparison_inputs = {
-        "trial_model": {"model": prepared.config.to_mapping()["scene"]["subhalo"],
+        "trial_model": {"model": trial_recipe,
                         "redshift": trial.redshift, "source_redshift": trial.source_redshift,
                         "cosmology": trial.cosmology.to_mapping()},
         "truth_psf": data.record["truth_kernels"],
         "fitted_psf": data.record["fitted_kernel"],
         "detector_geometry": {"shape": list(observation.grid.shape), "pixel_scale_arcsec": observation.pixel_scale_arcsec},
-        "response": response_identity(prepared.scene, data.record["rendering"]),
+        "response": response_identity(scene, data.record["rendering"]),
         "noise": {"units": "e_per_s", "digest": data.record["noise_digest"], "covariance": None,
                   "fiducial": "smooth_scene" if observation.subhalo is None else "injected_observation"},
         "nuisance_constraints": constraints,
@@ -198,21 +228,99 @@ def prepare_case(prepared: PreparedForecast, trial: Halo, observation: Observati
                                                  "upper": list(getattr(models, role).upper)}
                                            for role in ("smooth", "subhalo")}},
     }
-    data = replace(data, record=dict(data.record) | {"comparison_inputs": comparison_inputs})
+    data = replace(data, record=dict(data.record) | {"comparison_inputs": comparison_inputs}
+                   | ({"fit_scene": preparation["fit_scene"]} if independent else {}))
     converted = {role: autofit_model(getattr(models, role)) for role in ("smooth", "subhalo")}
     singular = trial.model.type in ("PointMass", "SIS") or any(
-        halo.model.type in ("PointMass", "SIS") for halo in prepared.scene.perturbers)
-    analysis = make_analysis(data.imaging, cosmology=prepared.scene.cosmology.autogalaxy(), use_jax=use_jax,
+        halo.model.type in ("PointMass", "SIS") for halo in scene.perturbers)
+    analysis = make_analysis(data.imaging, cosmology=scene.cosmology.autogalaxy(), use_jax=use_jax,
                              integrate_singular=singular)
-    record = {"prepared": dict(prepared.record), "hypothesis": trial.to_mapping(),
+    record = {**preparation, "hypothesis": trial.to_mapping(),
               "observation": {"kind": observation.kind, "noise_seed": observation.noise_seed,
                               "config_digest": observation.config_digest, "data_digest": array_digest(observation.data_adu),
                               "subhalo": None if observation.subhalo is None else observation.subhalo.to_mapping()},
               "data": data.record, "models": {role: getattr(models, role).digest() for role in converted},
               "fit": fit.to_mapping(), "fitted_parameters": free,
-              "comparison_digest": prepared.record["comparison_digest"]}
+              "comparison_digest": comparison_digest}
     return PreparedCase(trial, observation, fit, use_jax, data, models, types.MappingProxyType(converted),
                          analysis, types.MappingProxyType(record))
+
+
+def _candidate(config: EngineConfig, mass_msun: float, position_yx: tuple[float, float]) -> Halo:
+    scene = config.scene
+    redshift = scene.lens.redshift if scene.subhalo_redshift is None else scene.subhalo_redshift
+    return make_halo(scene.subhalo, mass_msun, position_yx, redshift=redshift,
+                     source_redshift=scene.source.redshift, cosmology=Cosmology(config.cosmology))
+
+
+def _prepare_independent_case(observation: Observation, config: EngineConfig, candidate: Halo, *,
+                              fit: FitSpec, use_jax: bool) -> PreparedCase:
+    from ..fisher.psf_pair import bind_psfs, truth_provider, validate_psf_pair_files
+
+    if fit.h1 == "truth_anchor":
+        raise ValueError("truth_anchor requires matched nonlinear validation")
+    if config.scene.grid != observation.grid:
+        raise ValueError("fit grid shape, pixel scale and sampling must match the observation")
+    if config.scene.injection is not None:
+        raise ValueError("the fit model uses scene.subhalo for its recipe and a separate candidate")
+    if config.forecast is not None and config.forecast.noise_covariance is not None:
+        raise ValueError("dense noise covariance is unsupported by the diagonal nonlinear likelihood")
+    cosmology = Cosmology(config.cosmology)
+
+    identity = config.capture_identity()
+    manifest = identity["file_digests"]
+    assets = load_scene_image_assets(config.scene)
+    for path, asset in assets.items():
+        validate_loaded_file(path, asset.digest, manifest)
+    bandpass = None if config.instrument.bandpass is None else build_bandpass(config.instrument.bandpass)
+    provider = truth_provider(config, bandpass=bandpass)
+    setup = resolve_observing(config.scene, config.instrument, config.observation, truth=provider,
+                              bandpass=bandpass, assets=assets, expected_file_digests=manifest)
+    if setup.exposure != observation.exposure:
+        raise ValueError("fit instrument and exposure calibration must match the observation")
+    psfs = bind_psfs(config, setup.scene, setup.instrument, truth=provider, loaded_seds=setup.loaded_seds)
+    kernel = psfs.model_kernels.single
+    support = support_half_widths(tuple(observation.grid.shape), observation.pixel_scale_arcsec, kernel.shape)
+    if any(abs(value) > half for value, half in zip(candidate.position_yx_arcsec, support, strict=True)):
+        raise ValueError(f"candidate position {candidate.position_yx_arcsec} lies outside fit support {support}")
+    perturbers = realize_perturbers(setup.scene, cosmology, seed=config.seed)
+    scene = build_scene(setup.scene, cosmology, subhalo=None, perturbers=perturbers, assets=assets,
+                        loaded_seds=setup.loaded_seds)
+    names = tuple(parameter.name for parameter in scene_parameters(setup.scene))
+    fixed = () if config.forecast is None else config.forecast.nuisances.fixed
+    held = set(match_parameters(names, fixed, path="forecast.nuisances.fixed"))
+    free = tuple(name for name in names if name not in held)
+    validate_psf_pair_files(psfs, manifest)
+    validate_file_manifest(manifest)
+    fit_record = {"config_digest": identity["config_digest"], "file_digests": manifest,
+                  "perturbers": [halo.to_mapping() for halo in perturbers]}
+    return _assemble_case(scene, candidate, observation, fit=fit, use_jax=use_jax,
+                          kernel=kernel, forecast_mask=None, free=free,
+                          comparison_digest=identity["comparison_digest"],
+                          preparation={"fit_scene": fit_record},
+                          trial_recipe=config.to_mapping()["scene"]["subhalo"])
+
+
+def fit_observation(observation: Observation, *, model: ConfigSource, mass_msun: float,
+                    position_yx: tuple[float, float], fit: FitSpec, sampler: SamplerSettings,
+                    sampler_seed: int, output_dir: str | os.PathLike[str],
+                    refine: RefineSettings | None = None, session: BackendSession | None = None,
+                    case_id: str | None = None) -> CaseResult:
+    """Fit one candidate subhalo using an independent scene and a calibrated mock.
+
+    The model configuration describes the fitted components, their nominal values
+    and fitted PSF. Its grid and exposure must match the observation. The candidate
+    has the given mass and (y, x) position in arcsec, with the halo recipe, planes
+    and cosmology of the model configuration. An optional forecast section supplies
+    the scene parameter patterns to hold fixed.
+    """
+    config = resolve_config(model)
+    candidate = _candidate(config, mass_msun, position_yx)
+    return _run_case(lambda: _prepare_independent_case(observation, config, candidate, fit=fit,
+                                                       use_jax=sampler.use_jax),
+                     candidate, observation, fit=fit, sampler=sampler, sampler_seed=sampler_seed,
+                     output_dir=output_dir, refine=refine, session=session, forecast_reference=None,
+                     case_id=case_id, comparison_policy="strict")
 
 
 def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Observation, *, fit: FitSpec,
@@ -262,6 +370,17 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
     -----
     The caller keeps ownership of the forecast preparation and any supplied session.
     """
+    return _run_case(lambda: prepare_case(prepared, trial, observation, fit=fit, use_jax=sampler.use_jax),
+                     trial, observation, fit=fit, sampler=sampler, sampler_seed=sampler_seed,
+                     output_dir=output_dir, refine=refine, session=session, forecast_reference=forecast_reference,
+                     case_id=case_id, comparison_policy=comparison_policy)
+
+
+def _run_case(prepare: Callable[[], PreparedCase], trial: Halo, observation: Observation, *,
+              fit: FitSpec, sampler: SamplerSettings, sampler_seed: int, output_dir: str | os.PathLike[str],
+              refine: RefineSettings | None, session: BackendSession | None,
+              forecast_reference: ForecastReference | None, case_id: str | None,
+              comparison_policy: str) -> CaseResult:
     if refine is not None and not sampler.use_jax:
         raise ValueError("refinement requires sampler.use_jax")
     if comparison_policy not in ("strict", "diagnostic"):
@@ -274,7 +393,7 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
                                          or forecast_reference.position_yx_arcsec != trial.position_yx_arcsec):
         raise ValueError(f"forecast reference node {(forecast_reference.mass_msun, forecast_reference.position_yx_arcsec)} "
                          f"differs from trial node {(trial.mass_msun, trial.position_yx_arcsec)}")
-    case = prepare_case(prepared, trial, observation, fit=fit, use_jax=sampler.use_jax)
+    case = prepare()
     if forecast_reference is not None:
         comparison = compare_forecast(forecast_reference, hypothesis=trial, data=case.data.record,
                                       fitted_parameters=case.record["fitted_parameters"],
@@ -286,9 +405,12 @@ def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Obs
         data = replace(case.data, record=dict(case.data.record) | {
             "forecast_comparison": comparison.to_mapping() | {"policy": comparison_policy}})
         case = replace(case, data=data, record=frozen_value(dict(case.record) | {"data": data.record}))
-    for role in ("smooth", "subhalo"):
-        if not math.isfinite(case.log_likelihood(role, case.truth_vector(role))):
-            raise ValueError(f"{role} truth likelihood is non-finite before any search")
+    reference_likelihoods = {role: case.log_likelihood(role, case.reference_vector(role))
+                             for role in ("smooth", "subhalo")}
+    reference_label = "reference" if case.independent_scene else "truth"
+    for role, likelihood in reference_likelihoods.items():
+        if not math.isfinite(likelihood):
+            raise ValueError(f"{role} {reference_label} likelihood is non-finite before any search")
     if fit.h1 == "truth_anchor":
         chi2 = case.chi_squared("subhalo", case.truth_vector("subhalo"))
         if not chi2 <= fit.anchor_chi2_tolerance:

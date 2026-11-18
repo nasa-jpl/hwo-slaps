@@ -102,7 +102,7 @@ class Job:
 
     def digest(self):
         parameters = {key: value for key, value in self.parameters.items()
-                      if key not in ('forecast_config_mapping', 'retry_case_path')}
+                      if key not in ('forecast_config_mapping', 'retry_case_path', 'observation_path')}
         record = {'kind': self.kind, 'job_id': self.job_id, 'config_digest': self.config_digest,
                   'parameters': parameters, 'seeds': self.seeds}
         if self.engine is not None:
@@ -187,26 +187,32 @@ def _reference_arm(plan, family, arm):
 
 def _job(plan, arm, kind, suffix, parameters, seeds):
     job_id = f'members/{arm.member.run_name}/{arm.name}/{suffix}'
-    engine = None if kind == 'simulate' else plan.spec.execution.forecast.engine
+    needs_forecast = kind != 'simulate' and 'observation_path' not in parameters
+    engine = plan.spec.execution.forecast.engine if needs_forecast else None
     return Job(job_id, kind, arm.member, arm.name, arm.config, arm.config_digest,
-               None if kind == 'simulate' else arm.config_digest, parameters, seeds, engine)
+               arm.config_digest if needs_forecast else None, parameters, seeds, engine)
 
 
 def _nonlinear_jobs(plan, arm, family, mass, position, *, attempt=0, resolved_trial=None, retry_source=None):
-    reference = _reference_arm(plan, family, arm)
     identifier = 'configured' if position is None else trial_id(mass, position)
     sampler, refine = family.sampler, family.refine
     if attempt:
         sampler = SamplerSettings.from_mapping({**sampler.to_mapping(), **family.retry.sampler})
         if refine is not None:
             refine = RefineSettings.from_mapping({**refine.to_mapping(), **family.retry.refine})
-    parameters = {'family': family.name, 'mass_msun': mass, 'position_yx': position,
-                  'inject': family.inject, 'noise': family.noise, 'attempt': attempt,
+    parameters = {'family': family.name, 'mass_msun': mass, 'position_yx': position, 'attempt': attempt,
                   'fit': family.fit.to_mapping(), 'sampler': sampler.to_mapping(),
                   'refine': None if refine is None else refine.to_mapping(),
                   'retry': None if family.retry is None else family.retry.to_mapping(),
-                  'forecast_arm': reference.name, 'forecast_config_digest': reference.config_digest,
-                  'forecast_config_mapping': reference.config.to_mapping(), 'comparison_policy': family.comparison_policy}
+                  'comparison_policy': family.comparison_policy}
+    if family.observation is None:
+        reference = _reference_arm(plan, family, arm)
+        parameters.update(inject=family.inject, noise=family.noise, forecast_arm=reference.name,
+                          forecast_config_digest=reference.config_digest,
+                          forecast_config_mapping=reference.config.to_mapping())
+    else:
+        parameters.update(observation_path=family.observation,
+                          observation_sha256=plan.file_digests[family.observation])
     if position is None:
         parameters.update(configured_trial=True, batch_seed=plan.spec.seed, member_index=arm.member.index,
                           sampler_arm=arm.name, resolved_trial=resolved_trial)
@@ -302,9 +308,15 @@ def build_plan(spec: BatchSpec, *, frozen_members=None, frozen_arms=None, member
                 effective = config if direction is None else config.replace({'psf': {'model': {'draw': {
                     'seed': derived_seed(spec.seed, 'batch/psf.model/direction', member.index, direction)}}}})
                 name = arm.name if direction is None else f'{arm.name}/d{direction}'
-                if (spec.forecast is not None or spec.nonlinear) and effective.forecast is None:
+                needs_forecast = spec.forecast is not None or any(family.observation is None for family in spec.nonlinear)
+                if needs_forecast and effective.forecast is None:
                     raise ConfigError(f'members.{member.run_name}.arms.{name}.forecast', 'required for forecast/nonlinear jobs')
                 configurations.append(PlannedArm(member, name, arm.name, direction, effective, config_identity(effective)))
+    for filename in {family.observation for family in spec.nonlinear if family.observation is not None}:
+        digest = file_digest(filename)
+        if filename in manifest and manifest[filename] != digest:
+            raise ConfigError('nonlinear', f'referenced observation changed during planning: {filename}')
+        manifest[filename] = digest
     spec_digest = spec.captured_digest(base_config_digest=base_identity['config_digest'], population_digest=population_digest)
     plan = BatchPlan(spec, members, (), {}, tuple(configurations), spec_digest, population_digest, manifest)
     member_indices = {member.index for member in members} if member_indices is None else member_indices
@@ -333,7 +345,10 @@ def build_plan(spec: BatchSpec, *, frozen_members=None, frozen_arms=None, member
                 except ValueError as error:
                     raise ConfigError(f'nonlinear.{family.name}.trials.aperture_einstein_radius_multiple',
                                       'requires exactly one configured Einstein radius') from error
-            reference = _reference_arm(plan, family, arm)
+            reference = None if family.observation is not None else _reference_arm(plan, family, arm)
+            if family.observation is not None and arm.config.scene.injection is not None:
+                raise ConfigError(f'nonlinear.{family.name}.observation',
+                                  'clear scene.injection on the fit arm and supply an explicit candidate')
             if family.trials.kind.startswith('forecast_'):
                 if not _participates(spec.forecast, reference) or not set(family.trials.masses_msun) <= set(spec.forecast.masses_msun):
                     raise ConfigError(f'nonlinear.{family.name}.trials', 'forecast trials require this arm and every mass in the forecast family')
@@ -354,7 +369,7 @@ def build_plan(spec: BatchSpec, *, frozen_members=None, frozen_arms=None, member
                 trials = [(trial.mass_msun, trial.position_yx) for trial in family.trials.explicit
                           if trial.members == 'all' or arm.member.index in trial.members]
             for mass, position in trials:
-                if position is not None:
+                if position is not None and reference is not None:
                     _check_position(arm.config, position, f'nonlinear.{family.name}.trials')
                     _check_position(reference.config, position, f'nonlinear.{family.name}.forecast_arm')
                 jobs.extend(_nonlinear_jobs(plan, arm, family, mass, position))

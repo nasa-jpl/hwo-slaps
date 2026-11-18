@@ -47,7 +47,7 @@ def test_refinement_problem_keeps_completed_search_unresolved(problem, tmp_path,
         return BoxObjective(model.lower, model.upper, refused, lambda z: np.asarray(z) - 0.5,
                             lambda z, half: ScalarCheck(-half, -half, 0.0))
 
-    case = SimpleNamespace(model=lambda role: model, truth_vector=lambda role: model.truth,
+    case = SimpleNamespace(model=lambda role: model, reference_vector=lambda role: model.truth, independent_scene=False,
                            log_likelihood=lambda role, vector: -float(np.sum((np.asarray(vector) - 0.5) ** 2)),
                            autofit_models={"smooth": object()}, analysis=object(), data=SimpleNamespace(record={}),
                            fit=FitSpec(mode="fixed_template"), objective=objective)

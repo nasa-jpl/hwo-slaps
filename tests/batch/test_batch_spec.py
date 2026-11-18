@@ -46,6 +46,7 @@ _RETRY = {'acceptance': {'smooth': ['accepted_repeatable_profile'], 'subhalo': [
     ('retry_zero_stationarity', 'stationarity_tolerance'), ('retry_bad_role', 'acceptance.smooth'),
     ('devices_duplicate', 'execution.devices'), ('negative_memory', 'execution.memory_fraction'),
     ('trial_unknown', 'trials.unknown'), ('unknown_arm', 'arms'), ('no_family', 'at least one'),
+    ('saved_replicates', 'replicates'), ('saved_comparison_policy', 'comparison_policy'),
 ])
 def test_batch_spec_rejects_invalid_specs(tiny_batch_spec, defect, path):
     valid = tiny_batch_spec(nonlinear={'n': deepcopy(_FAMILY)})
@@ -86,6 +87,11 @@ def test_batch_spec_rejects_invalid_specs(tiny_batch_spec, defect, path):
         mapping['nonlinear']['n']['trials']['unknown'] = 1
     elif defect == 'unknown_arm':
         mapping['forecast']['arms'] = ['absent']
+    elif defect.startswith('saved_'):
+        family = mapping['nonlinear']['n']
+        del family['inject'], family['noise']
+        family['observation'] = 'observation.npz'
+        family.update({'replicates': 2} if defect == 'saved_replicates' else {'comparison_policy': 'diagnostic'})
     else:
         mapping.update(simulate=None, forecast=None, nonlinear={})
     with pytest.raises(ConfigError, match=path):

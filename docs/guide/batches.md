@@ -137,6 +137,43 @@ aperture or image-support margin when you need a bound before selection.
 `retry` gives a nonlinear family one follow-up attempt with different sampler or
 refinement settings, for cases whose roles did not reach an accepted status.
 
+## Fitting a saved observation
+
+Set `observation` on a nonlinear family to fit one saved mock across its arms.
+The path is relative to the batch YAML. Each arm supplies its own fit scene,
+and the family supplies the explicit candidate mass and position. For example,
+assuming `fit_scene.yaml` defines a lens mass component called `main` with
+multipoles and `scene.injection: null`:
+
+```yaml
+name: scene_comparison
+seed: 11
+config: fit_scene.yaml
+arms:
+  - {name: with_multipoles}
+  - name: without_multipoles
+    overrides:
+      scene:
+        lens:
+          mass:
+            main: {multipoles: null}
+nonlinear:
+  paired:
+    observation: out/mock/observation.npz
+    fit: {mode: fixed_template}
+    trials:
+      kind: explicit
+      explicit:
+        - {members: all, mass_msun: 1.0e8, position_yx: [0.0, 0.8]}
+```
+
+The observation supplies the pixels and noise, so the family uses one replicate
+and omits `inject`, `noise`, `forecast_arm` and `comparison_policy`. The plan pins
+the archive's SHA-256, and workers validate the bytes they load. A retry reuses the
+same archive and candidate with a different sampler seed. See
+[independent fits](nonlinear.md#fit-an-independently-specified-scene) for the
+detector and model requirements.
+
 ## Running a batch
 
 Batches run on Linux, because the runner uses `/proc` and process file descriptors to

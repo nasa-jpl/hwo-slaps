@@ -20,14 +20,18 @@ import types
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from numpy.typing import ArrayLike
 
 from ..identity import array_digest, read_file_snapshot
 
-__all__ = ["ASSET_FORMAT_VERSION", "ImageAsset", "frozen_value", "load_image_asset", "prepare_image_asset"]
+if TYPE_CHECKING:
+    from .spec import SceneSpec
+
+__all__ = ["ASSET_FORMAT_VERSION", "ImageAsset", "frozen_value", "load_image_asset",
+           "load_scene_image_assets", "prepare_image_asset"]
 
 ASSET_FORMAT_VERSION = 1
 _ASSET_MEMBERS = {"sb", "pixel_scale_arcsec", "metadata_json"}
@@ -127,6 +131,13 @@ def load_image_asset(path: Any) -> ImageAsset:
 
 
 # ------------------------------------------------------------------ preparation
+
+
+def load_scene_image_assets(scene: SceneSpec) -> dict[str, ImageAsset]:
+    """Load each distinct lens or source image asset used by a scene."""
+    paths = dict.fromkeys(str(component.values["asset_path"]) for galaxy in (scene.lens, scene.source)
+                          for component in galaxy.light if component.type == "Image")
+    return {path: load_image_asset(path) for path in paths}
 
 
 def _border_values(image: np.ndarray, border_fraction: float) -> np.ndarray:

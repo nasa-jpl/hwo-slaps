@@ -51,6 +51,39 @@ print(case.q_signed, case.smooth.acceptance_status, case.subhalo.acceptance_stat
 The sampler seed is separate from the scene seed and the noise seed, so the same data
 can be refitted with a different search.
 
+## Fit an independently specified scene
+
+Use `fit_observation` to fit the same simulated pixels with different lens, source or
+halo models. Run `simulate` once and pass its output or load its saved observation.
+Provide an ordinary engine configuration for the fit. Its scene values set the
+nominal fit parameters and prior centres, and `psf.model` supplies the fitted PSF.
+
+```python
+from hwoslaps import FitSpec, SamplerSettings, fit_observation, load_config, load_observation
+
+mock = load_observation("out/mock/observation.npz")
+case = fit_observation(
+    mock, model=load_config("fit_scene.yaml"), mass_msun=1e8, position_yx=(0.0, 0.8),
+    fit=FitSpec(mode="fixed_template"), sampler=SamplerSettings(),
+    sampler_seed=11, output_dir="out/independent",
+)
+```
+
+Set `scene.injection` to null in the fit configuration. `mass_msun` and `position_yx`
+give the candidate subhalo, and `scene.subhalo` in the fit configuration gives its
+profile and redshift. Match the grid, subsampling and calibrated exposure
+to the observation. Use all pixels within the fitted PSF border or provide a
+`PixelMask`. The fit uses a single model kernel and a diagonal noise likelihood.
+Use `forecast.nuisances.fixed` in the fit configuration to hold selected scene
+parameters fixed. A forecast workspace is unnecessary for this fit.
+
+The result stores separate observation and fit identities. The simulation's
+injection stays in `case.observation.subhalo` for scoring, and the candidate is
+recorded in `case.hypothesis`. Each role records the likelihood at its nominal fit
+model in `reference_log_likelihood`, and its `truth_log_likelihood` is None. These fits
+carry no forecast reference. The [batch guide](batches.md#fitting-a-saved-observation)
+shows how to fit several arms to a single saved image.
+
 ## Fit modes
 
 `FitSpec.mode` sets what the subhalo role may vary.

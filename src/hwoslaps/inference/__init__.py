@@ -2,6 +2,7 @@
 from importlib import import_module
 
 _PUBLIC_API = {
+    "fit_observation": ("api", "fit_observation"),
     "prepare_case": ("api", "prepare_case"),
     "PreparedCase": ("api", "PreparedCase"),
     "validate_nonlinear": ("api", "validate_nonlinear"),

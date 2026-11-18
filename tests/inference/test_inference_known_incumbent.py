@@ -42,7 +42,7 @@ def _fit(tmp_path, monkeypatch, box_objective, *, role="subhalo", truth=(0.8, 0.
         max_log_likelihood=lambda as_instance: points[0])), None)
     monkeypatch.setattr(roles, "run_search", lambda **kwargs: search)
     model = SimpleNamespace(parameter_names=("a", "b"), lower=np.zeros(2), upper=np.ones(2))
-    case = SimpleNamespace(model=lambda role: model, truth_vector=lambda role: np.asarray(truth),
+    case = SimpleNamespace(model=lambda role: model, reference_vector=lambda role: np.asarray(truth), independent_scene=False,
         log_likelihood=lambda role, point: -_half_chi2(point), autofit_models={role: object()},
         analysis=object(), data=SimpleNamespace(record={}), fit=FitSpec(mode="fixed_template"),
         objective=lambda role: box_objective([0, 0], [1, 1], _half_chi2, _gradient))
