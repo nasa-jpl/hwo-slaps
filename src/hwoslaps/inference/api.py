@@ -21,7 +21,7 @@ from ..observation.observation import Observation
 from ..scene.builder import Scene, build_scene
 from ..scene.cosmology import Cosmology
 from ..scene.halos import Halo
-from ..scene.image_source import frozen_value
+from ..scene.image_source import frozen_value, load_scene_image_assets
 from ..scene.parameters import match_parameters, scene_parameters
 from ..scene.perturbers import realize_perturbers
 from ..scene.rendering import response_identity
@@ -248,8 +248,7 @@ def _assemble_case(scene: Scene, trial: Halo, observation: Observation, *, fit: 
 
 def _prepare_independent_case(observation: Observation, model: ConfigSource, candidate: Halo, *,
                               fit: FitSpec, use_jax: bool) -> PreparedCase:
-    from ..fisher.api import _assets, _validate_loaded_files
-    from ..fisher.psf_pair import bind_psfs, truth_provider
+    from ..fisher.psf_pair import bind_psfs, truth_provider, validate_psf_pair_files
 
     if fit.h1 == "truth_anchor":
         raise ValueError("truth_anchor requires matched nonlinear validation")
@@ -270,7 +269,7 @@ def _prepare_independent_case(observation: Observation, model: ConfigSource, can
 
     identity = config.capture_identity()
     manifest = identity["file_digests"]
-    assets = _assets(config.scene)
+    assets = load_scene_image_assets(config.scene)
     for path, asset in assets.items():
         validate_loaded_file(path, asset.digest, manifest)
     bandpass = None if config.instrument.bandpass is None else build_bandpass(config.instrument.bandpass)
@@ -291,7 +290,7 @@ def _prepare_independent_case(observation: Observation, model: ConfigSource, can
     fixed = () if config.forecast is None else config.forecast.nuisances.fixed
     held = set(match_parameters(names, fixed, path="forecast.nuisances.fixed"))
     free = tuple(name for name in names if name not in held)
-    _validate_loaded_files(manifest, assets, psfs)
+    validate_psf_pair_files(psfs, manifest)
     validate_file_manifest(manifest)
     fit_record = {"config_digest": identity["config_digest"], "file_digests": manifest,
                   "perturbers": [halo.to_mapping() for halo in perturbers]}

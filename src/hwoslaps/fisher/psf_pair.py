@@ -23,7 +23,8 @@ if TYPE_CHECKING:
     from ..instrument import Instrument
     from ..scene.spec import SceneSpec
 
-__all__ = ["PsfPair", "bind_psfs", "bind_truth", "truth_provider", "validate_loaded_psf_files"]
+__all__ = ["PsfPair", "bind_psfs", "bind_truth", "truth_provider",
+           "validate_loaded_psf_files", "validate_psf_pair_files"]
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,16 @@ def validate_loaded_psf_files(provider: PSFProvider, binding: KernelBinding, man
             validate_loaded_file(kernel.source["path"], kernel.source["file_sha256"], manifest)
     if isinstance(provider, OpticalPSF) and provider.draw is not None:
         draw = provider.draw
+        if draw.spec.prior.kind == "path":
+            validate_loaded_file(draw.spec.prior.path, draw.prior_digest, manifest)
+
+
+def validate_psf_pair_files(psfs: PsfPair, manifest: Mapping[str, str]) -> None:
+    """Verify the actual kernels and wavefront prior against the captured inputs."""
+    validate_loaded_psf_files(psfs.truth, psfs.truth_kernels, manifest)
+    validate_loaded_psf_files(psfs.model.provider, psfs.model_kernels, manifest)
+    if psfs.model.knowledge_error is not None:
+        draw = psfs.model.knowledge_error.draw
         if draw.spec.prior.kind == "path":
             validate_loaded_file(draw.spec.prior.path, draw.prior_digest, manifest)
 

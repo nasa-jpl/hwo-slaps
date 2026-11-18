@@ -12,7 +12,7 @@ from .observation.observation import Observation, observe
 from .scene.builder import build_scene, native_sampling_variation
 from .scene.cosmology import Cosmology
 from .scene.halos import Halo
-from .scene.image_source import load_image_asset
+from .scene.image_source import load_scene_image_assets
 from .scene.perturbers import realize_perturbers
 from .spectra.bandpass import build_bandpass
 from .fisher.psf_pair import bind_truth, truth_provider, validate_loaded_psf_files
@@ -59,9 +59,7 @@ def simulate(source: ConfigSource | PreparedForecast, *, subhalo: Halo | None, n
         if bandpass is not None:
             for path, digest in bandpass.file_digests.items():
                 validate_loaded_file(path, digest, manifest)
-        paths = dict.fromkeys(str(component.values["asset_path"]) for galaxy in (config.scene.lens, config.scene.source)
-                              for component in galaxy.light if component.type == "Image")
-        assets = {path: load_image_asset(path) for path in paths}
+        assets = load_scene_image_assets(config.scene)
         for path, asset in assets.items():
             validate_loaded_file(path, asset.digest, manifest)
         cosmology = Cosmology(config.cosmology)

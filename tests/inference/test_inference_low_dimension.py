@@ -174,7 +174,7 @@ def test_capped_role_counts_truth_with_search_and_retains_the_known_incumbent(di
         calls.append((tuple(vector), value))
         return value
 
-    case = SimpleNamespace(model=lambda role: model, truth_vector=lambda role: model.truth,
+    case = SimpleNamespace(model=lambda role: model, reference_vector=lambda role: model.truth, independent_scene=False,
                            log_likelihood=likelihood)
     budget = 10 if dimension else 1
     fitted, outcome = roles.run_search_role(case, "smooth", sampler=SamplerSettings(n_like_max=budget),
@@ -206,7 +206,7 @@ def test_roles_dispatch_without_sampler_or_refinement_and_round_trip(dimension, 
         raise AssertionError("zero/scalar dimensions must never launch Nautilus")
 
     monkeypatch.setattr(roles, "run_search", forbidden)
-    case = SimpleNamespace(model=lambda role: model, truth_vector=lambda role: model.truth, log_likelihood=likelihood)
+    case = SimpleNamespace(model=lambda role: model, reference_vector=lambda role: model.truth, independent_scene=False, log_likelihood=likelihood)
     result, searched = roles.run_search_role(case, "smooth", sampler=SamplerSettings(), sampler_seed=7,
                                              refine=RefineSettings(), session=None, case_dir=tmp_path, case_id="case")
     assert searched is None and result.sampler is None and result.refinement is None
@@ -239,7 +239,7 @@ def test_each_mixed_dimension_role_dispatches_independently(dimension, mode, tmp
         return SearchOutcome(record, result, None)
 
     monkeypatch.setattr(roles, "run_search", search)
-    case = SimpleNamespace(model=lambda role: models[role], truth_vector=lambda role: models[role].truth,
+    case = SimpleNamespace(model=lambda role: models[role], reference_vector=lambda role: models[role].truth, independent_scene=False,
                            log_likelihood=lambda role, vector: 3. - sum((value - .4) ** 2 for value in vector),
                            autofit_models={"subhalo": object()}, analysis=object(), data=SimpleNamespace(record={}),
                            fit=FitSpec(mode=mode, mass_support=MassSupport(6., 10.) if mode == "freed" else None))

@@ -76,7 +76,7 @@ def test_fit_priors_and_reference_follow_the_fit_scene(pair, tmp_path):
                             "forecast": {"nuisances": {"fixed": fixed}}})
     candidate = _candidate(model, 8e7, (0.1, 0.75))
     settings = dict(model=model, candidate=candidate, fit=FitSpec(mode="fixed_template"),
-                    sampler=SamplerSettings(), sampler_seed=31, output_dir=tmp_path)
+                    sampler=SamplerSettings(n_like_max=60), sampler_seed=31, output_dir=tmp_path)
     visible = fit_observation(observation, **settings)
     masked = fit_observation(replace(observation, subhalo=None), **settings)
     key = "source.light.light.intensity"
@@ -86,4 +86,4 @@ def test_fit_priors_and_reference_follow_the_fit_scene(pair, tmp_path):
     assert (box["lower"] + box["upper"]) / 2 == pytest.approx(1.1)
     assert visible.data["reference_log_likelihoods"] == masked.data["reference_log_likelihoods"]
     assert visible.models == masked.models
-    assert visible.q_signed == masked.q_signed
+    assert visible.q_signed is not None and visible.q_signed == masked.q_signed

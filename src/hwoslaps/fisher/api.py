@@ -22,7 +22,7 @@ from ..scene.builder import Scene, build_scene, native_sampling_variation
 from ..scene.cosmology import Cosmology
 from ..scene.critical_curve import effective_einstein_radius
 from ..scene.halos import Halo, make_halo
-from ..scene.image_source import frozen_value, load_image_asset
+from ..scene.image_source import frozen_value, load_scene_image_assets
 from ..scene.perturbers import realize_perturbers
 from ..scene.rendering import response_identity
 from ..scene.spec import SceneSpec, pixel_centres_yx
@@ -33,7 +33,7 @@ from .data_space import (DataSpace, all_pixels_mask, annulus_mask, build_data_sp
 from .engines.base import EngineContext, TemplateEngine, make_engine
 from .nuisances import NuisanceDesign, build_nuisance_design, resolve_nuisances
 from .positions import PositionSet, explicit_positions, grid_positions, ring_positions
-from .psf_pair import PsfPair, bind_psfs, truth_provider, validate_loaded_psf_files
+from .psf_pair import PsfPair, bind_psfs, truth_provider, validate_psf_pair_files
 from .renderer import SceneRenderer
 from .result import ForecastResult
 from .statistics import ProfileLikelihoodWorkspace
@@ -178,28 +178,11 @@ def _mask(spec: Any, scene: Scene, observation: Observation, psfs: PsfPair) -> n
     return psf_border_mask(shape, kernel_shape)
 
 
-def _assets(spec: SceneSpec) -> dict[str, Any]:
-    paths = dict.fromkeys(str(component.values["asset_path"]) for galaxy in (spec.lens, spec.source)
-                          for component in galaxy.light if component.type == "Image")
-    return {path: load_image_asset(path) for path in paths}
-
-
 def _constant(renderer: SceneRenderer, scene: Scene, binding: Any) -> float | np.ndarray:
     offset = renderer.exposure.background_adu
     if not scene.spec.lens.light:
         return offset
     return offset + renderer.exposure.signal_adu(renderer.light_rate(scene, binding, planes=("lens",)))
-
-
-def _validate_loaded_files(manifest: Mapping[str, str], assets: Mapping[str, Any], psfs: PsfPair) -> None:
-    for path, asset in assets.items():
-        validate_loaded_file(path, asset.digest, manifest)
-    validate_loaded_psf_files(psfs.truth, psfs.truth_kernels, manifest)
-    validate_loaded_psf_files(psfs.model.provider, psfs.model_kernels, manifest)
-    if psfs.model.knowledge_error is not None:
-        draw = psfs.model.knowledge_error.draw
-        if draw.spec.prior.kind == "path":
-            validate_loaded_file(draw.spec.prior.path, draw.prior_digest, manifest)
 
 
 def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution(),
@@ -243,7 +226,7 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
     if bandpass is not None:
         for path, digest in bandpass.file_digests.items():
             validate_loaded_file(path, digest, file_digests)
-    assets = _assets(resolved.scene)
+    assets = load_scene_image_assets(resolved.scene)
     for path, asset in assets.items():
         validate_loaded_file(path, asset.digest, file_digests)
     cosmology = Cosmology(resolved.cosmology)
@@ -295,7 +278,7 @@ def prepare_forecast(config: ConfigSource, *, execution: Execution = Execution()
                                            for kernel in psfs.model_kernels.kernels],
               "nuisance_names": list(design.names), "mask_digest": data_space.digest(),
               "pixel_count": data_space.pixel_count, "sampling": dict(observation.sampling)}
-    _validate_loaded_files(file_digests, assets, psfs)
+    validate_psf_pair_files(psfs, file_digests)
     engine = make_engine(execution.engine, context, execution)
     prepared = PreparedForecast(resolved, smooth, psfs, observation, positions, renderer, data_space,
                                 design, workspace, mean_model, engine, execution, frozen_value(record))

@@ -31,7 +31,8 @@ def saved_batch(tiny_batch_spec, tmp_path):
                                      "scene": {**fit_scene, "lens": {"mass": {"mass": {"ell_comps": [0.08, 0.02]}}}},
                                      "forecast": {"nuisances": {"fixed": ["*"]}}}}],
                            nonlinear={"saved": {"observation": path.name, "fit": {"mode": "fixed_template"},
-                               "retry": {"acceptance": {"smooth": ["sampler_only"], "subhalo": ["sampler_only"]}},
+                               "retry": {"require_retained_state": False, "stationarity_tolerance": None,
+                                         "acceptance": {"smooth": ["sampler_only"], "subhalo": ["sampler_only"]}},
                                "trials": {"kind": "explicit", "explicit": [
                                    {"members": "all", "mass_msun": 9e7, "position_yx": [0.1, 0.25]}]}}})
     return spec, path, observation
