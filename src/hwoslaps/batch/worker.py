@@ -126,28 +126,23 @@ def _fit_saved_observation(payload, config, parameters, seeds, run_dir, session)
     from ..identity import array_digest
     from ..inference.api import fit_observation
     from ..inference.settings import FitSpec, RefineSettings, SamplerSettings
-    from ..scene.cosmology import Cosmology
-    from ..scene.halos import make_halo
 
     observation = load_observation_snapshot(parameters['observation_path'],
                                             expected_sha256=parameters['observation_sha256'])
-    scene = config.scene
-    redshift = scene.lens.redshift if scene.subhalo_redshift is None else scene.subhalo_redshift
-    position = tuple(parameters['position_yx'])
-    candidate = make_halo(scene.subhalo, parameters['mass_msun'], position, redshift=redshift,
-                          source_redshift=scene.source.redshift, cosmology=Cosmology(config.cosmology))
+    mass, position = parameters['mass_msun'], tuple(parameters['position_yx'])
     if parameters['attempt']:
         first, digest = load_case_snapshot(parameters['retry_case_path'])
+        # The fit configuration fixes the halo recipe, planes and cosmology of the candidate.
         if (digest != parameters['retry_case_sha256']
                 or first.case_id != case_id(parameters['retry_source_job_id'])
-                or first.hypothesis != candidate
+                or (first.hypothesis.mass_msun, first.hypothesis.position_yx_arcsec) != (mass, position)
                 or first.data['fit_scene']['config_digest'] != payload.config_digest
                 or first.observation.data_digest != array_digest(observation.data_adu)
                 or first.observation.config_digest != observation.config_digest
                 or first.observation.noise_seed != observation.noise_seed):
             raise BatchConflict(f'retry differs from the original saved-observation fit: {payload.job_id}')
     refine = parameters['refine']
-    result = fit_observation(observation, model=config, candidate=candidate,
+    result = fit_observation(observation, model=config, mass_msun=mass, position_yx=position,
                              fit=FitSpec.from_mapping(parameters['fit']),
                              sampler=SamplerSettings.from_mapping(parameters['sampler']),
                              sampler_seed=seeds['sampler'], output_dir=run_dir / 'fit', session=session,
@@ -155,6 +150,7 @@ def _fit_saved_observation(payload, config, parameters, seeds, run_dir, session)
                              case_id=case_id(payload.job_id))
     if result.data['fit_scene']['config_digest'] != payload.config_digest:
         raise BatchConflict(f'actual fit inputs differ from the planned job: {payload.job_id}')
+    candidate = result.hypothesis
     actual_trial = {'mass_msun': candidate.mass_msun, 'position_yx': candidate.position_yx_arcsec,
                     'trial_id': trial_id(candidate.mass_msun, candidate.position_yx_arcsec)}
     return result, actual_trial

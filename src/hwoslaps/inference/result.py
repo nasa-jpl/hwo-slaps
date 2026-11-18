@@ -233,6 +233,9 @@ class RoleFit:
 
     ``log_likelihood`` is the refined direct likelihood when refinement ran, the sampler maximum
     otherwise, the truth value for the anchor, and None for a failed role.
+    A matched role records ``truth_log_likelihood`` at the generating parameters. An
+    independent fit has no truth vector in its own model, so its role records
+    ``reference_log_likelihood`` at the nominal values of the fit configuration.
     ``box_edge_margins`` is the retained best's distance to the nearer box edge per free
     parameter, in units of the box width.
 
@@ -254,11 +257,14 @@ class RoleFit:
     error: str | None
     runtime_s: float
     strategy_record: Mapping[str, Any] | None = None
+    reference_log_likelihood: float | None = None
     quality: Mapping[str, Any] = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
         if self.role not in ("smooth", "subhalo"):
             raise ValueError(f"role must be smooth or subhalo, got {self.role!r}")
+        if (self.truth_log_likelihood is None) == (self.reference_log_likelihood is None):
+            raise ValueError("a role records exactly one of truth_log_likelihood and reference_log_likelihood")
         if self.strategy not in ("search", "truth_anchor", "exact", "scalar"):
             raise ValueError(f"invalid role strategy {self.strategy!r}")
         if self.status not in ("success", "failed"):
@@ -330,13 +336,16 @@ class RoleFit:
 
     def to_mapping(self) -> dict[str, Any]:
         record = {item.name: getattr(self, item.name) for item in dataclasses.fields(self)}
+        if self.reference_log_likelihood is None:
+            # A matched role keeps the record layout written before independent fits existed.
+            del record["reference_log_likelihood"]
         record["sampler"] = None if self.sampler is None else self.sampler.to_mapping()
         record["refinement"] = None if self.refinement is None else self.refinement.to_mapping()
         return finite_json(record)
 
     @classmethod
     def from_mapping(cls, mapping: Mapping[str, Any]) -> RoleFit:
-        mapping = {"strategy_record": None, "quality": None, **mapping}
+        mapping = {"strategy_record": None, "reference_log_likelihood": None, "quality": None, **mapping}
         check_record_keys(mapping, cls)
         sampler, refinement, margins = mapping["sampler"], mapping["refinement"], mapping["box_edge_margins"]
         restored = cls(role=mapping["role"], strategy=mapping["strategy"], status=mapping["status"],
@@ -348,7 +357,8 @@ class RoleFit:
                    refinement=None if refinement is None else RefineOutcome.from_mapping(refinement),
                    box_edge_margins=None if margins is None else {name: float(v) for name, v in margins.items()},
                    anchor_chi2=_optional_float(mapping["anchor_chi2"]), error=mapping["error"],
-                   runtime_s=float(mapping["runtime_s"]), strategy_record=mapping["strategy_record"])
+                   runtime_s=float(mapping["runtime_s"]), strategy_record=mapping["strategy_record"],
+                   reference_log_likelihood=_optional_float(mapping["reference_log_likelihood"]))
         if mapping["quality"] is not None and mapping["quality"] != restored.quality:
             raise ValueError("role quality differs from its recorded stopping/integration diagnostics")
         return restored

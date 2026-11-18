@@ -83,7 +83,8 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
                      parameter_names=model.parameter_names,
                      n_free_parameters=len(model.parameter_names), sampler=outcome.record, refinement=refinement,
                      box_edge_margins=_edge_margins(case, role, vector), anchor_chi2=None, error=error,
-                     runtime_s=time.perf_counter() - start)
+                     runtime_s=time.perf_counter() - start,
+                     reference_log_likelihood=reference_likelihood if case.independent_scene else None)
     return result, outcome
 
 
@@ -142,7 +143,8 @@ def _deterministic_role(case: PreparedCase, role: Literal["smooth", "subhalo"], 
                    truth_log_likelihood=None if case.independent_scene else reference_likelihood,
                    parameter_names=model.parameter_names, n_free_parameters=dimension,
                    sampler=None, refinement=None, box_edge_margins=_edge_margins(case, role, vector),
-                   anchor_chi2=None, error=error, runtime_s=time.perf_counter() - start, strategy_record=record)
+                   anchor_chi2=None, error=error, runtime_s=time.perf_counter() - start, strategy_record=record,
+                   reference_log_likelihood=reference_likelihood if case.independent_scene else None)
 
 
 def anchor_role(case: PreparedCase) -> RoleFit:

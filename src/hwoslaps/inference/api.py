@@ -13,14 +13,14 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from ..config.schema import ConfigSource, resolve_config
+from ..config.schema import ConfigSource, EngineConfig, resolve_config
 from ..identity import array_digest, mapping_digest, validate_file_manifest, validate_loaded_file
 from ..optics.kernels import DetectorPSF
 from ..observation.normalization import resolve_observing
 from ..observation.observation import Observation
 from ..scene.builder import Scene, build_scene
 from ..scene.cosmology import Cosmology
-from ..scene.halos import Halo
+from ..scene.halos import Halo, make_halo
 from ..scene.image_source import frozen_value, load_scene_image_assets
 from ..scene.parameters import match_parameters, scene_parameters
 from ..scene.perturbers import realize_perturbers
@@ -246,13 +246,19 @@ def _assemble_case(scene: Scene, trial: Halo, observation: Observation, *, fit: 
                          analysis, types.MappingProxyType(record))
 
 
-def _prepare_independent_case(observation: Observation, model: ConfigSource, candidate: Halo, *,
+def _candidate(config: EngineConfig, mass_msun: float, position_yx: tuple[float, float]) -> Halo:
+    scene = config.scene
+    redshift = scene.lens.redshift if scene.subhalo_redshift is None else scene.subhalo_redshift
+    return make_halo(scene.subhalo, mass_msun, position_yx, redshift=redshift,
+                     source_redshift=scene.source.redshift, cosmology=Cosmology(config.cosmology))
+
+
+def _prepare_independent_case(observation: Observation, config: EngineConfig, candidate: Halo, *,
                               fit: FitSpec, use_jax: bool) -> PreparedCase:
     from ..fisher.psf_pair import bind_psfs, truth_provider, validate_psf_pair_files
 
     if fit.h1 == "truth_anchor":
         raise ValueError("truth_anchor requires matched nonlinear validation")
-    config = resolve_config(model)
     if config.scene.grid != observation.grid:
         raise ValueError("fit grid shape, pixel scale and sampling must match the observation")
     if config.scene.injection is not None:
@@ -260,12 +266,6 @@ def _prepare_independent_case(observation: Observation, model: ConfigSource, can
     if config.forecast is not None and config.forecast.noise_covariance is not None:
         raise ValueError("dense noise covariance is unsupported by the diagonal nonlinear likelihood")
     cosmology = Cosmology(config.cosmology)
-    redshift = config.scene.subhalo_redshift
-    if redshift is None:
-        redshift = config.scene.lens.redshift
-    if (candidate.model != config.scene.subhalo or candidate.redshift != redshift
-            or candidate.source_redshift != config.scene.source.redshift or candidate.cosmology != cosmology):
-        raise ValueError("candidate halo recipe, planes and cosmology must match the fit model")
 
     identity = config.capture_identity()
     manifest = identity["file_digests"]
@@ -301,22 +301,26 @@ def _prepare_independent_case(observation: Observation, model: ConfigSource, can
                           trial_recipe=config.to_mapping()["scene"]["subhalo"])
 
 
-def fit_observation(observation: Observation, *, model: ConfigSource, candidate: Halo, fit: FitSpec,
-                    sampler: SamplerSettings, sampler_seed: int, output_dir: str | os.PathLike[str],
+def fit_observation(observation: Observation, *, model: ConfigSource, mass_msun: float,
+                    position_yx: tuple[float, float], fit: FitSpec, sampler: SamplerSettings,
+                    sampler_seed: int, output_dir: str | os.PathLike[str],
                     refine: RefineSettings | None = None, session: BackendSession | None = None,
-                    forecast_reference: ForecastReference | None = None, case_id: str | None = None,
-                    comparison_policy: str = "strict") -> CaseResult:
-    """Fit one explicit candidate using an independent scene and a calibrated mock.
+                    case_id: str | None = None) -> CaseResult:
+    """Fit one candidate subhalo using an independent scene and a calibrated mock.
 
     The model configuration describes the fitted components, their nominal values
-    and fitted PSF. Its grid and exposure must match the observation. An optional
-    forecast section supplies the scene parameter patterns to hold fixed.
+    and fitted PSF. Its grid and exposure must match the observation. The candidate
+    has the given mass and (y, x) position in arcsec, with the halo recipe, planes
+    and cosmology of the model configuration. An optional forecast section supplies
+    the scene parameter patterns to hold fixed.
     """
-    return _run_case(lambda: _prepare_independent_case(observation, model, candidate, fit=fit,
+    config = resolve_config(model)
+    candidate = _candidate(config, mass_msun, position_yx)
+    return _run_case(lambda: _prepare_independent_case(observation, config, candidate, fit=fit,
                                                        use_jax=sampler.use_jax),
                      candidate, observation, fit=fit, sampler=sampler, sampler_seed=sampler_seed,
-                     output_dir=output_dir, refine=refine, session=session, forecast_reference=forecast_reference,
-                     case_id=case_id, comparison_policy=comparison_policy)
+                     output_dir=output_dir, refine=refine, session=session, forecast_reference=None,
+                     case_id=case_id, comparison_policy="strict")
 
 
 def validate_nonlinear(prepared: PreparedForecast, trial: Halo, observation: Observation, *, fit: FitSpec,
@@ -446,13 +450,10 @@ def _run_case(prepare: Callable[[], PreparedCase], trial: Halo, observation: Obs
             evidence_difference = evidence1 - evidence0
     from ..provenance import capture_provenance
 
-    provenance = capture_provenance()
-    if case.independent_scene:
-        provenance["reference_log_likelihoods"] = reference_likelihoods
     return CaseResult(case_id, trial, ObservationRecord(observation.kind, observation.noise_seed,
                                                         observation.config_digest, array_digest(observation.data_adu),
                                                         observation.subhalo),
                        case.data.record, fit, sampler, int(sampler_seed), refine,
                        case.record["models"], smooth, subhalo, q_signed, q_clipped, evidence_difference,
                        recovery, forecast_reference, case.record["fitted_parameters"],
-                       case.record["comparison_digest"], provenance)
+                       case.record["comparison_digest"], capture_provenance())

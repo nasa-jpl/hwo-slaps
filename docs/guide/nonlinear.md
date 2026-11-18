@@ -60,27 +60,18 @@ nominal fit parameters and prior centres, and `psf.model` supplies the fitted PS
 
 ```python
 from hwoslaps import FitSpec, SamplerSettings, fit_observation, load_config, load_observation
-from hwoslaps.scene.cosmology import Cosmology
-from hwoslaps.scene.halos import make_halo
 
 mock = load_observation("out/mock/observation.npz")
-model = load_config("fit_scene.yaml")
-scene = model.scene
-redshift = scene.lens.redshift if scene.subhalo_redshift is None else scene.subhalo_redshift
-candidate = make_halo(
-    scene.subhalo, 1e8, (0.0, 0.8),
-    redshift=redshift, source_redshift=scene.source.redshift,
-    cosmology=Cosmology(model.cosmology),
-)
 case = fit_observation(
-    mock, model=model, candidate=candidate,
+    mock, model=load_config("fit_scene.yaml"), mass_msun=1e8, position_yx=(0.0, 0.8),
     fit=FitSpec(mode="fixed_template"), sampler=SamplerSettings(),
     sampler_seed=11, output_dir="out/independent",
 )
 ```
 
-Set `scene.injection` to null in the fit configuration. The candidate supplies
-the trial mass and position. Match the grid, subsampling and calibrated exposure
+Set `scene.injection` to null in the fit configuration. `mass_msun` and `position_yx`
+give the candidate subhalo, and `scene.subhalo` in the fit configuration gives its
+profile and redshift. Match the grid, subsampling and calibrated exposure
 to the observation. Use all pixels within the fitted PSF border or provide a
 `PixelMask`. The fit uses a single model kernel and a diagonal noise likelihood.
 Use `forecast.nuisances.fixed` in the fit configuration to hold selected scene
@@ -88,9 +79,9 @@ parameters fixed. A forecast workspace is unnecessary for this fit.
 
 The result stores separate observation and fit identities. The simulation's
 injection stays in `case.observation.subhalo` for scoring, and the candidate is
-recorded in `case.hypothesis`. The likelihood at each nominal fit model is in
-`case.provenance["reference_log_likelihoods"]`. An optional forecast reference goes
-through diagnostic comparison. The [batch guide](batches.md#fitting-a-saved-observation)
+recorded in `case.hypothesis`. Each role records the likelihood at its nominal fit
+model in `reference_log_likelihood`, and its `truth_log_likelihood` is None. These fits
+carry no forecast reference. The [batch guide](batches.md#fitting-a-saved-observation)
 shows how to fit several arms to a single saved image.
 
 ## Fit modes
