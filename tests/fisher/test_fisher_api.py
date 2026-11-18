@@ -19,7 +19,7 @@ def test_named_forecast_radii_reject_hypotheses_behind_the_lens_before_preparati
     minimal_mapping["forecast"]["positions"] = {"kind": "ring", "count": 4, "radius": radius}
     def unexpected_preparation(*args, **kwargs):
         pytest.fail("an invalid radius must be rejected before scene preparation")
-    monkeypatch.setattr(api, "_assets", unexpected_preparation)
+    monkeypatch.setattr(api, "load_scene_image_assets", unexpected_preparation)
     with pytest.raises(ConfigError, match="own plane") as error:
         api.prepare_forecast(minimal_mapping)
     assert error.value.path == "forecast.positions.radius"
