@@ -3632,9 +3632,10 @@ Selected by `kind: function`.
 | `arms` | null or list of at least 1 items, each text matching [A-Za-z0-9_.-]+, no repeats | `null` |  | participating arm names |
 | `forecast_arm` | null or text matching [A-Za-z0-9_.-]+ | `null` |  | arm supplying trials and signed forecast references |
 | `comparison_policy` | one of: strict, diagnostic | `strict` |  | strict input compatibility or explicit diagnostic cross-arm comparison |
+| `observation` | null or non-empty text | `null` |  | saved observation NPZ for independent fitting |
 | `trials` | mapping by `kind` (explicit, configured, forecast_positions, forecast_argmax), see `batch.nonlinear.<key>.trials` | required |  | trial selection |
-| `inject` | true or false | required |  | inject the trial |
-| `noise` | true or false | required |  | draw detector noise |
+| `inject` | null or true or false | `null` |  | inject the trial when generating an observation |
+| `noise` | null or true or false | `null` |  | draw detector noise when generating an observation |
 | `replicates` | integer >= 1 | `1` |  | noise replicates |
 | `fit` | mapping | required |  | nonlinear fit |
 | `sampler` | mapping | `{n_live_smooth: 100, n_live_subhalo_fixed: 100, n_live_subhalo_search: 200, n_eff: null, n_shell: null, f_live: null, discard_exploration: null, n_like_max: null, number_of_cores: 1, use_jax: false, jax_n_batch: 100, retain_search_internal: false}` |  | sampler settings |

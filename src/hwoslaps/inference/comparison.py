@@ -47,8 +47,13 @@ def compare_forecast(reference: ForecastReference, *, hypothesis: Any, data: Map
 
     compare("physical_node", [reference.mass_msun, reference.position_yx_arcsec],
             [hypothesis.mass_msun, hypothesis.position_yx_arcsec], "Physical mass and position in y,x arcsec.")
-    compare("truth_configuration", reference.comparison_digest, comparison_digest,
+    independent = "fit_scene" in data
+    compare("truth_configuration", reference.comparison_digest, None if independent else comparison_digest,
             "Truth-preserving configuration identity, excluding the model PSF.")
+    if independent:
+        checks["fit_scene"] = {"status": "not_assessed", "forecast": reference.comparison_digest,
+                               "fit": data["fit_scene"]["config_digest"],
+                               "reason": "An independently specified fit scene requires a diagnostic comparison."}
     compare("model_psf", reference.model_kernel.to_mapping(), data.get("model_kernel"),
             "Actual model kernel bytes, shape and angular sampling.")
     compare("mask", reference.mask_digest, data.get("mask", {}).get("digest"), "Selected detector pixels.")

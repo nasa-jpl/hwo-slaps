@@ -368,14 +368,14 @@ def restored_plan(output, spec):
         if item['config_digest'] != arm.config_digest:
             raise BatchConflict(f'frozen job configuration differs from its arm: {item["job_id"]}')
         parameters = deepcopy(item['parameters'])
-        if item['kind'] == 'nonlinear':
+        if item['kind'] == 'nonlinear' and 'observation_path' not in parameters:
             reference = by_arm[item['member_index'], parameters['forecast_arm']]
             if reference.config_digest != parameters['forecast_config_digest']:
                 raise BatchConflict(f'frozen forecast reference differs from its arm: {item["job_id"]}')
             parameters['forecast_config_mapping'] = reference.config.to_mapping()
         jobs.append(Job(item['job_id'], item['kind'], arm.member, arm.name, arm.config, arm.config_digest,
                         item['preparation_key'], parameters, item['seeds'],
-                        None if item['kind'] == 'simulate' else spec.execution.forecast.engine))
+                        None if item['preparation_key'] is None else spec.execution.forecast.engine))
     current = BatchPlan(spec, members, tuple(jobs), record['deferred'], tuple(configurations),
                      spec.captured_digest(base_config_digest=record['base_config_digest'],
                                           population_digest=record['population_digest']),

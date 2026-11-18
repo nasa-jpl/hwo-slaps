@@ -121,6 +121,45 @@ def resolve_configured_trial(parameters, config, prepared):
     return trial
 
 
+def _fit_saved_observation(payload, config, parameters, seeds, run_dir, session):
+    from ..artifacts import load_case_snapshot, load_observation_snapshot
+    from ..identity import array_digest
+    from ..inference.api import fit_observation
+    from ..inference.settings import FitSpec, RefineSettings, SamplerSettings
+    from ..scene.cosmology import Cosmology
+    from ..scene.halos import make_halo
+
+    observation = load_observation_snapshot(parameters['observation_path'],
+                                            expected_sha256=parameters['observation_sha256'])
+    scene = config.scene
+    redshift = scene.lens.redshift if scene.subhalo_redshift is None else scene.subhalo_redshift
+    position = tuple(parameters['position_yx'])
+    candidate = make_halo(scene.subhalo, parameters['mass_msun'], position, redshift=redshift,
+                          source_redshift=scene.source.redshift, cosmology=Cosmology(config.cosmology))
+    if parameters['attempt']:
+        first, digest = load_case_snapshot(parameters['retry_case_path'])
+        if (digest != parameters['retry_case_sha256']
+                or first.case_id != case_id(parameters['retry_source_job_id'])
+                or first.hypothesis != candidate
+                or first.data['fit_scene']['config_digest'] != payload.config_digest
+                or first.observation.data_digest != array_digest(observation.data_adu)
+                or first.observation.config_digest != observation.config_digest
+                or first.observation.noise_seed != observation.noise_seed):
+            raise BatchConflict(f'retry differs from the original saved-observation fit: {payload.job_id}')
+    refine = parameters['refine']
+    result = fit_observation(observation, model=config, candidate=candidate,
+                             fit=FitSpec.from_mapping(parameters['fit']),
+                             sampler=SamplerSettings.from_mapping(parameters['sampler']),
+                             sampler_seed=seeds['sampler'], output_dir=run_dir / 'fit', session=session,
+                             refine=None if refine is None else RefineSettings.from_mapping(refine),
+                             case_id=case_id(payload.job_id))
+    if result.data['fit_scene']['config_digest'] != payload.config_digest:
+        raise BatchConflict(f'actual fit inputs differ from the planned job: {payload.job_id}')
+    actual_trial = {'mass_msun': candidate.mass_msun, 'position_yx': candidate.position_yx_arcsec,
+                    'trial_id': trial_id(candidate.mass_msun, candidate.position_yx_arcsec)}
+    return result, actual_trial
+
+
 def run_job(payload, cache, session, *, connection, worker, revision):
     from ..analysis.nonlinear import RoleAcceptance, case_status
     from ..artifacts import load_case_snapshot, save_case, save_forecast, save_observation
@@ -162,6 +201,8 @@ def run_job(payload, cache, session, *, connection, worker, revision):
                 if result.config_digest != payload.config_digest:
                     raise BatchConflict(f'actual simulated inputs differ from the planned job: {payload.job_id}')
                 artifacts = {'observation': save_observation(result, run_dir / 'observation.npz')}
+            elif payload.kind == 'nonlinear' and 'observation_path' in parameters:
+                result, actual_trial = _fit_saved_observation(payload, config, parameters, seeds, run_dir, session)
             else:
                 prepared, hit, duration = cache.get(config)
                 if prepared.record['config_digest'] != payload.config_digest:
@@ -234,19 +275,22 @@ def run_job(payload, cache, session, *, connection, worker, revision):
                     if (result.observation.config_digest != payload.config_digest
                             or result.forecast_reference.config_digest != parameters['forecast_config_digest']):
                         raise BatchConflict(f'actual case input identities differ from their plans: {payload.job_id}')
-                    artifacts = {'case': save_case(result, run_dir / 'case.json')}
-                    summary = {'role_statuses': {role: result.role(role).acceptance_status.value for role in ('smooth', 'subhalo')},
-                               'q_signed': result.q_signed, 'forecast_q': forecast_reference.q, 'trial': actual_trial}
-                    retry = parameters['retry']
-                    if retry is not None:
-                        # Keep the full physical archive validator in this backend-owning process.
-                        validated, validated_case_sha = load_case_snapshot(artifacts['case'])
-                        status = case_status(validated, acceptance=RoleAcceptance.from_mapping(retry['acceptance']),
-                                             require_retained_state=retry['require_retained_state'],
-                                             stationarity_tolerance=retry['stationarity_tolerance'])
-                        summary['retry'] = RetryVerdict(status, mapping_digest(retry), validated_case_sha).to_mapping()
                 else:
                     raise ValueError(f'unknown job kind {payload.kind!r}')
+            if payload.kind == 'nonlinear':
+                artifacts = {'case': save_case(result, run_dir / 'case.json')}
+                reference = result.forecast_reference
+                summary = {'role_statuses': {role: result.role(role).acceptance_status.value for role in ('smooth', 'subhalo')},
+                           'q_signed': result.q_signed, 'forecast_q': None if reference is None else reference.q,
+                           'trial': actual_trial}
+                retry = parameters['retry']
+                if retry is not None:
+                    # Keep the full physical archive validator in this backend-owning process.
+                    validated, validated_case_sha = load_case_snapshot(artifacts['case'])
+                    status = case_status(validated, acceptance=RoleAcceptance.from_mapping(retry['acceptance']),
+                                         require_retained_state=retry['require_retained_state'],
+                                         stationarity_tolerance=retry['stationarity_tolerance'])
+                    summary['retry'] = RetryVerdict(status, mapping_digest(retry), validated_case_sha).to_mapping()
             records = {name: {'path': str(path.relative_to(job_dir)), 'bytes': path.stat().st_size,
                               'sha256': validated_case_sha if name == 'case' and validated_case_sha is not None
                               else file_digest(path)} for name, path in artifacts.items()}

@@ -35,11 +35,11 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
                     case_dir: Path, case_id: str) -> tuple[RoleFit, SearchOutcome | None]:
     start = time.perf_counter()
     model = case.model(role)
-    truth_vector = case.truth_vector(role)
-    truth_log_likelihood = case.log_likelihood(role, truth_vector)
+    reference_vector = case.reference_vector(role)
+    reference_likelihood = case.log_likelihood(role, reference_vector)
     dimension = len(model.parameter_names)
     if dimension <= 1:
-        return _deterministic_role(case, role, truth_log_likelihood=truth_log_likelihood,
+        return _deterministic_role(case, role, reference_likelihood=reference_likelihood,
                                    sampler=sampler, start=start), None
     outcome = run_search(fit_model=model, model=case.autofit_models[role], analysis=case.analysis, role=role,
                          n_live=sampler.n_live(role, case.fit.mode), settings=sampler, seed=sampler_seed,
@@ -71,14 +71,16 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
                     projected_gradient_linf=None, repeat_converged=None)
             else:
                 refinement = refine_maximum(starts, case.objective(role), refine)
-            refinement = _retain_known_truth(refinement, truth_vector, truth_log_likelihood, refine)
+            refinement = _retain_known_truth(refinement, reference_vector, reference_likelihood, refine,
+                                              independent=case.independent_scene)
             log_likelihood = refinement.best_log_likelihood
             vector = refinement.best_vector
             if log_likelihood is None:
                 error = "refinement produced no finite evaluation"
     status = "success" if error is None and log_likelihood is not None else "failed"
     result = RoleFit(role=role, strategy="search", status=status, log_likelihood=log_likelihood,
-                     truth_log_likelihood=truth_log_likelihood, parameter_names=model.parameter_names,
+                     truth_log_likelihood=None if case.independent_scene else reference_likelihood,
+                     parameter_names=model.parameter_names,
                      n_free_parameters=len(model.parameter_names), sampler=outcome.record, refinement=refinement,
                      box_edge_margins=_edge_margins(case, role, vector), anchor_chi2=None, error=error,
                      runtime_s=time.perf_counter() - start)
@@ -86,7 +88,7 @@ def run_search_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *, s
 
 
 def _retain_known_truth(refinement: RefineOutcome, truth_vector: np.ndarray,
-                        truth_log_likelihood: float, settings: RefineSettings) -> RefineOutcome:
+                        truth_log_likelihood: float, settings: RefineSettings, *, independent: bool = False) -> RefineOutcome:
     """Keep an evaluated better incumbent without borrowing a local maximum's certificate."""
     best = refinement.best_log_likelihood
     if not np.isfinite(truth_log_likelihood) or (
@@ -95,42 +97,49 @@ def _retain_known_truth(refinement: RefineOutcome, truth_vector: np.ndarray,
         return refinement
     # Truth has no independent sampled-start support or tighter repeat. The old
     # certificate belongs to its own candidate, and remains available as evidence.
+    label = "model_reference_incumbent" if independent else "known_truth_incumbent"
+    reason = ("refinement did not support the better evaluated model reference" if independent
+              else "refinement did not support the better evaluated truth")
     return RefineOutcome(
         acceptance_status=RoleStatus.UNRESOLVED, best_log_likelihood=truth_log_likelihood,
         best_vector=truth_vector, gates=dict.fromkeys(refinement.gates, False),
-        record={"known_truth_incumbent": {"guard_version": 1, "log_likelihood": truth_log_likelihood,
+        record={label: {"guard_version": 1, "log_likelihood": truth_log_likelihood,
                                         "vector": list(truth_vector),
                                         "comparison_tolerance": settings.scalar_residual_tolerance,
-                                        "reason": "refinement did not support the better evaluated truth"},
+                                        "reason": reason},
                 "superseded_refinement": refinement.to_mapping(),
                 "procedure": settings.to_mapping(), "procedure_version": PROCEDURE_VERSION},
         projected_gradient_linf=None, repeat_converged=None)
 
 
 def _deterministic_role(case: PreparedCase, role: Literal["smooth", "subhalo"], *,
-                        truth_log_likelihood: float, sampler: SamplerSettings, start: float) -> RoleFit:
+                        reference_likelihood: float, sampler: SamplerSettings, start: float) -> RoleFit:
     model = case.model(role)
     dimension = len(model.parameter_names)
     strategy = "exact" if dimension == 0 else "scalar"
     vector, likelihood, record, error = None, None, None, None
     try:
-        outcome = (exact_likelihood(truth_log_likelihood) if dimension == 0 else
+        outcome = (exact_likelihood(reference_likelihood) if dimension == 0 else
                    scalar_likelihood(lambda values: case.log_likelihood(role, values),
                                      model.lower[0], model.upper[0], parameter_name=model.parameter_names[0],
                                      max_likelihood_calls=sampler.n_like_max,
-                                     initial_evaluation=(case.truth_vector(role)[0], truth_log_likelihood)))
+                                     initial_evaluation=(case.reference_vector(role)[0], reference_likelihood)))
         vector, likelihood, record = outcome.best_vector, outcome.best_log_likelihood, outcome.record
         record["requested_likelihood_calls"] = sampler.n_like_max
+        reference = "model reference" if case.independent_scene else "truth"
         record["call_count_convention"] = {
-            "role": "truth plus all new scalar search, quadrature and polishing evaluations",
-            "external_preflight": "validate_nonlinear evaluates one truth likelihood per role before dispatch",
+            "role": f"{reference} plus all new scalar search, quadrature and polishing evaluations",
+            "external_preflight": (f"fit_observation evaluates one {reference} likelihood per role before dispatch"
+                                   if case.independent_scene else
+                                   "validate_nonlinear evaluates one truth likelihood per role before dispatch"),
             "validate_nonlinear_preflight_calls_per_role": 1,
             "external_preflight_in_budget": False, "separate_refinement_calls": 0,
             "cache_hits_counted": False}
     except Exception as exception:
         error = f"{type(exception).__name__}: {exception}"
     return RoleFit(role=role, strategy=strategy, status="success" if error is None else "failed",
-                   log_likelihood=likelihood, truth_log_likelihood=truth_log_likelihood,
+                   log_likelihood=likelihood,
+                   truth_log_likelihood=None if case.independent_scene else reference_likelihood,
                    parameter_names=model.parameter_names, n_free_parameters=dimension,
                    sampler=None, refinement=None, box_edge_margins=_edge_margins(case, role, vector),
                    anchor_chi2=None, error=error, runtime_s=time.perf_counter() - start, strategy_record=record)

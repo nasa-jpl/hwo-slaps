@@ -244,7 +244,7 @@ class RoleFit:
     strategy: Literal["search", "truth_anchor", "exact", "scalar"]
     status: Literal["success", "failed"]
     log_likelihood: float | None
-    truth_log_likelihood: float
+    truth_log_likelihood: float | None
     parameter_names: tuple[str, ...]
     n_free_parameters: int
     sampler: SamplerRecord | None
@@ -341,7 +341,7 @@ class RoleFit:
         sampler, refinement, margins = mapping["sampler"], mapping["refinement"], mapping["box_edge_margins"]
         restored = cls(role=mapping["role"], strategy=mapping["strategy"], status=mapping["status"],
                    log_likelihood=_optional_float(mapping["log_likelihood"]),
-                   truth_log_likelihood=float(mapping["truth_log_likelihood"]),
+                   truth_log_likelihood=_optional_float(mapping["truth_log_likelihood"]),
                    parameter_names=tuple(mapping["parameter_names"]),
                    n_free_parameters=int(mapping["n_free_parameters"]),
                    sampler=None if sampler is None else SamplerRecord.from_mapping(sampler),

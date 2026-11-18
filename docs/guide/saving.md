@@ -8,7 +8,7 @@ checked years later without the original scripts.
 |---|---|---|---|
 | Forecast | `save_forecast(result, path)` | `load_forecast(path)` | NumPy `.npz`, schema 3 |
 | Observation | `save_observation(observation, path)` | `load_observation(path)` | NumPy `.npz`, schema 1 |
-| Nonlinear case | `save_case(case, path)` | `load_case(path)` | JSON, schema 2 |
+| Nonlinear case | `save_case(case, path)` | `load_case(path)` | JSON, schema 2 or 3 |
 
 ```python
 from hwoslaps import load_forecast, save_forecast
@@ -56,7 +56,10 @@ Forecast schema 3 stores `template_status` beside the primary arrays and preserv
 queries raise on these rows unless the caller chooses exclusion and reports the
 excluded cohort. The loader accepts the current schema only.
 
-Case schema 2 stores independent optimization and posterior/evidence quality, live
+Matched validation writes schema 2. Independent scene fits write schema 3,
+which records the fitted scene and its nominal likelihoods.
+
+Case schemas 2 and 3 store independent optimization and posterior/evidence quality, live
 sampler stopping diagnostics, exact/scalar strategy records, and forecast compatibility
 inputs. Finite provisional values survive saving; the quality labels and default
 scientific exclusions survive loading. The backend PDF weight-usability heuristic

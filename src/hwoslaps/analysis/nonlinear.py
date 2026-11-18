@@ -223,7 +223,8 @@ def classify_case(result: CaseResult, rule: ClassificationRule) -> CaseClassific
                               None if outcome.status != "accepted" else abs(q - rule.q_threshold) < rule.marginal_half_width,
                               None if outcome.status != "accepted" else q >= rule.q_threshold,
                               outcome.role_statuses, outcome.reasons,
-                              {role: None if result.role(role).log_likelihood is None
+                              {role: None if (result.role(role).log_likelihood is None
+                                             or result.role(role).truth_log_likelihood is None)
                                else result.role(role).truth_log_likelihood - result.role(role).log_likelihood
                                for role in _ROLES})
 
