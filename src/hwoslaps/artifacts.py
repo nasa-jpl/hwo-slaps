@@ -467,7 +467,7 @@ def load_case_snapshot(path) -> tuple[CaseResult, str]:
         raise ValueError("unsupported case artifact schema")
     result = CaseResult.from_mapping(value["result"])
     if (value["version"] == 3) != ("fit_scene" in result.data):
-        raise ValueError("case artifact version disagrees with the fitting workflow")
+        raise ValueError("unsupported case artifact schema for the recorded fitting workflow")
     return result, digest
 
 
