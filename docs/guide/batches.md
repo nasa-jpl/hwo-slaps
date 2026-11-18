@@ -168,9 +168,9 @@ nonlinear:
 ```
 
 The observation supplies the pixels and noise, so the family uses one replicate
-and omits `inject`, `noise` and `forecast_arm`. The plan pins the archive's
-SHA-256, and workers validate the bytes they load. A retry reuses the same
-archive and candidate with a different sampler seed. See
+and omits `inject`, `noise`, `forecast_arm` and `comparison_policy`. The plan pins
+the archive's SHA-256, and workers validate the bytes they load. A retry reuses the
+same archive and candidate with a different sampler seed. See
 [independent fits](nonlinear.md#fit-an-independently-specified-scene) for the
 detector and model requirements.
 

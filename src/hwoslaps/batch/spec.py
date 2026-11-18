@@ -443,6 +443,9 @@ def parse_batch(mapping: Mapping[str, Any], *, base_dir) -> BatchSpec:
             if any(record[key] is not None for key in ('inject', 'noise', 'forecast_arm')):
                 raise ConfigError(f'nonlinear.{name}.observation',
                                   'saved observations supply the image directly; omit inject, noise and forecast_arm')
+            if record['comparison_policy'] != 'strict':
+                raise ConfigError(f'nonlinear.{name}.comparison_policy',
+                                  'saved observations carry no forecast reference; omit comparison_policy')
             if trials.kind != 'explicit' or fit.h1 != 'search' or fit.mask == 'forecast_mask_minus_psf_border':
                 raise ConfigError(f'nonlinear.{name}.observation',
                                   'saved observations require explicit candidates, a search and an observation-space mask')
