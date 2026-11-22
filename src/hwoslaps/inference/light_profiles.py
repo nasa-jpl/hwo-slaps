@@ -3,6 +3,8 @@
 The backend's radius primal and nonround differential are preserved. At ell_comps=(0,0),
 the Cartesian differential removes the polar-coordinate singularity. Exact source-centre
 samples have a translation cusp and are refused for gradients; value-only sampling is finite.
+AutoGalaxy evaluates untransformed grids through its Cartesian eccentric radius, which is
+regular at ell_comps=(0,0); there only the source-centre treatment is added.
 """
 
 from __future__ import annotations
@@ -68,6 +70,13 @@ class Exponential(ag.lp.Exponential):
                               original, operand=None)
         return _supported_gradient(radius)
 
+    @aa.decorators.to_array
+    def _eccentric_radii_grid_from_cartesian(self, grid, xp=np, **kwargs):
+        radius = super()._eccentric_radii_grid_from_cartesian(grid=grid, xp=xp, **kwargs)
+        if xp is np:
+            return radius
+        return _supported_gradient(jnp.asarray(radius.array))
+
 
 @jax.custom_jvp
 def _sersic_radius(ell_comps, grid, sersic_index):
@@ -110,6 +119,40 @@ def _sersic_radius_jvp(primals, tangents):
 
 
 _sersic_radius.defjvp(_sersic_radius_jvp, symbolic_zeros=True)
+
+
+def _parent_cartesian_radius(centre, ell_comps, grid):
+    profile = ag.lp.Sersic(centre=(centre[0], centre[1]), ell_comps=(ell_comps[0], ell_comps[1]))
+    return jnp.asarray(profile._eccentric_radii_grid_from_cartesian(
+        grid=aa.Grid2DIrregular(values=grid, xp=jnp), xp=jnp).array)
+
+
+@jax.custom_jvp
+def _sersic_cartesian_radius(centre, ell_comps, grid, sersic_index):
+    return _parent_cartesian_radius(centre, ell_comps, grid)
+
+
+def _sersic_cartesian_radius_jvp(primals, tangents):
+    centre, ell, grid, n = primals
+    dc, de, dg, _ = tangents
+    radius = _parent_cartesian_radius(centre, ell, grid)
+    if all(isinstance(tangent, SymbolicZero) for tangent in (dc, de, dg)):
+        return radius, jnp.zeros_like(radius)
+    dc, de, dg = (jnp.zeros_like(primal) if isinstance(tangent, SymbolicZero) else tangent
+                  for primal, tangent in ((centre, dc), (ell, de), (grid, dg)))
+    coincident = jnp.all(grid == centre, axis=1)
+    checkify.check(jnp.all(~coincident | (n < 1.0)),
+                   "Sersic gradient is undefined at an exactly zero-radius source-centre sample for n >= 1; "
+                   "use value-only sampling or a sampling with no coincident source-centre point")
+    # The radius has no derivative at the source centre; for n<1 the composed brightness
+    # differential is zero there. Differentiate at a safe point and zero the centre tangent.
+    safe = jnp.where(coincident[:, None], centre + jnp.array([1.0, 0.0]), grid)
+    safe_dg = jnp.where(coincident[:, None], 0.0, dg)
+    _, differential = jax.jvp(_parent_cartesian_radius, (centre, ell, safe), (dc, de, safe_dg))
+    return radius, jnp.where(coincident, 0.0, differential)
+
+
+_sersic_cartesian_radius.defjvp(_sersic_cartesian_radius_jvp, symbolic_zeros=True)
 
 
 @jax.custom_jvp
@@ -168,6 +211,13 @@ class Sersic(ag.lp.Sersic):
         if xp is np:
             return super().eccentric_radii_grid_from(grid=grid, xp=xp, **kwargs)
         return _sersic_radius(jnp.asarray(self.ell_comps), jnp.asarray(grid.array), self.sersic_index)
+
+    @aa.decorators.to_array
+    def _eccentric_radii_grid_from_cartesian(self, grid, xp=np, **kwargs):
+        if xp is np:
+            return super()._eccentric_radii_grid_from_cartesian(grid=grid, xp=xp, **kwargs)
+        return _sersic_cartesian_radius(jnp.asarray(self.centre), jnp.asarray(self.ell_comps),
+                                        jnp.asarray(grid.array), self.sersic_index)
 
     def image_2d_via_radii_from(self, grid_radii, xp=np, **kwargs):
         if xp is np:

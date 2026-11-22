@@ -154,9 +154,9 @@ def _fitness_pair(prepared, *, role="smooth"):
     model=jax_case.autofit_models[role]
     merit=-1.23456789e99
     jfit=Fitness(model=model,analysis=jax_case.analysis,paths=None,fom_is_log_likelihood=True,
-                 resample_figure_of_merit=merit,use_jax_vmap=True,batch_size=3)
+                 resample_figure_of_merit=merit,batched=True,batch_size=3)
     nfit=Fitness(model=numpy_case.autofit_models[role],analysis=numpy_case.analysis,paths=None,
-                 fom_is_log_likelihood=True,resample_figure_of_merit=merit,use_jax_vmap=False)
+                 fom_is_log_likelihood=True,resample_figure_of_merit=merit,batched=False)
     columns=np.linspace(-.03,.03,model.prior_count)
     rows=np.linspace(-.04,.04,3)[:,None]
     a=np.asarray([model.vector_from_unit_vector(row) for row in .40+rows+columns])
@@ -542,6 +542,23 @@ def test_circular_powerlaw_one_sided_values_classify_the_shape_differential(gpu,
             print(f"PowerLaw gamma2 primitive value={value} gradient={gradient}")
             assert math.isfinite(value) and np.all(np.isfinite(gradient))
     finally:prepared.close()
+
+
+def test_powerlaw_fixed_circle_keeps_parent_derivatives_off_slope_two():
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.mass_profiles import PowerLaw
+
+    ensure_jax_x64()
+    grid=al.Grid2DIrregular(values=np.array([[.13,.21],[-.27,.15]]))
+    def values(cls,p):
+        profile=cls(centre=(.03,-.02),ell_comps=(0.,0.),einstein_radius=p[0],slope=p[1])
+        return profile.deflections_yx_2d_from(grid=grid,xp=jnp).array
+    params=jnp.array([.8,2.08])
+    np.testing.assert_allclose(jax.jacfwd(lambda p:values(PowerLaw,p))(params),
+                               jax.jacfwd(lambda p:values(al.mp.PowerLaw,p))(params),rtol=1e-12,atol=0.)
 
 
 @pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])

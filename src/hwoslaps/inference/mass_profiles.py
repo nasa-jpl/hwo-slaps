@@ -6,6 +6,8 @@ shape gradient. Ordinary noncircular derivatives and every value call remain
 the pinned parent operations. Isothermal is not routed through this adapter.
 """
 
+import functools
+
 import autoarray as aa
 import autolens as al
 import jax
@@ -17,21 +19,23 @@ from jax.experimental import checkify
 __all__ = ["PowerLaw"]
 
 
-def _parent_value(parameters, coordinates, *, stop_ellipse=False):
+def _parent_value(parameters, coordinates, *, exact_circle=False):
     cy, cx, e1, e2, theta, slope = parameters
-    if stop_ellipse:
-        e1, e2 = jax.lax.stop_gradient(e1), jax.lax.stop_gradient(e2)
+    if exact_circle:
+        # ell_comps are exactly zero here. As constants they stay on the circle;
+        # AutoGalaxy nudges a traced exact-circle ell_comps off the origin.
+        e1, e2 = 0.0, 0.0
     profile = al.mp.PowerLaw(centre=(cy, cx), ell_comps=(e1, e2), einstein_radius=theta, slope=slope)
     grid = al.Grid2DIrregular(values=coordinates, xp=jnp)
     return profile.deflections_yx_2d_from(grid=grid, xp=jnp).array
 
 
-@jax.custom_jvp
-def _deflections(parameters, coordinates):
-    return _parent_value(parameters, coordinates)
+@functools.partial(jax.custom_jvp, nondiff_argnums=(0,))
+def _deflections(constant_circle, parameters, coordinates):
+    return _parent_value(parameters, coordinates, exact_circle=constant_circle)
 
 
-def _deflections_jvp(primals, tangents):
+def _deflections_jvp(constant_circle, primals, tangents):
     parameters, coordinates = primals
     dp, dg = tangents
     geometry_active = (any(not isinstance(dp[i], SymbolicZero) for i in (0, 1, 2, 3))
@@ -40,7 +44,7 @@ def _deflections_jvp(primals, tangents):
                for p, d in zip(parameters, dp, strict=True))
     if isinstance(dg, SymbolicZero):
         dg = jnp.zeros_like(coordinates)
-    primal = _parent_value(parameters, coordinates)
+    primal = _parent_value(parameters, coordinates, exact_circle=constant_circle)
     cy, cx, e1, e2, theta, slope = parameters
 
     def regular_circle(_):
@@ -50,9 +54,9 @@ def _deflections_jvp(primals, tangents):
             checkify.check(jnp.all(~at_centre),
                            "PowerLaw circle+slope2 gradient is undefined at an exactly coincident mass-centre "
                            "sample with active geometry; use value-only sampling or noncoincident samples")
-        # Differentiate all other directions through the original parent with
-        # only ellipse stopped inside the constructor (not a zero tangent value).
-        _, original = jax.jvp(lambda p, g: _parent_value(p, g, stop_ellipse=True),
+        # Differentiate all other directions through the original parent at the
+        # exact circle, with the ellipse held constant inside the constructor.
+        _, original = jax.jvp(lambda p, g: _parent_value(p, g, exact_circle=True),
                               (parameters, coordinates), (dp, dg))
         phi = jnp.arctan2(relative[:, 0], relative[:, 1])
         cosine = dp[3] * jnp.cos(2.0 * phi) + dp[2] * jnp.sin(2.0 * phi)
@@ -64,7 +68,8 @@ def _deflections_jvp(primals, tangents):
         return original + harmonic
 
     def parent(_):
-        return jax.jvp(_parent_value, (parameters, coordinates), (dp, dg))[1]
+        return jax.jvp(lambda p, g: _parent_value(p, g, exact_circle=constant_circle),
+                       (parameters, coordinates), (dp, dg))[1]
 
     differential = jax.lax.cond((e1 == 0.0) & (e2 == 0.0) & (slope == 2.0),
                                 regular_circle, parent, operand=None)
@@ -81,6 +86,9 @@ class PowerLaw(al.mp.PowerLaw):
     def deflections_yx_2d_from(self, grid, xp=np, **kwargs):
         if xp is np or getattr(grid, "is_transformed", False):
             return super().deflections_yx_2d_from(grid=grid, xp=xp, **kwargs).array
+        # The parent primal of a concrete exact circle is evaluated on the circle, as the parent does.
+        constant_circle = all(not isinstance(value, jax.core.Tracer) and float(value) == 0.0
+                              for value in self.ell_comps)
         parameters = tuple(jnp.asarray(value) for value in (*self.centre, *self.ell_comps,
                                                            self.einstein_radius, self.slope))
-        return _deflections(parameters, jnp.asarray(grid.array))
+        return _deflections(constant_circle, parameters, jnp.asarray(grid.array))
