@@ -22,8 +22,9 @@ if TYPE_CHECKING:
 __all__ = ["JAX_POWER_LAW_MIN_AXIS_RATIO", "RoleModels", "build_role_models"]
 
 # AutoLens 20-term JAX EPL series: relative error 2.3e-12 at q=0.538, 7.3e-8 at q=0.333.
-# Isothermal uses its closed form and is exempt (A2 1.3; R2 section 7).
+# Isothermal uses its own closed form and near-circular series and is exempt (A2 1.3; R2 section 7).
 JAX_POWER_LAW_MIN_AXIS_RATIO = 0.5
+ISOTHERMAL_SERIES_THRESHOLD = 1.0e-4  # AutoGalaxy's threshold on 1 - q**2.
 
 
 @dataclass(frozen=True)
@@ -160,6 +161,15 @@ def _ellipticity_box_reaches_origin(component: ComponentSpec, parameters: dict[s
     return len(pair) == 2
 
 
+def _isothermal_box_reaches_series(component: ComponentSpec, parameters: dict[str, Any], free: set[str],
+                                   fit: FitSpec) -> bool:
+    bounds = [_bounds(component, parameter, free, fit) for parameter in parameters.values()
+              if parameter.definition.kind == "ellipticity"]
+    e = math.hypot(*(max(lower, -upper, 0.0) for lower, upper in bounds))
+    q = (1.0 - e) / (1.0 + e)
+    return 1 - q**2 < ISOTHERMAL_SERIES_THRESHOLD
+
+
 def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fit: FitSpec,
                       loaded: dict[tuple[str, str], Any], use_jax: bool) -> list[tuple[str, FitComponent]]:
     prefix = f"{component.plane}.{component.role}.{component.name}."
@@ -205,6 +215,9 @@ def _component_models(scene: Scene, component: ComponentSpec, free: set[str], fi
               and _bounds(component, parameters["slope"], free, fit)[0] <= 2.0
                   <= _bounds(component, parameters["slope"], free, fit)[1]):
             path = "hwoslaps.inference.mass_profiles:PowerLaw"
+        elif (use_jax and component.type == "Isothermal"
+              and _isothermal_box_reaches_series(component, parameters, free, fit)):
+            path = "hwoslaps.inference.mass_profiles:Isothermal"
         elif use_jax and (component.type == "Sersic" or (component.type == "Exponential"
                           and _ellipticity_box_reaches_origin(component, parameters, free, fit))):
             path = f"hwoslaps.inference.light_profiles:{component.type}"

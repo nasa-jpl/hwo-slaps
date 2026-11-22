@@ -1,9 +1,12 @@
-"""Inference-only regular circular slope-two EPL differential; all backend primals unchanged.
+"""Inference-only mass-profile differentials; all backend primals unchanged.
 
-At slope2 the normalization cusp cancels, leaving the linear Cartesian m=2
-harmonic. At other slopes the public objective refuses a free exact-circle
-shape gradient. Ordinary noncircular derivatives and every value call remain
-the pinned parent operations. Isothermal is not routed through this adapter.
+PowerLaw: at slope2 the normalization cusp cancels, leaving the linear
+Cartesian m=2 harmonic. At other slopes the public objective refuses a free
+exact-circle shape gradient. Ordinary noncircular derivatives and every value
+call remain the pinned parent operations.
+
+Isothermal: the parent's near-circular series with its unused closed form
+evaluated below one, so the reverse-mode gradient stays finite.
 """
 
 import functools
@@ -13,10 +16,13 @@ import autolens as al
 import jax
 import jax.numpy as jnp
 import numpy as np
+from autogalaxy.profiles.mass.total.isothermal import psi_from
 from jax.custom_derivatives import SymbolicZero
 from jax.experimental import checkify
 
-__all__ = ["PowerLaw"]
+from .hypotheses import ISOTHERMAL_SERIES_THRESHOLD
+
+__all__ = ["PowerLaw", "Isothermal"]
 
 
 def _parent_value(parameters, coordinates, *, exact_circle=False):
@@ -92,3 +98,40 @@ class PowerLaw(al.mp.PowerLaw):
         parameters = tuple(jnp.asarray(value) for value in (*self.centre, *self.ell_comps,
                                                            self.einstein_radius, self.slope))
         return _deflections(constant_circle, parameters, jnp.asarray(grid.array))
+
+
+class Isothermal(al.mp.Isothermal):
+    """The public parent primal with a finite near-circular reverse-mode gradient.
+
+    AutoGalaxy evaluates the closed form that its series branch discards at s = 1,
+    where arctanh is infinite on the minor axis; 0.5 keeps that branch finite.
+    Remove this adapter once upstream evaluates it below one.
+    """
+
+    def deflections_yx_2d_from(self, grid, xp=np, **kwargs):
+        if xp is np:
+            return super().deflections_yx_2d_from(grid=grid, xp=xp, **kwargs)
+        return self._deflections_yx_2d_from(grid=grid, xp=xp, **kwargs)
+
+    @aa.decorators.to_vector_yx
+    @aa.decorators.transform(rotate_back=True)
+    def _deflections_yx_2d_from(self, grid, xp=np, **kwargs):
+        axis_ratio = self.axis_ratio(xp)
+        one_minus_q2 = 1 - axis_ratio**2
+        small = one_minus_q2 < ISOTHERMAL_SERIES_THRESHOLD
+        sqrt_one_minus_q2 = xp.sqrt(xp.where(small, 0.5, one_minus_q2))
+        factor = 2.0 * self.einstein_radius_rescaled(xp) * axis_ratio / sqrt_one_minus_q2
+        psi = psi_from(grid=grid, axis_ratio=axis_ratio, core_radius=0.0, xp=xp)
+        deflection_y = xp.arctanh(xp.divide(xp.multiply(sqrt_one_minus_q2, grid.array[:, 0]), psi))
+        deflection_x = xp.arctan(xp.divide(xp.multiply(sqrt_one_minus_q2, grid.array[:, 1]), psi))
+        deflections = xp.multiply(factor, xp.vstack((deflection_y, deflection_x)).T)
+
+        t_y = grid.array[:, 0] / psi
+        t_x = grid.array[:, 1] / psi
+        u_y = one_minus_q2 * t_y**2
+        u_x = -one_minus_q2 * t_x**2
+        series_y = t_y * (1.0 + u_y * (1.0 / 3.0 + u_y * (1.0 / 5.0 + u_y / 7.0)))
+        series_x = t_x * (1.0 + u_x * (1.0 / 3.0 + u_x * (1.0 / 5.0 + u_x / 7.0)))
+        deflections_series = xp.multiply(2.0 * self.einstein_radius_rescaled(xp) * axis_ratio,
+                                         xp.vstack((series_y, series_x)).T)
+        return xp.where(small, deflections_series, deflections)
