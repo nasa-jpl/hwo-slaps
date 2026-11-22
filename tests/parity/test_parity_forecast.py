@@ -11,8 +11,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from current_oracles import (AugmentedQrOracle, assert_detector_response, assert_forecast_statistics,
-                             historical_changes, write_receipt)
+from current_oracles import (WAVEFRONT_TOLERANCE_NM, AugmentedQrOracle, assert_detector_response,
+                             assert_forecast_statistics, assert_wavefront_close, historical_changes, write_receipt)
 
 FISHER_SCENES = ("p1_optical_matched", "p2_delta_knowledge_error", "p3_image_source_kernel",
                  "p4_subhalo_sis", "p4_subhalo_pointmass")
@@ -21,38 +21,41 @@ STATISTICS = ("q_asimov", "fisher_raw", "fisher_profiled", "sigma_amplitude", "d
 MISMATCH = ("amplitude_hat", "q_mismatch", "z_mismatch", "amplitude_spurious", "q_spurious", "z_spurious")
 
 
-def assert_unchanged_inputs(scene, preparation, manifest, paper_digest, final_name):
+def assert_unchanged_inputs(scene, preparation, manifest, paper_digest, paper_kernel, final_name):
     entry = manifest["scenes"][scene]
-    assert paper_digest.kernel(preparation.psfs.truth_kernels.single.kernel) == entry["truth_kernel_sha256"]
-    assert paper_digest.kernel(preparation.psfs.model_kernels.single.kernel) == entry["fit_kernel_sha256"]
+    kernels = {"truth_kernel": paper_kernel(preparation.psfs.truth_kernels.single.kernel, entry["truth_kernel_sha256"]),
+               "fit_kernel": paper_kernel(preparation.psfs.model_kernels.single.kernel, entry["fit_kernel_sha256"])}
     names = entry["profiled_nuisance_names"]
     assert preparation.nuisances.names == tuple(final_name[scene][name] for name in names)
     np.testing.assert_array_equal(preparation.nuisances.prior_precision, entry["nuisance_prior_precision"])
     assert preparation.data_space.pixel_count == entry["pixels_unmasked"]
     digests = entry["diagnostic_digests"]
     assert paper_digest.array(preparation.mask.astype(float)) == digests["fisher_mask"]
-    changes = {name: {"historical_digest": digests[name], "current_digest": paper_digest.array(image)}
-               for name, image in (("mu0_adu", preparation.mean_truth_adu),
-                                   ("mu0_model_adu", preparation.mean_model_adu), ("sigma_adu", preparation.sigma_adu))}
+    changes = dict(kernels, **{name: {"historical_digest": digests[name], "current_digest": paper_digest.array(image)}
+                              for name, image in (("mu0_adu", preparation.mean_truth_adu),
+                                                  ("mu0_model_adu", preparation.mean_model_adu),
+                                                  ("sigma_adu", preparation.sigma_adu))})
     changes["nuisance_images"] = {name: {"historical_digest": digests["nuisance_images"][name],
                                         "current_digest": paper_digest.array(image)}
                                   for name, image in zip(names, preparation.nuisances.images, strict=True)}
     if "fit_psf_delta" in entry:
         draw, expected = preparation.psfs.model.knowledge_error.draw, entry["fit_psf_delta"]
         assert draw.spec.amplitude_rms_nm == expected["requested_amplitude_rms_nm"]
-        assert draw.measured_rms_nm == expected["measured_draw_rms_nm"]
+        assert abs(draw.measured_rms_nm - expected["measured_draw_rms_nm"]) <= WAVEFRONT_TOLERANCE_NM
         assert draw.spec.seed == expected["seed"] and draw.spec.family == expected["family"]
-        coefficients, old = draw.coefficients.to_mapping(), expected["draw_aberrations"]
-        assert coefficients["segment_hexikes"] == {int(s): {int(n): v for n, v in modes} for s, modes in old["segment_hexikes"]}
-        assert coefficients["zernikes"] == {int(n): v for n, v in old["global_zernikes"]}
+        old = expected["draw_aberrations"]
+        assert_wavefront_close(draw.coefficients.to_mapping(), {
+            "segment_hexikes": {int(s): {int(n): v for n, v in modes} for s, modes in old["segment_hexikes"]},
+            "zernikes": {int(n): v for n, v in old["global_zernikes"]}})
     assert_detector_response(preparation)
     return changes
 
 
-def _check(scene, engine, prepared, manifest, paper_digest, final_name, current_forecast_oracle, tmp_path, record_property):
+def _check(scene, engine, prepared, manifest, paper_digest, paper_kernel, final_name, current_forecast_oracle, tmp_path,
+           record_property):
     from hwoslaps.fisher.api import forecast
     preparation = prepared(scene, engine)
-    inputs = assert_unchanged_inputs(scene, preparation, manifest, paper_digest, final_name)
+    inputs = assert_unchanged_inputs(scene, preparation, manifest, paper_digest, paper_kernel, final_name)
     with np.load(FIXTURES/manifest["scenes"][scene]["fixture"], allow_pickle=False) as archive:
         # A declared bounded cohort, including both opposite corners and centre;
         # every archived mass is retained. Full archived arrays remain hash sealed.
@@ -75,24 +78,27 @@ def _check(scene, engine, prepared, manifest, paper_digest, final_name, current_
 
 @pytest.mark.backend
 @pytest.mark.parametrize("scene", FISHER_SCENES)
-def test_reference_forecast_satisfies_current_qr_contract(scene, prepared, manifest, paper_digest, final_name,
-                                                        current_forecast_oracle, tmp_path, record_property):
-    _check(scene, "reference", prepared, manifest, paper_digest, final_name, current_forecast_oracle, tmp_path, record_property)
+def test_reference_forecast_satisfies_current_qr_contract(scene, prepared, manifest, paper_digest, paper_kernel, final_name,
+                                                          current_forecast_oracle, tmp_path, record_property):
+    _check(scene, "reference", prepared, manifest, paper_digest, paper_kernel, final_name, current_forecast_oracle,
+           tmp_path, record_property)
 
 
 @pytest.mark.backend
 @pytest.mark.xtx_gpu
 @pytest.mark.parametrize("scene", FISHER_SCENES)
-def test_jax_gpu_forecast_satisfies_current_qr_contract(scene, prepared, manifest, paper_digest, final_name,
-                                                      current_forecast_oracle, tmp_path, record_property):
-    _check(scene, "jax", prepared, manifest, paper_digest, final_name, current_forecast_oracle, tmp_path, record_property)
+def test_jax_gpu_forecast_satisfies_current_qr_contract(scene, prepared, manifest, paper_digest, paper_kernel, final_name,
+                                                        current_forecast_oracle, tmp_path, record_property):
+    _check(scene, "jax", prepared, manifest, paper_digest, paper_kernel, final_name, current_forecast_oracle,
+           tmp_path, record_property)
 
 
 @pytest.mark.backend
 @pytest.mark.parametrize("scene", FISHER_SCENES)
-def test_jax_cpu_forecast_satisfies_current_qr_contract(scene, prepared, manifest, paper_digest, final_name,
-                                                      current_forecast_oracle, tmp_path, record_property):
-    _check(scene, "jax", prepared, manifest, paper_digest, final_name, current_forecast_oracle, tmp_path, record_property)
+def test_jax_cpu_forecast_satisfies_current_qr_contract(scene, prepared, manifest, paper_digest, paper_kernel, final_name,
+                                                        current_forecast_oracle, tmp_path, record_property):
+    _check(scene, "jax", prepared, manifest, paper_digest, paper_kernel, final_name, current_forecast_oracle,
+           tmp_path, record_property)
 
 
 def test_archived_inputs_outputs_and_manifests_are_unchanged():

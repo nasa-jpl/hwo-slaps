@@ -12,6 +12,34 @@ import numpy as np
 from scipy.linalg import qr
 from scipy.linalg.lapack import get_lapack_funcs
 
+KERNEL_TOLERANCE = 1.0e-14
+"""Bound on |current - archived| / peak for an archived optical kernel.
+
+The archived kernels come from NumPy 1.26.4. NumPy 2's arctan2 and power differ from it by one
+or two ulp, which moves the HCIPy Zernike and hexike modes and so the kernels by at most
+1.1e-16 of their peak (measured at 17, 51 and 999 pixels on xtx). The bound is a hundredfold.
+"""
+
+WAVEFRONT_TOLERANCE_NM = 1.0e-12
+"""Bound on |current - archived| for a drawn wavefront coefficient or RMS, in nm.
+
+The same ufunc and BLAS changes move the archived draws by at most 9e-15 nm; a hundredfold.
+"""
+
+
+def assert_wavefront_close(actual, expected):
+    """Two wavefront coefficient mappings with the same modes and values within WAVEFRONT_TOLERANCE_NM."""
+    assert actual.keys() == expected.keys()
+    for family, modes in expected.items():
+        assert actual[family].keys() == modes.keys(), family
+        for key, value in modes.items():
+            if isinstance(value, dict):
+                assert actual[family][key].keys() == value.keys(), (family, key)
+                for mode, coefficient in value.items():
+                    assert abs(actual[family][key][mode] - coefficient) <= WAVEFRONT_TOLERANCE_NM, (family, key, mode)
+            else:
+                assert abs(actual[family][key] - value) <= WAVEFRONT_TOLERANCE_NM, (family, key)
+
 
 class AugmentedQrOracle:
     def __init__(self, design, precision):
