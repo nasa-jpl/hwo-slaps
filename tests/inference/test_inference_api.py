@@ -180,7 +180,7 @@ def test_freed_noisy_case_on_two_cores_reports_recovery(prepared_forecast, tmp_p
     trial = prepared_forecast.hypothesis(1.0e8, (0.4, -0.6))
     result = validate_nonlinear(prepared_forecast, trial, simulate(prepared_forecast, subhalo=trial, noise_seed=11),
                                 fit=FitSpec(mode="freed", mass_support=MassSupport(6.0, 9.7)),
-                                sampler=SamplerSettings(number_of_cores=2, n_live_smooth=10, n_live_subhalo_search=10,
+                                sampler=SamplerSettings(number_of_cores=2, n_live_smooth=12, n_live_subhalo_search=15,
                                                         n_like_max=80),
                                 sampler_seed=7, output_dir=tmp_path)
     assert result.smooth.status == result.subhalo.status == "success"

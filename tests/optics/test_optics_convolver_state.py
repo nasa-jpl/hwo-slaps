@@ -1,53 +1,74 @@
-"""Supported backend patch behavior at the real convolver and blurring-mask boundary."""
-
-import warnings
+"""In-repo ConvolverState reuse and upstream separable blurring-mask geometry."""
 
 import numpy as np
 import pytest
 from scipy.ndimage import binary_dilation
 
-from hwoslaps.optics.kernels import make_convolver
+from hwoslaps.observation.expected import convolve_light
+from hwoslaps.optics.kernels import DetectorPSF, KernelBinding, make_convolver
+from hwoslaps.scene.spec import LightGroup
 
 pytestmark = pytest.mark.backend
 SCALE = 0.05
 
 
-@pytest.mark.parametrize("changed", ["equal_contents", "kernel_contents", "mask_contents"])
-def test_backend_convolver_state_follows_kernel_and_mask_contents(changed):
+def test_convolver_for_shape_reuses_state_by_shape_and_pixel_scale():
     import autoarray as aa
 
     values = np.random.default_rng(1).random((21, 21))
-    convolver = make_convolver(values, SCALE)
-    mask = aa.Mask2D.all_false(shape_native=(40, 40), pixel_scales=SCALE)
-    first = convolver.state_from(mask)
-    second_mask = np.array(mask, dtype=bool, copy=True)
-    if changed == "kernel_contents":
-        convolver.kernel.array[...] *= 2.0
-        np.testing.assert_array_equal(np.asarray(convolver.kernel.native), 2.0 * values)
-    elif changed == "mask_contents":
-        second_mask[7, 11] = True
-    second = convolver.state_from(aa.Mask2D(mask=second_mask, pixel_scales=SCALE))
-    assert (second is first) is (changed == "equal_contents")
+    psf = DetectorPSF.from_array(values, SCALE, normalize=True)
+    kernel_before = psf.kernel.tobytes()
+
+    first = psf.convolver_for_shape((40, 40), SCALE)
+    again = psf.convolver_for_shape((40, 40), SCALE)
+    assert again is first
+    assert first._state is not None
+    mask_40 = aa.Mask2D.all_false(shape_native=(40, 40), pixel_scales=SCALE)
+    assert first.state_from(mask_40) is first._state
+
+    different_shape = psf.convolver_for_shape((42, 40), SCALE)
+    assert different_shape is not first and different_shape._state is not first._state
+    mask_42 = aa.Mask2D.all_false(shape_native=(42, 40), pixel_scales=SCALE)
+    assert different_shape.state_from(mask_42) is different_shape._state
+
+    different_scale = psf.convolver_for_shape((40, 40), 0.06)
+    assert different_scale is not first and different_scale._state is not first._state
+    mask_scale = aa.Mask2D.all_false(shape_native=(40, 40), pixel_scales=0.06)
+    assert different_scale.state_from(mask_scale) is different_scale._state
+
+    assert psf.kernel.tobytes() == kernel_before
+    assert psf.convolver() is not first
+    for bad_shape in ((0, 40), (40,), (True, 40), "40x40"):
+        with pytest.raises(ValueError, match="shape_native"):
+            psf.convolver_for_shape(bad_shape)
 
 
-def test_backend_convolution_is_bitwise_stable_across_a_state_cache_hit():
+def test_convolve_light_reuses_state_and_matches_uncached_convolver():
+    rng = np.random.default_rng(3)
+    psf = DetectorPSF.from_array(rng.random((21, 21)), SCALE, normalize=True)
+    image = rng.random((40, 40))
+    groups = {"source": LightGroup(plane="source", sed=None, components=("light",))}
+    binding = KernelBinding.uniform(psf, ["source"])
+
+    first = convolve_light({"source": image}, groups, binding, SCALE)
+    state_after_first = psf.convolver_for_shape((40, 40), SCALE)._state
+    second = convolve_light({"source": image}, groups, binding, SCALE)
+    state_after_second = psf.convolver_for_shape((40, 40), SCALE)._state
+
+    assert state_after_first is not None and state_after_second is state_after_first
+    assert second["source"].tobytes() == first["source"].tobytes()
+
     import autoarray as aa
 
     mask = aa.Mask2D.all_false(shape_native=(40, 40), pixel_scales=SCALE)
-    image = aa.Array2D(values=np.random.default_rng(3).random((40, 40)), mask=mask)
-    convolver = make_convolver(np.random.default_rng(1).random((21, 21)), SCALE)
-    state = convolver.state_from(mask)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", UserWarning)
-        first = convolver.convolved_image_from(image=image, blurring_image=None)
-        second = convolver.convolved_image_from(image=image, blurring_image=None)
-    assert convolver.state_from(mask) is state
-    np.testing.assert_array_equal(np.asarray(second.native), np.asarray(first.native))
+    uncached = make_convolver(psf.kernel, SCALE).convolved_image_from(
+        image=aa.Array2D(values=image.copy(), mask=mask), blurring_image=None)
+    assert first["source"].tobytes() == np.asarray(uncached.native, dtype=float).tobytes()
 
 
 @pytest.mark.parametrize("kernel_shape", [(3, 3), (1, 5), (5, 1), (4, 4), (2, 6), (7, 3), (9, 9)])
 @pytest.mark.parametrize("array_shape", [(1, 1), (5, 8), (31, 17)])
-def test_patched_blurring_mask_matches_independent_dense_geometry(kernel_shape, array_shape):
+def test_blurring_mask_matches_independent_dense_geometry(kernel_shape, array_shape):
     from autoarray.mask.mask_2d_util import blurring_mask_2d_from
 
     ky, kx = kernel_shape
@@ -62,7 +83,7 @@ def test_patched_blurring_mask_matches_independent_dense_geometry(kernel_shape, 
     np.testing.assert_array_equal(actual, expected)
 
 
-def test_patched_blurring_mask_has_the_single_pixel_hand_footprint():
+def test_blurring_mask_has_the_single_pixel_hand_footprint():
     from autoarray.mask.mask_2d_util import blurring_mask_2d_from
 
     mask = np.ones((7, 7), dtype=bool)

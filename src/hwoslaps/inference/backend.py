@@ -1,10 +1,10 @@
-"""Every interaction of inference with process state of AutoLens, AutoFit, autoconf, Nautilus and JAX.
+"""Every interaction of inference with process state of AutoLens, AutoFit, autonerves, Nautilus and JAX.
 
 Backend glue: this module imports AutoLens when imported, so other modules import it inside
 functions only. No AutoLens class attribute is ever written. The process-global effects are:
 JAX x64 (enabled for good by ``ensure_jax_x64``), and, for the duration of one search inside
 ``BackendSession.search_scope`` and restored afterwards, ``PYAUTO_SKIP_VISUALIZATION``, the
-autoconf ``output.search_internal`` value and the Nautilus emulator-training replacement.
+autonerves ``output.search_internal`` value and the Nautilus emulator-training replacement.
 """
 
 from __future__ import annotations
@@ -46,14 +46,13 @@ _FIT_IMAGING_KEYWORDS = frozenset(inspect.signature(FitImaging).parameters)
 
 
 class CompatAnalysisImaging(al.AnalysisImaging):
-    """``AnalysisImaging`` whose ``fit_from`` matches the installed AutoGalaxy adapt-image signature.
+    """``AnalysisImaging`` wrapper preserving singular-tracer native integration.
 
-    The pinned PyAutoLens passes ``dataset_model`` and ``xp`` to
-    ``adapt_images_via_instance_from``, which the pinned AutoGalaxy does not accept; this
-    subclass makes the same fit with the keywords both sides accept.
+    Delegates fit assembly to ``FitImaging`` while forwarding ``dataset_model``, ``xp``,
+    and ``preloads`` when supported by the installed AutoLens signature.
     """
 
-    def fit_from(self, instance: Any) -> Any:
+    def fit_from(self, instance: Any, preloads: Any = None) -> Any:
         if self._use_jax:
             self._register_fit_imaging_pytrees()
         tracer = self.tracer_via_instance_from(instance=instance)
@@ -61,9 +60,12 @@ class CompatAnalysisImaging(al.AnalysisImaging):
         tracer = integrated_tracer(tracer, use_jax=self._use_jax,
                                    force=getattr(self, "_hwoslaps_singular_integrated", False))
         dataset_model = self.dataset_model_via_instance_from(instance=instance)
-        adapt_images = self.adapt_images_via_instance_from(instance=instance, galaxies=tracer.galaxies)
+        adapt_images = self.adapt_images_via_instance_from(
+            instance=instance, dataset_model=dataset_model, galaxies=tracer.galaxies, xp=self._xp,
+        )
         keywords = {"dataset": self.dataset, "tracer": tracer, "dataset_model": dataset_model,
-                    "adapt_images": adapt_images, "settings": self.settings, "xp": self._xp}
+                    "adapt_images": adapt_images, "settings": self.settings, "xp": self._xp,
+                    "preloads": preloads}
         return FitImaging(**{name: value for name, value in keywords.items()
                              if name in _FIT_IMAGING_KEYWORDS and value is not None})
 
@@ -87,7 +89,7 @@ def require_jax_fitness_api() -> None:
     from autofit.non_linear.fitness import Fitness
 
     missing = [name for name, present in (
-        ("Fitness.use_jax_vmap", "use_jax_vmap" in inspect.signature(Fitness).parameters),
+        ("Fitness.batched", "batched" in inspect.signature(Fitness).parameters),
         ("Fitness.batch_size", "batch_size" in inspect.signature(Fitness).parameters),
         ("Model.instance_from_vector(xp=...)",
          "xp" in inspect.signature(af.Model.instance_from_vector).parameters),
@@ -133,7 +135,7 @@ def _skipped_visualization() -> Iterator[None]:
 @contextmanager
 def _retained_search_internal() -> Iterator[None]:
     """AutoFit's post-fit cleanup keeps the raw sampler state while output.search_internal is True."""
-    from autoconf import conf
+    from autonerves import conf
 
     output = conf.instance["output"]
     existed = "search_internal" in output

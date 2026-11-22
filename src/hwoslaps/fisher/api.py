@@ -132,8 +132,9 @@ class PreparedForecast:
             if binding.to_mapping() != json_ready(recorded):
                 raise ValueError(f"the {side} kernel changed; prepare the forecast again")
             for index, kernel in enumerate(binding.kernels):
-                digest = array_digest(np.asarray(kernel.convolver().kernel.native))
-                if digest != self.record[side + "_convolver_digests"][index]:
+                recorded_digest = self.record[side + "_convolver_digests"][index]
+                if any(array_digest(np.asarray(convolver.kernel.native)) != recorded_digest
+                       for convolver in kernel.convolvers()):
                     raise ValueError(f"the {side} convolver kernel {index} changed; prepare the forecast again")
         validate_file_manifest(self.record["file_digests"])
 

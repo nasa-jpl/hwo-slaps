@@ -23,9 +23,8 @@ configuration handling and result loading usable on machines without them. The b
 runner sets up the AutoArray configuration the tests expect. Batch tests need Linux.
 
 CI runs the core tests on Python 3.11 and 3.12 with both the validated dependency
-constraints and the latest compatible releases. The full scientific environment
-uses `constraints/validated.txt`. Pull requests also run a compact pinned CPU scientific
-invariant lane. The complete CPU backend job runs only on manual dispatch. CI has no GPU
+constraints and the latest compatible releases. The full scientific environment uses Python 3.12 and `constraints/validated.txt`.
+Pull requests also run a compact pinned CPU scientific invariant lane. The complete CPU backend job runs only on manual dispatch. CI has no GPU
 job: run the GPU commands above on a machine with the cards. A new push to a pull
 request cancels that pull request's running checks; a push to `main` or `rasti` never
 cancels a running check.

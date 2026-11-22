@@ -28,7 +28,7 @@ def test_validate_reports_dotted_key_and_reference_is_backend_free(minimal_mappi
     # The actual command must compose all owning schemas without a scientific backend.
     program = r'''
 import importlib.abc, sys
-forbidden = {'autolens', 'autogalaxy', 'autoarray', 'autofit', 'autoconf', 'hcipy',
+forbidden = {'autolens', 'autogalaxy', 'autoarray', 'autofit', 'autoconf', 'autonerves', 'hcipy',
              'jax', 'jaxlib', 'nautilus', 'numba', 'matplotlib'}
 class Block(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):

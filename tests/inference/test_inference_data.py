@@ -86,6 +86,14 @@ def test_building_fit_data_leaves_the_prepared_kernel_unchanged(prepared_forecas
     with pytest.raises(ValueError, match="model convolver kernel"):
         prepared.validate_identity()
 
+def test_fit_data_precomputes_the_convolver_state_of_its_mask(prepared_forecast):
+    fitted = build_fit_data(prepared_forecast.observation, prepared_forecast.psfs.model_kernels.single,
+                            mask_name="all_pixels_minus_psf_border", base_mask=np.ones((40, 40), dtype=bool),
+                            over_sample_size=2)
+    assert fitted.imaging.psf._state is not None
+    assert fitted.imaging.psf.state_from(fitted.imaging.data.mask) is fitted.imaging.psf._state
+
+
 @pytest.mark.parametrize("size", [1, 2, 4])
 def test_dataset_samples_light_and_blurring_grids_at_generation_size(size, prepared_forecast_factory):
     prepared = prepared_forecast_factory({"scene": {"grid": {"over_sample_size": size}}})

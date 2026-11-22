@@ -272,7 +272,7 @@ def test_small_knowledge_error_has_matched_limit_and_quadratic_spurious_response
         np.testing.assert_allclose(result.q_spurious / expected.q_spurious, 4.0, rtol=0.15)
 
 
-@pytest.mark.parametrize("changed", ["kernel", "convolver"])
+@pytest.mark.parametrize("changed", ["kernel", "convolver", "render_convolver"])
 def test_prepared_kernel_buffers_cannot_change_identity(minimal_mapping, changed):
     from hwoslaps.fisher.api import forecast, prepare_forecast
 
@@ -284,9 +284,11 @@ def test_prepared_kernel_buffers_cannot_change_identity(minimal_mapping, changed
             buffer[3, 3] += 0.01
         else:
             import autoarray as aa
-            buffer = np.array(kernel.convolver().kernel.native)
+            convolver = kernel.convolver() if changed == "convolver" else kernel.convolver_for_shape(
+                tuple(prepared.record["rendering"]["render_shape"]), prepared.scene.spec.grid.pixel_scale_arcsec)
+            buffer = np.array(convolver.kernel.native)
             buffer[3, 3] += 0.01
-            kernel.convolver().kernel = aa.Array2D.no_mask(values=buffer, pixel_scales=kernel.pixel_scale_arcsec)
+            convolver.kernel = aa.Array2D.no_mask(values=buffer, pixel_scales=kernel.pixel_scale_arcsec)
         with pytest.raises(ValueError, match="truth.*kernel.*changed"):
             forecast(prepared, masses_msun=[1.0e8])
         with pytest.raises(TypeError):

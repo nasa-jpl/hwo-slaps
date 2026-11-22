@@ -24,7 +24,7 @@ ABSENT = object()
 
 
 def _process_state():
-    from autoconf import conf
+    from autonerves import conf
     from nautilus.neural import NeuralNetworkEmulator
 
     output = conf.instance["output"]
@@ -33,7 +33,7 @@ def _process_state():
 
 
 def _set_prior_state(monkeypatch, variable, key):
-    from autoconf import conf
+    from autonerves import conf
 
     if variable is ABSENT:
         monkeypatch.delenv(VARIABLE, raising=False)
@@ -68,7 +68,7 @@ def _record_process_pool_maps(monkeypatch):
     ("0", ABSENT, True, 1, 1, False),
     ("0", False, True, 2, 1, False),
     ("0", False, True, 2, 2, False),
-], ids=["normal-exit", "exception-inside", "variable-absent", "autoconf-key-absent", "pooled-training",
+], ids=["normal-exit", "exception-inside", "variable-absent", "autonerves-key-absent", "pooled-training",
         "several-sampler-cores"])
 def test_search_scope_restores_process_state(monkeypatch, variable, key, retain, workers, cores, raises):
     from hwoslaps.inference.backend import BackendSession
@@ -217,7 +217,7 @@ X64_CHILD = textwrap.dedent("""
     for iteration in (1, 2):
         analysis = make_analysis(make_raw_imaging(kernel / kernel.sum()), cosmology=ag.cosmo.Planck15(), use_jax=True)
         fitness = Fitness(model=autofit_model(fit_model), analysis=analysis, paths=None, fom_is_log_likelihood=True,
-                          resample_figure_of_merit=-1.0e99, use_jax_vmap=True, batch_size=4)
+                          resample_figure_of_merit=-1.0e99, batched=True, batch_size=4)
         values = np.asarray(fitness.call_wrap(vectors))
         report = {"after": bool(jax.config.jax_enable_x64), "dtype": str(values.dtype),
                   "finite": bool(np.all(np.isfinite(values)))}
@@ -337,7 +337,7 @@ def test_jax_analysis_refuses_failed_enablement_and_missing_installed_apis(fault
         assert report["error"] == "JAX 64-bit mode could not be enabled"
     else:
         assert report["after"] is True
-        for name in ("Fitness.use_jax_vmap", "Fitness.batch_size", "Model.instance_from_vector(xp=...)"):
+        for name in ("Fitness.batched", "Fitness.batch_size", "Model.instance_from_vector(xp=...)"):
             assert name in report["error"]
         for package, version in report["versions"].items():
             assert version and f"{package} {version}" in report["error"]

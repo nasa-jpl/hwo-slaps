@@ -112,7 +112,7 @@ def build_fit_data(observation: Observation, model_kernel: DetectorPSF, *, mask_
                                model_kernel.pixel_scale_arcsec)
     imaging = al.Imaging(data=al.Array2D(values=geometry.pad(data), mask=mask),
                          noise_map=al.Array2D(values=geometry.pad(noise, fill=1.0), mask=mask),
-                         psf=convolver, over_sample_size_lp=over_sample_size)
+                         psf=convolver, psf_setup_state=True, over_sample_size_lp=over_sample_size)
     sampling = _consistent_sampling(imaging, int(over_sample_size))
     fitted = np.asarray(imaging.psf.kernel.native, dtype=float)
     include.setflags(write=False)

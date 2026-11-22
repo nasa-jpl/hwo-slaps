@@ -30,7 +30,7 @@ def main(argv=None):
         resolved = [str(root / "tests"), "-q"]
     with tempfile.TemporaryDirectory(prefix="hwoslaps-backend-tests-") as directory:
         os.chdir(directory)
-        from autoconf import conf
+        from autonerves import conf
 
         autoarray = importlib.util.find_spec("autoarray")
         if autoarray is None or autoarray.origin is None:

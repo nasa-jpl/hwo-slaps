@@ -20,7 +20,7 @@ import types
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from numbers import Real
+from numbers import Integral, Real
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -189,6 +189,47 @@ class DetectorPSF:
     @functools.cached_property
     def _convolver(self) -> Any:
         return make_convolver(self.kernel, self.pixel_scale_arcsec)
+
+    @functools.cached_property
+    def _shape_convolvers(self) -> dict[tuple[tuple[int, int], float], Any]:
+        return {}
+
+    def convolvers(self) -> tuple[Any, ...]:
+        """Every Convolver this kernel has handed out: ``convolver()`` and each ``convolver_for_shape``."""
+        return (self.convolver(), *self._shape_convolvers.values())
+
+    def convolver_for_shape(self, shape_native: tuple[int, int], pixel_scale_arcsec: float | None = None) -> Any:
+        """The autoarray Convolver with precomputed state for ``shape_native`` and ``pixel_scale_arcsec``.
+
+        For convolutions only: never hand it to a dataset constructor, which would
+        normalize it in place (use ``make_convolver`` for a dataset).
+        """
+        if isinstance(shape_native, (str, bytes)) or not isinstance(shape_native, Sequence) or len(shape_native) != 2 or any(
+            isinstance(value, (bool, np.bool_)) or not isinstance(value, Integral) or int(value) <= 0
+            for value in shape_native
+        ):
+            raise ValueError(f"shape_native must contain two positive integers, got {shape_native!r}")
+        shape = (int(shape_native[0]), int(shape_native[1]))
+        scale = self.pixel_scale_arcsec if pixel_scale_arcsec is None else _pixel_scale(
+            pixel_scale_arcsec, "pixel_scale_arcsec"
+        )
+        key = (shape, scale)
+        cached = self._shape_convolvers.get(key)
+        if cached is not None:
+            return cached
+
+        import autoarray as aa
+        from autoarray.operators.convolver import ConvolverState
+
+        mask = aa.Mask2D.all_false(shape_native=shape, pixel_scales=scale)
+        kernel = aa.Array2D.no_mask(
+            values=np.array(self.kernel, dtype=np.float64, copy=True),
+            pixel_scales=self.pixel_scale_arcsec,
+        )
+        state = ConvolverState(kernel=kernel, mask=mask)
+        cached = aa.Convolver(kernel=kernel, state=state)
+        self._shape_convolvers[key] = cached
+        return cached
 
 
 def make_convolver(values: ArrayLike, pixel_scale_arcsec: float) -> Any:

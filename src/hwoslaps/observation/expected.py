@@ -172,7 +172,8 @@ def _convolve(image: np.ndarray, kernel: DetectorPSF, pixel_scale_arcsec: float)
     mask = aa.Mask2D.all_false(shape_native=image.shape, pixel_scales=pixel_scale_arcsec)
     # Array2D multiplies its input by the mask in place, so it receives a copy of the light.
     light = aa.Array2D(values=np.array(image, dtype=float), mask=mask)
-    convolved = kernel.convolver().convolved_image_from(image=light, blurring_image=None)
+    convolved = kernel.convolver_for_shape(image.shape, pixel_scale_arcsec).convolved_image_from(
+        image=light, blurring_image=None)
     return np.array(convolved.native, dtype=float)
 
 
