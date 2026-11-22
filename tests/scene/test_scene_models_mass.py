@@ -47,7 +47,8 @@ def test_power_law_deflections_equal_keeton_quadrature(slope, q, minimal_mapping
         ay = q * yr * quad(integrand, 0, 1, args=(-1.5,), epsabs=1e-12, epsrel=1e-12)[0]
         expected.append([ax * math.sin(angle) + ay * math.cos(angle), ax * math.cos(angle) - ay * math.sin(angle)])
     actual = np.asarray(profile.deflections_yx_2d_from(grid=al.Grid2DIrregular(values=POINTS)))
-    np.testing.assert_allclose(actual, expected, rtol=1e-11, atol=1e-14)
+    # AutoGalaxy bounds NumPy omega-series truncation at _OMEGA_SERIES_RTOL = 1e-10.
+    np.testing.assert_allclose(actual, expected, rtol=1e-10, atol=1e-14)
     if q == 1.0:
         shifted = POINTS - [0.03, -0.02]
         radii = np.linalg.norm(shifted, axis=1)
