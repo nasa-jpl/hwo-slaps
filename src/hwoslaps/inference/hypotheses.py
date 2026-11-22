@@ -106,8 +106,6 @@ def _mass_box_domains(component: ComponentSpec, parameters: dict[str, Any], free
     def positive(narrowed):
         e = _corner(component, kinds["ellipticity"], free, fit, narrowed)
         minimum_q = (1.0 - e) / (1.0 + e)
-        if component.type == "Isothermal":
-            minimum_q = min(minimum_q, 0.99999)
         maximum_slope = (max(_bounds(component, kinds["slope"][0], free, fit, narrowed))
                          if kinds["slope"] else 2.0)
         amplitude = sum(_corner(component, [p for p in kinds["multipole"]

@@ -133,7 +133,6 @@ def test_multipole_boxes_keep_every_corner_positive(kind,q,pair,width,accepted,m
         slopes=prior.rule("lens","slope").box(2.,defs["slope"].definition.domain) if kind=="PowerLaw" else (2.,)
         for e1,e2,c1,c2 in product(*axes):
             e=math.hypot(e1,e2);qq=(1-e)/(1+e)
-            if kind=="Isothermal":qq=min(qq,.99999)
             angle=.5*math.atan2(e1,e2)
             eta=np.sqrt(np.cos(phi-angle)**2+np.sin(phi-angle)**2/qq**2)
             for slope in slopes:

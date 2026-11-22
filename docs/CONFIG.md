@@ -84,7 +84,7 @@ Selected by `type: Isothermal`.
 
 A mass component; its parameters are profiled in registry order unless fixed.
 
-Singular isothermal ellipsoid (al.mp.Isothermal); AutoGalaxy evaluates it at q <= 0.99999.
+Singular isothermal ellipsoid (al.mp.Isothermal), including the circular limit at q = 1.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|
@@ -1891,7 +1891,7 @@ Selected by `type: Isothermal`.
 
 A mass component; its parameters are profiled in registry order unless fixed.
 
-Singular isothermal ellipsoid (al.mp.Isothermal); AutoGalaxy evaluates it at q <= 0.99999.
+Singular isothermal ellipsoid (al.mp.Isothermal), including the circular limit at q = 1.
 
 | key | value | default | unit | meaning |
 |---|---|---|---|---|

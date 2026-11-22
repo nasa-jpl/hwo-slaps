@@ -130,7 +130,8 @@ def test_multipole_parameter_reads_replacement_and_links_use_registry(minimal_ma
     ("PowerLaw", 1., 2., {"m4": [0., .99]}, True),
     ("PowerLaw", 1., 2., {"m4": [0., 1.]}, False),
     ("Isothermal", 1., 2., {"m4": [0., .99]}, True),
-    ("Isothermal", 1., 2., {"m4": [0., -.999997]}, False),
+    ("Isothermal", 1., 2., {"m4": [0., -1.]}, False),
+    ("Isothermal", .999998, 2., {"m4": [0., -.999997]}, True),
     ("Isothermal", .8, 2., {"m3": [.4, 0.], "m4": [0., -.45]}, True),
     ("Isothermal", .8, 2., {"m3": [.4, 0.], "m4": [0., -.5]}, False),
     ("PowerLaw", 1., 2.9, {"m4": [0., .0999]}, True),
@@ -141,14 +142,19 @@ def test_multipole_domain_keeps_convergence_positive(kind, q, slope, multipoles,
     if kind == "PowerLaw":
         mass["slope"] = slope
     phi = np.arange(7200) * 2*np.pi/7200
-    evaluated_q = min(q, .99999) if kind == "Isothermal" else q
-    eta = np.sqrt(np.cos(phi)**2 + np.sin(phi)**2/evaluated_q**2)
-    convergence = (3-slope)/(1+evaluated_q) * (0.8/eta)**(slope-1)
+    eta = np.sqrt(np.cos(phi)**2 + np.sin(phi)**2/q**2)
+    convergence = (3-slope)/(1+q) * (0.8/eta)**(slope-1)
     for order, comps in multipoles.items():
         m = int(order[1:])
         convergence += .5 * .8**(slope-1) * math.hypot(*comps) * np.cos(m*phi - math.atan2(*comps))
     if accepted:
-        _scene(minimal_mapping, mass)
+        import autolens as al
+
+        # The oracle is the convergence AutoGalaxy evaluates on the unit circle, not only its formula.
+        ring = al.Grid2DIrregular(values=np.column_stack((np.sin(phi), np.cos(phi))))
+        evaluated = sum(np.asarray(profile.convergence_2d_from(grid=ring))
+                        for profile in instantiate(_scene(minimal_mapping, mass).lens.mass[0]).values())
+        np.testing.assert_allclose(evaluated, convergence, rtol=1e-12, atol=1e-12)
         assert np.min(convergence) > 0
     else:
         with pytest.raises(ConfigError) as error:

@@ -238,8 +238,6 @@ def _check_multipoles(values: Mapping[str, Any], path: str) -> None:
     e = math.hypot(*values["ell_comps"])
     q = (1.0 - e) / (1.0 + e)
     slope = values.get("slope", 2.0)
-    if "slope" not in values:
-        q = min(q, 0.99999)  # The evaluated Isothermal axis ratio, including its circular clamp.
     bound = 2.0 * (3.0 - slope) * q ** (slope - 1.0) / (1.0 + q)
     amplitude = sum(math.hypot(*pair) for pair in multipoles.values() if pair is not None)
     if not amplitude < bound:
@@ -290,7 +288,7 @@ ISOTHERMAL = ProfileType(
          Key("einstein_radius", _real(_POSITIVE), "AutoLens Einstein radius of the SIE", unit="arcsec"),
          _ELL_COMPS, _MULTIPOLES),
         rules=(_ELLIPTICITY_RULE, _MULTIPOLE_RULE),
-        doc="Singular isothermal ellipsoid (al.mp.Isothermal); AutoGalaxy evaluates it at q <= 0.99999.",
+        doc="Singular isothermal ellipsoid (al.mp.Isothermal), including the circular limit at q = 1.",
     ),
     amplitude_key=None,
     parameters=lambda values: (*_ISOTHERMAL_PARAMETERS, *_multipole_parameters(values)),
