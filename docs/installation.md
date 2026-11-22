@@ -1,7 +1,7 @@
 # Installation
 
-The core package needs Python 3.11 or newer. The pinned scientific stack supports
-Python 3.11 and 3.12. HWO-SLAPS has two layers:
+The core package needs Python 3.11 or newer. The pinned scientific stack requires
+Python 3.12. HWO-SLAPS has two layers:
 
 - **The core package** reads and validates configurations and works with saved results.
   It depends only on NumPy, SciPy, PyYAML, Astropy and threadpoolctl.
@@ -38,19 +38,15 @@ conda activate hwo-slaps-gpu
 
 The installer:
 
-- creates the environment if it does not exist, using Python 3.11 by default
-  (`--python 3.12` selects Python 3.12, `--prefix` installs into a directory);
+- creates the environment if it does not exist, using Python 3.12 (`--prefix`
+  installs into a directory);
 - preserves existing environments by default. To install or update dependencies
-  in an existing environment, pass `--reuse` and select its Python version with
-  `--python` if it differs from the default;
-- installs HWO-SLAPS in editable mode with all optional dependencies;
-- applies two small performance patches to AutoArray. It first checks that the
-  installed AutoArray version and file hashes are the ones the patches were written
-  for, and stops if they differ.
+  in an existing environment, pass `--reuse`;
+- installs HWO-SLAPS in editable mode with all optional dependencies.
 
 Run `bash install.sh --help` for every option.
 
-For example, to update a Python 3.12 environment explicitly:
+For example, to update an existing Python 3.12 environment explicitly:
 
 ```bash
 bash install.sh --cpu --env-name hwo-slaps --python 3.12 --reuse

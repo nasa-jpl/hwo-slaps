@@ -36,7 +36,7 @@ REQUIRED_SEARCH_INTERNAL_FILES: tuple[str, ...] = ("search_internal.dill",)
 """Sampler state AutoFit must leave under ``files/search_internal``; the timer files beside it are not state."""
 
 EFFECTIVE_FIELDS = ("n_live", "n_eff", "n_shell", "f_live", "discard_exploration", "n_like_max", "number_of_cores",
-                    "seed", "n_batch", "use_jax_vmap")
+                    "seed", "n_batch")
 
 _BLOCK_BYTES = 1 << 20
 
@@ -64,7 +64,7 @@ def _search_keywords(settings: SamplerSettings, *, n_live: int, seed: int) -> di
         if getattr(settings, name) is not None:
             keywords[name] = getattr(settings, name)
     if settings.use_jax:
-        keywords.update(n_batch=settings.jax_n_batch, use_jax_vmap=True)
+        keywords["n_batch"] = settings.jax_n_batch
     return keywords
 
 

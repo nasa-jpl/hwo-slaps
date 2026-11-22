@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlparse
 
 from threadpoolctl import threadpool_info
 
-RECORDED_DISTRIBUTIONS = ("numpy", "scipy", "astropy", "PyYAML", "threadpoolctl", "hcipy", "autoconf",
+RECORDED_DISTRIBUTIONS = ("numpy", "scipy", "astropy", "PyYAML", "threadpoolctl", "hcipy", "autonerves",
                           "autoarray", "autogalaxy", "autolens", "autofit", "nautilus-sampler", "jax",
                           "jaxlib", "matplotlib")
 THREAD_VARIABLES = ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMEXPR_NUM_THREADS")

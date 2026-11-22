@@ -44,6 +44,41 @@ def paper_digest():
 
 
 @pytest.fixture(scope="session")
+def paper_kernel(paper_digest):
+    """Check a live kernel against the archived kernel with paper digest ``digest``.
+
+    An optical kernel is compared with ``archived_kernels.npz`` (whole, or its central block
+    for a 999x999 kernel) within KERNEL_TOLERANCE of the peak; a kernel read from a file must
+    still match its digest exactly. Returns both digests for a receipt.
+    """
+    from current_oracles import KERNEL_TOLERANCE
+
+    anchor = json.loads((FIXTURES / "k1_paper_kernel.json").read_text(encoding="utf-8"))
+    oracle = json.loads((FIXTURES / "production" / "oracle.json").read_text(encoding="utf-8"))
+    with np.load(FIXTURES / "archived_kernels.npz", allow_pickle=False) as archive:
+        stored = {name: archive[name] for name in archive.files}
+    archived = {paper_digest.kernel(stored[name]): (stored[name], stored[name].shape)
+                for name in ("fisher_optical_17x17", "fisher_knowledge_error_17x17", "k1_51x51")}
+    archived[anchor["kernels"]["999x999"]["sha256"]] = (stored["k1_999x999_core"], (999, 999))
+    archived[oracle["truth_kernel_sha256"]] = (stored["production_999x999_core"], (999, 999))
+
+    def check(values, digest):
+        current = paper_digest.kernel(values)
+        if digest not in archived:
+            assert current == digest
+        else:
+            expected, shape = archived[digest]
+            live = np.asarray(values, dtype=float)
+            assert live.shape == shape
+            (y, x), (ny, nx) = ((n - m) // 2 for n, m in zip(shape, expected.shape)), expected.shape
+            np.testing.assert_allclose(live[y:y + ny, x:x + nx], expected, rtol=0.0,
+                                       atol=KERNEL_TOLERANCE * float(np.max(expected)))
+        return {"historical_digest": digest, "current_digest": current}
+
+    return check
+
+
+@pytest.fixture(scope="session")
 def final_name():
     image = dict(_NAME_MAP, **{"source.intensity": "source.light.light.flux_scale",
                               "source.effective_radius": "source.light.light.size_scale"})

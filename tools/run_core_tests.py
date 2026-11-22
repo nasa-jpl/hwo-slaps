@@ -6,8 +6,8 @@ from importlib.machinery import ModuleSpec
 from pathlib import Path
 import sys
 
-BACKENDS = frozenset(("autolens", "autogalaxy", "autoarray", "autofit", "autoconf", "hcipy", "jax", "jaxlib",
-                      "nautilus", "numba", "matplotlib"))
+BACKENDS = frozenset(("autolens", "autogalaxy", "autoarray", "autofit", "autoconf", "autonerves",
+                      "hcipy", "jax", "jaxlib", "nautilus", "numba", "matplotlib"))
 CORE_MARKERS = "not backend and not xtx_gpu and not xtx_multi_gpu"
 
 

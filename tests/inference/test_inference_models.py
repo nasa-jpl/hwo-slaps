@@ -75,6 +75,39 @@ def test_jax_power_law_box_floor_is_specific_to_series(kind,q,accepted,prepared_
         _models(prepared,use_jax=False)
 
 
+@pytest.mark.parametrize("ell,free_shape,use_jax,adapted",[
+    ((.02002,0.),(1,2),True,True),
+    ((-.02002,0.),(1,),True,True),
+    ((.02002,.02002),(1,2),True,False),
+    ((.1,0.),(1,2),True,False),
+    ((-.074,.184),(1,2),True,False),
+    ((1e-8,0.),(),True,True),
+    ((1e-8,0.),(1,2),False,False),
+],ids=["series-without-origin","negative-box","outside-series-at-corner","paper","production","fixed","numpy"])
+def test_isothermal_adapter_routing_uses_reachable_shape(ell,free_shape,use_jax,adapted,prepared_forecast_factory):
+    prepared=prepared_forecast_factory({"scene":{"lens":{"mass":{"mass":_mass("Isothermal",ell_comps=list(ell))}}}})
+    free=["lens.mass.mass.centre_y",*(f"lens.mass.mass.ell_comp_{i}" for i in free_shape)]
+    models=_models(prepared,use_jax=use_jax,free=free)
+    expected="hwoslaps.inference.mass_profiles:Isothermal" if adapted else "autolens:mp.Isothermal"
+    for model in (models.smooth,models.subhalo):
+        lens=next(galaxy for galaxy in model.galaxies if galaxy.name=="lens")
+        assert dict(lens.components)["mass"].profile_class==expected
+
+
+def test_isothermal_adapter_keeps_the_exact_origin_guard(prepared_forecast_factory):
+    from hwoslaps.inference.api import prepare_case
+
+    prepared=prepared_forecast_factory({"scene":{"lens":{"mass":{"mass":_mass("Isothermal",ell_comps=[0.,0.])}}}})
+    case=prepare_case(prepared,prepared.hypothesis(1e8,(.4,-.6)),prepared.observation,
+                      fit=FitSpec(mode="fixed_template"),use_jax=True)
+    for model in (case.models.smooth,case.models.subhalo):
+        lens=next(galaxy for galaxy in model.galaxies if galaxy.name=="lens")
+        assert dict(lens.components)["mass"].profile_class=="hwoslaps.inference.mass_profiles:Isothermal"
+        point=(model.truth-model.lower)/(model.upper-model.lower)
+        with pytest.raises(ValueError,match=r"Isothermal gradient is undefined at exactly ell_comps=\(0,0\)"):
+            case.objective(model.role).value_and_gradient(point)
+
+
 @pytest.mark.parametrize("kind,q,pair,width,accepted,maximum",[
     ("Isothermal",1.,[.64,.64],.01,True,None),
     ("Isothermal",1.,[.66,.66],.01,False,None),
@@ -100,7 +133,6 @@ def test_multipole_boxes_keep_every_corner_positive(kind,q,pair,width,accepted,m
         slopes=prior.rule("lens","slope").box(2.,defs["slope"].definition.domain) if kind=="PowerLaw" else (2.,)
         for e1,e2,c1,c2 in product(*axes):
             e=math.hypot(e1,e2);qq=(1-e)/(1+e)
-            if kind=="Isothermal":qq=min(qq,.99999)
             angle=.5*math.atan2(e1,e2)
             eta=np.sqrt(np.cos(phi-angle)**2+np.sin(phi-angle)**2/qq**2)
             for slope in slopes:
@@ -154,9 +186,9 @@ def _fitness_pair(prepared, *, role="smooth"):
     model=jax_case.autofit_models[role]
     merit=-1.23456789e99
     jfit=Fitness(model=model,analysis=jax_case.analysis,paths=None,fom_is_log_likelihood=True,
-                 resample_figure_of_merit=merit,use_jax_vmap=True,batch_size=3)
+                 resample_figure_of_merit=merit,batched=True,batch_size=3)
     nfit=Fitness(model=numpy_case.autofit_models[role],analysis=numpy_case.analysis,paths=None,
-                 fom_is_log_likelihood=True,resample_figure_of_merit=merit,use_jax_vmap=False)
+                 fom_is_log_likelihood=True,resample_figure_of_merit=merit,batched=False)
     columns=np.linspace(-.03,.03,model.prior_count)
     rows=np.linspace(-.04,.04,3)[:,None]
     a=np.asarray([model.vector_from_unit_vector(row) for row in .40+rows+columns])
@@ -544,6 +576,23 @@ def test_circular_powerlaw_one_sided_values_classify_the_shape_differential(gpu,
     finally:prepared.close()
 
 
+def test_powerlaw_fixed_circle_keeps_parent_derivatives_off_slope_two():
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.mass_profiles import PowerLaw
+
+    ensure_jax_x64()
+    grid=al.Grid2DIrregular(values=np.array([[.13,.21],[-.27,.15]]))
+    def values(cls,p):
+        profile=cls(centre=(.03,-.02),ell_comps=(0.,0.),einstein_radius=p[0],slope=p[1])
+        return profile.deflections_yx_2d_from(grid=grid,xp=jnp).array
+    params=jnp.array([.8,2.08])
+    np.testing.assert_allclose(jax.jacfwd(lambda p:values(PowerLaw,p))(params),
+                               jax.jacfwd(lambda p:values(al.mp.PowerLaw,p))(params),rtol=1e-12,atol=0.)
+
+
 @pytest.mark.parametrize("gpu",[False,pytest.param(True,marks=pytest.mark.xtx_gpu)],ids=["cpu","gpu"])
 @pytest.mark.parametrize("ell,slope",[((0.,0.),2.),((.05,.02),2.),((-.02,.04),2.08)])
 def test_powerlaw_adapter_preserves_parent_bits_and_all_regular_direction_derivatives(gpu,ell,slope):
@@ -619,3 +668,69 @@ def test_powerlaw_regular_circle_refuses_singular_mass_centre_geometry_gradient(
     error,derivative=jax.jit(checkify.checkify(jax.jacrev(value)))(ell)
     with pytest.raises(Exception,match="exactly coincident mass-centre sample with active geometry"):
         error.throw()
+
+
+@pytest.mark.parametrize("ell",[(0.,0.),(1e-8,0.),(2e-5,0.),(2.51e-5,0.),(.02,-.01),(.1,0.)])
+@pytest.mark.parametrize("transformed",[False,True],ids=["observer-frame","lens-frame"])
+def test_isothermal_adapter_preserves_parent_bits(ell,transformed):
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.mass_profiles import Isothermal
+
+    ensure_jax_x64()
+    params=np.array([.03,-.02,.8])
+    points=(np.array([[.8375,0.],[-.5875,0.],[.31,.29]]) if transformed else
+            params[:2]+np.array([[.8375,0.],[.8375,-.8375],[-.5875,.5875],[.31,.29]]))
+    grid=al.Grid2DIrregular(values=points)
+    grid.is_transformed=transformed
+    def values(cls,p,xp):
+        profile=cls(centre=(p[0],p[1]),ell_comps=ell,einstein_radius=p[2])
+        return profile.deflections_yx_2d_from(grid=grid,xp=xp).array
+    np.testing.assert_array_equal(values(Isothermal,params,np),values(al.mp.Isothermal,params,np))
+    np.testing.assert_array_equal(jax.jit(lambda p:values(Isothermal,p,jnp))(params),
+                                  jax.jit(lambda p:values(al.mp.Isothermal,p,jnp))(params))
+
+
+@pytest.mark.parametrize("ell,series",[((1e-8,0.),True),((2e-5,0.),True),((.02,-.01),False)])
+def test_isothermal_adapter_reverse_derivatives_match_parent(ell,series):
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.mass_profiles import Isothermal
+
+    ensure_jax_x64()
+    grid=al.Grid2DIrregular(values=np.array([[.8375,-.8375],[.5875,-.5875],[.31,.29]]))
+    params=jnp.array([0.,0.,*ell,.8])
+    def values(cls,p):
+        profile=cls(centre=(p[0],p[1]),ell_comps=(p[2],p[3]),einstein_radius=p[4])
+        return profile.deflections_yx_2d_from(grid=grid,xp=jnp).array
+    # Forward mode discards the unused closed-form tangent before it can contaminate the series.
+    oracle=jax.jacfwd if series else jax.jacrev
+    actual=jax.jacrev(lambda p:values(Isothermal,p))(params)
+    expected=oracle(lambda p:values(al.mp.Isothermal,p))(params)
+    assert np.all(np.isfinite(actual)) and np.all(np.isfinite(expected))
+    for index in range(len(params)):
+        # The angle derivative in the second ellipticity direction cancels terms of order 1/e.
+        atol=1e-12+(np.finfo(float).eps/ell[0] if series and index==3 else 0.)
+        np.testing.assert_allclose(actual[...,index],expected[...,index],rtol=1e-12,atol=atol)
+    gradient=jax.grad(lambda p:jnp.sum(values(Isothermal,p)))(params)
+    assert np.all(np.isfinite(gradient))
+
+
+@pytest.mark.parametrize("ell",[(1e-8,0.),(2e-5,0.)])
+def test_isothermal_adapter_reverse_centre_gradient_with_fixed_shape(ell):
+    import autolens as al
+    import jax
+    import jax.numpy as jnp
+    from hwoslaps.inference.backend import ensure_jax_x64
+    from hwoslaps.inference.mass_profiles import Isothermal
+
+    ensure_jax_x64()
+    grid=al.Grid2DIrregular(values=np.array([[.8375,-.8375],[.5875,-.5875],[.31,.29]]))
+    def total(centre):
+        profile=Isothermal(centre=(centre[0],centre[1]),ell_comps=ell,einstein_radius=.8)
+        return jnp.sum(profile.deflections_yx_2d_from(grid=grid,xp=jnp).array)
+    assert np.all(np.isfinite(jax.grad(total)(jnp.zeros(2))))

@@ -11,7 +11,7 @@ parser.add_argument('--output', type=Path, required=True)
 args = parser.parse_args()
 args.output.parent.mkdir(parents=True,exist_ok=True)
 os.chdir(args.output.parent)
-from autoconf import conf
+from autonerves import conf
 conf.instance.push(str(Path(importlib.util.find_spec('autoarray').origin).resolve().parent/'config'),keep_first=True)
 import autolens as al
 import numpy as np

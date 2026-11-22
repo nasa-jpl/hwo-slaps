@@ -24,7 +24,7 @@ def _n1(prepared, use_jax):
                         use_jax=use_jax)
 
 
-def _inputs(case, expected, manifest, paper_digest):
+def _inputs(case, expected, manifest, paper_digest, paper_kernel):
     entry = manifest["scenes"]["n1_nonlinear_likelihood"]
     lensing = case.hypothesis.lensing()
     assert lensing.parameters["kappa_s"] == entry["trial"]["kappa_s"]
@@ -37,12 +37,11 @@ def _inputs(case, expected, manifest, paper_digest):
     assert case.data.pixel_count == record["n_unmasked_pixels"]
     # Geometry, actual kernels and prior boxes are unchanged input contracts.
     # Padded rendering deliberately changes data/noise, recorded below.
-    for values, key in ((imaging.psf.kernel.native, "psf_digest"), ((~case.data.mask).astype(float), "mask_digest")):
-        assert paper_digest.array(values) == record[key], key
+    assert paper_digest.array((~case.data.mask).astype(float)) == record["mask_digest"]
     padding = case.data.record["rendering"]["padding_yx"]
     expected_backend_mask = np.pad(~case.data.mask, tuple((p, p) for p in padding), constant_values=True)
     np.testing.assert_array_equal(np.asarray(imaging.mask), expected_backend_mask)
-    assert paper_digest.kernel(imaging.psf.kernel.native) == record["psf_fit_sha256"]
+    paper_kernel(imaging.psf.kernel.native, record["psf_fit_sha256"])
     for role, oracle_role in (("smooth", "smooth"), ("subhalo", "freed")):
         model = case.model(role)
         assert list(model.parameter_names) == list(expected[f"{oracle_role}_prior_paths"])
@@ -59,7 +58,8 @@ def _assert_gaussian(case, role, vector):
     return independent
 
 
-def test_current_nonlinear_likelihood_has_independent_gaussian_normalization(prepared, manifest, paper_digest, tmp_path, record_property):
+def test_current_nonlinear_likelihood_has_independent_gaussian_normalization(prepared, manifest, paper_digest, paper_kernel,
+                                                                              tmp_path, record_property):
     case = _n1(prepared, False)
     changes = {}
     # Independent consumers of the same physical truth: scene/PSF renderer
@@ -73,7 +73,7 @@ def test_current_nonlinear_likelihood_has_independent_gaussian_normalization(pre
         np.testing.assert_allclose(actual_model, expected_model, rtol=2.e-12, atol=2.e-12)
         prediction_errors[role] = float(np.max(np.abs(actual_model-expected_model)))
     with np.load(FIXTURES/"n1_nonlinear_likelihood.npz", allow_pickle=False) as expected:
-        _inputs(case, expected, manifest, paper_digest)
+        _inputs(case, expected, manifest, paper_digest, paper_kernel)
         for role, oracle_role in (("smooth", "smooth"), ("subhalo", "freed")):
             live = [_assert_gaussian(case, role, vector) for vector in expected[oracle_role+"_vectors"]]
             changes[role] = {term: {"historical": expected["reference__"+oracle_role+"_"+term].tolist(),
@@ -89,11 +89,12 @@ def test_current_nonlinear_likelihood_has_independent_gaussian_normalization(pre
 
 
 @pytest.mark.xtx_gpu
-def test_current_nonlinear_jax_objective_and_gradient_have_independent_oracles(prepared, manifest, paper_digest, tmp_path, record_property):
+def test_current_nonlinear_jax_objective_and_gradient_have_independent_oracles(prepared, manifest, paper_digest, paper_kernel,
+                                                                               tmp_path, record_property):
     case, reference = _n1(prepared, True), _n1(prepared, False)
     changes = {}
     with np.load(FIXTURES/"n1_nonlinear_likelihood.npz", allow_pickle=False) as expected:
-        _inputs(case, expected, manifest, paper_digest)
+        _inputs(case, expected, manifest, paper_digest, paper_kernel)
         for role, oracle_role in (("smooth", "smooth"), ("subhalo", "freed")):
             model, rows = case.model(role), []
             for vector in expected[oracle_role+"_vectors"]:
@@ -126,7 +127,7 @@ def test_batched_fitness_equals_scalar_likelihood(batch_size, prepared):
             * (model.upper - model.lower)
         fitness = Fitness(model=case.autofit_models[role], analysis=case.analysis, paths=None,
                           fom_is_log_likelihood=True, resample_figure_of_merit=-1e99,
-                          use_jax_vmap=True, batch_size=batch_size)
+                          batched=True, batch_size=batch_size)
         scalar = np.array([case.log_likelihood(role, vector) for vector in vectors])
         assert np.max(np.abs(np.asarray(fitness.call_wrap(vectors)) - scalar)) <= 1e-4
 

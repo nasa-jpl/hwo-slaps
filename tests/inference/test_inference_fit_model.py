@@ -70,6 +70,22 @@ def test_incoherent_fit_models_are_refused(build, message):
 
 
 @pytest.mark.backend
+def test_near_circular_isothermal_multipole_box_uses_the_true_axis_ratio(prepared_forecast_factory):
+    from hwoslaps.inference.hypotheses import build_role_models
+    from hwoslaps.inference.settings import FitSpec, PriorWidths
+
+    q = 0.999998
+    prepared = prepared_forecast_factory({"scene": {"lens": {"mass": {"mass": {
+        "ell_comps": [0.0, (1.0 - q) / (1.0 + q)], "multipoles": {"m4": [0.0, -0.99]},
+    }}}}})
+    prior = PriorWidths.from_mapping({"rules": {"lens.multipole": {"half_width": 0.009995}}})
+    models = build_role_models(prepared.scene, prepared.hypothesis(1.0e8, (0.4, -0.6)),
+                               ["lens.mass.mass.multipole_m4_2"],
+                               FitSpec(mode="fixed_template", prior_widths=prior), use_jax=False)
+    assert models.smooth.lower == pytest.approx([-0.999995])
+
+
+@pytest.mark.backend
 def test_autofit_model_builds_the_fit_model_free_priors():
     """The AutoFit collection has the fit model's prior paths in vector order, the truth vector lands on
     the attributes the fit model names, and a constructor argument left unassigned is refused."""

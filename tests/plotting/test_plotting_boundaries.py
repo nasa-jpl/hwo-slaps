@@ -40,7 +40,7 @@ def test_importing_plot_callables_does_not_require_graphics_or_fitting_backends(
     code = '''
 import importlib.abc
 import sys
-banned = {'matplotlib', 'autolens', 'autoarray', 'autogalaxy', 'autofit', 'autoconf', 'hcipy', 'jax', 'jaxlib'}
+banned = {'matplotlib', 'autolens', 'autoarray', 'autogalaxy', 'autofit', 'autoconf', 'autonerves', 'hcipy', 'jax', 'jaxlib'}
 class Refuse(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in banned:

@@ -27,6 +27,7 @@ def installer(tmp_path):
     (base / "etc/profile.d").mkdir(parents=True)
     # No unversioned Python is exposed on PATH. JSON is parsed with base/bin/python.
     (binary / "dirname").symlink_to(shutil.which("dirname"))
+    (binary / "cat").symlink_to(shutil.which("cat"))
     (base / "bin/python").symlink_to(sys.executable)
     log = tmp_path / "commands.log"
     stub = tmp_path / "environment-python"
@@ -128,9 +129,10 @@ def test_absent_named_environment_uses_base_python_and_exact_prefix(installer):
     result, commands = run()
     assert result.returncode == 0, result.stderr
     prefix = envs / "hwo-slaps"
-    assert f"conda create --prefix {prefix} python=3.11 -y" in commands
+    assert f"conda create --prefix {prefix} python=3.12 -y" in commands
     assert f"activate {prefix}" in commands
     assert any(line.startswith("interpreter -m pip install -c ") for line in commands)
+    assert not any("--editable-backends" in line or "tools/patches" in line for line in commands)
     assert (prefix / "conda-meta").is_dir()
 
 
@@ -156,12 +158,19 @@ def test_reuse_of_absent_prefix_fails_before_creation(installer):
     assert not (envs / "hwo-slaps").exists()
 
 
-@pytest.mark.parametrize("version", ["3.10", "3.13", "3.14", "3"])
+@pytest.mark.parametrize("version", ["3.10", "3.11", "3.13", "3.14", "3"])
 def test_unsupported_scientific_python_fails_before_conda(installer, version):
     run, _, _, _ = installer
     result, commands = run("--python", version)
     assert result.returncode == 2
-    assert "requires Python 3.11 or 3.12" in result.stderr
+    assert "requires Python 3.12" in result.stderr
+    assert not commands
+
+
+def test_removed_editable_backends_option_is_rejected_before_conda(installer):
+    run, _, _, _ = installer
+    result, commands = run("--editable-backends", "/tmp/backends")
+    assert result.returncode == 2
     assert not commands
 
 

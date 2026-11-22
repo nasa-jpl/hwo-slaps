@@ -65,7 +65,8 @@ def production_preparation():
     reference.close()
 
 
-def _current_production(engine, production_preparation, paper_digest, final_name, tmp_path, record_property):
+def _current_production(engine, production_preparation, paper_digest, paper_kernel, final_name, tmp_path,
+                        record_property):
     from hwoslaps.fisher.api import forecast
     from hwoslaps.simulation import simulate
     from current_oracles import assert_detector_response, assert_forecast_statistics, historical_changes, write_receipt
@@ -76,8 +77,8 @@ def _current_production(engine, production_preparation, paper_digest, final_name
     assert preparation.scene.spec.grid.pixel_scale_arcsec == 0.00716
     assert preparation.scene.spec.grid.over_sample_size == 4
     assert preparation.psfs.truth_kernels.single.kernel.shape == (999, 999)
-    assert paper_digest.kernel(preparation.psfs.truth_kernels.single.kernel) == oracle["truth_kernel_sha256"]
-    assert paper_digest.kernel(preparation.psfs.model_kernels.single.kernel) == oracle["fit_kernel_sha256"]
+    kernels = {"truth_kernel": paper_kernel(preparation.psfs.truth_kernels.single.kernel, oracle["truth_kernel_sha256"]),
+               "fit_kernel": paper_kernel(preparation.psfs.model_kernels.single.kernel, oracle["fit_kernel_sha256"])}
     assert preparation.nuisances.names == tuple(final_name["p3_image_source_kernel"][name] for name in oracle["profiled_nuisance_names"])
     np.testing.assert_array_equal(preparation.nuisances.prior_precision, oracle["nuisance_prior_precision"])
     assert preparation.data_space.pixel_count == oracle["pixels_unmasked"]
@@ -86,9 +87,12 @@ def _current_production(engine, production_preparation, paper_digest, final_name
     noisy = simulate(preparation, subhalo=None, noise_seed=oracle["noise_seed"])
     again = simulate(preparation, subhalo=None, noise_seed=oracle["noise_seed"])
     np.testing.assert_array_equal(noisy.data_adu, again.data_adu)
-    inputs = {name: {"historical_digest": oracle["diagnostic_digests"][name], "current_digest": paper_digest.array(image)}
-              for name, image in (("mu0_adu", preparation.mean_truth_adu), ("mu0_model_adu", preparation.mean_model_adu),
-                                  ("sigma_adu", preparation.sigma_adu), ("noisy_baseline_adu", noisy.data_adu))}
+    inputs = dict(kernels, **{name: {"historical_digest": oracle["diagnostic_digests"][name],
+                                     "current_digest": paper_digest.array(image)}
+                              for name, image in (("mu0_adu", preparation.mean_truth_adu),
+                                                  ("mu0_model_adu", preparation.mean_model_adu),
+                                                  ("sigma_adu", preparation.sigma_adu),
+                                                  ("noisy_baseline_adu", noisy.data_adu))})
     with np.load(FIXTURES/oracle["fixture"], allow_pickle=False) as archive:
         result = forecast(preparation, masses_msun=archive["masses_msun"], positions=archive["positions_yx"])
         np.testing.assert_array_equal(result.positions_yx, archive["positions_yx"])
@@ -102,11 +106,14 @@ def _current_production(engine, production_preparation, paper_digest, final_name
 
 
 @pytest.mark.backend
-def test_reference_production_inputs_satisfy_current_qr_oracle(production_preparation, paper_digest, final_name, tmp_path, record_property):
-    _current_production("reference", production_preparation, paper_digest, final_name, tmp_path, record_property)
+def test_reference_production_inputs_satisfy_current_qr_oracle(production_preparation, paper_digest, paper_kernel, final_name,
+                                                               tmp_path, record_property):
+    _current_production("reference", production_preparation, paper_digest, paper_kernel, final_name, tmp_path,
+                        record_property)
 
 
 @pytest.mark.backend
 @pytest.mark.xtx_gpu
-def test_gpu_production_inputs_satisfy_current_qr_oracle(production_preparation, paper_digest, final_name, tmp_path, record_property):
-    _current_production("jax", production_preparation, paper_digest, final_name, tmp_path, record_property)
+def test_gpu_production_inputs_satisfy_current_qr_oracle(production_preparation, paper_digest, paper_kernel, final_name,
+                                                         tmp_path, record_property):
+    _current_production("jax", production_preparation, paper_digest, paper_kernel, final_name, tmp_path, record_property)

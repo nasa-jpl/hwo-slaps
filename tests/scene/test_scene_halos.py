@@ -18,6 +18,14 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "scene"
 POINT_MASS = HaloModel("PointMass", None, None)
 SIS = HaloModel("SIS", None, None)
 NFW = HaloModel("NFW", Moline2017(x_sub=1.0, h=None), None)
+NFW_SWEEP_RTOL = 1.0e-14
+"""The 8fa6209 sweep was recorded with NumPy 1.26.4. NumPy 2's log10 moves the NFW concentration by up to
+2 ulp, and the NFW scale radius, density and kappa_s by up to 1.1e-15 relative (measured on xtx). The
+geometry, point-mass and SIS values are unchanged and stay exact."""
+
+
+def _assert_nfw_sweep(actual, expected):
+    np.testing.assert_allclose(actual, expected, rtol=NFW_SWEEP_RTOL, atol=0.0)
 
 
 def _astropy_planck15_geometry(z_deflector, z_source):
@@ -68,21 +76,21 @@ def test_halo_scales_match_the_base_tree_over_a_mass_sweep(planck15):
         assert [h.parameters["einstein_radius"] for h in concrete["point_mass"]] == scalar["point_mass_einstein_radius"]
         assert [h.parameters["einstein_radius"] for h in concrete["sis"]] == scalar["sis_einstein_radius"]
         assert [h.derived["velocity_dispersion_km_s"] for h in concrete["sis"]] == scalar["sis_velocity_dispersion_km_s"]
-        assert [h.derived["concentration"] for h in concrete["nfw"]] == scalar["nfw_concentration"]
-        assert [h.derived["scale_radius_kpc"] for h in concrete["nfw"]] == scalar["nfw_scale_radius_kpc"]
-        assert [h.derived["rho_s_kg_m3"] for h in concrete["nfw"]] == scalar["nfw_rho_s_kg_m3"]
-        assert [h.parameters["kappa_s"] for h in concrete["nfw"]] == scalar["nfw_kappa_s"]
-        assert [h.parameters["scale_radius"] for h in concrete["nfw"]] == scalar["nfw_scale_radius"]
+        _assert_nfw_sweep([h.derived["concentration"] for h in concrete["nfw"]], scalar["nfw_concentration"])
+        _assert_nfw_sweep([h.derived["scale_radius_kpc"] for h in concrete["nfw"]], scalar["nfw_scale_radius_kpc"])
+        _assert_nfw_sweep([h.derived["rho_s_kg_m3"] for h in concrete["nfw"]], scalar["nfw_rho_s_kg_m3"])
+        _assert_nfw_sweep([h.parameters["kappa_s"] for h in concrete["nfw"]], scalar["nfw_kappa_s"])
+        _assert_nfw_sweep([h.parameters["scale_radius"] for h in concrete["nfw"]], scalar["nfw_scale_radius"])
 
         def twin(model, name):
             return [float(halo_lensing_traced(model, m, geometry, reduced_h=reduced_h, xp=np)[name]) for m in masses]
 
         assert twin(POINT_MASS, "einstein_radius") == traced["point_mass_einstein_radius"]
         assert twin(SIS, "einstein_radius") == traced["sis_einstein_radius"]
-        assert twin(NFW, "kappa_s") == traced["nfw_kappa_s"]
-        assert twin(NFW, "scale_radius") == traced["nfw_scale_radius"]
-        assert [float(concentration(NFW.concentration, m, pair["z_deflector"], reduced_h)) for m in masses] == \
-            traced["nfw_concentration"]
+        _assert_nfw_sweep(twin(NFW, "kappa_s"), traced["nfw_kappa_s"])
+        _assert_nfw_sweep(twin(NFW, "scale_radius"), traced["nfw_scale_radius"])
+        _assert_nfw_sweep([float(concentration(NFW.concentration, m, pair["z_deflector"], reduced_h)) for m in masses],
+                          traced["nfw_concentration"])
 
 
 @pytest.mark.backend

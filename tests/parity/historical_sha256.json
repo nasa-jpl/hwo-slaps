@@ -3,6 +3,7 @@
   "submitted_commit": "41621de8ca861e425e1caddb7a599d5c1032751f",
   "purpose": "Immutable archived inputs and outputs; current-engine tests use independent numerical oracles, never regenerated expected arrays.",
   "sha256": {
+    "archived_kernels.npz": "9f2b7eb1abc2eb309c5e3452c7c8bfdfc2739a579bdfd4095e243e8593da3021",
     "detector_kernel.npy": "29f18a68d294868a3091d1d9f79da6ffd6dcce684247a3ab1f25fb4eb2e645c4",
     "engine/p1_optical_matched.yaml": "d708766a5acdc994918b1f3e4c656cae2466e7a7f15da120c4e3077e1b914847",
     "engine/p2_delta_knowledge_error.yaml": "71833963ecc13c1970bf50ee0064c43b4f6be2a35c0317bd2bcb63e7dca84a4c",

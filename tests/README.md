@@ -24,8 +24,7 @@ need Linux.
 
 The `test` extra supplies the backend-free test runner. The `scientific-test` extra also
 declares the independent interpolation and high-precision numerical oracles; `all`
-includes it. Install the scientific stack with `install.sh` so the checked AutoArray
-patches are applied in the selected environment.
+includes it. Install the scientific stack with `install.sh`.
 
 Pull requests run a compact pinned CPU scientific job covering nuisance projection,
 halo values, singular integration, padded rendering, Image gradients, low-dimensional

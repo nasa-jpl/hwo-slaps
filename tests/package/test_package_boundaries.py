@@ -18,10 +18,10 @@ GLUE = {"scene.image_profile", "scene.multipole_profile", "scene.halo_profiles",
         "inference.light_profiles", "inference.mass_profiles", "inference.integrated_tracer"}
 BLOCKER = '''
 import importlib.abc, importlib.machinery, sys
-forbidden = {'autolens','autogalaxy','autoarray','autofit','autoconf','hcipy','jax','jaxlib','nautilus','numba','matplotlib'}
+forbidden = {'autolens','autogalaxy','autoarray','autofit','autoconf','autonerves','hcipy','jax','jaxlib','nautilus','numba','matplotlib'}
 class Block(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname.split('.')[0] in {'autolens','autogalaxy','autoarray','autofit','autoconf','hcipy','jax','jaxlib','nautilus','numba','matplotlib'}:
+        if fullname.split('.')[0] in {'autolens','autogalaxy','autoarray','autofit','autoconf','autonerves','hcipy','jax','jaxlib','nautilus','numba','matplotlib'}:
             return importlib.machinery.ModuleSpec(fullname, self, is_package=True)
         return None
     def create_module(self, spec):

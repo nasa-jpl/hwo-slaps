@@ -60,7 +60,7 @@ def test_effective_settings_are_read_back_and_recorded(light_model, raw_imaging,
     requested = SamplerSettings(n_eff=200, n_shell=2, f_live=0.02, discard_exploration=True, n_like_max=900)
     assert effective_settings(_search(light_model, requested, tmp_path, n_live=30)) == {
         "n_live": 30, "n_eff": 200.0, "n_shell": 2, "f_live": 0.02, "discard_exploration": True, "n_like_max": 900,
-        "number_of_cores": 1, "seed": 7, "n_batch": 100, "use_jax_vmap": True}
+        "number_of_cores": 1, "seed": 7, "n_batch": 100}
     defaults = effective_settings(_search(light_model, SamplerSettings(), tmp_path))
     assert {name: defaults[name] for name in ("n_eff", "n_shell", "f_live", "discard_exploration", "n_like_max")} \
         == {"n_eff": 500, "n_shell": 1, "f_live": 0.01, "discard_exploration": False, "n_like_max": float("inf")}

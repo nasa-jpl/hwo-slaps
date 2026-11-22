@@ -1,32 +1,28 @@
-"""K1: the paper's HWO reference PSF, bitwise against the submitted code (41621de).
+"""K1: the paper's HWO reference PSF against the submitted code (41621de).
 
 The fixture ``k1_paper_kernel.json`` is written by ``tests/scripts/generate_paper_parity.py
 --kernel-anchor`` from the 41621de tree, never by this engine: the paper-format digests of the
 ``science_hwo35`` truth kernel at the Fisher-ladder support (999 x 999) and the nonlinear-fit
 support (51 x 51), and the state's wavefront coefficients. Here the same optics are configured in
 the final schema, with the truth wavefront drawn from the packaged static prior as the paper drew
-it. The test runs with 16 BLAS threads, so it also proves that kernel bytes do not depend on the
-caller's thread count.
+it. The paper's NumPy 1.26 bytes are not reproducible on the current stack, so the coefficients
+and kernels are compared with the archived values to the stack's rounding (``current_oracles``).
+The kernels are built with 16 BLAS threads and again with one, and must be byte-identical, so
+kernel bytes do not depend on the caller's thread count.
 """
 
-import hashlib
 import json
 from pathlib import Path
 
-import numpy as np
 import pytest
 
+from current_oracles import assert_wavefront_close
 from hwoslaps.optics.providers import build_psf_provider, parse_psf
 
 pytestmark = pytest.mark.backend
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "paper_parity" / "k1_paper_kernel.json"
 THREADS = 16
-
-
-def _paper_digest(values):
-    array = np.ascontiguousarray(np.asarray(values, dtype=np.float64))
-    return hashlib.sha256(f"{array.shape[0]}x{array.shape[1]}:".encode("ascii") + array.tobytes()).hexdigest()
 
 
 def _paper_truth(shape):
@@ -45,7 +41,7 @@ def _blas_threads():
     return [library["num_threads"] for library in threadpool_info() if library["user_api"] == "blas"]
 
 
-def test_paper_optics_reproduce_the_submitted_code():
+def test_paper_optics_reproduce_the_submitted_code(paper_kernel):
     import scipy.linalg  # noqa: F401  (HCIPy's propagation runs on SciPy's BLAS: load it before raising threads)
     from threadpoolctl import threadpool_limits
 
@@ -55,13 +51,18 @@ def test_paper_optics_reproduce_the_submitted_code():
         "segment_hexikes": {int(s): {int(n): v for n, v in modes.items()}
                             for s, modes in aberrations["segment_hexikes"].items()},
         "zernikes": {int(n): v for n, v in aberrations["global_zernikes"].items()}}
-    with threadpool_limits(limits=THREADS):
-        assert set(_blas_threads()) == {THREADS}, _blas_threads()
-        for shape in (999, 51):
-            psf = build_psf_provider(parse_psf(_paper_truth(shape)).truth,
-                                     pixel_scale_arcsec=anchor["pixel_scale_arcsec"])
-            assert psf.coefficients.to_mapping() == expected_wavefront
+
+    def build(shape):
+        return build_psf_provider(parse_psf(_paper_truth(shape)).truth, pixel_scale_arcsec=anchor["pixel_scale_arcsec"])
+
+    for shape in (999, 51):
+        with threadpool_limits(limits=THREADS):
+            assert set(_blas_threads()) == {THREADS}, _blas_threads()
+            psf = build(shape)
+            assert_wavefront_close(psf.coefficients.to_mapping(), expected_wavefront)
             kernel = psf.kernel().kernel
-            assert kernel.shape == tuple(anchor["kernels"][f"{shape}x{shape}"]["shape"])
-            assert _paper_digest(kernel) == anchor["kernels"][f"{shape}x{shape}"]["sha256"]
-        assert set(_blas_threads()) == {THREADS}, _blas_threads()
+            assert set(_blas_threads()) == {THREADS}, _blas_threads()
+        assert kernel.shape == tuple(anchor["kernels"][f"{shape}x{shape}"]["shape"])
+        paper_kernel(kernel, anchor["kernels"][f"{shape}x{shape}"]["sha256"])
+        with threadpool_limits(limits=1):
+            assert kernel.tobytes() == build(shape).kernel().kernel.tobytes()

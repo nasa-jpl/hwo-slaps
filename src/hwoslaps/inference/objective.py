@@ -142,15 +142,16 @@ def guard_circular_mass_gradient(objective: BoxObjective, model: FitModel) -> Bo
                         elements[key] = (next_index if prior.kind == "uniform" else None, prior)
                         if prior.kind == "uniform":
                             next_index += 1
-            if component.profile_class not in {"autolens:mp.Isothermal", "autolens:mp.PowerLaw",
-                                               "hwoslaps.inference.mass_profiles:PowerLaw"}:
+            isothermal = component.profile_class in {"autolens:mp.Isothermal",
+                                                     "hwoslaps.inference.mass_profiles:Isothermal"}
+            if not isothermal and component.profile_class not in {"autolens:mp.PowerLaw",
+                                                                  "hwoslaps.inference.mass_profiles:PowerLaw"}:
                 continue
             pair = tuple(elements[(component_name, "ell_comps", index)] for index in (0, 1))
             if any(index is not None for index, _ in pair) and all(
                     prior.lower <= 0.0 <= prior.upper if index is not None else prior.value == 0.0
                     for index, prior in pair):
-                slope = (elements[(component_name, "slope", None)]
-                         if component.profile_class != "autolens:mp.Isothermal" else None)
+                slope = None if isothermal else elements[(component_name, "slope", None)]
                 pairs.append((f"galaxies.{galaxy.name}.{component_name}", pair, slope))
     if not pairs:
         return objective
